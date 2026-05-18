@@ -3,6 +3,7 @@ import fetch from 'node-fetch'
 import db from '../db.js'
 import { broadcastSSE } from '../sse.js'
 import { triggerCapiForStageChange } from '../services/metaCapi.js'
+import { getInstanceConfig, wasAutoMsgSentRecently, sendAutoMessage } from '../services/autoMessages.js'
 
 const router = Router()
 
@@ -390,6 +391,31 @@ router.post('/evolution/:accountSlug', (req, res) => {
     // CAPI: lead novo → dispara evento da primeira etapa (se mapeada)
     if (isNew) {
       triggerCapiForStageChange(lead.id, lead.stage_id, null)
+    }
+
+    // Auto-mensagem de SAUDACAO: lead novo + msg inbound (lead mandou 1a vez)
+    // Se nao tiver config greeting_enabled, NAO faz nada (silencioso, sem alterar fluxo)
+    if (isNew && !fromMe && waInstance) {
+      try {
+        const autoCfg = getInstanceConfig(waInstance.id)
+        if (autoCfg?.greeting_enabled && autoCfg?.greeting_text) {
+          const alreadySent = wasAutoMsgSentRecently(lead.id, 'greeting', 24)
+          if (!alreadySent) {
+            // Fire-and-forget com delay de 2s pra parecer mais natural
+            setTimeout(() => {
+              sendAutoMessage({
+                leadId: lead.id,
+                instanceId: waInstance.id,
+                type: 'greeting',
+                text: autoCfg.greeting_text,
+                accountId: account.id,
+              }).catch(e => console.error('[AutoMsg greeting] async:', e?.message))
+            }, 2000)
+          }
+        }
+      } catch (e) {
+        console.error('[AutoMsg greeting] erro:', e?.message)
+      }
     }
 
     // Fetch profile picture in background (no await)
