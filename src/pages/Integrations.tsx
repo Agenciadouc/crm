@@ -5,9 +5,11 @@ import {
   checkWhatsAppStatus, refreshWhatsAppQR, disconnectWhatsApp, deleteWhatsAppInstance,
   fetchEvolutionConfig, saveEvolutionConfig, setupWhatsAppWebhook, restartWhatsAppInstance, syncWhatsAppNow, setInstanceAttendant, fetchUsers, apiFetch,
   updateMetaCapi, testMetaCapi,
-  type WhatsAppInstance, type User as UserType, type Account,
+  fetchTags, fetchTagInstanceMappings, upsertTagInstanceMapping, deleteTagInstanceMapping,
+  fetchDefaultFormInstance, setDefaultFormInstance,
+  type WhatsAppInstance, type User as UserType, type Account, type Tag, type TagInstanceMapping,
 } from '../lib/api'
-import { Plug, Plus, Wifi, WifiOff, Loader, Trash2, QrCode, Power, PowerOff, RefreshCw, Smartphone, Save, Check, Settings, FileSpreadsheet, Copy, Webhook, RotateCw, Download, User, Eye, EyeOff, Activity, AlertTriangle, MessageSquare } from 'lucide-react'
+import { Plug, Plus, Wifi, WifiOff, Loader, Trash2, QrCode, Power, PowerOff, RefreshCw, Smartphone, Save, Check, Settings, FileSpreadsheet, Copy, Webhook, RotateCw, Download, User, Eye, EyeOff, Activity, AlertTriangle, MessageSquare, Link as LinkIcon, GitBranch } from 'lucide-react'
 import InstanceAutoMessagesModal from '../components/InstanceAutoMessagesModal'
 
 export default function Integrations() {
@@ -178,6 +180,68 @@ export default function Integrations() {
 
   const [restarting, setRestarting] = useState<number | null>(null)
   const [autoMsgInstance, setAutoMsgInstance] = useState<WhatsAppInstance | null>(null)
+
+  // Roteamento de leads de formulario (tag → instancia)
+  const [routingMappings, setRoutingMappings] = useState<TagInstanceMapping[]>([])
+  const [routingDefaultId, setRoutingDefaultId] = useState<number | null>(null)
+  const [routingTags, setRoutingTags] = useState<Tag[]>([])
+  const [routingEdit, setRoutingEdit] = useState<{ tag_id: string; instance_id: string; attendant_id: string; isNew: boolean } | null>(null)
+  const [routingSaving, setRoutingSaving] = useState(false)
+
+  const loadRouting = useCallback(async () => {
+    if (!accountId) return
+    try {
+      const [m, def, ts] = await Promise.all([
+        fetchTagInstanceMappings(accountId).then(r => r.mappings).catch(() => []),
+        fetchDefaultFormInstance(accountId).then(r => r.instance_id).catch(() => null),
+        fetchTags(accountId).catch(() => []),
+      ])
+      setRoutingMappings(m); setRoutingDefaultId(def); setRoutingTags(ts)
+    } catch {}
+  }, [accountId])
+
+  useEffect(() => { loadRouting() }, [loadRouting])
+
+  const handleChangeDefaultRouting = async (instanceId: number | null) => {
+    if (!accountId) return
+    try { await setDefaultFormInstance(accountId, instanceId); setRoutingDefaultId(instanceId) }
+    catch (e: any) { alert(e.message || 'Erro') }
+  }
+
+  const startRoutingEdit = (existing?: TagInstanceMapping) => {
+    if (existing) {
+      setRoutingEdit({
+        tag_id: String(existing.tag_id),
+        instance_id: String(existing.instance_id),
+        attendant_id: existing.attendant_id ? String(existing.attendant_id) : '',
+        isNew: false,
+      })
+    } else {
+      setRoutingEdit({ tag_id: '', instance_id: '', attendant_id: '', isNew: true })
+    }
+  }
+
+  const handleSaveRouting = async () => {
+    if (!accountId || !routingEdit || !routingEdit.tag_id || !routingEdit.instance_id) return
+    setRoutingSaving(true)
+    try {
+      await upsertTagInstanceMapping(accountId, {
+        tag_id: Number(routingEdit.tag_id),
+        instance_id: Number(routingEdit.instance_id),
+        attendant_id: routingEdit.attendant_id ? Number(routingEdit.attendant_id) : null,
+      })
+      setRoutingEdit(null)
+      await loadRouting()
+    } catch (e: any) { alert(e.message || 'Erro ao salvar regra') }
+    setRoutingSaving(false)
+  }
+
+  const handleDeleteRouting = async (tagId: number) => {
+    if (!accountId) return
+    if (!confirm('Remover essa regra?')) return
+    try { await deleteTagInstanceMapping(accountId, tagId); await loadRouting() }
+    catch (e: any) { alert(e.message || 'Erro') }
+  }
   const handleRestart = async (inst: WhatsAppInstance) => {
     if (!accountId) return
     if (!confirm(`Reiniciar a sessao do WhatsApp "${inst.instance_name}"? Use isso quando a instancia parecer conectada mas nao receber mensagens.`)) return
@@ -380,6 +444,161 @@ export default function Integrations() {
           <Smartphone size={32} style={{ color: '#6B6580', marginBottom: 8 }} />
           <h3>Configure a Evolution API acima</h3>
           <p style={{ color: '#9B96B0', fontSize: 13 }}>Salve a URL e API Key do servidor Evolution para comecar a conectar numeros de WhatsApp.</p>
+        </div>
+      )}
+
+      {/* Roteamento de leads de formulario (tag → instancia) */}
+      {evoConfigured && (() => {
+        const connectedInsts = instances.filter(i => i.status === 'connected')
+        const attendants = users.filter(u => (u.role === 'atendente' || u.role === 'gerente') && u.is_active)
+        if (connectedInsts.length === 0) return null
+        return (
+          <section className="dash-section" style={{ marginTop: 24 }}>
+            <div className="section-title"><GitBranch size={14} /> Roteamento de leads (formulários)</div>
+            <div className="card">
+              <p style={{ fontSize: 12, color: '#9B96B0', marginBottom: 16 }}>
+                Leads que chegam via Google Sheets, Meta Lead Form ou site não tem WhatsApp na origem.
+                Configure qual instância vai receber esses leads — regra geral (fallback) ou específica por tag.
+              </p>
+
+              {/* Fallback default */}
+              <div style={{ background: 'rgba(255,255,255,0.03)', padding: 12, borderRadius: 8, marginBottom: 16 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                  <Smartphone size={13} style={{ color: '#FFB300' }} />
+                  <strong style={{ fontSize: 13 }}>Instância padrão (fallback)</strong>
+                </div>
+                <p style={{ fontSize: 11, color: '#9B96B0', marginBottom: 8 }}>
+                  Usada quando o lead não tem regra de tag específica abaixo.
+                </p>
+                <select
+                  className="select"
+                  value={routingDefaultId ?? ''}
+                  onChange={e => handleChangeDefaultRouting(e.target.value ? Number(e.target.value) : null)}
+                  style={{ minWidth: 280, fontSize: 12 }}
+                >
+                  <option value="">— nenhuma (lead fica sem instância) —</option>
+                  {connectedInsts.map(i => (
+                    <option key={i.id} value={i.id}>{i.instance_name}{i.phone_number ? ` (${i.phone_number})` : ''}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Regras por tag */}
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                  <strong style={{ fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <LinkIcon size={12} /> Regras por tag (prioridade sobre o fallback)
+                  </strong>
+                  <button className="btn btn-primary btn-sm" onClick={() => startRoutingEdit()} disabled={routingTags.length === 0}>
+                    <Plus size={12} /> Nova regra
+                  </button>
+                </div>
+
+                {routingTags.length === 0 ? (
+                  <p style={{ fontSize: 11, color: '#9B96B0', textAlign: 'center', padding: 16 }}>
+                    Nenhuma tag criada na conta. Crie tags em <strong>Tags</strong> primeiro.
+                  </p>
+                ) : routingMappings.length === 0 ? (
+                  <div style={{ fontSize: 12, color: '#6B6580', textAlign: 'center', padding: 16, background: 'rgba(255,255,255,0.02)', borderRadius: 6 }}>
+                    Nenhuma regra configurada. Leads de form usam apenas o fallback acima.
+                  </div>
+                ) : (
+                  <div className="table-card">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>Tag</th>
+                          <th>Instância</th>
+                          <th>Atendente</th>
+                          <th className="right">Ações</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {routingMappings.map(m => (
+                          <tr key={m.id}>
+                            <td>
+                              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '4px 10px', background: `${m.tag_color}25`, color: m.tag_color, borderRadius: 4, fontSize: 12, fontWeight: 600 }}>
+                                <span style={{ width: 6, height: 6, borderRadius: '50%', background: m.tag_color }} />
+                                {m.tag_name}
+                              </span>
+                            </td>
+                            <td style={{ fontSize: 12 }}><Smartphone size={11} style={{ display: 'inline', marginRight: 4, color: '#34C759' }} />{m.instance_name}</td>
+                            <td style={{ fontSize: 12 }}>{m.attendant_name || <span style={{ color: '#6B6580' }}>— (roleta)</span>}</td>
+                            <td className="right">
+                              <button className="btn btn-secondary btn-sm" style={{ fontSize: 10 }} onClick={() => startRoutingEdit(m)}>Editar</button>
+                              <button className="btn btn-secondary btn-sm" style={{ fontSize: 10, color: '#FF6B6B', marginLeft: 4 }} onClick={() => handleDeleteRouting(m.tag_id)}><Trash2 size={10} /></button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </div>
+          </section>
+        )
+      })()}
+
+      {/* Modal de criar/editar regra de roteamento */}
+      {routingEdit && (
+        <div className="modal-overlay" onClick={() => setRoutingEdit(null)}>
+          <div className="modal" style={{ maxWidth: 480 }} onClick={e => e.stopPropagation()}>
+            <h2 style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <LinkIcon size={16} style={{ color: '#FFB300' }} /> {routingEdit.isNew ? 'Nova regra' : 'Editar regra'}
+            </h2>
+            <p style={{ fontSize: 12, color: '#9B96B0', marginTop: 4, marginBottom: 12 }}>
+              Quando lead de formulário receber a tag escolhida, vai pra esta instância (e atendente, se definido).
+            </p>
+            <div className="form-group">
+              <label>Tag *</label>
+              <select
+                className="select"
+                value={routingEdit.tag_id}
+                onChange={e => setRoutingEdit(p => p ? { ...p, tag_id: e.target.value } : null)}
+                disabled={!routingEdit.isNew}
+              >
+                <option value="">— escolha —</option>
+                {routingTags
+                  .filter(t => routingEdit.isNew ? !routingMappings.some(m => m.tag_id === t.id) : true)
+                  .map(t => <option key={t.id} value={t.id}>{t.name}</option>)
+                }
+              </select>
+              {!routingEdit.isNew && <p style={{ fontSize: 10, color: '#6B6580', marginTop: 4 }}>Tag não editável — pra trocar de tag, remove e cria nova.</p>}
+            </div>
+            <div className="form-group">
+              <label>Instância WhatsApp *</label>
+              <select
+                className="select"
+                value={routingEdit.instance_id}
+                onChange={e => setRoutingEdit(p => p ? { ...p, instance_id: e.target.value } : null)}
+              >
+                <option value="">— escolha —</option>
+                {instances.filter(i => i.status === 'connected').map(i => (
+                  <option key={i.id} value={i.id}>{i.instance_name}{i.phone_number ? ` (${i.phone_number})` : ''}</option>
+                ))}
+              </select>
+            </div>
+            <div className="form-group">
+              <label>Atendente padrão (opcional)</label>
+              <select
+                className="select"
+                value={routingEdit.attendant_id}
+                onChange={e => setRoutingEdit(p => p ? { ...p, attendant_id: e.target.value } : null)}
+              >
+                <option value="">— sem atendente fixo (usa roleta) —</option>
+                {users.filter(u => (u.role === 'atendente' || u.role === 'gerente') && u.is_active).map(u => (
+                  <option key={u.id} value={u.id}>{u.name} ({u.role})</option>
+                ))}
+              </select>
+            </div>
+            <div className="modal-actions">
+              <button className="btn btn-secondary" onClick={() => setRoutingEdit(null)} disabled={routingSaving}>Cancelar</button>
+              <button className="btn btn-primary" onClick={handleSaveRouting} disabled={routingSaving || !routingEdit.tag_id || !routingEdit.instance_id}>
+                <Save size={12} /> {routingSaving ? 'Salvando...' : 'Salvar'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
