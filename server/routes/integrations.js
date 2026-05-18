@@ -300,4 +300,85 @@ router.post('/whatsapp/:id/test', requireRole('super_admin', 'gerente'), async (
   }
 })
 
+// ─── Auto-mensagens por instancia ─────────────────────────────────
+// GET: carrega config atual da instancia
+router.get('/whatsapp/:id/auto-messages', requireRole('super_admin', 'gerente'), (req, res) => {
+  const instance = getOwnedInstance(req, res)
+  if (!instance) return
+  const cfg = db.prepare('SELECT * FROM instance_auto_messages WHERE instance_id = ?').get(instance.id)
+  res.json({ config: cfg || { instance_id: instance.id, greeting_enabled: 0, away_enabled: 0, away_mode: 'manual', inactivity_lead_enabled: 0, inactivity_agent_enabled: 0 } })
+})
+
+// PUT: salva config (upsert)
+router.put('/whatsapp/:id/auto-messages', requireRole('super_admin', 'gerente'), (req, res) => {
+  const instance = getOwnedInstance(req, res)
+  if (!instance) return
+  const {
+    greeting_enabled = 0, greeting_text = null,
+    away_enabled = 0, away_mode = 'manual', away_manual_active = 0, away_text = null, away_schedule_json = null, away_cooldown_hours = 4,
+    inactivity_lead_enabled = 0, inactivity_lead_hours = 24, inactivity_lead_text = null,
+    inactivity_agent_enabled = 0, inactivity_agent_hours = 4, inactivity_agent_text = null,
+  } = req.body || {}
+
+  // Valida JSON schedule
+  let scheduleStr = null
+  if (away_schedule_json) {
+    try {
+      if (typeof away_schedule_json === 'string') { JSON.parse(away_schedule_json); scheduleStr = away_schedule_json }
+      else scheduleStr = JSON.stringify(away_schedule_json)
+    } catch { return res.status(400).json({ error: 'away_schedule_json invalido' }) }
+  }
+
+  const existing = db.prepare('SELECT id FROM instance_auto_messages WHERE instance_id = ?').get(instance.id)
+  if (existing) {
+    db.prepare(`
+      UPDATE instance_auto_messages SET
+        greeting_enabled = ?, greeting_text = ?,
+        away_enabled = ?, away_mode = ?, away_manual_active = ?, away_text = ?, away_schedule_json = ?, away_cooldown_hours = ?,
+        inactivity_lead_enabled = ?, inactivity_lead_hours = ?, inactivity_lead_text = ?,
+        inactivity_agent_enabled = ?, inactivity_agent_hours = ?, inactivity_agent_text = ?,
+        updated_at = datetime('now')
+      WHERE instance_id = ?
+    `).run(
+      greeting_enabled ? 1 : 0, greeting_text,
+      away_enabled ? 1 : 0, away_mode || 'manual', away_manual_active ? 1 : 0, away_text, scheduleStr, parseInt(away_cooldown_hours) || 4,
+      inactivity_lead_enabled ? 1 : 0, parseInt(inactivity_lead_hours) || 24, inactivity_lead_text,
+      inactivity_agent_enabled ? 1 : 0, parseInt(inactivity_agent_hours) || 4, inactivity_agent_text,
+      instance.id
+    )
+  } else {
+    db.prepare(`
+      INSERT INTO instance_auto_messages (
+        instance_id, greeting_enabled, greeting_text,
+        away_enabled, away_mode, away_manual_active, away_text, away_schedule_json, away_cooldown_hours,
+        inactivity_lead_enabled, inactivity_lead_hours, inactivity_lead_text,
+        inactivity_agent_enabled, inactivity_agent_hours, inactivity_agent_text
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      instance.id,
+      greeting_enabled ? 1 : 0, greeting_text,
+      away_enabled ? 1 : 0, away_mode || 'manual', away_manual_active ? 1 : 0, away_text, scheduleStr, parseInt(away_cooldown_hours) || 4,
+      inactivity_lead_enabled ? 1 : 0, parseInt(inactivity_lead_hours) || 24, inactivity_lead_text,
+      inactivity_agent_enabled ? 1 : 0, parseInt(inactivity_agent_hours) || 4, inactivity_agent_text,
+    )
+  }
+  const cfg = db.prepare('SELECT * FROM instance_auto_messages WHERE instance_id = ?').get(instance.id)
+  res.json({ config: cfg })
+})
+
+// POST: toggle do modo ausencia manual (atalho rapido)
+router.post('/whatsapp/:id/away/toggle', requireRole('super_admin', 'gerente'), (req, res) => {
+  const instance = getOwnedInstance(req, res)
+  if (!instance) return
+  const existing = db.prepare('SELECT * FROM instance_auto_messages WHERE instance_id = ?').get(instance.id)
+  if (!existing) {
+    db.prepare(`INSERT INTO instance_auto_messages (instance_id, away_enabled, away_mode, away_manual_active, away_text) VALUES (?, 1, 'manual', 1, 'Estou ausente no momento. Retorno em breve.')`).run(instance.id)
+  } else {
+    const newActive = existing.away_manual_active ? 0 : 1
+    db.prepare("UPDATE instance_auto_messages SET away_manual_active = ?, away_enabled = ?, away_mode = 'manual', updated_at = datetime('now') WHERE instance_id = ?").run(newActive, newActive ? 1 : existing.away_enabled, instance.id)
+  }
+  const cfg = db.prepare('SELECT * FROM instance_auto_messages WHERE instance_id = ?').get(instance.id)
+  res.json({ config: cfg })
+})
+
 export default router

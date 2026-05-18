@@ -7,7 +7,8 @@ import {
   updateMetaCapi, testMetaCapi,
   type WhatsAppInstance, type User as UserType, type Account,
 } from '../lib/api'
-import { Plug, Plus, Wifi, WifiOff, Loader, Trash2, QrCode, Power, PowerOff, RefreshCw, Smartphone, Save, Check, Settings, FileSpreadsheet, Copy, Webhook, RotateCw, Download, User, Eye, EyeOff, Activity, AlertTriangle } from 'lucide-react'
+import { Plug, Plus, Wifi, WifiOff, Loader, Trash2, QrCode, Power, PowerOff, RefreshCw, Smartphone, Save, Check, Settings, FileSpreadsheet, Copy, Webhook, RotateCw, Download, User, Eye, EyeOff, Activity, AlertTriangle, MessageSquare } from 'lucide-react'
+import InstanceAutoMessagesModal from '../components/InstanceAutoMessagesModal'
 
 export default function Integrations() {
   const { accountId } = useAccount()
@@ -176,6 +177,7 @@ export default function Integrations() {
   }
 
   const [restarting, setRestarting] = useState<number | null>(null)
+  const [autoMsgInstance, setAutoMsgInstance] = useState<WhatsAppInstance | null>(null)
   const handleRestart = async (inst: WhatsAppInstance) => {
     if (!accountId) return
     if (!confirm(`Reiniciar a sessao do WhatsApp "${inst.instance_name}"? Use isso quando a instancia parecer conectada mas nao receber mensagens.`)) return
@@ -347,6 +349,13 @@ export default function Integrations() {
                           title="Reinicia a sessao Baileys da Evolution. Use quando a instancia mostra Conectada mas nao recebe nem envia mensagens."
                         >
                           {restarting === inst.id ? <Loader size={12} className="spinning" /> : <RotateCw size={12} />} Reiniciar sessao
+                        </button>
+                        <button
+                          className="btn btn-secondary btn-sm"
+                          onClick={() => setAutoMsgInstance(inst)}
+                          title="Configurar saudacao, ausencia e inatividade"
+                        >
+                          <MessageSquare size={12} /> Auto-mensagens
                         </button>
                         <button className="btn btn-secondary btn-sm" onClick={() => handleDisconnect(inst)}><PowerOff size={12} /> Desconectar</button>
                       </>
@@ -677,6 +686,15 @@ function onChange(e) {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Auto-Messages Modal */}
+      {autoMsgInstance && accountId && (
+        <InstanceAutoMessagesModal
+          instance={autoMsgInstance}
+          accountId={accountId}
+          onClose={() => setAutoMsgInstance(null)}
+        />
       )}
     </div>
   )

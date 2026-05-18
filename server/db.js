@@ -528,6 +528,61 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_transfer_from ON lead_transfer_requests(from_attendant_id, status);
 `)
 
+// Auto-mensagens por instância (saudação, ausência, inatividade)
+db.exec(`
+  CREATE TABLE IF NOT EXISTS instance_auto_messages (
+    id                          INTEGER PRIMARY KEY AUTOINCREMENT,
+    instance_id                 INTEGER NOT NULL UNIQUE,
+    greeting_enabled            INTEGER NOT NULL DEFAULT 0,
+    greeting_text               TEXT,
+    away_enabled                INTEGER NOT NULL DEFAULT 0,
+    away_mode                   TEXT NOT NULL DEFAULT 'manual',
+    away_manual_active          INTEGER NOT NULL DEFAULT 0,
+    away_text                   TEXT,
+    away_schedule_json          TEXT,
+    away_cooldown_hours         INTEGER NOT NULL DEFAULT 4,
+    inactivity_lead_enabled     INTEGER NOT NULL DEFAULT 0,
+    inactivity_lead_hours       INTEGER NOT NULL DEFAULT 24,
+    inactivity_lead_text        TEXT,
+    inactivity_agent_enabled    INTEGER NOT NULL DEFAULT 0,
+    inactivity_agent_hours      INTEGER NOT NULL DEFAULT 4,
+    inactivity_agent_text       TEXT,
+    updated_at                  TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (instance_id) REFERENCES whatsapp_instances(id) ON DELETE CASCADE
+  );
+
+  CREATE TABLE IF NOT EXISTS auto_messages_log (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    lead_id     INTEGER NOT NULL,
+    instance_id INTEGER NOT NULL,
+    account_id  INTEGER NOT NULL,
+    type        TEXT NOT NULL CHECK (type IN ('greeting','away','inactivity_lead','inactivity_agent')),
+    message_id  INTEGER,
+    sent_at     TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (lead_id) REFERENCES leads(id) ON DELETE CASCADE,
+    FOREIGN KEY (instance_id) REFERENCES whatsapp_instances(id) ON DELETE CASCADE
+  );
+  CREATE INDEX IF NOT EXISTS idx_auto_log_lead ON auto_messages_log(lead_id, type, sent_at);
+  CREATE INDEX IF NOT EXISTS idx_auto_log_instance ON auto_messages_log(instance_id, type);
+
+  CREATE TABLE IF NOT EXISTS tag_instance_mapping (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id    INTEGER NOT NULL,
+    tag_id        INTEGER NOT NULL,
+    instance_id   INTEGER NOT NULL,
+    attendant_id  INTEGER,
+    created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(account_id, tag_id),
+    FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE,
+    FOREIGN KEY (tag_id) REFERENCES tags(id) ON DELETE CASCADE,
+    FOREIGN KEY (instance_id) REFERENCES whatsapp_instances(id) ON DELETE CASCADE,
+    FOREIGN KEY (attendant_id) REFERENCES users(id) ON DELETE SET NULL
+  );
+`)
+
+// Instância padrão pra leads de formulário
+addColumnIfNotExists('accounts', 'default_form_instance_id', 'INTEGER REFERENCES whatsapp_instances(id) ON DELETE SET NULL')
+
 // Proposals (proposta comercial gerada pelo super_admin)
 db.exec(`
   CREATE TABLE IF NOT EXISTS proposals (

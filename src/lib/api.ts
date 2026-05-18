@@ -224,6 +224,31 @@ export const cancelTransferRequest = (reqId: number) =>
 export const grabLead = (leadId: number, accountId: number) =>
   apiFetch<{ ok: boolean; leadId: number }>(`/api/leads/${leadId}/grab?account_id=${accountId}`, { method: 'POST', body: JSON.stringify({}) })
 
+// Auto-mensagens por instancia (saudacao, ausencia, inatividade)
+export interface InstanceAutoMessageConfig {
+  instance_id: number
+  greeting_enabled?: number
+  greeting_text?: string | null
+  away_enabled?: number
+  away_mode?: 'manual' | 'schedule'
+  away_manual_active?: number
+  away_text?: string | null
+  away_schedule_json?: string | null
+  away_cooldown_hours?: number
+  inactivity_lead_enabled?: number
+  inactivity_lead_hours?: number
+  inactivity_lead_text?: string | null
+  inactivity_agent_enabled?: number
+  inactivity_agent_hours?: number
+  inactivity_agent_text?: string | null
+}
+export const fetchInstanceAutoMessages = (instanceId: number, accountId: number) =>
+  apiFetch<{ config: InstanceAutoMessageConfig }>(`/api/integrations/whatsapp/${instanceId}/auto-messages?account_id=${accountId}`)
+export const saveInstanceAutoMessages = (instanceId: number, accountId: number, config: Partial<InstanceAutoMessageConfig>) =>
+  apiFetch<{ config: InstanceAutoMessageConfig }>(`/api/integrations/whatsapp/${instanceId}/auto-messages?account_id=${accountId}`, { method: 'PUT', body: JSON.stringify(config) })
+export const toggleInstanceAwayManual = (instanceId: number, accountId: number) =>
+  apiFetch<{ config: InstanceAutoMessageConfig }>(`/api/integrations/whatsapp/${instanceId}/away/toggle?account_id=${accountId}`, { method: 'POST', body: JSON.stringify({}) })
+
 // Admin: check all WhatsApp instances across all accounts (super_admin only)
 export interface InstanceCheckResult {
   id: number; account: string; instance: string; state: string; action: string; error?: string
