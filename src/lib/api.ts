@@ -250,15 +250,15 @@ export interface TagInstanceMapping {
   attendant_id: number | null; attendant_name: string | null
 }
 export const fetchTagInstanceMappings = (accountId: number) =>
-  apiFetch<{ mappings: TagInstanceMapping[] }>(`/api/leads/tag-mapping/list?account_id=${accountId}`)
+  apiFetch<{ mappings: TagInstanceMapping[] }>(`/api/tag-mapping/list?account_id=${accountId}`)
 export const upsertTagInstanceMapping = (accountId: number, data: { tag_id: number; instance_id: number; attendant_id?: number | null }) =>
-  apiFetch(`/api/leads/tag-mapping?account_id=${accountId}`, { method: 'PUT', body: JSON.stringify(data) })
+  apiFetch(`/api/tag-mapping?account_id=${accountId}`, { method: 'PUT', body: JSON.stringify(data) })
 export const deleteTagInstanceMapping = (accountId: number, tagId: number) =>
-  apiFetch(`/api/leads/tag-mapping/${tagId}?account_id=${accountId}`, { method: 'DELETE' })
+  apiFetch(`/api/tag-mapping/${tagId}?account_id=${accountId}`, { method: 'DELETE' })
 export const fetchDefaultFormInstance = (accountId: number) =>
-  apiFetch<{ instance_id: number | null }>(`/api/leads/tag-mapping/default-form-instance?account_id=${accountId}`)
+  apiFetch<{ instance_id: number | null }>(`/api/tag-mapping/default-form-instance?account_id=${accountId}`)
 export const setDefaultFormInstance = (accountId: number, instanceId: number | null) =>
-  apiFetch(`/api/leads/tag-mapping/default-form-instance?account_id=${accountId}`, { method: 'PUT', body: JSON.stringify({ instance_id: instanceId }) })
+  apiFetch(`/api/tag-mapping/default-form-instance?account_id=${accountId}`, { method: 'PUT', body: JSON.stringify({ instance_id: instanceId }) })
 
 // Admin: check all WhatsApp instances across all accounts (super_admin only)
 export interface InstanceCheckResult {
