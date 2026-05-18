@@ -422,10 +422,14 @@ export default function Chat() {
 
   const handleSendMsg = async () => {
     if (!msgText.trim() || !lead || !accountId) return
+    // Bloqueia envio se nao ha instancia escolhida (lead novo sem aba ativa)
+    const override = sendInstanceOverride || activeConvInstance || undefined
+    if (!override) {
+      setNotice({ kind: 'error', title: 'Escolha uma instancia', message: 'Clique em "Enviar via" acima do input pra escolher de qual WhatsApp essa mensagem vai sair.' })
+      return
+    }
     setSending(true)
     try {
-      // Tab ativa = instancia que vai enviar (override manual sobreescreve)
-      const override = sendInstanceOverride || activeConvInstance || undefined
       const result = await sendMessage(lead.id, accountId, msgText, override)
       setMessages(prev => [...prev, result.message])
       setMsgText('')
@@ -739,24 +743,35 @@ export default function Chat() {
                 ))}
                 <div ref={chatEndRef} />
               </div>
-              {resolvedSendInstance && (
-                <div style={{ padding: '6px 12px', display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: '#9B96B0', borderTop: '1px solid rgba(255,255,255,0.04)', position: 'relative' }}>
-                  <Smartphone size={11} style={{ color: '#FFB300' }} />
-                  <span>Respondendo por:</span>
-                  <button onClick={() => setShowSendInstance(s => !s)} style={{ background: 'none', border: 'none', color: '#FFB300', fontWeight: 600, cursor: 'pointer', padding: 0, fontSize: 11 }}>
-                    {resolvedSendInstance.instance_name} ▾
-                  </button>
-                  {showSendInstance && (
-                    <div style={{ position: 'absolute', bottom: '100%', left: 12, marginBottom: 4, background: '#1a1625', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 6, padding: 4, minWidth: 220, zIndex: 10, boxShadow: '0 4px 14px rgba(0,0,0,0.4)' }}>
-                      {instances.filter(i => i.status === 'connected').map(i => (
-                        <button key={i.id} onClick={() => { setSendInstanceOverride(i.id); setShowSendInstance(false) }} style={{ display: 'block', width: '100%', textAlign: 'left', padding: '8px 10px', background: i.id === resolvedSendInstance.id ? 'rgba(255,179,0,0.12)' : 'transparent', color: i.id === resolvedSendInstance.id ? '#FFB300' : '#fff', border: 'none', borderRadius: 4, fontSize: 12, cursor: 'pointer' }}>
-                          {i.instance_name}{i.id === resolvedSendInstance.id ? ' ✓' : ''}
-                        </button>
-                      ))}
+              {/* Dropdown 'Enviar via' — sempre visivel quando ha instancias conectadas */}
+              {(() => {
+                const connected = instances.filter(i => i.status === 'connected')
+                if (connected.length === 0) {
+                  return (
+                    <div style={{ padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: '#FF6B6B', borderTop: '1px solid rgba(255,107,107,0.2)', background: 'rgba(255,107,107,0.05)' }}>
+                      <Smartphone size={11} /> Nenhuma instancia conectada — nao da pra enviar
                     </div>
-                  )}
-                </div>
-              )}
+                  )
+                }
+                return (
+                  <div style={{ padding: '6px 12px', display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: '#9B96B0', borderTop: '1px solid rgba(255,255,255,0.04)', background: resolvedSendInstance ? 'transparent' : 'rgba(255,179,0,0.05)', position: 'relative' }}>
+                    <Smartphone size={11} style={{ color: resolvedSendInstance ? '#FFB300' : '#FBBC04' }} />
+                    <span>Enviar via:</span>
+                    <button onClick={() => setShowSendInstance(s => !s)} style={{ background: 'none', border: 'none', color: resolvedSendInstance ? '#FFB300' : '#FBBC04', fontWeight: 600, cursor: 'pointer', padding: 0, fontSize: 11 }}>
+                      {resolvedSendInstance ? resolvedSendInstance.instance_name : '— escolha uma instancia —'} ▾
+                    </button>
+                    {showSendInstance && (
+                      <div style={{ position: 'absolute', bottom: '100%', left: 12, marginBottom: 4, background: '#1a1625', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 6, padding: 4, minWidth: 240, zIndex: 10, boxShadow: '0 4px 14px rgba(0,0,0,0.4)' }}>
+                        {connected.map(i => (
+                          <button key={i.id} onClick={() => { setSendInstanceOverride(i.id); setShowSendInstance(false) }} style={{ display: 'block', width: '100%', textAlign: 'left', padding: '8px 10px', background: i.id === resolvedSendInstance?.id ? 'rgba(255,179,0,0.12)' : 'transparent', color: i.id === resolvedSendInstance?.id ? '#FFB300' : '#fff', border: 'none', borderRadius: 4, fontSize: 12, cursor: 'pointer' }}>
+                            {i.instance_name}{i.phone_number ? <span style={{ color: '#6B6580', marginLeft: 6 }}>({i.phone_number})</span> : ''}{i.id === resolvedSendInstance?.id ? ' ✓' : ''}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )
+              })()}
               <div className="chat-input">
                 <input ref={fileInputRef} type="file" style={{ display: 'none' }} onChange={e => handlePickFile(e.target.files?.[0] || null)} accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip,.txt,.csv" />
                 <button
@@ -882,7 +897,7 @@ export default function Chat() {
                     </div>
                   )}
                 </div>
-                <button className="btn btn-primary btn-icon" onClick={handleSendMsg} disabled={sending || !msgText.trim()}><Send size={16} /></button>
+                <button className="btn btn-primary btn-icon" onClick={handleSendMsg} disabled={sending || !msgText.trim() || !resolvedSendInstance} title={!resolvedSendInstance ? 'Escolha uma instancia pra enviar' : ''}><Send size={16} /></button>
               </div>
               {attachFile && (
                 <div className="modal-overlay" onClick={handleCancelAttach}>
