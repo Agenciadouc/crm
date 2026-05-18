@@ -458,17 +458,17 @@ export default function Integrations() {
             <div className="card">
               <p style={{ fontSize: 12, color: '#9B96B0', marginBottom: 16 }}>
                 Leads que chegam via Google Sheets, Meta Lead Form ou site não tem WhatsApp na origem.
-                Configure qual instância vai receber esses leads — regra geral (fallback) ou específica por tag.
+                Configure pra qual número essas conversas vão.
               </p>
 
-              {/* Fallback default */}
+              {/* Default — fallback */}
               <div style={{ background: 'rgba(255,255,255,0.03)', padding: 12, borderRadius: 8, marginBottom: 16 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
                   <Smartphone size={13} style={{ color: '#FFB300' }} />
-                  <strong style={{ fontSize: 13 }}>Instância padrão (fallback)</strong>
+                  <strong style={{ fontSize: 13 }}>Número padrão</strong>
                 </div>
                 <p style={{ fontSize: 11, color: '#9B96B0', marginBottom: 8 }}>
-                  Usada quando o lead não tem regra de tag específica abaixo.
+                  Todos os leads de formulário vão pra esse número, exceto os que tiverem regra específica por tag abaixo.
                 </p>
                 <select
                   className="select"
@@ -485,14 +485,17 @@ export default function Integrations() {
 
               {/* Regras por tag */}
               <div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
                   <strong style={{ fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <LinkIcon size={12} /> Regras por tag (prioridade sobre o fallback)
+                    <LinkIcon size={12} /> Regras especiais por tag
                   </strong>
                   <button className="btn btn-primary btn-sm" onClick={() => startRoutingEdit()} disabled={routingTags.length === 0}>
                     <Plus size={12} /> Nova regra
                   </button>
                 </div>
+                <p style={{ fontSize: 11, color: '#9B96B0', marginBottom: 8 }}>
+                  Quando uma regra bater com a tag do lead, ela tem prioridade sobre o número padrão.
+                </p>
 
                 {routingTags.length === 0 ? (
                   <p style={{ fontSize: 11, color: '#9B96B0', textAlign: 'center', padding: 16 }}>
@@ -500,7 +503,7 @@ export default function Integrations() {
                   </p>
                 ) : routingMappings.length === 0 ? (
                   <div style={{ fontSize: 12, color: '#6B6580', textAlign: 'center', padding: 16, background: 'rgba(255,255,255,0.02)', borderRadius: 6 }}>
-                    Nenhuma regra configurada. Leads de form usam apenas o fallback acima.
+                    Nenhuma regra configurada. Leads de formulário usam o número padrão acima.
                   </div>
                 ) : (
                   <div className="table-card">
