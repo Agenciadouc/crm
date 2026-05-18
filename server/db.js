@@ -396,6 +396,8 @@ addColumnIfNotExists('accounts', 'meta_pixel_id', 'TEXT')
 addColumnIfNotExists('accounts', 'meta_capi_token', 'TEXT')
 addColumnIfNotExists('accounts', 'meta_capi_test_event_code', 'TEXT')
 addColumnIfNotExists('accounts', 'meta_capi_enabled', 'INTEGER NOT NULL DEFAULT 0')
+// Ultimo lead recebido via webhook Google Sheets (pra UI mostrar status da integração)
+addColumnIfNotExists('accounts', 'last_sheets_lead_at', 'TEXT')
 
 // Funnel stages: evento Meta enviado quando lead entra nessa etapa (CAPI)
 addColumnIfNotExists('funnel_stages', 'meta_event_name', 'TEXT')

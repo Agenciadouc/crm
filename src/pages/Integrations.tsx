@@ -6,11 +6,23 @@ import {
   fetchEvolutionConfig, saveEvolutionConfig, setupWhatsAppWebhook, restartWhatsAppInstance, syncWhatsAppNow, setInstanceAttendant, fetchUsers, apiFetch,
   updateMetaCapi, testMetaCapi,
   fetchTags, fetchTagInstanceMappings, upsertTagInstanceMapping, deleteTagInstanceMapping,
-  fetchDefaultFormInstance, setDefaultFormInstance,
+  fetchDefaultFormInstance, setDefaultFormInstance, fetchSheetsStatus,
   type WhatsAppInstance, type User as UserType, type Account, type Tag, type TagInstanceMapping,
 } from '../lib/api'
 import { Plug, Plus, Wifi, WifiOff, Loader, Trash2, QrCode, Power, PowerOff, RefreshCw, Smartphone, Save, Check, Settings, FileSpreadsheet, Copy, Webhook, RotateCw, Download, User, Eye, EyeOff, Activity, AlertTriangle, MessageSquare, Link as LinkIcon, GitBranch } from 'lucide-react'
 import InstanceAutoMessagesModal from '../components/InstanceAutoMessagesModal'
+import { parseSqlDate } from '../lib/dates'
+
+function sheetsTimeAgo(s: string | null) {
+  if (!s) return null
+  const d = parseSqlDate(s)
+  const mins = Math.max(0, Math.floor((Date.now() - d.getTime()) / 60000))
+  if (mins < 1) return 'agora'
+  if (mins < 60) return `há ${mins}min`
+  const hrs = Math.floor(mins / 60)
+  if (hrs < 24) return `há ${hrs}h`
+  return `há ${Math.floor(hrs / 24)}d`
+}
 
 export default function Integrations() {
   const { accountId } = useAccount()
@@ -180,6 +192,7 @@ export default function Integrations() {
 
   const [restarting, setRestarting] = useState<number | null>(null)
   const [autoMsgInstance, setAutoMsgInstance] = useState<WhatsAppInstance | null>(null)
+  const [sheetsLastAt, setSheetsLastAt] = useState<string | null>(null)
 
   // Roteamento de leads de formulario (tag → instancia)
   const [routingMappings, setRoutingMappings] = useState<TagInstanceMapping[]>([])
@@ -201,6 +214,11 @@ export default function Integrations() {
   }, [accountId])
 
   useEffect(() => { loadRouting() }, [loadRouting])
+
+  useEffect(() => {
+    if (!accountId) return
+    fetchSheetsStatus(accountId).then(r => setSheetsLastAt(r.last_lead_at)).catch(() => {})
+  }, [accountId])
 
   const handleChangeDefaultRouting = async (instanceId: number | null) => {
     if (!accountId) return
@@ -610,6 +628,21 @@ export default function Integrations() {
         <section className="dash-section" style={{ marginTop: 24 }}>
           <div className="section-title"><FileSpreadsheet size={14} /> Integracao Google Sheets</div>
           <div className="card">
+            {/* Status da integracao */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', borderRadius: 6, background: sheetsLastAt ? 'rgba(52,199,89,0.08)' : 'rgba(255,255,255,0.03)', border: `1px solid ${sheetsLastAt ? 'rgba(52,199,89,0.25)' : 'rgba(255,255,255,0.06)'}`, marginBottom: 12, fontSize: 12 }}>
+              {sheetsLastAt ? (
+                <>
+                  <Check size={14} style={{ color: '#34C759' }} />
+                  <strong style={{ color: '#34C759' }}>Conectada</strong>
+                  <span style={{ color: '#9B96B0' }}>· Último lead recebido {sheetsTimeAgo(sheetsLastAt)} ({parseSqlDate(sheetsLastAt).toLocaleString('pt-BR')})</span>
+                </>
+              ) : (
+                <>
+                  <AlertTriangle size={14} style={{ color: '#9B96B0' }} />
+                  <span style={{ color: '#9B96B0' }}>Aguardando primeiro lead — siga as instruções abaixo pra configurar.</span>
+                </>
+              )}
+            </div>
             <p style={{ fontSize: 12, color: '#9B96B0', marginBottom: 12 }}>
               Conecte uma planilha do Google Sheets ao CRM. Leads adicionados na planilha sao criados automaticamente no sistema.
             </p>

@@ -834,6 +834,8 @@ router.post('/sheets/:accountSlug', (req, res) => {
       triggerCapiForStageChange(lead.id, lead.stage_id, null, req)
     }
 
+    // Marca timestamp do ultimo lead recebido (pra UI mostrar status de integração)
+    try { db.prepare("UPDATE accounts SET last_sheets_lead_at = datetime('now') WHERE id = ?").run(account.id) } catch {}
     console.log(`[Webhook Sheets] ${isNew ? 'New' : 'Existing'} lead: ${name || phone} → account ${account.name} fbp=${!!body.fbp} fbc=${!!fbcVal} event_id=${body.event_id || 'none'}`)
     res.json({ ok: true, leadId: lead.id, isNew })
   } catch (err) {

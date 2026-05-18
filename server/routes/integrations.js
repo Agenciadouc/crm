@@ -371,4 +371,11 @@ router.post('/whatsapp/:id/away/toggle', requireRole('super_admin', 'gerente'), 
   res.json({ config: cfg })
 })
 
+// Status da integracao Google Sheets — retorna timestamp do ultimo lead recebido
+router.get('/sheets-status', (req, res) => {
+  if (!req.accountId) return res.status(400).json({ error: 'account_id required' })
+  const row = db.prepare('SELECT last_sheets_lead_at FROM accounts WHERE id = ?').get(req.accountId)
+  res.json({ last_lead_at: row?.last_sheets_lead_at || null })
+})
+
 export default router
