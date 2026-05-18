@@ -687,6 +687,22 @@ router.post('/sheets/:accountSlug', (req, res) => {
     if (empresa) db.prepare('UPDATE leads SET empresa = COALESCE(empresa, ?) WHERE id = ?').run(empresa, lead.id)
     if (cpf_cnpj) db.prepare('UPDATE leads SET cpf_cnpj = COALESCE(cpf_cnpj, ?) WHERE id = ?').run(cpf_cnpj, lead.id)
     if (instagram) db.prepare('UPDATE leads SET instagram = COALESCE(instagram, ?) WHERE id = ?').run(instagram, lead.id)
+
+    // Auto-detect: lead veio de anuncio? Marca trabalha_anuncio=1 se houver sinal claro
+    // (fbclid, ad_id, campaign_id, gclid, ou source/utm indicam paid)
+    const sourceStr = String(source || '').toLowerCase()
+    const utmMedStr = String(body.utm_medium || '').toLowerCase()
+    const utmSrcStr = String(body.utm_source || '').toLowerCase()
+    const isFromAd = !!(
+      body.fbclid || body.gclid || body.ad_id || body.campaign_id ||
+      sourceStr.includes('form') || sourceStr.includes('fb') || sourceStr.includes('meta') || sourceStr.includes('ad') ||
+      utmMedStr.includes('paid') || utmMedStr.includes('cpc') ||
+      utmSrcStr.includes('fb') || utmSrcStr.includes('google') || utmSrcStr.includes('meta')
+    )
+    if (isFromAd) {
+      db.prepare('UPDATE leads SET trabalha_anuncio = 1 WHERE id = ? AND (trabalha_anuncio IS NULL OR trabalha_anuncio = 0)').run(lead.id)
+    }
+
     // source_detail: combina o source_detail explicito + utms + page_url quando vierem
     const detailExtras = []
     if (source_detail) detailExtras.push(source_detail)
