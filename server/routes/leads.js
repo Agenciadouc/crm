@@ -661,7 +661,8 @@ router.delete('/tags/:tagId', requireRole('super_admin', 'gerente'), (req, res) 
 })
 
 // ─── Mapeamento tag → instância (leads de formulário) ───────────────────
-router.get('/tags/mapping/list', requireRole('super_admin', 'gerente'), (req, res) => {
+// IMPORTANTE: rotas em /tag-mapping/* (sem 's') pra nao conflitar com /tags/:tagId
+router.get('/tag-mapping/list', requireRole('super_admin', 'gerente'), (req, res) => {
   if (!req.accountId) return res.status(400).json({ error: 'account_id required' })
   const list = db.prepare(`
     SELECT tim.id, tim.tag_id, t.name as tag_name, t.color as tag_color,
@@ -677,7 +678,7 @@ router.get('/tags/mapping/list', requireRole('super_admin', 'gerente'), (req, re
   res.json({ mappings: list })
 })
 
-router.put('/tags/mapping', requireRole('super_admin', 'gerente'), (req, res) => {
+router.put('/tag-mapping', requireRole('super_admin', 'gerente'), (req, res) => {
   if (!req.accountId) return res.status(400).json({ error: 'account_id required' })
   const { tag_id, instance_id, attendant_id } = req.body || {}
   if (!tag_id || !instance_id) return res.status(400).json({ error: 'tag_id e instance_id obrigatorios' })
@@ -702,14 +703,14 @@ router.put('/tags/mapping', requireRole('super_admin', 'gerente'), (req, res) =>
   res.json({ ok: true })
 })
 
-router.delete('/tags/mapping/:tagId', requireRole('super_admin', 'gerente'), (req, res) => {
+router.delete('/tag-mapping/:tagId', requireRole('super_admin', 'gerente'), (req, res) => {
   if (!req.accountId) return res.status(400).json({ error: 'account_id required' })
   db.prepare('DELETE FROM tag_instance_mapping WHERE account_id = ? AND tag_id = ?').run(req.accountId, req.params.tagId)
   res.json({ ok: true })
 })
 
 // Configura instancia padrao pra leads de form (fallback quando nenhuma tag matchea)
-router.put('/tags/mapping/default-form-instance', requireRole('super_admin', 'gerente'), (req, res) => {
+router.put('/tag-mapping/default-form-instance', requireRole('super_admin', 'gerente'), (req, res) => {
   if (!req.accountId) return res.status(400).json({ error: 'account_id required' })
   const { instance_id } = req.body || {}
   if (instance_id) {
@@ -720,7 +721,7 @@ router.put('/tags/mapping/default-form-instance', requireRole('super_admin', 'ge
   res.json({ ok: true })
 })
 
-router.get('/tags/mapping/default-form-instance', requireRole('super_admin', 'gerente'), (req, res) => {
+router.get('/tag-mapping/default-form-instance', requireRole('super_admin', 'gerente'), (req, res) => {
   if (!req.accountId) return res.status(400).json({ error: 'account_id required' })
   const row = db.prepare('SELECT default_form_instance_id FROM accounts WHERE id = ?').get(req.accountId)
   res.json({ instance_id: row?.default_form_instance_id || null })
