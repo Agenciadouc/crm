@@ -384,7 +384,7 @@ export default function LeadDetail() {
         <div>
           {/* Botao destacado pra abrir o chat */}
           <button onClick={() => navigate(`/chat?lead=${lead.id}`)} style={{ width: '100%', padding: '14px 16px', background: 'linear-gradient(135deg, #34C759, #2BA84A)', color: '#fff', border: 'none', borderRadius: 8, fontSize: 14, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, marginBottom: 10, boxShadow: '0 2px 8px rgba(52,199,89,0.25)' }}>
-            <MessageCircle size={18} /> Abrir Chat ({messages.length} {messages.length === 1 ? 'mensagem' : 'mensagens'})
+            <MessageCircle size={18} /> Abrir Chat {messages.length > 0 ? `(${messages.length} ${messages.length === 1 ? 'mensagem' : 'mensagens'})` : '— iniciar conversa'}
           </button>
 
           {/* Tab switcher (sem chat) */}
