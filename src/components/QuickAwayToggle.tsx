@@ -20,15 +20,9 @@ export default function QuickAwayToggle() {
     try {
       const insts = await fetchWhatsAppInstances(accountId)
       const connected = insts.filter(i => i.status === 'connected')
-      // Filtra so as do atendente atual (se for atendente)
-      // Gerente/admin: ve todas
-      const filtered = user.role === 'atendente'
-        ? connected.filter(i => i.default_attendant_id === user.id || i.id === (user as any).primary_instance_id)
-        : connected
-
-      // Carrega config de cada
+      // Todos os roles veem todas as instâncias conectadas da conta — cada um pode marcar/desmarcar
       const withCfg: InstanceWithCfg[] = await Promise.all(
-        filtered.map(async i => {
+        connected.map(async i => {
           try { const r = await fetchInstanceAutoMessages(i.id, accountId); return { ...i, _cfg: r.config } }
           catch { return { ...i, _cfg: null } }
         })

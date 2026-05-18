@@ -301,8 +301,8 @@ router.post('/whatsapp/:id/test', requireRole('super_admin', 'gerente'), async (
 })
 
 // ─── Auto-mensagens por instancia ─────────────────────────────────
-// GET: carrega config atual da instancia
-router.get('/whatsapp/:id/auto-messages', requireRole('super_admin', 'gerente'), (req, res) => {
+// GET: carrega config atual da instancia (atendente tb le pra mostrar status na sidebar)
+router.get('/whatsapp/:id/auto-messages', (req, res) => {
   const instance = getOwnedInstance(req, res)
   if (!instance) return
   const cfg = db.prepare('SELECT * FROM instance_auto_messages WHERE instance_id = ?').get(instance.id)
@@ -356,8 +356,8 @@ router.put('/whatsapp/:id/auto-messages', requireRole('super_admin', 'gerente'),
   res.json({ config: cfg })
 })
 
-// POST: toggle do modo ausencia manual (atalho rapido)
-router.post('/whatsapp/:id/away/toggle', requireRole('super_admin', 'gerente'), (req, res) => {
+// POST: toggle do modo ausencia manual (atalho rapido — atendente tb pode marcar pra si)
+router.post('/whatsapp/:id/away/toggle', (req, res) => {
   const instance = getOwnedInstance(req, res)
   if (!instance) return
   const existing = db.prepare('SELECT * FROM instance_auto_messages WHERE instance_id = ?').get(instance.id)
