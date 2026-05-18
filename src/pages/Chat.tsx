@@ -17,10 +17,12 @@ import EditTaskModal from '../components/EditTaskModal'
 import {
   MessageCircle, Search, Send, Phone, User, Edit3, Save, X, Plus,
   StickyNote, Tag as TagIcon, GitBranch, Smartphone, ListOrdered, ChevronRight, Check, Clock, Archive, ListTodo, ChevronDown, ChevronUp, Trash2, Paperclip, FileText, MessageSquarePlus, Copy,
+  Menu as MenuIcon, MessagesSquare, Info as InfoIcon, History as HistoryIcon, ChevronLeft,
 } from 'lucide-react'
 import MessageMedia from '../components/MessageMedia'
 import { applyMessageVars } from '../lib/messageVars'
 import { parseSqlDate, formatTime } from '../lib/dates'
+import { useIsMobile } from '../hooks/useIsMobile'
 
 function timeAgo(dateStr: string) {
   const diff = Date.now() - parseSqlDate(dateStr).getTime()
@@ -51,6 +53,26 @@ export default function Chat() {
   type NoticeAction = { label: string; onClick: () => void; primary?: boolean; danger?: boolean }
   const [notice, setNotice] = useState<{ kind: 'info' | 'error' | 'success'; title: string; message: string; actions?: NoticeAction[] } | null>(null)
   const [pendingTransfers, setPendingTransfers] = useState<TransferRequest[]>([])
+
+  // Mobile single-pane com bottom nav de 5 tabs
+  const isMobile = useIsMobile()
+  const [mobileTab, setMobileTab] = useState<'conversas' | 'chat' | 'info' | 'history'>('conversas')
+  // Quando seleciona lead em mobile, auto-vai pra tab Chat (UX igual WhatsApp)
+  const selectLead = (id: number | null) => {
+    setSelectedLeadId(id)
+    if (isMobile && id !== null) setMobileTab('chat')
+  }
+  // Quando vai pra Info/Historico via bottom nav, sincroniza com a rightTab interna
+  const switchMobileTab = (tab: 'conversas' | 'chat' | 'info' | 'history') => {
+    setMobileTab(tab)
+    if (tab === 'info') setRightTab('info')
+    if (tab === 'history') setRightTab('history')
+  }
+  // Pra "Menu" abrir a sidebar — reusa o hamburger button da Sidebar via custom event
+  const openSidebarMenu = () => {
+    const btn = document.querySelector('.hamburger-btn') as HTMLButtonElement | null
+    if (btn) btn.click()
+  }
   const [lead, setLead] = useState<Lead | null>(null)
   const [messages, setMessages] = useState<Message[]>([])
   const [history, setHistory] = useState<StageHistoryEntry[]>([])
@@ -569,7 +591,7 @@ export default function Chat() {
   const availableTags = lead ? tags.filter(t => !lead.tags?.some(lt => lt.id === t.id)) : []
 
   return (
-    <div className="chat-page">
+    <div className={isMobile ? `chat-page chat-mobile-active mobile-tab-${mobileTab}` : 'chat-page'}>
       {/* Top bar: instance selector */}
       <div className="chat-header">
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -633,7 +655,7 @@ export default function Chat() {
               const active = l.id === selectedLeadId
               const stage = allStages.find(s => s.id === l.stage_id)
               return (
-                <div key={l.id} className={`chat-contact-item ${active ? 'active' : ''}`} onClick={() => setSelectedLeadId(l.id)} style={{ position: 'relative' }}>
+                <div key={l.id} className={`chat-contact-item ${active ? 'active' : ''}`} onClick={() => selectLead(l.id)} style={{ position: 'relative' }}>
                   <div className="chat-contact-avatar" style={{ background: stage ? `${stage.color}25` : '#FFB30025', overflow: 'hidden' }}>
                     {l.profile_pic_url ? (
                       <img src={l.profile_pic_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={e => { (e.target as HTMLImageElement).style.display = 'none' }} />
@@ -677,6 +699,9 @@ export default function Chat() {
           ) : (
             <>
               <div className="chat-conversation-header">
+                <button className="chat-mobile-back" onClick={() => setMobileTab('conversas')} title="Voltar">
+                  <ChevronLeft size={16} />
+                </button>
                 <div className="chat-contact-avatar" style={{ background: `${currentStage?.color || '#FFB300'}25`, overflow: 'hidden' }}>
                   {lead.profile_pic_url ? (
                     <img src={lead.profile_pic_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={e => { (e.target as HTMLImageElement).style.display = 'none' }} />
@@ -1416,6 +1441,50 @@ export default function Chat() {
             </div>
           </div>
         </div>
+      )}
+
+      {isMobile && (
+        <nav className="chat-mobile-bottom-nav">
+          <button className="chat-mobile-tab" onClick={openSidebarMenu} title="Menu">
+            <MenuIcon size={18} />
+            <span>Menu</span>
+          </button>
+          <button
+            className={`chat-mobile-tab ${mobileTab === 'conversas' ? 'active' : ''}`}
+            onClick={() => switchMobileTab('conversas')}
+            title="Conversas"
+          >
+            <MessageCircle size={18} />
+            <span>Conversas</span>
+          </button>
+          <button
+            className={`chat-mobile-tab ${mobileTab === 'chat' ? 'active' : ''}`}
+            onClick={() => switchMobileTab('chat')}
+            disabled={!lead}
+            title="Chat"
+          >
+            <MessagesSquare size={18} />
+            <span>Chat</span>
+          </button>
+          <button
+            className={`chat-mobile-tab ${mobileTab === 'info' ? 'active' : ''}`}
+            onClick={() => switchMobileTab('info')}
+            disabled={!lead}
+            title="Info"
+          >
+            <InfoIcon size={18} />
+            <span>Info</span>
+          </button>
+          <button
+            className={`chat-mobile-tab ${mobileTab === 'history' ? 'active' : ''}`}
+            onClick={() => switchMobileTab('history')}
+            disabled={!lead}
+            title="Histórico"
+          >
+            <HistoryIcon size={18} />
+            <span>Histórico</span>
+          </button>
+        </nav>
       )}
     </div>
   )

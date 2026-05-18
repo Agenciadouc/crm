@@ -262,9 +262,55 @@ th.right, td.right { text-align: right; }
   .chat-layout { grid-template-columns: 240px 1fr; }
   .chat-details { display: none; }
 }
-@media (max-width: 768px) {
+@media (max-width: 768px) and (min-width: 641px) {
   .chat-layout { grid-template-columns: 1fr; }
   .chat-contacts { display: none; }
+}
+
+/* Layout MOBILE do chat — single-pane navegado por bottom nav (5 tabs) */
+.chat-mobile-bottom-nav {
+  display: none;
+  justify-content: space-around; align-items: stretch;
+  background: var(--bg-surface); border-top: 1px solid var(--border-subtle);
+  padding: 4px 0; flex-shrink: 0;
+}
+.chat-mobile-tab {
+  flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 2px; padding: 6px 4px; background: transparent; border: none; cursor: pointer;
+  color: #9B96B0; font-size: 10px; font-weight: 500; transition: color 0.15s;
+  position: relative;
+}
+.chat-mobile-tab.active { color: #FFCB45; }
+.chat-mobile-tab .badge {
+  position: absolute; top: 2px; right: 26%;
+  background: #FF6B6B; color: #fff; border-radius: 10px;
+  font-size: 9px; font-weight: 700; padding: 1px 5px; min-width: 14px; text-align: center;
+}
+.chat-mobile-back {
+  display: none; align-items: center; gap: 4px; padding: 4px 8px; margin-right: 4px;
+  background: transparent; border: none; color: #FFCB45; cursor: pointer;
+  font-size: 12px; font-weight: 600; flex-shrink: 0;
+}
+
+@media (max-width: 640px) {
+  /* O wrapper .chat-page controla qual painel aparece via class mobile-tab-X */
+  .chat-page.chat-mobile-active { padding-bottom: 0; }
+  .chat-page.chat-mobile-active .chat-header { display: none; }
+  .chat-page.chat-mobile-active .chat-layout {
+    grid-template-columns: 1fr !important;
+    gap: 0;
+  }
+  .chat-page.chat-mobile-active .chat-contacts,
+  .chat-page.chat-mobile-active .chat-conversation,
+  .chat-page.chat-mobile-active .chat-details { display: none; border-radius: 0; border: none; }
+
+  .chat-page.chat-mobile-active.mobile-tab-conversas .chat-contacts { display: flex; }
+  .chat-page.chat-mobile-active.mobile-tab-chat .chat-conversation { display: flex; }
+  .chat-page.chat-mobile-active.mobile-tab-info .chat-details,
+  .chat-page.chat-mobile-active.mobile-tab-history .chat-details { display: flex; }
+
+  .chat-page.chat-mobile-active .chat-mobile-bottom-nav { display: flex; }
+  .chat-page.chat-mobile-active.mobile-tab-chat .chat-mobile-back { display: flex; }
 }
 
 .spinning { animation: spin 1s linear infinite; }
