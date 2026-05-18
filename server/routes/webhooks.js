@@ -3,7 +3,7 @@ import fetch from 'node-fetch'
 import db from '../db.js'
 import { broadcastSSE } from '../sse.js'
 import { triggerCapiForStageChange } from '../services/metaCapi.js'
-import { getInstanceConfig, wasAutoMsgSentRecently, sendAutoMessage } from '../services/autoMessages.js'
+import { getInstanceConfig, wasAutoMsgSentRecently, sendAutoMessage, shouldSendAway } from '../services/autoMessages.js'
 
 const router = Router()
 
@@ -393,28 +393,45 @@ router.post('/evolution/:accountSlug', (req, res) => {
       triggerCapiForStageChange(lead.id, lead.stage_id, null)
     }
 
-    // Auto-mensagem de SAUDACAO: lead novo + msg inbound (lead mandou 1a vez)
-    // Se nao tiver config greeting_enabled, NAO faz nada (silencioso, sem alterar fluxo)
-    if (isNew && !fromMe && waInstance) {
+    // Auto-mensagens: SAUDACAO (so lead novo) + AUSENCIA (toda msg inbound)
+    // Se nada configurado, NAO altera o fluxo
+    if (!fromMe && waInstance) {
       try {
         const autoCfg = getInstanceConfig(waInstance.id)
-        if (autoCfg?.greeting_enabled && autoCfg?.greeting_text) {
-          const alreadySent = wasAutoMsgSentRecently(lead.id, 'greeting', 24)
-          if (!alreadySent) {
-            // Fire-and-forget com delay de 2s pra parecer mais natural
-            setTimeout(() => {
-              sendAutoMessage({
-                leadId: lead.id,
-                instanceId: waInstance.id,
-                type: 'greeting',
-                text: autoCfg.greeting_text,
-                accountId: account.id,
-              }).catch(e => console.error('[AutoMsg greeting] async:', e?.message))
-            }, 2000)
+        if (autoCfg) {
+          // 1) SAUDACAO (so lead novo, anti-flood 24h)
+          if (isNew && autoCfg.greeting_enabled && autoCfg.greeting_text) {
+            if (!wasAutoMsgSentRecently(lead.id, 'greeting', 24)) {
+              setTimeout(() => {
+                sendAutoMessage({
+                  leadId: lead.id,
+                  instanceId: waInstance.id,
+                  type: 'greeting',
+                  text: autoCfg.greeting_text,
+                  accountId: account.id,
+                }).catch(e => console.error('[AutoMsg greeting] async:', e?.message))
+              }, 2000)
+            }
+          }
+          // 2) AUSENCIA (manual ou horario, anti-flood configuravel)
+          if (autoCfg.away_text && shouldSendAway(autoCfg, new Date())) {
+            const cooldown = autoCfg.away_cooldown_hours || 4
+            if (!wasAutoMsgSentRecently(lead.id, 'away', cooldown)) {
+              // Delay menor (1s) pra ausencia parecer responsiva
+              setTimeout(() => {
+                sendAutoMessage({
+                  leadId: lead.id,
+                  instanceId: waInstance.id,
+                  type: 'away',
+                  text: autoCfg.away_text,
+                  accountId: account.id,
+                }).catch(e => console.error('[AutoMsg away] async:', e?.message))
+              }, 1000)
+            }
           }
         }
       } catch (e) {
-        console.error('[AutoMsg greeting] erro:', e?.message)
+        console.error('[AutoMsg] erro no hook:', e?.message)
       }
     }
 
