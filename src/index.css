@@ -294,7 +294,9 @@ th.right, td.right { text-align: right; }
 
 @media (max-width: 640px) {
   /* O wrapper .chat-page controla qual painel aparece via class mobile-tab-X */
-  .chat-page.chat-mobile-active { padding-bottom: 0; }
+  /* Sem hamburger no chat mobile → zera padding do main-content pra layout encostar nas bordas */
+  .app-layout:has(.chat-mobile-active) .main-content { padding: 0 !important; min-height: 100vh; }
+  .chat-page.chat-mobile-active { height: 100vh; gap: 0; padding-bottom: 0; }
   .chat-page.chat-mobile-active .chat-header { display: none; }
   .chat-page.chat-mobile-active .chat-layout {
     grid-template-columns: 1fr !important;
