@@ -414,6 +414,8 @@ th.right, td.right { text-align: right; }
 
 @media (max-width: 768px) {
   .hamburger-btn { display: flex; }
+  /* No chat mobile, o bottom nav ja tem aba Menu — esconde o hamburger pra nao duplicar */
+  .app-layout:has(.chat-mobile-active) .hamburger-btn { display: none; }
   .sidebar-close-btn { display: block; }
   .sidebar-overlay { display: block; position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 999; backdrop-filter: blur(3px); }
   .sidebar { position: fixed; left: 0; top: 0; z-index: 1000; width: 260px; transform: translateX(-100%); transition: transform var(--transition-slow); }
