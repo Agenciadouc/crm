@@ -528,7 +528,7 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_transfer_from ON lead_transfer_requests(from_attendant_id, status);
 `)
 
-// Auto-mensagens por instância (saudação, ausência, inatividade)
+// Auto-mensagens por instância (saudação, ausência)
 db.exec(`
   CREATE TABLE IF NOT EXISTS instance_auto_messages (
     id                          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -541,16 +541,12 @@ db.exec(`
     away_text                   TEXT,
     away_schedule_json          TEXT,
     away_cooldown_hours         INTEGER NOT NULL DEFAULT 4,
-    inactivity_lead_enabled     INTEGER NOT NULL DEFAULT 0,
-    inactivity_lead_hours       INTEGER NOT NULL DEFAULT 24,
-    inactivity_lead_text        TEXT,
-    inactivity_agent_enabled    INTEGER NOT NULL DEFAULT 0,
-    inactivity_agent_hours      INTEGER NOT NULL DEFAULT 4,
-    inactivity_agent_text       TEXT,
     updated_at                  TEXT NOT NULL DEFAULT (datetime('now')),
     FOREIGN KEY (instance_id) REFERENCES whatsapp_instances(id) ON DELETE CASCADE
   );
 
+  -- Log de auto-mensagens enviadas (anti-flood + auditoria)
+  -- type aceita 'greeting' e 'away' (outros tipos legados ficam no CHECK pra compat)
   CREATE TABLE IF NOT EXISTS auto_messages_log (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     lead_id     INTEGER NOT NULL,

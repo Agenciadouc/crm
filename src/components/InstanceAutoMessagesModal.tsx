@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { fetchInstanceAutoMessages, saveInstanceAutoMessages, type InstanceAutoMessageConfig, type WhatsAppInstance } from '../lib/api'
-import { X, MessageSquare, Moon, Clock, Save, AlertTriangle, Smartphone } from 'lucide-react'
+import { X, MessageSquare, Moon, Save, AlertTriangle, Smartphone } from 'lucide-react'
 
 const DAYS: { key: string; label: string }[] = [
   { key: 'mon', label: 'Segunda' },
@@ -34,7 +34,7 @@ interface Props {
 }
 
 export default function InstanceAutoMessagesModal({ instance, accountId, onClose }: Props) {
-  const [tab, setTab] = useState<'greeting' | 'away' | 'inactivity'>('greeting')
+  const [tab, setTab] = useState<'greeting' | 'away'>('greeting')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -48,12 +48,6 @@ export default function InstanceAutoMessagesModal({ instance, accountId, onClose
     away_text: '',
     away_schedule_json: null,
     away_cooldown_hours: 4,
-    inactivity_lead_enabled: 0,
-    inactivity_lead_hours: 24,
-    inactivity_lead_text: '',
-    inactivity_agent_enabled: 0,
-    inactivity_agent_hours: 4,
-    inactivity_agent_text: '',
   })
   const [schedule, setSchedule] = useState<Schedule>(DEFAULT_SCHEDULE)
 
@@ -116,9 +110,6 @@ export default function InstanceAutoMessagesModal({ instance, accountId, onClose
           </button>
           <button className={`btn btn-sm ${tab === 'away' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setTab('away')}>
             <Moon size={12} /> Ausencia
-          </button>
-          <button className={`btn btn-sm ${tab === 'inactivity' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setTab('inactivity')}>
-            <Clock size={12} /> Inatividade
           </button>
         </div>
 
@@ -243,77 +234,6 @@ export default function InstanceAutoMessagesModal({ instance, accountId, onClose
                     style={{ width: 100 }}
                   />
                 </div>
-              </div>
-            )}
-
-            {/* TAB: INATIVIDADE */}
-            {tab === 'inactivity' && (
-              <div>
-                <div style={{ background: 'rgba(255,255,255,0.03)', padding: 12, borderRadius: 8, marginBottom: 12 }}>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, marginBottom: 8, cursor: 'pointer' }}>
-                    <input type="checkbox" checked={!!config.inactivity_lead_enabled} onChange={e => update({ inactivity_lead_enabled: e.target.checked ? 1 : 0 })} />
-                    <span><strong>Lead sumiu (ping de reaquecimento)</strong></span>
-                  </label>
-                  <p style={{ fontSize: 11, color: '#9B96B0', marginBottom: 8 }}>
-                    Se atendente mandou mensagem e o lead nao respondeu apos X horas, envia um ping pra reativar.
-                  </p>
-                  <div className="form-group">
-                    <label>Tempo sem resposta do lead (horas)</label>
-                    <input
-                      type="number"
-                      className="input"
-                      min={1}
-                      max={168}
-                      value={config.inactivity_lead_hours || 24}
-                      onChange={e => update({ inactivity_lead_hours: parseInt(e.target.value) || 24 })}
-                      style={{ width: 120 }}
-                    />
-                  </div>
-                  <div className="form-group">
-                    <label>Texto do ping</label>
-                    <textarea
-                      className="input"
-                      rows={3}
-                      value={config.inactivity_lead_text || ''}
-                      onChange={e => update({ inactivity_lead_text: e.target.value })}
-                      placeholder="Oi {{primeiro_nome}}, tudo bem? Posso te ajudar com mais alguma coisa?"
-                    />
-                  </div>
-                </div>
-
-                <div style={{ background: 'rgba(255,255,255,0.03)', padding: 12, borderRadius: 8 }}>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, marginBottom: 8, cursor: 'pointer' }}>
-                    <input type="checkbox" checked={!!config.inactivity_agent_enabled} onChange={e => update({ inactivity_agent_enabled: e.target.checked ? 1 : 0 })} />
-                    <span><strong>Atendente atrasado (desculpa automatica)</strong></span>
-                  </label>
-                  <p style={{ fontSize: 11, color: '#9B96B0', marginBottom: 8 }}>
-                    Se lead mandou mensagem e o atendente nao respondeu apos X horas, envia uma desculpa automatica.
-                  </p>
-                  <div className="form-group">
-                    <label>Tempo sem resposta do atendente (horas)</label>
-                    <input
-                      type="number"
-                      className="input"
-                      min={1}
-                      max={48}
-                      value={config.inactivity_agent_hours || 4}
-                      onChange={e => update({ inactivity_agent_hours: parseInt(e.target.value) || 4 })}
-                      style={{ width: 120 }}
-                    />
-                  </div>
-                  <div className="form-group">
-                    <label>Texto da desculpa</label>
-                    <textarea
-                      className="input"
-                      rows={3}
-                      value={config.inactivity_agent_text || ''}
-                      onChange={e => update({ inactivity_agent_text: e.target.value })}
-                      placeholder="Desculpe a demora! Em breve te atendemos."
-                    />
-                  </div>
-                </div>
-
-                <p style={{ fontSize: 10, color: '#6B6580', marginTop: 8 }}>{VARS_HELP}</p>
               </div>
             )}
 

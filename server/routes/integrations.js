@@ -306,7 +306,7 @@ router.get('/whatsapp/:id/auto-messages', requireRole('super_admin', 'gerente'),
   const instance = getOwnedInstance(req, res)
   if (!instance) return
   const cfg = db.prepare('SELECT * FROM instance_auto_messages WHERE instance_id = ?').get(instance.id)
-  res.json({ config: cfg || { instance_id: instance.id, greeting_enabled: 0, away_enabled: 0, away_mode: 'manual', inactivity_lead_enabled: 0, inactivity_agent_enabled: 0 } })
+  res.json({ config: cfg || { instance_id: instance.id, greeting_enabled: 0, away_enabled: 0, away_mode: 'manual' } })
 })
 
 // PUT: salva config (upsert)
@@ -316,8 +316,6 @@ router.put('/whatsapp/:id/auto-messages', requireRole('super_admin', 'gerente'),
   const {
     greeting_enabled = 0, greeting_text = null,
     away_enabled = 0, away_mode = 'manual', away_manual_active = 0, away_text = null, away_schedule_json = null, away_cooldown_hours = 4,
-    inactivity_lead_enabled = 0, inactivity_lead_hours = 24, inactivity_lead_text = null,
-    inactivity_agent_enabled = 0, inactivity_agent_hours = 4, inactivity_agent_text = null,
   } = req.body || {}
 
   // Valida JSON schedule
@@ -335,31 +333,23 @@ router.put('/whatsapp/:id/auto-messages', requireRole('super_admin', 'gerente'),
       UPDATE instance_auto_messages SET
         greeting_enabled = ?, greeting_text = ?,
         away_enabled = ?, away_mode = ?, away_manual_active = ?, away_text = ?, away_schedule_json = ?, away_cooldown_hours = ?,
-        inactivity_lead_enabled = ?, inactivity_lead_hours = ?, inactivity_lead_text = ?,
-        inactivity_agent_enabled = ?, inactivity_agent_hours = ?, inactivity_agent_text = ?,
         updated_at = datetime('now')
       WHERE instance_id = ?
     `).run(
       greeting_enabled ? 1 : 0, greeting_text,
       away_enabled ? 1 : 0, away_mode || 'manual', away_manual_active ? 1 : 0, away_text, scheduleStr, parseInt(away_cooldown_hours) || 4,
-      inactivity_lead_enabled ? 1 : 0, parseInt(inactivity_lead_hours) || 24, inactivity_lead_text,
-      inactivity_agent_enabled ? 1 : 0, parseInt(inactivity_agent_hours) || 4, inactivity_agent_text,
       instance.id
     )
   } else {
     db.prepare(`
       INSERT INTO instance_auto_messages (
         instance_id, greeting_enabled, greeting_text,
-        away_enabled, away_mode, away_manual_active, away_text, away_schedule_json, away_cooldown_hours,
-        inactivity_lead_enabled, inactivity_lead_hours, inactivity_lead_text,
-        inactivity_agent_enabled, inactivity_agent_hours, inactivity_agent_text
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        away_enabled, away_mode, away_manual_active, away_text, away_schedule_json, away_cooldown_hours
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       instance.id,
       greeting_enabled ? 1 : 0, greeting_text,
       away_enabled ? 1 : 0, away_mode || 'manual', away_manual_active ? 1 : 0, away_text, scheduleStr, parseInt(away_cooldown_hours) || 4,
-      inactivity_lead_enabled ? 1 : 0, parseInt(inactivity_lead_hours) || 24, inactivity_lead_text,
-      inactivity_agent_enabled ? 1 : 0, parseInt(inactivity_agent_hours) || 4, inactivity_agent_text,
     )
   }
   const cfg = db.prepare('SELECT * FROM instance_auto_messages WHERE instance_id = ?').get(instance.id)

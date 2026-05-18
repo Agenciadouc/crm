@@ -235,12 +235,6 @@ export interface InstanceAutoMessageConfig {
   away_text?: string | null
   away_schedule_json?: string | null
   away_cooldown_hours?: number
-  inactivity_lead_enabled?: number
-  inactivity_lead_hours?: number
-  inactivity_lead_text?: string | null
-  inactivity_agent_enabled?: number
-  inactivity_agent_hours?: number
-  inactivity_agent_text?: string | null
 }
 export const fetchInstanceAutoMessages = (instanceId: number, accountId: number) =>
   apiFetch<{ config: InstanceAutoMessageConfig }>(`/api/integrations/whatsapp/${instanceId}/auto-messages?account_id=${accountId}`)
