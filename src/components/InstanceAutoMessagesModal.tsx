@@ -70,9 +70,11 @@ export default function InstanceAutoMessagesModal({ instance, accountId, onClose
   const handleSave = async () => {
     setSaving(true); setError(null)
     try {
-      const payload: any = { ...config }
-      if (config.away_mode === 'schedule') {
-        payload.away_schedule_json = JSON.stringify(schedule)
+      const payload: any = {
+        ...config,
+        away_mode: 'schedule',
+        away_manual_active: 0,
+        away_schedule_json: JSON.stringify(schedule),
       }
       await saveInstanceAutoMessages(instance.id, accountId, payload)
       onClose()
@@ -159,56 +161,31 @@ export default function InstanceAutoMessagesModal({ instance, accountId, onClose
                 </p>
 
                 <div className="form-group">
-                  <label>Modo</label>
-                  <select className="select" value={config.away_mode || 'manual'} onChange={e => update({ away_mode: e.target.value as any })}>
-                    <option value="manual">Manual (atendente liga/desliga)</option>
-                    <option value="schedule">Por horario (grade de dias/horas)</option>
-                  </select>
-                </div>
-
-                {config.away_mode === 'manual' && (
-                  <div style={{ background: 'rgba(255,179,0,0.05)', padding: 10, borderRadius: 6, marginBottom: 12, fontSize: 12, color: '#9B96B0' }}>
-                    Status atual: <strong style={{ color: config.away_manual_active ? '#FBBC04' : '#34C759' }}>
-                      {config.away_manual_active ? '🌙 Ausente' : '🟢 Disponivel'}
-                    </strong>
-                    <button
-                      className={`btn btn-sm ${config.away_manual_active ? 'btn-secondary' : 'btn-primary'}`}
-                      style={{ marginLeft: 12, fontSize: 11 }}
-                      onClick={() => update({ away_manual_active: config.away_manual_active ? 0 : 1 })}
-                    >
-                      {config.away_manual_active ? 'Marcar disponivel' : 'Marcar ausente'}
-                    </button>
-                  </div>
-                )}
-
-                {config.away_mode === 'schedule' && (
-                  <div className="form-group">
-                    <label>Horarios de DISPONIBILIDADE (fora deles dispara ausencia)</label>
-                    <p style={{ fontSize: 11, color: '#9B96B0', marginBottom: 8 }}>
-                      Sem horario num dia = ausente o dia todo. Sabado/Domingo vazios = sempre ausente fim de semana.
-                    </p>
-                    {DAYS.map(d => (
-                      <div key={d.key} style={{ background: 'rgba(255,255,255,0.02)', padding: 8, borderRadius: 6, marginBottom: 6 }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-                          <strong style={{ fontSize: 12, color: '#C8C2D8' }}>{d.label}</strong>
-                          <button className="btn btn-secondary btn-sm" style={{ fontSize: 10, padding: '2px 8px' }} onClick={() => addSlot(d.key)}>+ Adicionar horario</button>
-                        </div>
-                        {(schedule[d.key] || []).length === 0 ? (
-                          <span style={{ fontSize: 10, color: '#FF6B6B', fontStyle: 'italic' }}>Ausente o dia todo</span>
-                        ) : (
-                          (schedule[d.key] || []).map((slot, idx) => (
-                            <div key={idx} style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 4 }}>
-                              <input type="time" className="input" value={slot.start} onChange={e => updateSlot(d.key, idx, 'start', e.target.value)} style={{ width: 110, fontSize: 11 }} />
-                              <span style={{ color: '#9B96B0', fontSize: 11 }}>ate</span>
-                              <input type="time" className="input" value={slot.end} onChange={e => updateSlot(d.key, idx, 'end', e.target.value)} style={{ width: 110, fontSize: 11 }} />
-                              <button className="btn btn-danger btn-sm btn-icon" onClick={() => removeSlot(d.key, idx)}><X size={10} /></button>
-                            </div>
-                          ))
-                        )}
+                  <label>Horarios de DISPONIBILIDADE (fora deles dispara ausencia)</label>
+                  <p style={{ fontSize: 11, color: '#9B96B0', marginBottom: 8 }}>
+                    Sem horario num dia = ausente o dia todo. Sabado/Domingo vazios = sempre ausente fim de semana.
+                  </p>
+                  {DAYS.map(d => (
+                    <div key={d.key} style={{ background: 'rgba(255,255,255,0.02)', padding: 8, borderRadius: 6, marginBottom: 6 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                        <strong style={{ fontSize: 12, color: '#C8C2D8' }}>{d.label}</strong>
+                        <button className="btn btn-secondary btn-sm" style={{ fontSize: 10, padding: '2px 8px' }} onClick={() => addSlot(d.key)}>+ Adicionar horario</button>
                       </div>
-                    ))}
-                  </div>
-                )}
+                      {(schedule[d.key] || []).length === 0 ? (
+                        <span style={{ fontSize: 10, color: '#FF6B6B', fontStyle: 'italic' }}>Ausente o dia todo</span>
+                      ) : (
+                        (schedule[d.key] || []).map((slot, idx) => (
+                          <div key={idx} style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 4 }}>
+                            <input type="time" className="input" value={slot.start} onChange={e => updateSlot(d.key, idx, 'start', e.target.value)} style={{ width: 110, fontSize: 11 }} />
+                            <span style={{ color: '#9B96B0', fontSize: 11 }}>ate</span>
+                            <input type="time" className="input" value={slot.end} onChange={e => updateSlot(d.key, idx, 'end', e.target.value)} style={{ width: 110, fontSize: 11 }} />
+                            <button className="btn btn-danger btn-sm btn-icon" onClick={() => removeSlot(d.key, idx)}><X size={10} /></button>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  ))}
+                </div>
 
                 <div className="form-group">
                   <label>Texto da resposta de ausencia</label>

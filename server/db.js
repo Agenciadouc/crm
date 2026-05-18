@@ -399,6 +399,11 @@ addColumnIfNotExists('accounts', 'meta_capi_enabled', 'INTEGER NOT NULL DEFAULT 
 // Ultimo lead recebido via webhook Google Sheets (pra UI mostrar status da integração)
 addColumnIfNotExists('accounts', 'last_sheets_lead_at', 'TEXT')
 
+// Normaliza configs antigas que tinham modo manual (feature descontinuada — agora so schedule)
+try {
+  db.prepare("UPDATE instance_auto_messages SET away_mode = 'schedule', away_manual_active = 0 WHERE away_mode = 'manual'").run()
+} catch {}
+
 // Funnel stages: evento Meta enviado quando lead entra nessa etapa (CAPI)
 addColumnIfNotExists('funnel_stages', 'meta_event_name', 'TEXT')
 

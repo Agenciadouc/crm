@@ -4,7 +4,6 @@ import { useAuth } from '../context/AuthContext'
 import { useAccount } from '../context/AccountContext'
 import { useSSE } from '../context/SSEContext'
 import { apiFetch, fetchTaskCounts, fetchPendingTransferRequests } from '../lib/api'
-import QuickAwayToggle from './QuickAwayToggle'
 import {
   LayoutDashboard, Kanban, Users, MessageCircle, UserCog, GitBranch,
   Plug, Settings, Building2, LogOut, UsersRound, Menu, X,
@@ -154,8 +153,6 @@ export default function Sidebar() {
             </>
           )}
         </nav>
-
-        <QuickAwayToggle />
 
         <div className="sidebar-footer">
           <div>

@@ -36,31 +36,24 @@ export function wasAutoMsgSentRecently(leadId, type, hoursCooldown) {
   return !!row
 }
 
-// Decide se deve enviar ausencia agora (modo manual ou horario)
+// Decide se deve enviar ausencia agora (apenas por horario — modo manual foi removido)
 export function shouldSendAway(cfg, now = new Date()) {
   if (!cfg?.away_enabled) return false
-  if (cfg.away_mode === 'manual') {
-    return !!cfg.away_manual_active
+  let schedule = null
+  try { schedule = cfg.away_schedule_json ? JSON.parse(cfg.away_schedule_json) : null } catch {}
+  if (!schedule || typeof schedule !== 'object') return false
+  const dayKeys = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat']
+  const key = dayKeys[now.getDay()]
+  const slots = schedule[key]
+  // Sem slots ou array vazio = SEMPRE ausente nesse dia
+  if (!Array.isArray(slots) || slots.length === 0) return true
+  const hh = String(now.getHours()).padStart(2, '0')
+  const mm = String(now.getMinutes()).padStart(2, '0')
+  const cur = `${hh}:${mm}`
+  for (const slot of slots) {
+    if (slot?.start && slot?.end && cur >= slot.start && cur <= slot.end) return false
   }
-  if (cfg.away_mode === 'schedule') {
-    let schedule = null
-    try { schedule = cfg.away_schedule_json ? JSON.parse(cfg.away_schedule_json) : null } catch {}
-    if (!schedule || typeof schedule !== 'object') return false
-    const dayKeys = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat']
-    const key = dayKeys[now.getDay()]
-    const slots = schedule[key]
-    // Sem slots ou array vazio = SEMPRE ausente nesse dia
-    if (!Array.isArray(slots) || slots.length === 0) return true
-    const hh = String(now.getHours()).padStart(2, '0')
-    const mm = String(now.getMinutes()).padStart(2, '0')
-    const cur = `${hh}:${mm}`
-    // Dentro de algum slot = NAO ausente
-    for (const slot of slots) {
-      if (slot?.start && slot?.end && cur >= slot.start && cur <= slot.end) return false
-    }
-    return true // fora dos slots = ausente
-  }
-  return false
+  return true // fora dos slots = ausente
 }
 
 // Envia auto-msg via Evolution + grava em messages + grava em log

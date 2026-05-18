@@ -315,8 +315,11 @@ router.put('/whatsapp/:id/auto-messages', requireRole('super_admin', 'gerente'),
   if (!instance) return
   const {
     greeting_enabled = 0, greeting_text = null,
-    away_enabled = 0, away_mode = 'manual', away_manual_active = 0, away_text = null, away_schedule_json = null, away_cooldown_hours = 4,
+    away_enabled = 0, away_text = null, away_schedule_json = null, away_cooldown_hours = 4,
   } = req.body || {}
+  // Modo manual descontinuado — sempre salva como 'schedule'
+  const away_mode = 'schedule'
+  const away_manual_active = 0
 
   // Valida JSON schedule
   let scheduleStr = null
@@ -351,21 +354,6 @@ router.put('/whatsapp/:id/auto-messages', requireRole('super_admin', 'gerente'),
       greeting_enabled ? 1 : 0, greeting_text,
       away_enabled ? 1 : 0, away_mode || 'manual', away_manual_active ? 1 : 0, away_text, scheduleStr, parseInt(away_cooldown_hours) || 4,
     )
-  }
-  const cfg = db.prepare('SELECT * FROM instance_auto_messages WHERE instance_id = ?').get(instance.id)
-  res.json({ config: cfg })
-})
-
-// POST: toggle do modo ausencia manual (atalho rapido — atendente tb pode marcar pra si)
-router.post('/whatsapp/:id/away/toggle', (req, res) => {
-  const instance = getOwnedInstance(req, res)
-  if (!instance) return
-  const existing = db.prepare('SELECT * FROM instance_auto_messages WHERE instance_id = ?').get(instance.id)
-  if (!existing) {
-    db.prepare(`INSERT INTO instance_auto_messages (instance_id, away_enabled, away_mode, away_manual_active, away_text) VALUES (?, 1, 'manual', 1, 'Estou ausente no momento. Retorno em breve.')`).run(instance.id)
-  } else {
-    const newActive = existing.away_manual_active ? 0 : 1
-    db.prepare("UPDATE instance_auto_messages SET away_manual_active = ?, away_enabled = ?, away_mode = 'manual', updated_at = datetime('now') WHERE instance_id = ?").run(newActive, newActive ? 1 : existing.away_enabled, instance.id)
   }
   const cfg = db.prepare('SELECT * FROM instance_auto_messages WHERE instance_id = ?').get(instance.id)
   res.json({ config: cfg })

@@ -240,8 +240,6 @@ export const fetchInstanceAutoMessages = (instanceId: number, accountId: number)
   apiFetch<{ config: InstanceAutoMessageConfig }>(`/api/integrations/whatsapp/${instanceId}/auto-messages?account_id=${accountId}`)
 export const saveInstanceAutoMessages = (instanceId: number, accountId: number, config: Partial<InstanceAutoMessageConfig>) =>
   apiFetch<{ config: InstanceAutoMessageConfig }>(`/api/integrations/whatsapp/${instanceId}/auto-messages?account_id=${accountId}`, { method: 'PUT', body: JSON.stringify(config) })
-export const toggleInstanceAwayManual = (instanceId: number, accountId: number) =>
-  apiFetch<{ config: InstanceAutoMessageConfig }>(`/api/integrations/whatsapp/${instanceId}/away/toggle?account_id=${accountId}`, { method: 'POST', body: JSON.stringify({}) })
 
 // Mapeamento tag → instancia (leads de form)
 export interface TagInstanceMapping {
