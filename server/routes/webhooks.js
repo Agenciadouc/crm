@@ -753,6 +753,7 @@ router.post('/sheets/:accountSlug', (req, res) => {
     // Tags: aceita array ou string separada por virgula. Cria a tag se nao existir.
     const tagsRaw = body.tags || body.tag || ''
     const tagList = Array.isArray(tagsRaw) ? tagsRaw : String(tagsRaw).split(',').map(t => t.trim()).filter(Boolean)
+    const appliedTagIds = []
     for (const tagName of tagList) {
       let tag = db.prepare('SELECT id FROM tags WHERE account_id = ? AND LOWER(name) = LOWER(?)').get(account.id, tagName)
       if (!tag) {
@@ -760,6 +761,34 @@ router.post('/sheets/:accountSlug', (req, res) => {
         tag = { id: r.lastInsertRowid }
       }
       db.prepare('INSERT OR IGNORE INTO lead_tags (lead_id, tag_id) VALUES (?, ?)').run(lead.id, tag.id)
+      appliedTagIds.push(tag.id)
+    }
+
+    // Mapeamento tag → instancia (so se lead nao tem instance_id ainda)
+    // Primeira tag que tem mapping vence. Fallback: account.default_form_instance_id
+    // SO ATIVA se a conta cadastrou mapping ou default_form_instance_id — caso contrario nao mexe em nada (fluxo antigo intacto)
+    if (!lead.instance_id && appliedTagIds.length > 0) {
+      for (const tagId of appliedTagIds) {
+        const mapping = db.prepare('SELECT instance_id, attendant_id FROM tag_instance_mapping WHERE account_id = ? AND tag_id = ?').get(account.id, tagId)
+        if (mapping) {
+          db.prepare("UPDATE leads SET instance_id = ?, last_instance_id = ?, updated_at = datetime('now') WHERE id = ?").run(mapping.instance_id, mapping.instance_id, lead.id)
+          lead.instance_id = mapping.instance_id
+          lead.last_instance_id = mapping.instance_id
+          if (mapping.attendant_id && !lead.attendant_id) {
+            db.prepare('UPDATE leads SET attendant_id = ? WHERE id = ?').run(mapping.attendant_id, lead.id)
+            lead.attendant_id = mapping.attendant_id
+          }
+          db.prepare('INSERT OR IGNORE INTO lead_instance_assignments (lead_id, instance_id, attendant_id) VALUES (?, ?, ?)').run(lead.id, mapping.instance_id, mapping.attendant_id || null)
+          break
+        }
+      }
+    }
+    // Fallback: instancia padrao da conta pra leads de form
+    if (!lead.instance_id && account.default_form_instance_id) {
+      db.prepare("UPDATE leads SET instance_id = ?, last_instance_id = ?, updated_at = datetime('now') WHERE id = ?").run(account.default_form_instance_id, account.default_form_instance_id, lead.id)
+      lead.instance_id = account.default_form_instance_id
+      lead.last_instance_id = account.default_form_instance_id
+      db.prepare('INSERT OR IGNORE INTO lead_instance_assignments (lead_id, instance_id, attendant_id) VALUES (?, ?, ?)').run(lead.id, account.default_form_instance_id, lead.attendant_id || null)
     }
 
     // Remove tags: aceita array ou string. Util pra correcao em massa.
