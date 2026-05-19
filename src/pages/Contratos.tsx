@@ -136,9 +136,26 @@ export default function Contratos() {
     catch (e: any) { alert('Erro: ' + e.message) }
   }
 
-  const handleDownload = (c: Contract) => {
-    const url = `/crm/api/contracts/${c.id}/html?autoprint=1`
-    window.open(url, '_blank')
+  const handleDownload = async (c: Contract) => {
+    // Endpoint exige JWT — window.open direto perde o header.
+    // Faz fetch autenticado, abre nova aba com about:blank, escreve o HTML e dispara print.
+    const token = localStorage.getItem('dros_crm_token')
+    try {
+      const res = await fetch(`/crm/api/contracts/${c.id}/html`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      if (!res.ok) { alert('Erro ao carregar contrato: ' + res.status); return }
+      const html = await res.text()
+      const w = window.open('about:blank', '_blank')
+      if (!w) { alert('Bloqueador de popup ativo? Permite popups pra esse site.'); return }
+      w.document.open()
+      w.document.write(html)
+      w.document.close()
+      // Espera os estilos aplicarem antes de printar
+      setTimeout(() => { try { w.print() } catch {} }, 400)
+    } catch (e: any) {
+      alert('Erro: ' + (e?.message || 'desconhecido'))
+    }
   }
 
   return (
