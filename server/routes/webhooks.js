@@ -376,6 +376,21 @@ router.post('/evolution/:accountSlug', (req, res) => {
       lead.ctwa_clid = adInfo.ctwaClid
     }
 
+    // Auto-marca trabalha_anuncio=1 se veio de click-to-WhatsApp (Facebook/Instagram/Google ads)
+    // Sinais: ctwaClid presente, sourceType=ad/cta_url, ou URL contem facebook/instagram/google/meta
+    if (adInfo) {
+      const adSrcType = String(adInfo.sourceType || '').toLowerCase()
+      const adSrcUrl = String(adInfo.sourceUrl || '').toLowerCase()
+      const isFromAd = !!(
+        adInfo.ctwaClid ||
+        adSrcType === 'ad' || adSrcType === 'cta_url' ||
+        /facebook|instagram|fb\.|fb\.me|google|meta/.test(adSrcUrl)
+      )
+      if (isFromAd) {
+        db.prepare('UPDATE leads SET trabalha_anuncio = 1 WHERE id = ? AND (trabalha_anuncio IS NULL OR trabalha_anuncio = 0)').run(lead.id)
+      }
+    }
+
     // Captura IP do request (1a vez) — usado pelo CAPI pra elevar EMQ
     // NOTA: webhook do Evolution vem da MESMA VPS (127.0.0.1) — IP do lead NAO esta no request.
     // So serve pra forms web (/site, /sheets) onde o lead conecta direto.
