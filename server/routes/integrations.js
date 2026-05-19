@@ -38,10 +38,16 @@ router.put('/evolution-config', requireRole('super_admin', 'gerente'), (req, res
 })
 
 // ─── List WhatsApp instances ─────────────────────────────────────
-router.get('/whatsapp', requireRole('super_admin', 'gerente'), (req, res) => {
+// Atendente tb le (precisa pra saber qual instancia ta conectada e mandar msg),
+// mas recebe versao saneada — sem api_url, api_key, webhook_secret.
+router.get('/whatsapp', requireRole('super_admin', 'gerente', 'atendente'), (req, res) => {
   if (!req.accountId) return res.status(400).json({ error: 'account_id required' })
-  const instances = db.prepare('SELECT * FROM whatsapp_instances WHERE account_id = ? ORDER BY created_at DESC').all(req.accountId)
-  res.json({ instances })
+  const rows = db.prepare('SELECT * FROM whatsapp_instances WHERE account_id = ? ORDER BY created_at DESC').all(req.accountId)
+  if (req.user.role === 'atendente') {
+    const safe = rows.map(({ api_url, api_key, webhook_secret, ...rest }) => rest)
+    return res.json({ instances: safe })
+  }
+  res.json({ instances: rows })
 })
 
 // Helper: register webhook on Evolution for a given instance
