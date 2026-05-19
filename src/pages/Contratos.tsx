@@ -25,6 +25,8 @@ const BLANK: ContractInput = {
   frente_aquisicao: true,
   frente_editorial: true,
   exclusoes_extras: '',
+  videos_por_mes: 4,
+  imagens_por_mes: 8,
   fat_mes1_ref: '',
   fat_mes1_valor: null,
   fat_mes2_ref: '',
@@ -90,6 +92,8 @@ export default function Contratos() {
       frente_aquisicao: c.frente_aquisicao === 1,
       frente_editorial: c.frente_editorial === 1,
       exclusoes_extras: c.exclusoes_extras || '',
+      videos_por_mes: c.videos_por_mes || 0,
+      imagens_por_mes: c.imagens_por_mes || 0,
       fat_mes1_ref: c.fat_mes1_ref || '',
       fat_mes1_valor: c.fat_mes1_valor,
       fat_mes2_ref: c.fat_mes2_ref || '',
@@ -325,6 +329,23 @@ export default function Contratos() {
                 <span>Frente 4 — Linha Editorial e Conteudo</span>
               </label>
             </div>
+            {form.frente_editorial && (
+              <div style={{ marginTop: 8, padding: 12, background: 'rgba(255,179,0,0.05)', border: '1px solid rgba(255,179,0,0.2)', borderRadius: 6 }}>
+                <p style={{ fontSize: 11, color: '#FFCB45', marginBottom: 8 }}>
+                  Sera adicionado no contrato: "Serao postados nas redes sociais (Instagram e Facebook) do CONTRATANTE X videos e X imagens por mes pela CONTRATADA."
+                </p>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                  <div className="form-group">
+                    <label>Videos por mes</label>
+                    <input className="input" type="number" min={0} value={form.videos_por_mes ?? 0} onChange={e => setForm({ ...form, videos_por_mes: parseInt(e.target.value) || 0 })} />
+                  </div>
+                  <div className="form-group">
+                    <label>Imagens por mes</label>
+                    <input className="input" type="number" min={0} value={form.imagens_por_mes ?? 0} onChange={e => setForm({ ...form, imagens_por_mes: parseInt(e.target.value) || 0 })} />
+                  </div>
+                </div>
+              </div>
+            )}
             <div className="form-group" style={{ marginTop: 8 }}>
               <label>Exclusoes extras (HTML de &lt;li&gt;...&lt;/li&gt;, opcional)</label>
               <textarea className="input" rows={2} value={form.exclusoes_extras || ''} onChange={e => setForm({ ...form, exclusoes_extras: e.target.value })} placeholder="<li>Ex: SEO organico</li>" />

@@ -457,6 +457,9 @@ addColumnIfNotExists('users', 'primary_instance_id', 'INTEGER REFERENCES whatsap
 addColumnIfNotExists('users', 'can_manage_proposals', 'INTEGER NOT NULL DEFAULT 0')
 // users.can_manage_contracts: permite ao atendente gerenciar contratos (igual proposals)
 addColumnIfNotExists('users', 'can_manage_contracts', 'INTEGER NOT NULL DEFAULT 0')
+// contracts: quantidade de videos/imagens por mes (so aparece quando Frente 4 - Linha Editorial esta ativa)
+addColumnIfNotExists('contracts', 'videos_por_mes', 'INTEGER NOT NULL DEFAULT 0')
+addColumnIfNotExists('contracts', 'imagens_por_mes', 'INTEGER NOT NULL DEFAULT 0')
 // users.can_grab_leads: permite ao atendente "tomar" leads de outros sem precisar aprovacao
 addColumnIfNotExists('users', 'can_grab_leads', 'INTEGER NOT NULL DEFAULT 0')
 // messages.instance_id: qual instancia enviou/recebeu cada mensagem (mostrado internamente no chat)

@@ -177,6 +177,7 @@ export interface Contract {
   renovacao_meses: number; aviso_previo_dias: number; reajuste_indice: string;
   frente_diagnostico: number; frente_estruturacao: number; frente_aquisicao: number; frente_editorial: number;
   exclusoes_extras: string | null;
+  videos_por_mes: number; imagens_por_mes: number;
   fat_mes1_ref: string | null; fat_mes1_valor: number | null;
   fat_mes2_ref: string | null; fat_mes2_valor: number | null;
   fat_mes3_ref: string | null; fat_mes3_valor: number | null;
@@ -194,6 +195,7 @@ export interface ContractInput {
   renovacao_meses: number; aviso_previo_dias: number; reajuste_indice: string;
   frente_diagnostico: boolean; frente_estruturacao: boolean; frente_aquisicao: boolean; frente_editorial: boolean;
   exclusoes_extras?: string;
+  videos_por_mes?: number; imagens_por_mes?: number;
   fat_mes1_ref?: string; fat_mes1_valor?: number | null;
   fat_mes2_ref?: string; fat_mes2_valor?: number | null;
   fat_mes3_ref?: string; fat_mes3_valor?: number | null;

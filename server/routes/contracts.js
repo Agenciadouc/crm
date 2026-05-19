@@ -85,6 +85,8 @@ function renderTemplate(c) {
     AVISO_PREVIO_DIAS: String(c.aviso_previo_dias || 30),
     REAJUSTE_INDICE: c.reajuste_indice || 'IGPM/FGV',
     EXCLUSOES_EXTRAS: c.exclusoes_extras || '',
+    VIDEOS_POR_MES: String(c.videos_por_mes || 0),
+    IMAGENS_POR_MES: String(c.imagens_por_mes || 0),
     FAT_MES1_REF: c.fat_mes1_ref || '',
     FAT_MES1_VALOR: c.fat_mes1_valor != null ? formatBRL(c.fat_mes1_valor) : '',
     FAT_MES2_REF: c.fat_mes2_ref || '',
@@ -168,9 +170,10 @@ router.post('/', (req, res) => {
           fee_mensal, comissao_percent, vigencia_meses, data_inicio, data_fim,
           renovacao_meses, aviso_previo_dias, reajuste_indice,
           frente_diagnostico, frente_estruturacao, frente_aquisicao, frente_editorial, exclusoes_extras,
+          videos_por_mes, imagens_por_mes,
           fat_mes1_ref, fat_mes1_valor, fat_mes2_ref, fat_mes2_valor, fat_mes3_ref, fat_mes3_valor, fat_base,
           local_assinatura, data_assinatura, created_by
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         numero, b.razao_social, b.cnpj, b.inscricao_estadual || null,
         b.endereco_logradouro, b.endereco_bairro, b.endereco_cep, b.endereco_cidade, b.endereco_estado,
@@ -179,6 +182,7 @@ router.post('/', (req, res) => {
         parseInt(b.renovacao_meses) || 12, parseInt(b.aviso_previo_dias) || 30, b.reajuste_indice || 'IGPM/FGV',
         b.frente_diagnostico ? 1 : 0, b.frente_estruturacao ? 1 : 0, b.frente_aquisicao ? 1 : 0, b.frente_editorial ? 1 : 0,
         b.exclusoes_extras || null,
+        parseInt(b.videos_por_mes) || 0, parseInt(b.imagens_por_mes) || 0,
         b.fat_mes1_ref || null, b.fat_mes1_valor != null ? parseFloat(b.fat_mes1_valor) : null,
         b.fat_mes2_ref || null, b.fat_mes2_valor != null ? parseFloat(b.fat_mes2_valor) : null,
         b.fat_mes3_ref || null, b.fat_mes3_valor != null ? parseFloat(b.fat_mes3_valor) : null,
@@ -205,6 +209,7 @@ router.put('/:id', (req, res) => {
     'fee_mensal', 'comissao_percent', 'vigencia_meses', 'data_inicio', 'data_fim',
     'renovacao_meses', 'aviso_previo_dias', 'reajuste_indice',
     'frente_diagnostico', 'frente_estruturacao', 'frente_aquisicao', 'frente_editorial', 'exclusoes_extras',
+    'videos_por_mes', 'imagens_por_mes',
     'fat_mes1_ref', 'fat_mes1_valor', 'fat_mes2_ref', 'fat_mes2_valor', 'fat_mes3_ref', 'fat_mes3_valor',
     'local_assinatura', 'data_assinatura',
   ]
@@ -215,7 +220,7 @@ router.put('/:id', (req, res) => {
       let val = b[f]
       if (['frente_diagnostico', 'frente_estruturacao', 'frente_aquisicao', 'frente_editorial'].includes(f)) val = val ? 1 : 0
       else if (['fee_mensal', 'comissao_percent', 'fat_mes1_valor', 'fat_mes2_valor', 'fat_mes3_valor'].includes(f)) val = val != null && val !== '' ? parseFloat(val) : null
-      else if (['vigencia_meses', 'renovacao_meses', 'aviso_previo_dias'].includes(f)) val = parseInt(val) || 0
+      else if (['vigencia_meses', 'renovacao_meses', 'aviso_previo_dias', 'videos_por_mes', 'imagens_por_mes'].includes(f)) val = parseInt(val) || 0
       sets.push(`${f} = ?`); params.push(val)
     }
   }
