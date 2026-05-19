@@ -4,6 +4,7 @@ import { AuthProvider, useAuth } from './context/AuthContext'
 import { AccountProvider } from './context/AccountContext'
 import { SSEProvider } from './context/SSEContext'
 import Sidebar from './components/Sidebar'
+import DisconnectedInstancesAlert from './components/DisconnectedInstancesAlert'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
 import Pipeline from './pages/Pipeline'
@@ -69,6 +70,7 @@ function AppRoutes() {
   return (
     <AccountProvider>
     <SSEProvider>
+    <DisconnectedInstancesAlert />
     <div className="app-layout">
       <Sidebar />
       <main className="main-content">
