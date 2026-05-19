@@ -14,6 +14,7 @@ import {
   type Funnel, type User as UserType, type Tag, type LeadCadence, type Cadence,
 } from '../lib/api'
 import EditTaskModal from '../components/EditTaskModal'
+import FilterDropdown, { type FilterValue } from '../components/FilterDropdown'
 import {
   MessageCircle, Search, Send, Phone, User, Edit3, Save, X, Plus,
   StickyNote, Tag as TagIcon, GitBranch, Smartphone, ListOrdered, ChevronRight, Check, Clock, Archive, ListTodo, ChevronDown, ChevronUp, Trash2, Paperclip, FileText, MessageSquarePlus, Copy,
@@ -38,7 +39,7 @@ export default function Chat() {
   const { user } = useAuth()
   const { accountId, accounts } = useAccount()
   const [instances, setInstances] = useState<WhatsAppInstance[]>([])
-  const [selectedInstance, setSelectedInstance] = useState<number | 'all'>('all')
+  const [instanceFilter, setInstanceFilter] = useState<FilterValue[]>([])
   const [leads, setLeads] = useState<Lead[]>([])
   const [selectedLeadId, setSelectedLeadId] = useState<number | null>(() => {
     const params = new URLSearchParams(window.location.search)
@@ -84,9 +85,9 @@ export default function Chat() {
   const [cadences, setCadences] = useState<Cadence[]>([])
   const [showCadenceMenu, setShowCadenceMenu] = useState(false)
   const [search, setSearch] = useState('')
-  const [tagFilter, setTagFilter] = useState<number | ''>('')
-  const [attendantFilter, setAttendantFilter] = useState<number | 'all' | 'unassigned'>('all')
-  const [stageFilter, setStageFilter] = useState<number | ''>('')
+  const [tagFilter, setTagFilter] = useState<FilterValue[]>([])
+  const [attendantFilter, setAttendantFilter] = useState<FilterValue[]>([])
+  const [stageFilter, setStageFilter] = useState<FilterValue[]>([])
   const [showArchived, setShowArchived] = useState(false)
   const [msgText, setMsgText] = useState('')
   const [readyMessages, setReadyMessages] = useState<ReadyMessage[]>([])
@@ -184,10 +185,11 @@ export default function Chat() {
     const filters: any = { limit: 200 }
     if (showArchived) filters.show_archived = '1'
     fetchLeads(accountId, filters).then(data => {
-      const filtered = selectedInstance === 'all' ? data.leads : data.leads.filter(l => l.instance_id === selectedInstance)
+      const instanceIds = instanceFilter.filter((v): v is number => typeof v === 'number')
+      const filtered = instanceIds.length === 0 ? data.leads : data.leads.filter(l => l.instance_id != null && instanceIds.includes(l.instance_id))
       setLeads(filtered)
     })
-  }, [accountId, selectedInstance, showArchived])
+  }, [accountId, instanceFilter, showArchived])
   useEffect(() => { loadLeadsList() }, [loadLeadsList])
 
   // Load selected lead detail
@@ -431,10 +433,28 @@ export default function Chat() {
 
   const filteredLeads = useMemo(() => {
     let result = leads
-    if (tagFilter) result = result.filter(l => l.tags?.some(t => t.id === tagFilter))
-    if (attendantFilter === 'unassigned') result = result.filter(l => !l.attendant_id)
-    else if (typeof attendantFilter === 'number') result = result.filter(l => l.attendant_id === attendantFilter)
-    if (stageFilter) result = result.filter(l => l.stage_id === stageFilter)
+    if (tagFilter.length > 0) {
+      const wantsUntagged = tagFilter.includes('untagged')
+      const wantedTagIds = tagFilter.filter((v): v is number => typeof v === 'number')
+      result = result.filter(l => {
+        const hasNoTags = !l.tags || l.tags.length === 0
+        const hasWantedTag = l.tags?.some(t => wantedTagIds.includes(t.id)) || false
+        return (wantsUntagged && hasNoTags) || hasWantedTag
+      })
+    }
+    if (attendantFilter.length > 0) {
+      const wantsNoAttendant = attendantFilter.includes('none')
+      const wantedAttIds = attendantFilter.filter((v): v is number => typeof v === 'number')
+      result = result.filter(l => {
+        const isNone = !l.attendant_id
+        const matches = l.attendant_id != null && wantedAttIds.includes(l.attendant_id)
+        return (wantsNoAttendant && isNone) || matches
+      })
+    }
+    if (stageFilter.length > 0) {
+      const wantedStageIds = stageFilter.filter((v): v is number => typeof v === 'number')
+      result = result.filter(l => l.stage_id != null && wantedStageIds.includes(l.stage_id))
+    }
     if (search.trim()) {
       const s = search.toLowerCase()
       result = result.filter(l => (l.name || '').toLowerCase().includes(s) || (l.phone || '').includes(s))
@@ -596,32 +616,41 @@ export default function Chat() {
       <div className="chat-header">
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <h1 style={{ fontSize: 20, margin: 0 }}><MessageCircle size={20} style={{ verticalAlign: -4, marginRight: 6 }} />Chat</h1>
-          <select className="select" style={{ width: 200 }} value={selectedInstance} onChange={e => setSelectedInstance(e.target.value === 'all' ? 'all' : +e.target.value)}>
-            <option value="all">Todos os numeros</option>
-            {instances.map(i => (
-              <option key={i.id} value={i.id}>{i.instance_name}{i.status === 'connected' ? ' ✓' : ' ✗'}</option>
-            ))}
-          </select>
-          <select className="select" style={{ width: 160 }} value={tagFilter} onChange={e => setTagFilter(e.target.value ? +e.target.value : '')}>
-            <option value="">Todas as tags</option>
-            {tags.map(t => (
-              <option key={t.id} value={t.id}>{t.name}</option>
-            ))}
-          </select>
-          <select className="select" style={{ width: 180 }} value={stageFilter} onChange={e => setStageFilter(e.target.value ? +e.target.value : '')}>
-            <option value="">Todas etapas</option>
-            {allStages.map(s => (
-              <option key={s.id} value={s.id}>{s.name}</option>
-            ))}
-          </select>
+          <FilterDropdown
+            label="instancias"
+            width={200}
+            options={instances.map(i => ({ value: i.id, label: `${i.instance_name}${i.status === 'connected' ? ' ✓' : ' ✗'}` }))}
+            selected={instanceFilter}
+            onChange={setInstanceFilter}
+          />
+          <FilterDropdown
+            label="tags"
+            width={160}
+            options={[
+              { value: 'untagged', label: '(Sem tag)' },
+              ...tags.map(t => ({ value: t.id, label: t.name })),
+            ]}
+            selected={tagFilter}
+            onChange={setTagFilter}
+          />
+          <FilterDropdown
+            label="etapas"
+            width={180}
+            options={allStages.map(s => ({ value: s.id, label: s.name }))}
+            selected={stageFilter}
+            onChange={setStageFilter}
+          />
           {user?.role !== 'atendente' && (
-            <select className="select" style={{ width: 180 }} value={attendantFilter} onChange={e => setAttendantFilter(e.target.value === 'all' ? 'all' : e.target.value === 'unassigned' ? 'unassigned' : +e.target.value)}>
-              <option value="all">Todos atendentes</option>
-              <option value="unassigned">Sem atendente</option>
-              {attendants.map(a => (
-                <option key={a.id} value={a.id}>{a.name}</option>
-              ))}
-            </select>
+            <FilterDropdown
+              label="atendentes"
+              width={180}
+              options={[
+                { value: 'none', label: '(Sem atendente)' },
+                ...attendants.map(a => ({ value: a.id, label: a.name })),
+              ]}
+              selected={attendantFilter}
+              onChange={setAttendantFilter}
+            />
           )}
           <button onClick={() => setShowArchived(s => !s)} className={`btn btn-sm ${showArchived ? 'btn-primary' : 'btn-secondary'}`} style={{ fontSize: 11 }} title="Mostrar leads arquivados">
             <Archive size={12} /> {showArchived ? 'Ocultar arquivados' : 'Mostrar arquivados'}
