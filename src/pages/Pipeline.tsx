@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, type MouseEvent } from 'react'
+import { useState, useEffect, useRef, useCallback, type MouseEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAccount } from '../context/AccountContext'
 import AccountSelector from '../components/AccountSelector'
@@ -27,6 +27,80 @@ function useIsMobile() {
   return isMobile
 }
 
+// Dropdown de multi-selecao com checkboxes — usado pelos filtros de tag e atendente
+type FilterValue = number | string
+function FilterDropdown({ label, options, selected, onChange, width = 140 }: {
+  label: string
+  options: { value: FilterValue, label: string }[]
+  selected: FilterValue[]
+  onChange: (next: FilterValue[]) => void
+  width?: number
+}) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!open) return
+    const handler = (e: Event) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [open])
+  const toggle = (v: FilterValue) => {
+    if (selected.includes(v)) onChange(selected.filter(x => x !== v))
+    else onChange([...selected, v])
+  }
+  const display = selected.length === 0
+    ? `Todas as ${label}`
+    : selected.length === 1
+      ? options.find(o => o.value === selected[0])?.label || `1 ${label}`
+      : `${selected.length} ${label}`
+  return (
+    <div ref={ref} style={{ position: 'relative', width }}>
+      <button
+        type="button"
+        className="select"
+        style={{ width: '100%', textAlign: 'left', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 4 }}
+        onClick={() => setOpen(o => !o)}
+      >
+        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{display}</span>
+        <span style={{ fontSize: 10, opacity: 0.6 }}>▾</span>
+      </button>
+      {open && (
+        <div style={{
+          position: 'absolute', top: '100%', left: 0, right: 0, marginTop: 4,
+          background: '#1a1625', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 6,
+          maxHeight: 280, overflowY: 'auto', zIndex: 50, padding: 4,
+          boxShadow: '0 4px 14px rgba(0,0,0,0.4)'
+        }}>
+          {options.length === 0 && (
+            <div style={{ padding: '6px 10px', fontSize: 11, color: '#6B6580' }}>Sem opcoes</div>
+          )}
+          {options.map(opt => {
+            const isSel = selected.includes(opt.value)
+            return (
+              <label key={String(opt.value)} style={{
+                display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px',
+                cursor: 'pointer', fontSize: 12, borderRadius: 4,
+                background: isSel ? 'rgba(255,179,0,0.08)' : 'transparent',
+                color: isSel ? '#FFCB45' : 'inherit',
+              }}>
+                <input
+                  type="checkbox"
+                  checked={isSel}
+                  onChange={() => toggle(opt.value)}
+                  style={{ cursor: 'pointer' }}
+                />
+                {opt.label}
+              </label>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function Pipeline() {
   const navigate = useNavigate()
   const { accountId } = useAccount()
@@ -40,9 +114,9 @@ export default function Pipeline() {
   const [expandedStages, setExpandedStages] = useState<Set<number>>(new Set())
   const [moveLeadId, setMoveLeadId] = useState<number | null>(null)
   const [tags, setTags] = useState<Tag[]>([])
-  const [tagFilter, setTagFilter] = useState<number | ''>('')
+  const [tagFilter, setTagFilter] = useState<FilterValue[]>([])
   const [users, setUsers] = useState<User[]>([])
-  const [attendantFilter, setAttendantFilter] = useState<number | ''>('')
+  const [attendantFilter, setAttendantFilter] = useState<FilterValue[]>([])
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
   const [expandedColumns, setExpandedColumns] = useState<Set<number>>(new Set())
@@ -78,8 +152,20 @@ export default function Pipeline() {
   useEffect(() => { if (accountId) fetchUsers(accountId).then(setUsers).catch(() => {}) }, [accountId])
 
   const filteredLeads = leads.filter(l => {
-    if (tagFilter && !l.tags?.some(t => t.id === tagFilter)) return false
-    if (attendantFilter && l.attendant_id !== attendantFilter) return false
+    if (tagFilter.length > 0) {
+      const wantsUntagged = tagFilter.includes('untagged')
+      const wantedTagIds = tagFilter.filter((v): v is number => typeof v === 'number')
+      const hasNoTags = !l.tags || l.tags.length === 0
+      const hasWantedTag = l.tags?.some(t => wantedTagIds.includes(t.id)) || false
+      if (!((wantsUntagged && hasNoTags) || hasWantedTag)) return false
+    }
+    if (attendantFilter.length > 0) {
+      const wantsNoAttendant = attendantFilter.includes('none')
+      const wantedAttIds = attendantFilter.filter((v): v is number => typeof v === 'number')
+      const isNone = !l.attendant_id
+      const matches = l.attendant_id != null && wantedAttIds.includes(l.attendant_id)
+      if (!((wantsNoAttendant && isNone) || matches)) return false
+    }
     if (dateFrom) {
       const created = new Date(l.created_at).getTime()
       if (created < new Date(dateFrom + 'T00:00:00').getTime()) return false
@@ -241,18 +327,30 @@ export default function Pipeline() {
               {funnels.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
             </select>
           )}
-          <select className="select" style={{ width: 140 }} value={tagFilter} onChange={e => setTagFilter(e.target.value ? +e.target.value : '')}>
-            <option value="">Todas as tags</option>
-            {tags.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-          </select>
-          <select className="select" style={{ width: 160 }} value={attendantFilter} onChange={e => setAttendantFilter(e.target.value ? +e.target.value : '')}>
-            <option value="">Todos atendentes</option>
-            {users.filter(u => u.is_active).map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
-          </select>
+          <FilterDropdown
+            label="tags"
+            width={150}
+            options={[
+              { value: 'untagged', label: '(Sem tag)' },
+              ...tags.map(t => ({ value: t.id, label: t.name })),
+            ]}
+            selected={tagFilter}
+            onChange={setTagFilter}
+          />
+          <FilterDropdown
+            label="atendentes"
+            width={170}
+            options={[
+              { value: 'none', label: '(Sem atendente)' },
+              ...users.filter(u => u.is_active).map(u => ({ value: u.id, label: u.name })),
+            ]}
+            selected={attendantFilter}
+            onChange={setAttendantFilter}
+          />
           <input type="date" className="input" style={{ width: 140 }} value={dateFrom} onChange={e => setDateFrom(e.target.value)} title="Data inicial (criacao)" />
           <input type="date" className="input" style={{ width: 140 }} value={dateTo} onChange={e => setDateTo(e.target.value)} title="Data final (criacao)" />
-          {(tagFilter || attendantFilter || dateFrom || dateTo) && (
-            <button className="btn btn-secondary btn-sm" onClick={() => { setTagFilter(''); setAttendantFilter(''); setDateFrom(''); setDateTo('') }}>
+          {(tagFilter.length > 0 || attendantFilter.length > 0 || dateFrom || dateTo) && (
+            <button className="btn btn-secondary btn-sm" onClick={() => { setTagFilter([]); setAttendantFilter([]); setDateFrom(''); setDateTo('') }}>
               Limpar filtros
             </button>
           )}
