@@ -6,15 +6,17 @@ import { requireRole, scopeToAccount } from '../middleware/auth.js'
 const router = Router()
 
 // List users (admin sees all, gerente sees own account)
+// Includes account_name via JOIN — frontend usa pra exibir/ocultar permissoes restritas a conta da agencia
 router.get('/', scopeToAccount, (req, res) => {
+  const baseSelect = `SELECT u.id, u.account_id, u.name, u.email, u.role, u.is_active, u.primary_instance_id, u.can_manage_proposals, u.can_manage_contracts, u.can_grab_leads, u.created_at, a.name as account_name FROM users u LEFT JOIN accounts a ON a.id = u.account_id`
   if (req.user.role === 'super_admin') {
     const accountId = req.query.account_id
     const users = accountId
-      ? db.prepare('SELECT id, account_id, name, email, role, is_active, primary_instance_id, can_manage_proposals, can_manage_contracts, can_grab_leads, created_at FROM users WHERE account_id = ? ORDER BY name').all(accountId)
-      : db.prepare('SELECT id, account_id, name, email, role, is_active, primary_instance_id, can_manage_proposals, can_manage_contracts, can_grab_leads, created_at FROM users ORDER BY name').all()
+      ? db.prepare(`${baseSelect} WHERE u.account_id = ? ORDER BY u.name`).all(accountId)
+      : db.prepare(`${baseSelect} ORDER BY u.name`).all()
     return res.json({ users })
   }
-  const users = db.prepare('SELECT id, account_id, name, email, role, is_active, primary_instance_id, can_manage_proposals, can_manage_contracts, can_grab_leads, created_at FROM users WHERE account_id = ? ORDER BY name').all(req.user.account_id)
+  const users = db.prepare(`${baseSelect} WHERE u.account_id = ? ORDER BY u.name`).all(req.user.account_id)
   res.json({ users })
 })
 
@@ -72,19 +74,23 @@ router.put('/:id', (req, res) => {
   if (is_active !== undefined) { sets.push('is_active = ?'); params.push(is_active ? 1 : 0) }
   if (password) { sets.push('password = ?'); params.push(bcrypt.hashSync(password, 10)) }
   if (primary_instance_id !== undefined) { sets.push('primary_instance_id = ?'); params.push(primary_instance_id || null) }
-  // can_manage_proposals — super_admin altera qualquer um; gerente altera apenas users da propria conta
-  // (o gate de scope da conta ja foi aplicado nas linhas 53-54 acima)
+  // Permissoes comerciais (proposals/contracts) so se aplicam a users da conta da AGENCIA (Dros | Deivid).
+  // Equivalente a "tools internas da Dros" — outras contas nao tem acesso a esse modulo.
+  const targetAcct = db.prepare('SELECT name FROM accounts WHERE id = ?').get(user.account_id)
+  const isAgencyUser = targetAcct?.name === 'Dros | Deivid'
+
   if (can_manage_proposals !== undefined) {
     const newVal = can_manage_proposals ? 1 : 0
     if (newVal !== (user.can_manage_proposals || 0)) {
+      if (!isAgencyUser) return res.status(403).json({ error: 'Permissao de Propostas disponivel apenas pra equipe da Dros' })
       if (!['super_admin', 'gerente'].includes(req.user.role)) return res.status(403).json({ error: 'Sem permissao pra alterar can_manage_proposals' })
       sets.push('can_manage_proposals = ?'); params.push(newVal)
     }
   }
-  // can_manage_contracts — mesmo gate de can_manage_proposals
   if (can_manage_contracts !== undefined) {
     const newVal = can_manage_contracts ? 1 : 0
     if (newVal !== (user.can_manage_contracts || 0)) {
+      if (!isAgencyUser) return res.status(403).json({ error: 'Permissao de Contratos disponivel apenas pra equipe da Dros' })
       if (!['super_admin', 'gerente'].includes(req.user.role)) return res.status(403).json({ error: 'Sem permissao pra alterar can_manage_contracts' })
       sets.push('can_manage_contracts = ?'); params.push(newVal)
     }

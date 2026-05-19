@@ -104,24 +104,28 @@ export default function AdminUsers() {
                 <option value="super_admin">Super Admin</option><option value="gerente">Gerente</option><option value="atendente">Atendente</option>
               </select>
             </div>
-            <div className="form-group">
-              <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
-                <input type="checkbox" checked={editForm.can_manage_proposals} onChange={e => setEditForm(p => ({ ...p, can_manage_proposals: e.target.checked }))} />
-                <span>Pode gerenciar Propostas (área comercial)</span>
-              </label>
-              <p style={{ fontSize: 11, color: '#9B96B0', marginTop: 4, marginLeft: 24 }}>
-                Libera acesso à aba "Propostas" mesmo pra usuários que não são super admin.
-              </p>
-            </div>
-            <div className="form-group">
-              <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
-                <input type="checkbox" checked={editForm.can_manage_contracts} onChange={e => setEditForm(p => ({ ...p, can_manage_contracts: e.target.checked }))} />
-                <span>Pode gerenciar Contratos (área comercial)</span>
-              </label>
-              <p style={{ fontSize: 11, color: '#9B96B0', marginTop: 4, marginLeft: 24 }}>
-                Libera acesso à aba "Contratos" mesmo pra usuários que não são super admin.
-              </p>
-            </div>
+            {editingUser?.account_name === 'Dros | Deivid' && (
+              <>
+                <div className="form-group">
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+                    <input type="checkbox" checked={editForm.can_manage_proposals} onChange={e => setEditForm(p => ({ ...p, can_manage_proposals: e.target.checked }))} />
+                    <span>Pode gerenciar Propostas (área comercial)</span>
+                  </label>
+                  <p style={{ fontSize: 11, color: '#9B96B0', marginTop: 4, marginLeft: 24 }}>
+                    Libera acesso à aba "Propostas" mesmo pra usuários que não são super admin.
+                  </p>
+                </div>
+                <div className="form-group">
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+                    <input type="checkbox" checked={editForm.can_manage_contracts} onChange={e => setEditForm(p => ({ ...p, can_manage_contracts: e.target.checked }))} />
+                    <span>Pode gerenciar Contratos (área comercial)</span>
+                  </label>
+                  <p style={{ fontSize: 11, color: '#9B96B0', marginTop: 4, marginLeft: 24 }}>
+                    Libera acesso à aba "Contratos" mesmo pra usuários que não são super admin.
+                  </p>
+                </div>
+              </>
+            )}
             <div className="form-group">
               <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
                 <input type="checkbox" checked={editForm.can_grab_leads} onChange={e => setEditForm(p => ({ ...p, can_grab_leads: e.target.checked }))} />
