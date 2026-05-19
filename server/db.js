@@ -455,6 +455,8 @@ addColumnIfNotExists('leads', 'last_instance_id', 'INTEGER REFERENCES whatsapp_i
 addColumnIfNotExists('users', 'primary_instance_id', 'INTEGER REFERENCES whatsapp_instances(id) ON DELETE SET NULL')
 // users.can_manage_proposals: permissao granular pra acessar a area de Propostas (super_admin sempre tem)
 addColumnIfNotExists('users', 'can_manage_proposals', 'INTEGER NOT NULL DEFAULT 0')
+// users.can_manage_contracts: permite ao atendente gerenciar contratos (igual proposals)
+addColumnIfNotExists('users', 'can_manage_contracts', 'INTEGER NOT NULL DEFAULT 0')
 // users.can_grab_leads: permite ao atendente "tomar" leads de outros sem precisar aprovacao
 addColumnIfNotExists('users', 'can_grab_leads', 'INTEGER NOT NULL DEFAULT 0')
 // messages.instance_id: qual instancia enviou/recebeu cada mensagem (mostrado internamente no chat)
@@ -606,6 +608,49 @@ db.exec(`
     FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
   );
   CREATE INDEX IF NOT EXISTS idx_proposals_slug ON proposals(slug);
+`)
+
+// Contracts (contrato de prestacao de servicos — gerenciado por super_admin OU users.can_manage_contracts=1)
+db.exec(`
+  CREATE TABLE IF NOT EXISTS contracts (
+    id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+    numero                TEXT NOT NULL UNIQUE,
+    razao_social          TEXT NOT NULL,
+    cnpj                  TEXT NOT NULL,
+    inscricao_estadual    TEXT,
+    endereco_logradouro   TEXT NOT NULL,
+    endereco_bairro       TEXT NOT NULL,
+    endereco_cep          TEXT NOT NULL,
+    endereco_cidade       TEXT NOT NULL,
+    endereco_estado       TEXT NOT NULL,
+    fee_mensal            REAL NOT NULL DEFAULT 3500,
+    comissao_percent      REAL NOT NULL DEFAULT 1.0,
+    vigencia_meses        INTEGER NOT NULL DEFAULT 3,
+    data_inicio           TEXT NOT NULL,
+    data_fim              TEXT NOT NULL,
+    renovacao_meses       INTEGER NOT NULL DEFAULT 12,
+    aviso_previo_dias     INTEGER NOT NULL DEFAULT 30,
+    reajuste_indice       TEXT NOT NULL DEFAULT 'IGPM/FGV',
+    frente_diagnostico    INTEGER NOT NULL DEFAULT 1,
+    frente_estruturacao   INTEGER NOT NULL DEFAULT 1,
+    frente_aquisicao      INTEGER NOT NULL DEFAULT 1,
+    frente_editorial      INTEGER NOT NULL DEFAULT 1,
+    exclusoes_extras      TEXT,
+    fat_mes1_ref          TEXT,
+    fat_mes1_valor        REAL,
+    fat_mes2_ref          TEXT,
+    fat_mes2_valor        REAL,
+    fat_mes3_ref          TEXT,
+    fat_mes3_valor        REAL,
+    fat_base              REAL,
+    local_assinatura      TEXT NOT NULL DEFAULT 'Sombrio/SC',
+    data_assinatura       TEXT NOT NULL,
+    created_by            INTEGER,
+    created_at            TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at            TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_contracts_created_at ON contracts(created_at DESC);
 `)
 
 // Seed super_admin if not exists

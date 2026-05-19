@@ -7,7 +7,7 @@ import { apiFetch, fetchTaskCounts, fetchPendingTransferRequests } from '../lib/
 import {
   LayoutDashboard, Kanban, Users, MessageCircle, UserCog, GitBranch,
   Plug, Settings, Building2, LogOut, UsersRound, Menu, X,
-  ListOrdered, MessageSquarePlus, ClipboardList, Rocket, ListTodo, ExternalLink, Tag as TagIcon, FileText, ArrowRightLeft,
+  ListOrdered, MessageSquarePlus, ClipboardList, Rocket, ListTodo, ExternalLink, Tag as TagIcon, FileText, FileSignature, ArrowRightLeft,
 } from 'lucide-react'
 
 export default function Sidebar() {
@@ -97,15 +97,25 @@ export default function Sidebar() {
               <NavLink to="/admin/propostas" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`} onClick={closeMobile}>
                 <FileText size={16} /> Propostas
               </NavLink>
+              <NavLink to="/contratos" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`} onClick={closeMobile}>
+                <FileSignature size={16} /> Contratos
+              </NavLink>
             </>
           )}
 
-          {!isAdmin && (user as any).can_manage_proposals === 1 && (
+          {!isAdmin && ((user as any).can_manage_proposals === 1 || (user as any).can_manage_contracts === 1) && (
             <>
               <div className="nav-section">Comercial</div>
-              <NavLink to="/admin/propostas" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`} onClick={closeMobile}>
-                <FileText size={16} /> Propostas
-              </NavLink>
+              {(user as any).can_manage_proposals === 1 && (
+                <NavLink to="/admin/propostas" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`} onClick={closeMobile}>
+                  <FileText size={16} /> Propostas
+                </NavLink>
+              )}
+              {(user as any).can_manage_contracts === 1 && (
+                <NavLink to="/contratos" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`} onClick={closeMobile}>
+                  <FileSignature size={16} /> Contratos
+                </NavLink>
+              )}
             </>
           )}
 

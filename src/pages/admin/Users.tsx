@@ -9,7 +9,7 @@ export default function AdminUsers() {
   const [showNew, setShowNew] = useState(false)
   const [newUser, setNewUser] = useState({ name: '', email: '', password: '', role: 'gerente', account_id: '' })
   const [editingUser, setEditingUser] = useState<UserType | null>(null)
-  const [editForm, setEditForm] = useState({ name: '', email: '', password: '', role: 'gerente', can_manage_proposals: false, can_grab_leads: false })
+  const [editForm, setEditForm] = useState({ name: '', email: '', password: '', role: 'gerente', can_manage_proposals: false, can_manage_contracts: false, can_grab_leads: false })
 
   const load = () => { setLoading(true); Promise.all([fetchUsers(), fetchAccounts()]).then(([u, a]) => { setUsers(u); setAccounts(a) }).finally(() => setLoading(false)) }
   useEffect(load, [])
@@ -20,10 +20,10 @@ export default function AdminUsers() {
     setShowNew(false); setNewUser({ name: '', email: '', password: '', role: 'gerente', account_id: '' }); load()
   }
 
-  const openEdit = (u: UserType) => { setEditingUser(u); setEditForm({ name: u.name, email: u.email, password: '', role: u.role, can_manage_proposals: u.can_manage_proposals === 1, can_grab_leads: u.can_grab_leads === 1 }) }
+  const openEdit = (u: UserType) => { setEditingUser(u); setEditForm({ name: u.name, email: u.email, password: '', role: u.role, can_manage_proposals: u.can_manage_proposals === 1, can_manage_contracts: u.can_manage_contracts === 1, can_grab_leads: u.can_grab_leads === 1 }) }
   const handleSaveEdit = async () => {
     if (!editingUser) return
-    const data: any = { name: editForm.name, email: editForm.email, role: editForm.role, can_manage_proposals: editForm.can_manage_proposals ? 1 : 0, can_grab_leads: editForm.can_grab_leads ? 1 : 0 }
+    const data: any = { name: editForm.name, email: editForm.email, role: editForm.role, can_manage_proposals: editForm.can_manage_proposals ? 1 : 0, can_manage_contracts: editForm.can_manage_contracts ? 1 : 0, can_grab_leads: editForm.can_grab_leads ? 1 : 0 }
     if (editForm.password) data.password = editForm.password
     await updateUser(editingUser.id, data)
     setEditingUser(null); load()
@@ -111,6 +111,15 @@ export default function AdminUsers() {
               </label>
               <p style={{ fontSize: 11, color: '#9B96B0', marginTop: 4, marginLeft: 24 }}>
                 Libera acesso à aba "Propostas" mesmo pra usuários que não são super admin.
+              </p>
+            </div>
+            <div className="form-group">
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+                <input type="checkbox" checked={editForm.can_manage_contracts} onChange={e => setEditForm(p => ({ ...p, can_manage_contracts: e.target.checked }))} />
+                <span>Pode gerenciar Contratos (área comercial)</span>
+              </label>
+              <p style={{ fontSize: 11, color: '#9B96B0', marginTop: 4, marginLeft: 24 }}>
+                Libera acesso à aba "Contratos" mesmo pra usuários que não são super admin.
               </p>
             </div>
             <div className="form-group">
