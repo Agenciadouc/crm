@@ -179,17 +179,24 @@ export default function Chat() {
     setTimeout(() => msgInputRef.current?.focus(), 0)
   }
 
-  // Load leads list (with optional instance filter)
+  // Load leads list — passa filtros pro backend pra evitar perder leads que ficam fora do limit
   const loadLeadsList = useCallback(() => {
     if (!accountId) return
-    const filters: any = { limit: 200 }
+    const filters: any = { limit: 500 }
     if (showArchived) filters.show_archived = '1'
-    fetchLeads(accountId, filters).then(data => {
-      const instanceIds = instanceFilter.filter((v): v is number => typeof v === 'number')
-      const filtered = instanceIds.length === 0 ? data.leads : data.leads.filter(l => l.instance_id != null && instanceIds.includes(l.instance_id))
-      setLeads(filtered)
-    })
-  }, [accountId, instanceFilter, showArchived])
+
+    const toCsv = (arr: FilterValue[]) => arr.filter(v => typeof v === 'number' || v === 'none' || v === 'untagged').join(',')
+    const stageCsv = toCsv(stageFilter)
+    if (stageCsv) filters.stage_id = stageCsv
+    const tagCsv = toCsv(tagFilter)
+    if (tagCsv) filters.tag = tagCsv
+    const attCsv = toCsv(attendantFilter)
+    if (attCsv) filters.attendant_id = attCsv
+    const instCsv = toCsv(instanceFilter)
+    if (instCsv) filters.instance_id = instCsv
+
+    fetchLeads(accountId, filters).then(data => setLeads(data.leads))
+  }, [accountId, instanceFilter, tagFilter, stageFilter, attendantFilter, showArchived])
   useEffect(() => { loadLeadsList() }, [loadLeadsList])
 
   // Load selected lead detail

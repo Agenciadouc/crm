@@ -37,7 +37,7 @@ function normalizePhone(phone) {
 router.get('/', (req, res) => {
   if (!req.accountId) return res.status(400).json({ error: 'account_id required' })
 
-  const { stage_id, attendant_id, funnel_id, source, tag, city, search, date_from, date_to, show_archived, page = '1', limit = '50' } = req.query
+  const { stage_id, attendant_id, instance_id, funnel_id, source, tag, city, search, date_from, date_to, show_archived, page = '1', limit = '50' } = req.query
   const where = ['l.account_id = ?', 'l.is_active = 1']
   const params = [req.accountId]
 
@@ -51,8 +51,31 @@ router.get('/', (req, res) => {
     params.push(req.user.id, req.user.id)
   }
 
-  if (stage_id) { where.push('l.stage_id = ?'); params.push(stage_id) }
-  if (attendant_id) { where.push('l.attendant_id = ?'); params.push(attendant_id) }
+  // Helper: parse CSV de IDs ("1,2,3" → [1,2,3])
+  const parseIds = (v) => String(v || '').split(',').map(s => s.trim()).filter(Boolean).map(Number).filter(n => !isNaN(n))
+
+  if (stage_id) {
+    const ids = parseIds(stage_id)
+    if (ids.length === 1) { where.push('l.stage_id = ?'); params.push(ids[0]) }
+    else if (ids.length > 1) { where.push(`l.stage_id IN (${ids.map(() => '?').join(',')})`); params.push(...ids) }
+  }
+  if (attendant_id) {
+    const parts = String(attendant_id).split(',').map(s => s.trim()).filter(Boolean)
+    const wantNone = parts.includes('none')
+    const ids = parts.filter(p => p !== 'none').map(Number).filter(n => !isNaN(n))
+    const conds = []
+    if (wantNone) conds.push('l.attendant_id IS NULL')
+    if (ids.length > 0) {
+      conds.push(`l.attendant_id IN (${ids.map(() => '?').join(',')})`)
+      params.push(...ids)
+    }
+    if (conds.length > 0) where.push(`(${conds.join(' OR ')})`)
+  }
+  if (instance_id) {
+    const ids = parseIds(instance_id)
+    if (ids.length === 1) { where.push('l.instance_id = ?'); params.push(ids[0]) }
+    else if (ids.length > 1) { where.push(`l.instance_id IN (${ids.map(() => '?').join(',')})`); params.push(...ids) }
+  }
   if (funnel_id) { where.push('l.funnel_id = ?'); params.push(funnel_id) }
   if (source) { where.push('l.source = ?'); params.push(source) }
   if (city) { where.push('l.city LIKE ?'); params.push(`%${city}%`) }
@@ -60,8 +83,16 @@ router.get('/', (req, res) => {
   if (date_from) { where.push('l.created_at >= ?'); params.push(date_from) }
   if (date_to) { where.push('l.created_at <= ?'); params.push(date_to + ' 23:59:59') }
   if (tag) {
-    where.push('l.id IN (SELECT lead_id FROM lead_tags WHERE tag_id = ?)')
-    params.push(tag)
+    const parts = String(tag).split(',').map(s => s.trim()).filter(Boolean)
+    const wantUntagged = parts.includes('untagged') || parts.includes('none')
+    const ids = parts.filter(p => p !== 'untagged' && p !== 'none').map(Number).filter(n => !isNaN(n))
+    const conds = []
+    if (wantUntagged) conds.push('l.id NOT IN (SELECT lead_id FROM lead_tags)')
+    if (ids.length > 0) {
+      conds.push(`l.id IN (SELECT lead_id FROM lead_tags WHERE tag_id IN (${ids.map(() => '?').join(',')}))`)
+      params.push(...ids)
+    }
+    if (conds.length > 0) where.push(`(${conds.join(' OR ')})`)
   }
 
   const countSql = `SELECT COUNT(*) as total FROM leads l WHERE ${where.join(' AND ')}`
