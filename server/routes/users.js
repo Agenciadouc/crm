@@ -72,19 +72,20 @@ router.put('/:id', (req, res) => {
   if (is_active !== undefined) { sets.push('is_active = ?'); params.push(is_active ? 1 : 0) }
   if (password) { sets.push('password = ?'); params.push(bcrypt.hashSync(password, 10)) }
   if (primary_instance_id !== undefined) { sets.push('primary_instance_id = ?'); params.push(primary_instance_id || null) }
-  // can_manage_proposals so super_admin altera, mas ignora se valor nao mudou (evita 403 desnecessario)
+  // can_manage_proposals — super_admin altera qualquer um; gerente altera apenas users da propria conta
+  // (o gate de scope da conta ja foi aplicado nas linhas 53-54 acima)
   if (can_manage_proposals !== undefined) {
     const newVal = can_manage_proposals ? 1 : 0
     if (newVal !== (user.can_manage_proposals || 0)) {
-      if (req.user.role !== 'super_admin') return res.status(403).json({ error: 'Apenas admin pode alterar permissao de propostas' })
+      if (!['super_admin', 'gerente'].includes(req.user.role)) return res.status(403).json({ error: 'Sem permissao pra alterar can_manage_proposals' })
       sets.push('can_manage_proposals = ?'); params.push(newVal)
     }
   }
-  // can_manage_contracts so super_admin altera (mesmo gate que proposals)
+  // can_manage_contracts — mesmo gate de can_manage_proposals
   if (can_manage_contracts !== undefined) {
     const newVal = can_manage_contracts ? 1 : 0
     if (newVal !== (user.can_manage_contracts || 0)) {
-      if (req.user.role !== 'super_admin') return res.status(403).json({ error: 'Apenas admin pode alterar permissao de contratos' })
+      if (!['super_admin', 'gerente'].includes(req.user.role)) return res.status(403).json({ error: 'Sem permissao pra alterar can_manage_contracts' })
       sets.push('can_manage_contracts = ?'); params.push(newVal)
     }
   }
