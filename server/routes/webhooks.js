@@ -95,12 +95,16 @@ function getOrCreateLead(accountId, phone, name, source, waJid, instanceId) {
   // ─── GATE: instancia em modo RESTRITO so processa leads ja cadastrados (form/sheets/Novo chat).
   // Se chegou aqui (lead nao existe ainda) E veio do Evolution webhook (instanceId presente) E instancia eh restrita,
   // ignora silenciosamente. Form/site/sheets passam instanceId=null entao bypassam esse gate.
+  console.log(`[GATE-DEBUG] getOrCreateLead reached. phone=${phone} waJid=${waJid} instanceId=${instanceId} accountId=${accountId} name=${name}`)
   if (instanceId) {
     const inst = db.prepare('SELECT lead_intake_mode FROM whatsapp_instances WHERE id = ?').get(instanceId)
+    console.log(`[GATE-DEBUG] instance mode = ${inst?.lead_intake_mode}`)
     if (inst?.lead_intake_mode === 'restricted') {
+      console.log(`[GATE-DEBUG] RETURNING restricted=true (lead nao sera criado)`)
       return { lead: null, isNew: false, restricted: true }
     }
   }
+  console.log(`[GATE-DEBUG] gate passou (sem restricted), vai criar lead novo agora`)
 
   // Get default funnel + first stage
   const funnel = db.prepare('SELECT id FROM funnels WHERE account_id = ? AND is_default = 1 AND is_active = 1').get(accountId)
