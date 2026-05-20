@@ -458,6 +458,8 @@ addColumnIfNotExists('users', 'primary_instance_id', 'INTEGER REFERENCES whatsap
 addColumnIfNotExists('users', 'can_manage_proposals', 'INTEGER NOT NULL DEFAULT 0')
 // users.can_manage_contracts: permite ao atendente gerenciar contratos (igual proposals)
 addColumnIfNotExists('users', 'can_manage_contracts', 'INTEGER NOT NULL DEFAULT 0')
+// instance_auto_messages.greeting_cooldown_hours: cooldown configuravel da saudacao (default 24h, comportamento anterior)
+addColumnIfNotExists('instance_auto_messages', 'greeting_cooldown_hours', 'INTEGER NOT NULL DEFAULT 24')
 // contracts: quantidade de videos/imagens por mes (so aparece quando Frente 4 - Linha Editorial esta ativa)
 addColumnIfNotExists('contracts', 'videos_por_mes', 'INTEGER NOT NULL DEFAULT 0')
 addColumnIfNotExists('contracts', 'imagens_por_mes', 'INTEGER NOT NULL DEFAULT 0')
@@ -554,6 +556,7 @@ db.exec(`
     away_text                   TEXT,
     away_schedule_json          TEXT,
     away_cooldown_hours         INTEGER NOT NULL DEFAULT 4,
+    greeting_cooldown_hours     INTEGER NOT NULL DEFAULT 24,
     updated_at                  TEXT NOT NULL DEFAULT (datetime('now')),
     FOREIGN KEY (instance_id) REFERENCES whatsapp_instances(id) ON DELETE CASCADE
   );

@@ -320,7 +320,7 @@ router.put('/whatsapp/:id/auto-messages', requireRole('super_admin', 'gerente'),
   const instance = getOwnedInstance(req, res)
   if (!instance) return
   const {
-    greeting_enabled = 0, greeting_text = null,
+    greeting_enabled = 0, greeting_text = null, greeting_cooldown_hours = 24,
     away_enabled = 0, away_text = null, away_schedule_json = null, away_cooldown_hours = 4,
   } = req.body || {}
   // Modo manual descontinuado — sempre salva como 'schedule'
@@ -340,24 +340,24 @@ router.put('/whatsapp/:id/auto-messages', requireRole('super_admin', 'gerente'),
   if (existing) {
     db.prepare(`
       UPDATE instance_auto_messages SET
-        greeting_enabled = ?, greeting_text = ?,
+        greeting_enabled = ?, greeting_text = ?, greeting_cooldown_hours = ?,
         away_enabled = ?, away_mode = ?, away_manual_active = ?, away_text = ?, away_schedule_json = ?, away_cooldown_hours = ?,
         updated_at = datetime('now')
       WHERE instance_id = ?
     `).run(
-      greeting_enabled ? 1 : 0, greeting_text,
+      greeting_enabled ? 1 : 0, greeting_text, parseInt(greeting_cooldown_hours) || 24,
       away_enabled ? 1 : 0, away_mode || 'manual', away_manual_active ? 1 : 0, away_text, scheduleStr, parseInt(away_cooldown_hours) || 4,
       instance.id
     )
   } else {
     db.prepare(`
       INSERT INTO instance_auto_messages (
-        instance_id, greeting_enabled, greeting_text,
+        instance_id, greeting_enabled, greeting_text, greeting_cooldown_hours,
         away_enabled, away_mode, away_manual_active, away_text, away_schedule_json, away_cooldown_hours
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       instance.id,
-      greeting_enabled ? 1 : 0, greeting_text,
+      greeting_enabled ? 1 : 0, greeting_text, parseInt(greeting_cooldown_hours) || 24,
       away_enabled ? 1 : 0, away_mode || 'manual', away_manual_active ? 1 : 0, away_text, scheduleStr, parseInt(away_cooldown_hours) || 4,
     )
   }

@@ -414,9 +414,10 @@ router.post('/evolution/:accountSlug', (req, res) => {
       try {
         const autoCfg = getInstanceConfig(waInstance.id)
         if (autoCfg) {
-          // 1) SAUDACAO (so lead novo, anti-flood 24h)
+          // 1) SAUDACAO (so lead novo, anti-flood configuravel via greeting_cooldown_hours)
           if (isNew && autoCfg.greeting_enabled && autoCfg.greeting_text) {
-            if (!wasAutoMsgSentRecently(lead.id, 'greeting', 24)) {
+            const greetCooldown = autoCfg.greeting_cooldown_hours || 24
+            if (!wasAutoMsgSentRecently(lead.id, 'greeting', greetCooldown)) {
               setTimeout(() => {
                 sendAutoMessage({
                   leadId: lead.id,

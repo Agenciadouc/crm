@@ -42,6 +42,7 @@ export default function InstanceAutoMessagesModal({ instance, accountId, onClose
     instance_id: instance.id,
     greeting_enabled: 0,
     greeting_text: '',
+    greeting_cooldown_hours: 24,
     away_enabled: 0,
     away_mode: 'manual',
     away_manual_active: 0,
@@ -133,7 +134,7 @@ export default function InstanceAutoMessagesModal({ instance, accountId, onClose
                   <span><strong>Ativar saudacao automatica</strong></span>
                 </label>
                 <p style={{ fontSize: 11, color: '#9B96B0', marginBottom: 8 }}>
-                  Enviada UMA vez quando um lead novo manda a primeira mensagem nesse WhatsApp. Anti-flood: 1 saudacao por lead a cada 24h.
+                  Enviada UMA vez quando um lead novo manda a primeira mensagem nesse WhatsApp. Cooldown anti-flood configuravel abaixo.
                 </p>
                 <div className="form-group">
                   <label>Texto da saudacao</label>
@@ -145,6 +146,21 @@ export default function InstanceAutoMessagesModal({ instance, accountId, onClose
                     placeholder="Oi {{primeiro_nome}}! Tudo bem? Vi que voce entrou em contato, em breve um de nossos atendentes vai te responder."
                   />
                   <p style={{ fontSize: 10, color: '#6B6580', marginTop: 4 }}>{VARS_HELP}</p>
+                </div>
+                <div className="form-group">
+                  <label>Cooldown da saudacao (horas)</label>
+                  <input
+                    className="input"
+                    type="number"
+                    min={1}
+                    max={720}
+                    style={{ width: 100 }}
+                    value={config.greeting_cooldown_hours || 24}
+                    onChange={e => update({ greeting_cooldown_hours: parseInt(e.target.value) || 24 })}
+                  />
+                  <p style={{ fontSize: 10, color: '#6B6580', marginTop: 4 }}>
+                    Tempo minimo entre saudacoes pro mesmo lead. Default 24h. Em pratica raramente eh ativado (saudacao so dispara em lead novo).
+                  </p>
                 </div>
               </div>
             )}

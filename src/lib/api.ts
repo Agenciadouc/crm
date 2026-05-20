@@ -271,6 +271,7 @@ export interface InstanceAutoMessageConfig {
   instance_id: number
   greeting_enabled?: number
   greeting_text?: string | null
+  greeting_cooldown_hours?: number
   away_enabled?: number
   away_mode?: 'manual' | 'schedule'
   away_manual_active?: number
