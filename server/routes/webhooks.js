@@ -92,6 +92,16 @@ function getOrCreateLead(accountId, phone, name, source, waJid, instanceId) {
     return { lead, isNew: false }
   }
 
+  // ─── GATE: instancia em modo RESTRITO so processa leads ja cadastrados (form/sheets/Novo chat).
+  // Se chegou aqui (lead nao existe ainda) E veio do Evolution webhook (instanceId presente) E instancia eh restrita,
+  // ignora silenciosamente. Form/site/sheets passam instanceId=null entao bypassam esse gate.
+  if (instanceId) {
+    const inst = db.prepare('SELECT lead_intake_mode FROM whatsapp_instances WHERE id = ?').get(instanceId)
+    if (inst?.lead_intake_mode === 'restricted') {
+      return { lead: null, isNew: false, restricted: true }
+    }
+  }
+
   // Get default funnel + first stage
   const funnel = db.prepare('SELECT id FROM funnels WHERE account_id = ? AND is_default = 1 AND is_active = 1').get(accountId)
   if (!funnel) return { lead: null, isNew: false }
@@ -363,14 +373,18 @@ router.post('/evolution/:accountSlug', (req, res) => {
         const sourceForNew = adSourceLabel || 'whatsapp'
         const r = getOrCreateLead(account.id, null, leadName, sourceForNew, dedupJid, waInstance?.id || null)
         if (r.blocked) {
-          console.log(`[Webhook] Mensagem ignorada — phone bloqueado na conta ${account.slug}`)
+          console.log(`[Webhook] Msg ignorada — phone bloqueado na conta ${account.slug}`)
           return res.json({ ok: true, blocked: true })
+        }
+        if (r.restricted) {
+          console.log(`[Webhook] Msg ignorada — instancia ${waInstance?.instance_name} em modo restrito (lead novo nao processado)`)
+          return res.json({ ok: true, restricted: true })
         }
         lead = r.lead; isNew = r.isNew
       } else {
         // Se lead ja existe e esta bloqueado, ignora silenciosamente
         if (lead.is_blocked) {
-          console.log(`[Webhook] Mensagem ignorada — lead ${lead.id} bloqueado na conta ${account.slug}`)
+          console.log(`[Webhook] Msg ignorada — lead ${lead.id} bloqueado na conta ${account.slug}`)
           return res.json({ ok: true, blocked: true })
         }
         // Se arquivado, marca has_new_after_archive mas NAO desarquiva (so manual)
@@ -383,8 +397,12 @@ router.post('/evolution/:accountSlug', (req, res) => {
       const sourceForNew = adSourceLabel || 'whatsapp'
       const r = getOrCreateLead(account.id, phone, leadName, sourceForNew, dedupJid, waInstance?.id || null)
       if (r.blocked) {
-        console.log(`[Webhook] Mensagem ignorada — phone ${phone} bloqueado na conta ${account.slug}`)
+        console.log(`[Webhook] Msg ignorada — phone ${phone} bloqueado na conta ${account.slug}`)
         return res.json({ ok: true, blocked: true })
+      }
+      if (r.restricted) {
+        console.log(`[Webhook] Msg ignorada — instancia ${waInstance?.instance_name} em modo restrito (phone ${phone} nao cadastrado)`)
+        return res.json({ ok: true, restricted: true })
       }
       lead = r.lead; isNew = r.isNew
     }

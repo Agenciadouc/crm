@@ -460,6 +460,8 @@ addColumnIfNotExists('users', 'can_manage_proposals', 'INTEGER NOT NULL DEFAULT 
 addColumnIfNotExists('users', 'can_manage_contracts', 'INTEGER NOT NULL DEFAULT 0')
 // instance_auto_messages.greeting_cooldown_hours: cooldown configuravel da saudacao (default 24h, comportamento anterior)
 addColumnIfNotExists('instance_auto_messages', 'greeting_cooldown_hours', 'INTEGER NOT NULL DEFAULT 24')
+// whatsapp_instances.lead_intake_mode: 'open' (atual, qualquer msg cria lead) | 'restricted' (so processa leads ja cadastrados no CRM)
+addColumnIfNotExists('whatsapp_instances', 'lead_intake_mode', "TEXT NOT NULL DEFAULT 'open'")
 // leads.is_blocked: bloqueio total (lead some do CRM e mensagens futuras sao silenciosamente ignoradas pelo webhook)
 addColumnIfNotExists('leads', 'is_blocked', 'INTEGER NOT NULL DEFAULT 0')
 addColumnIfNotExists('leads', 'blocked_at', 'TEXT')

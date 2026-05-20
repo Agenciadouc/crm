@@ -68,8 +68,9 @@ async function registerEvolutionWebhook(baseUrl, apiKey, instanceName, accountSl
 // ─── Create instance on Evolution API + get QR code ──────────────
 router.post('/whatsapp', requireRole('super_admin', 'gerente'), async (req, res) => {
   if (!req.accountId) return res.status(400).json({ error: 'account_id required' })
-  const { instance_name } = req.body
+  const { instance_name, lead_intake_mode = 'open' } = req.body
   if (!instance_name) return res.status(400).json({ error: 'instance_name obrigatorio' })
+  if (!['open', 'restricted'].includes(lead_intake_mode)) return res.status(400).json({ error: 'lead_intake_mode invalido (use open ou restricted)' })
 
   // Get Evolution API credentials from account config (or fallback to body for backwards compat)
   const account = db.prepare('SELECT evolution_api_url, evolution_api_key, slug FROM accounts WHERE id = ?').get(req.accountId)
@@ -105,8 +106,8 @@ router.post('/whatsapp', requireRole('super_admin', 'gerente'), async (req, res)
 
   // Save to DB
   const result = db.prepare(
-    'INSERT INTO whatsapp_instances (account_id, instance_name, api_url, api_key, status, qr_code) VALUES (?, ?, ?, ?, ?, ?)'
-  ).run(req.accountId, instance_name, baseUrl, api_key, qrCode ? 'connecting' : 'disconnected', qrCode)
+    'INSERT INTO whatsapp_instances (account_id, instance_name, api_url, api_key, status, qr_code, lead_intake_mode) VALUES (?, ?, ?, ?, ?, ?, ?)'
+  ).run(req.accountId, instance_name, baseUrl, api_key, qrCode ? 'connecting' : 'disconnected', qrCode, lead_intake_mode)
   const instance = db.prepare('SELECT * FROM whatsapp_instances WHERE id = ?').get(result.lastInsertRowid)
 
   // Setup webhook automatically (Evolution v2.3 format)
@@ -242,6 +243,17 @@ router.post('/whatsapp/:id/setup-webhook', requireRole('super_admin', 'gerente')
   } catch (err) {
     res.status(500).json({ error: err.message })
   }
+})
+
+// ─── Update lead intake mode (open vs restricted) ─────────────────
+router.put('/whatsapp/:id/mode', requireRole('super_admin', 'gerente'), (req, res) => {
+  const instance = getOwnedInstance(req, res)
+  if (!instance) return
+  const { mode } = req.body
+  if (!['open', 'restricted'].includes(mode)) return res.status(400).json({ error: 'mode invalido (use open ou restricted)' })
+  db.prepare("UPDATE whatsapp_instances SET lead_intake_mode = ?, updated_at = datetime('now') WHERE id = ?").run(mode, instance.id)
+  const updated = db.prepare('SELECT * FROM whatsapp_instances WHERE id = ?').get(instance.id)
+  res.json({ instance: updated })
 })
 
 // ─── Update default attendant for an instance ────────────────────

@@ -3,7 +3,7 @@ import { useAccount } from '../context/AccountContext'
 import {
   fetchWhatsAppInstances, createWhatsAppInstance, connectWhatsAppInstance,
   checkWhatsAppStatus, refreshWhatsAppQR, disconnectWhatsApp, deleteWhatsAppInstance,
-  fetchEvolutionConfig, saveEvolutionConfig, setupWhatsAppWebhook, restartWhatsAppInstance, syncWhatsAppNow, setInstanceAttendant, fetchUsers, apiFetch,
+  fetchEvolutionConfig, saveEvolutionConfig, setupWhatsAppWebhook, restartWhatsAppInstance, syncWhatsAppNow, setInstanceAttendant, setInstanceMode, fetchUsers, apiFetch,
   updateMetaCapi, testMetaCapi,
   fetchTags, fetchTagInstanceMappings, upsertTagInstanceMapping, deleteTagInstanceMapping,
   fetchDefaultFormInstance, setDefaultFormInstance, fetchSheetsStatus,
@@ -30,6 +30,7 @@ export default function Integrations() {
   const [loading, setLoading] = useState(true)
   const [showNew, setShowNew] = useState(false)
   const [newName, setNewName] = useState('')
+  const [newMode, setNewMode] = useState<'open' | 'restricted'>('open')
   const [creating, setCreating] = useState(false)
   const [activeQR, setActiveQR] = useState<number | null>(null)
   const pollRef = useRef<Record<number, ReturnType<typeof setInterval>>>({})
@@ -67,6 +68,24 @@ export default function Integrations() {
     if (!accountId) return
     try {
       const { instance } = await setInstanceAttendant(inst.id, accountId, attendantId)
+      setInstances(prev => prev.map(i => i.id === instance.id ? instance : i))
+    } catch (e: any) {
+      alert('Erro: ' + e.message)
+    }
+  }
+
+  const handleModeChange = async (inst: WhatsAppInstance, mode: 'open' | 'restricted') => {
+    if (!accountId) return
+    if (mode === 'restricted') {
+      const ok = confirm(
+        'Trocar pra modo RESTRITO?\n\n' +
+        'Mensagens de numeros desconhecidos serao IGNORADAS — so processa leads ja cadastrados no CRM (form, planilha, ou Novo chat).\n\n' +
+        'Conversas atuais continuam normais. Pra reverter, clica no badge de novo.'
+      )
+      if (!ok) return
+    }
+    try {
+      const { instance } = await setInstanceMode(inst.id, accountId, mode)
       setInstances(prev => prev.map(i => i.id === instance.id ? instance : i))
     } catch (e: any) {
       alert('Erro: ' + e.message)
@@ -137,9 +156,10 @@ export default function Integrations() {
     if (!accountId || !newName.trim()) return
     setCreating(true)
     try {
-      const inst = await createWhatsAppInstance(accountId, { instance_name: newName.trim() })
+      const inst = await createWhatsAppInstance(accountId, { instance_name: newName.trim(), lead_intake_mode: newMode })
       setShowNew(false)
       setNewName('')
+      setNewMode('open')
       if (inst.qr_code) setActiveQR(inst.id)
       load()
     } catch (e: any) { alert('Erro: ' + e.message) }
@@ -398,6 +418,19 @@ export default function Integrations() {
                           {users.filter(u => u.is_active && (u.role === 'atendente' || u.role === 'gerente')).map(u => (
                             <option key={u.id} value={u.id}>{u.name}</option>
                           ))}
+                        </select>
+                      </div>
+                      <div style={{ fontSize: 11, color: '#9B96B0', marginTop: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
+                        Modo:
+                        <select
+                          className="select"
+                          value={inst.lead_intake_mode || 'open'}
+                          onChange={e => handleModeChange(inst, e.target.value as 'open' | 'restricted')}
+                          style={{ height: 26, fontSize: 11, padding: '2px 8px', minWidth: 180, color: inst.lead_intake_mode === 'restricted' ? '#FBBC04' : undefined }}
+                          title={inst.lead_intake_mode === 'restricted' ? 'Restrito: só processa msgs de leads ja cadastrados (form, planilha, Novo chat). Numeros novos sao ignorados.' : 'Aberto: qualquer mensagem cria lead novo automaticamente.'}
+                        >
+                          <option value="open">📥 Aberto (recebe todos)</option>
+                          <option value="restricted">🔒 Restrito (so leads cadastrados)</option>
                         </select>
                       </div>
                     </div>
@@ -925,16 +958,68 @@ function onChange(e) {
         </div>
       )}
 
-      {/* New Instance Modal — only asks for name */}
+      {/* New Instance Modal */}
       {showNew && (
-        <div className="modal-overlay" onClick={() => setShowNew(false)}>
-          <div className="modal" onClick={e => e.stopPropagation()}>
+        <div className="modal-overlay">
+          <div className="modal" style={{ maxWidth: 560 }}>
             <h2>Conectar WhatsApp</h2>
             <p style={{ fontSize: 12, color: '#9B96B0', marginBottom: 16 }}>De um nome para identificar este numero (ex: Comercial, Suporte, Vendas).</p>
             <div className="form-group">
               <label>Nome do numero</label>
               <input className="input" value={newName} onChange={e => setNewName(e.target.value)} placeholder="Ex: Comercial" autoFocus onKeyDown={e => e.key === 'Enter' && handleCreate()} />
             </div>
+
+            {/* Modo de recebimento */}
+            <div className="form-group" style={{ marginTop: 16 }}>
+              <label style={{ display: 'block', marginBottom: 8 }}>Modo de recebimento de leads</label>
+
+              <div
+                onClick={() => setNewMode('open')}
+                style={{
+                  padding: 12,
+                  marginBottom: 8,
+                  border: `1px solid ${newMode === 'open' ? '#FFB300' : 'rgba(255,255,255,0.08)'}`,
+                  background: newMode === 'open' ? 'rgba(255,179,0,0.08)' : 'rgba(255,255,255,0.02)',
+                  borderRadius: 8,
+                  cursor: 'pointer',
+                  transition: 'all 0.15s',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+                  <input type="radio" checked={newMode === 'open'} onChange={() => setNewMode('open')} style={{ marginTop: 3 }} />
+                  <div>
+                    <div style={{ fontWeight: 600, fontSize: 13, color: newMode === 'open' ? '#FFCB45' : '#fff' }}>Aberto (recomendado)</div>
+                    <div style={{ fontSize: 11, color: '#9B96B0', marginTop: 4 }}>
+                      Recebe leads de TODO mundo que mandar mensagem pra esse WhatsApp. Atendimento comercial padrao.
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div
+                onClick={() => setNewMode('restricted')}
+                style={{
+                  padding: 12,
+                  border: `1px solid ${newMode === 'restricted' ? '#FBBC04' : 'rgba(255,255,255,0.08)'}`,
+                  background: newMode === 'restricted' ? 'rgba(251,188,4,0.08)' : 'rgba(255,255,255,0.02)',
+                  borderRadius: 8,
+                  cursor: 'pointer',
+                  transition: 'all 0.15s',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+                  <input type="radio" checked={newMode === 'restricted'} onChange={() => setNewMode('restricted')} style={{ marginTop: 3 }} />
+                  <div>
+                    <div style={{ fontWeight: 600, fontSize: 13, color: newMode === 'restricted' ? '#FBBC04' : '#fff' }}>Restrito</div>
+                    <div style={{ fontSize: 11, color: '#9B96B0', marginTop: 4 }}>
+                      Recebe APENAS msgs de leads ja cadastrados no CRM (via formulario, planilha, ou "Novo chat" pelo atendente). Numeros desconhecidos sao ignorados.
+                      <br /><strong style={{ color: '#FBBC04' }}>Ideal pra quem usa WhatsApp pessoal + comercial.</strong>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
             <div className="modal-actions">
               <button className="btn btn-secondary" onClick={() => setShowNew(false)}>Cancelar</button>
               <button className="btn btn-primary" onClick={handleCreate} disabled={creating || !newName.trim()}>{creating ? 'Criando...' : 'Gerar QR Code'}</button>
