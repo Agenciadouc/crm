@@ -107,6 +107,9 @@ export default function Chat() {
   const [savingNotes, setSavingNotes] = useState(false)
   const [editing, setEditing] = useState(false)
   const [infoCollapsed, setInfoCollapsed] = useState(() => localStorage.getItem('chat_info_collapsed') !== '0')
+  const [notesCollapsed, setNotesCollapsed] = useState(() => localStorage.getItem('chat_notes_collapsed') === '1')
+  const [tagsCollapsed, setTagsCollapsed] = useState(() => localStorage.getItem('chat_tags_collapsed') === '1')
+  const [cadenceCollapsed, setCadenceCollapsed] = useState(() => localStorage.getItem('chat_cadence_collapsed') === '1')
   const [leadTasks, setLeadTasks] = useState<any[]>([])
   const [editingTask, setEditingTask] = useState<any>(null)
   const [sendInstanceOverride, setSendInstanceOverride] = useState<number | null>(null)
@@ -1087,10 +1090,13 @@ export default function Chat() {
 
                   {/* Observacoes */}
                   <div className="card" style={{ padding: 12, marginBottom: 12 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                      <div style={{ fontSize: 10, color: '#9B96B0', textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: 3 }}><FileText size={10} /> Observacoes</div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: notesCollapsed ? 0 : 6 }}>
+                      <div onClick={() => { if (!editingNotes) { setNotesCollapsed(p => { const v = !p; localStorage.setItem('chat_notes_collapsed', v ? '1' : '0'); return v }) } }} style={{ fontSize: 10, color: '#9B96B0', textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: 3, cursor: editingNotes ? 'default' : 'pointer', flex: 1 }}>
+                        {!editingNotes && (notesCollapsed ? <ChevronDown size={12} style={{ color: '#9B96B0' }} /> : <ChevronUp size={12} style={{ color: '#9B96B0' }} />)}
+                        <FileText size={10} /> Observacoes
+                      </div>
                       {!editingNotes ? (
-                        <button className="btn btn-secondary btn-sm" onClick={() => { setNotesDraft(lead.notes || ''); setEditingNotes(true) }} style={{ padding: '2px 6px' }}><Edit3 size={10} /></button>
+                        <button className="btn btn-secondary btn-sm" onClick={() => { setNotesCollapsed(false); setNotesDraft(lead.notes || ''); setEditingNotes(true) }} style={{ padding: '2px 6px' }}><Edit3 size={10} /></button>
                       ) : (
                         <div style={{ display: 'flex', gap: 4 }}>
                           <button className="btn btn-primary btn-sm" disabled={savingNotes} onClick={async () => {
@@ -1103,7 +1109,7 @@ export default function Chat() {
                         </div>
                       )}
                     </div>
-                    {editingNotes ? (
+                    {!notesCollapsed && (editingNotes ? (
                       <textarea className="input" value={notesDraft} onChange={e => setNotesDraft(e.target.value)} rows={4} style={{ width: '100%', resize: 'vertical', fontSize: 11, lineHeight: 1.4 }} placeholder="Anotacoes sobre o lead..." />
                     ) : (
                       lead.notes ? (
@@ -1111,15 +1117,18 @@ export default function Chat() {
                       ) : (
                         <div style={{ fontSize: 10, color: '#6B6580' }}>Sem observacoes</div>
                       )
-                    )}
+                    ))}
                   </div>
 
                   {/* Tags */}
                   <div className="card" style={{ padding: 12, marginBottom: 12 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                      <div style={{ fontSize: 10, color: '#9B96B0', textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: 3 }}><TagIcon size={10} /> Tags</div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: tagsCollapsed ? 0 : 6 }}>
+                      <div onClick={() => setTagsCollapsed(p => { const v = !p; localStorage.setItem('chat_tags_collapsed', v ? '1' : '0'); return v })} style={{ fontSize: 10, color: '#9B96B0', textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: 3, cursor: 'pointer', flex: 1 }}>
+                        {tagsCollapsed ? <ChevronDown size={12} style={{ color: '#9B96B0' }} /> : <ChevronUp size={12} style={{ color: '#9B96B0' }} />}
+                        <TagIcon size={10} /> Tags
+                      </div>
                       <div style={{ position: 'relative' }}>
-                        <button className="btn btn-secondary btn-sm" onClick={() => setShowTagMenu(!showTagMenu)} style={{ padding: '2px 6px' }}><Plus size={10} /></button>
+                        <button className="btn btn-secondary btn-sm" onClick={() => { setTagsCollapsed(false); setShowTagMenu(!showTagMenu) }} style={{ padding: '2px 6px' }}><Plus size={10} /></button>
                         {showTagMenu && (
                           <div style={{ position: 'absolute', right: 0, top: '100%', marginTop: 4, background: 'var(--bg-card)', border: '1px solid var(--border-medium)', borderRadius: 8, padding: 6, zIndex: 50, minWidth: 200 }}>
                             {availableTags.length > 0 && (
@@ -1141,22 +1150,27 @@ export default function Chat() {
                         )}
                       </div>
                     </div>
-                    <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                      {lead.tags?.map(t => (
-                        <span key={t.id} className="tag-pill" style={{ background: `${t.color}20`, color: t.color, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 3, fontSize: 10 }} onClick={() => handleRemoveTag(t.id)}>
-                          {t.name} <X size={7} />
-                        </span>
-                      ))}
-                      {(!lead.tags || lead.tags.length === 0) && <span style={{ fontSize: 10, color: '#6B6580' }}>Sem tags</span>}
-                    </div>
+                    {!tagsCollapsed && (
+                      <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                        {lead.tags?.map(t => (
+                          <span key={t.id} className="tag-pill" style={{ background: `${t.color}20`, color: t.color, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 3, fontSize: 10 }} onClick={() => handleRemoveTag(t.id)}>
+                            {t.name} <X size={7} />
+                          </span>
+                        ))}
+                        {(!lead.tags || lead.tags.length === 0) && <span style={{ fontSize: 10, color: '#6B6580' }}>Sem tags</span>}
+                      </div>
+                    )}
                   </div>
 
                   {/* Cadence */}
                   <div className="card" style={{ padding: 12 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                      <div style={{ fontSize: 10, color: '#9B96B0', textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: 3 }}><ListOrdered size={10} /> Cadencia</div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: cadenceCollapsed ? 0 : 6 }}>
+                      <div onClick={() => setCadenceCollapsed(p => { const v = !p; localStorage.setItem('chat_cadence_collapsed', v ? '1' : '0'); return v })} style={{ fontSize: 10, color: '#9B96B0', textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: 3, cursor: 'pointer', flex: 1 }}>
+                        {cadenceCollapsed ? <ChevronDown size={12} style={{ color: '#9B96B0' }} /> : <ChevronUp size={12} style={{ color: '#9B96B0' }} />}
+                        <ListOrdered size={10} /> Cadencia
+                      </div>
                       <div style={{ position: 'relative' }}>
-                        <button className="btn btn-secondary btn-sm" onClick={() => setShowCadenceMenu(!showCadenceMenu)} style={{ padding: '2px 8px', fontSize: 10 }}>{leadCadence ? 'Trocar' : 'Atribuir'}</button>
+                        <button className="btn btn-secondary btn-sm" onClick={() => { setCadenceCollapsed(false); setShowCadenceMenu(!showCadenceMenu) }} style={{ padding: '2px 8px', fontSize: 10 }}>{leadCadence ? 'Trocar' : 'Atribuir'}</button>
                         {showCadenceMenu && (
                           <div style={{ position: 'absolute', right: 0, top: '100%', marginTop: 4, background: 'var(--bg-card)', border: '1px solid var(--border-medium)', borderRadius: 8, padding: 4, zIndex: 50, minWidth: 180, maxHeight: 220, overflowY: 'auto' }}>
                             {cadences.length === 0 && <div style={{ padding: 8, fontSize: 11, color: '#9B96B0' }}>Nenhuma cadencia. Crie em /cadences</div>}
@@ -1169,7 +1183,7 @@ export default function Chat() {
                         )}
                       </div>
                     </div>
-                    {leadCadence ? (
+                    {!cadenceCollapsed && (leadCadence ? (
                       <>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                           <div style={{ fontSize: 12, fontWeight: 600 }}>{leadCadence.cadence_name}</div>
@@ -1208,7 +1222,7 @@ export default function Chat() {
                       </>
                     ) : (
                       <div style={{ fontSize: 11, color: '#6B6580' }}>Nenhuma cadencia atribuida</div>
-                    )}
+                    ))}
                   </div>
 
                   {/* Lead pending tasks */}
