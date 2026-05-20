@@ -26,7 +26,7 @@ router.get('/', requireRole('super_admin', 'gerente'), (req, res) => {
 // Create broadcast
 router.post('/', requireRole('super_admin', 'gerente'), (req, res) => {
   if (!req.accountId) return res.status(400).json({ error: 'account_id required' })
-  const { name, message_template, message_variations, media_url, lead_ids, delay_seconds, instance_id } = req.body
+  const { name, message_template, message_variations, media_url, lead_ids, delay_seconds, instance_id, scheduled_at } = req.body
   if (!name || !message_template) return res.status(400).json({ error: 'name e message_template obrigatorios' })
 
   // Valida instancia (deve existir e pertencer a conta)
@@ -47,10 +47,22 @@ router.post('/', requireRole('super_admin', 'gerente'), (req, res) => {
 
   const variationsJson = variationsArr.length > 0 ? JSON.stringify(variationsArr) : null
 
+  // Valida agendamento (opcional). Aceita ISO string. Tem que ser >= now+60s pra evitar race com scheduler.
+  let scheduledAtISO = null
+  let initialStatus = 'draft'
+  if (scheduled_at) {
+    const d = new Date(scheduled_at)
+    if (isNaN(d.getTime())) return res.status(400).json({ error: 'scheduled_at invalido' })
+    if (d.getTime() < Date.now() + 60_000) return res.status(400).json({ error: 'Agendamento precisa ser pelo menos 1min no futuro' })
+    // Salva em UTC formato SQLite compativel: 'YYYY-MM-DD HH:MM:SS'
+    scheduledAtISO = d.toISOString().replace('T', ' ').slice(0, 19)
+    initialStatus = 'scheduled'
+  }
+
   const result = db.prepare(`
-    INSERT INTO broadcasts (account_id, name, message_template, message_variations, delay_seconds, media_url, total_count, created_by, instance_id)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(req.accountId, name, message_template, variationsJson, delay, media_url || null, lead_ids?.length || 0, req.user.id, instance_id)
+    INSERT INTO broadcasts (account_id, name, message_template, message_variations, delay_seconds, media_url, total_count, created_by, instance_id, status, scheduled_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(req.accountId, name, message_template, variationsJson, delay, media_url || null, lead_ids?.length || 0, req.user.id, instance_id, initialStatus, scheduledAtISO)
 
   // Add recipients (only opted-in leads)
   let skippedNoOptin = 0
@@ -132,7 +144,7 @@ router.get('/:id', requireRole('super_admin', 'gerente'), (req, res) => {
 const runningLoops = new Set()
 
 // ─── Loop interno de envio (chamado por send + retomada automatica) ──
-async function runBroadcastLoop(broadcastId) {
+export async function runBroadcastLoop(broadcastId) {
   if (runningLoops.has(broadcastId)) {
     console.log(`[Broadcast] Loop ${broadcastId} ja em execucao, ignorando duplicata`)
     return
@@ -233,10 +245,11 @@ async function runBroadcastLoopInner(broadcastId) {
   broadcastSSE(broadcast.account_id, 'broadcast:completed', { id: broadcastId, sent: finalCounts.sent_count, failed: finalCounts.failed_count })
 }
 
-// Send broadcast
+// Send broadcast — dispara imediato (so funciona em draft; pra agendado precisa cancelar agendamento antes)
 router.post('/:id/send', requireRole('super_admin', 'gerente'), async (req, res) => {
   const broadcast = db.prepare('SELECT * FROM broadcasts WHERE id = ?').get(req.params.id)
   if (!broadcast) return res.status(404).json({ error: 'Disparo nao encontrado' })
+  if (broadcast.status === 'scheduled') return res.status(400).json({ error: 'Disparo esta agendado. Cancele o agendamento antes de enviar agora.' })
   if (broadcast.status !== 'draft') return res.status(400).json({ error: 'Disparo ja enviado ou em andamento' })
 
   if (!broadcast.instance_id) return res.status(400).json({ error: 'Disparo sem instancia configurada' })
@@ -286,9 +299,19 @@ router.post('/:id/resume', requireRole('super_admin', 'gerente'), async (req, re
   runBroadcastLoop(broadcast.id).catch(err => console.error('[Broadcast] Resume error:', err))
 })
 
-// Delete broadcast
+// Cancelar agendamento — volta pra draft, limpa scheduled_at
+router.post('/:id/cancel-schedule', requireRole('super_admin', 'gerente'), (req, res) => {
+  const broadcast = db.prepare('SELECT * FROM broadcasts WHERE id = ? AND account_id = ?').get(req.params.id, req.accountId)
+  if (!broadcast) return res.status(404).json({ error: 'Disparo nao encontrado' })
+  if (broadcast.status !== 'scheduled') return res.status(400).json({ error: 'Disparo nao esta agendado (status: ' + broadcast.status + ')' })
+  db.prepare("UPDATE broadcasts SET status = 'draft', scheduled_at = NULL WHERE id = ?").run(broadcast.id)
+  const updated = db.prepare('SELECT * FROM broadcasts WHERE id = ?').get(broadcast.id)
+  res.json({ broadcast: updated })
+})
+
+// Delete broadcast — permite draft OU scheduled (cancela e apaga)
 router.delete('/:id', requireRole('super_admin', 'gerente'), (req, res) => {
-  db.prepare('DELETE FROM broadcasts WHERE id = ? AND status = ?').run(req.params.id, 'draft')
+  db.prepare("DELETE FROM broadcasts WHERE id = ? AND status IN ('draft', 'scheduled')").run(req.params.id)
   res.json({ ok: true })
 })
 

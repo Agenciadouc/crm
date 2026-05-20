@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAccount } from '../context/AccountContext'
-import { fetchBroadcasts, fetchLeads, createBroadcast, sendBroadcast, fetchTags, fetchFunnels, fetchWhatsAppInstances, fetchBroadcastCloneData, type Broadcast, type Lead, type Tag, type Funnel, type WhatsAppInstance } from '../lib/api'
+import { fetchBroadcasts, fetchLeads, createBroadcast, sendBroadcast, cancelScheduledBroadcast, fetchTags, fetchFunnels, fetchWhatsAppInstances, fetchBroadcastCloneData, type Broadcast, type Lead, type Tag, type Funnel, type WhatsAppInstance } from '../lib/api'
 import { MessageCircle, Plus, Send, CheckCircle, Clock, Trash2, Filter, Tag as TagIcon, GitBranch, Smartphone, AlertTriangle, Eye, PauseCircle, Copy } from 'lucide-react'
 import { parseSqlDate } from '../lib/dates'
 
@@ -35,6 +35,8 @@ export default function Messages() {
   const [showNew, setShowNew] = useState(false)
   const [newName, setNewName] = useState('')
   const [newTemplate, setNewTemplate] = useState('')
+  const [scheduleEnabled, setScheduleEnabled] = useState(false)
+  const [scheduledAt, setScheduledAt] = useState('') // datetime-local string (local time)
   const [newVariations, setNewVariations] = useState<string[]>(['', ''])
   const [newDelay, setNewDelay] = useState(DEFAULT_DELAY)
   const [newInstanceId, setNewInstanceId] = useState<number | ''>('')
@@ -142,14 +144,25 @@ export default function Messages() {
   const resetForm = () => {
     setShowNew(false); setStep(1); setNewName(''); setNewTemplate('')
     setNewVariations(['', '']); setNewDelay(DEFAULT_DELAY); setNewInstanceId('')
+    setScheduleEnabled(false); setScheduledAt('')
     setSelectedLeads([]); setLeadSearch(''); setFilterTags([]); setFilterStages([])
     setCloneNotice(null)
   }
+
+  // Valida agendamento: precisa ser parsable e >= agora+1min (margem pra evitar race com scheduler)
+  const validSchedule = !scheduleEnabled || (() => {
+    if (!scheduledAt) return false
+    const d = new Date(scheduledAt)
+    return !isNaN(d.getTime()) && d.getTime() >= Date.now() + 60_000
+  })()
 
   const handleCreate = async () => {
     if (!accountId || !newName || !newTemplate || selectedLeads.length === 0 || !newInstanceId) return
     if (!enoughVariations) { alert(`Adicione pelo menos ${MIN_VARIATIONS - 1} variacoes (total ${MIN_VARIATIONS} mensagens diferentes).`); return }
     if (!validDelay) { alert(`Delay minimo: ${MIN_DELAY}s. Valores menores aumentam risco de bloqueio no WhatsApp.`); return }
+    if (scheduleEnabled && !validSchedule) { alert('Agendamento invalido. Use uma data e hora pelo menos 1min no futuro.'); return }
+    // Converte datetime-local (horario local do navegador) pra ISO UTC pro backend
+    const scheduledISO = scheduleEnabled && scheduledAt ? new Date(scheduledAt).toISOString() : null
     setCreating(true)
     try {
       await createBroadcast(accountId, {
@@ -157,6 +170,7 @@ export default function Messages() {
         message_variations: newVariations.filter(v => v.trim()),
         delay_seconds: newDelay, lead_ids: selectedLeads.map(l => l.id),
         instance_id: Number(newInstanceId),
+        scheduled_at: scheduledISO,
       })
       resetForm(); load()
     } catch (e: any) { alert('Erro: ' + e.message) }
@@ -166,6 +180,14 @@ export default function Messages() {
   const handleSend = async (id: number) => {
     if (!accountId || !confirm('Enviar disparo agora?')) return
     try { await sendBroadcast(id, accountId); load() }
+    catch (e: any) { alert('Erro: ' + e.message) }
+  }
+
+  const handleCancelSchedule = async (b: Broadcast) => {
+    if (!accountId) return
+    const when = b.scheduled_at ? new Date(b.scheduled_at).toLocaleString('pt-BR') : ''
+    if (!confirm(`Cancelar agendamento de "${b.name}"${when ? ` (${when})` : ''}?\n\nO disparo volta pra rascunho e voce pode editar ou re-agendar.`)) return
+    try { await cancelScheduledBroadcast(b.id, accountId); load() }
     catch (e: any) { alert('Erro: ' + e.message) }
   }
 
@@ -230,6 +252,11 @@ export default function Messages() {
                       <span className="stage-badge" style={{ background: `${displayStatus.color}20`, color: displayStatus.color }}>
                         {displayStatus.label}
                       </span>
+                      {b.status === 'scheduled' && b.scheduled_at && (
+                        <div style={{ fontSize: 10, color: '#FBBC04', marginTop: 2 }}>
+                          📅 {parseSqlDate(b.scheduled_at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                        </div>
+                      )}
                     </td>
                     <td className="right" style={{ fontSize: 12 }}>
                       {b.status === 'completed'
@@ -243,6 +270,7 @@ export default function Messages() {
                         <button className="btn btn-secondary btn-sm btn-icon" onClick={() => navigate(`/messages/${b.id}`)} title="Ver detalhes"><Eye size={12} /></button>
                         <button className="btn btn-secondary btn-sm btn-icon" onClick={() => handleDuplicate(b.id)} disabled={duplicating} title="Duplicar disparo"><Copy size={12} /></button>
                         {b.status === 'draft' && <button className="btn btn-primary btn-sm" onClick={() => handleSend(b.id)} style={{ fontSize: 11 }}><Send size={11} /> Enviar</button>}
+                        {b.status === 'scheduled' && <button className="btn btn-secondary btn-sm" onClick={() => handleCancelSchedule(b)} style={{ fontSize: 11 }} title="Cancelar agendamento (volta pra rascunho)">Cancelar</button>}
                         {b.status === 'completed' && <CheckCircle size={14} style={{ color: '#34C759' }} />}
                         {b.status === 'sending' && !isPaused && <Clock size={14} style={{ color: '#5DADE2' }} className="spinning" />}
                         {isPaused && <PauseCircle size={14} style={{ color: '#FBBC04' }} />}
@@ -353,9 +381,35 @@ export default function Messages() {
                     <div>{newTemplate.replace(/\{\{name\}\}/g, 'Joao Silva')}</div>
                   </div>
                 )}
+
+                {/* Agendamento */}
+                <div className="form-group" style={{ marginTop: 12, padding: 12, background: scheduleEnabled ? 'rgba(255,179,0,0.05)' : 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,179,0,0.15)', borderRadius: 8 }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+                    <input type="checkbox" checked={scheduleEnabled} onChange={e => setScheduleEnabled(e.target.checked)} />
+                    <span style={{ fontWeight: 600 }}>📅 Agendar disparo pra data/hora futura</span>
+                  </label>
+                  {scheduleEnabled && (
+                    <div style={{ marginTop: 8 }}>
+                      <input
+                        type="datetime-local"
+                        className="input"
+                        value={scheduledAt}
+                        onChange={e => setScheduledAt(e.target.value)}
+                        min={new Date(Date.now() + 60_000).toISOString().slice(0, 16)}
+                        style={{ width: 240 }}
+                      />
+                      <p style={{ fontSize: 11, color: validSchedule ? '#9B96B0' : '#FF6B6B', marginTop: 4 }}>
+                        {validSchedule
+                          ? 'Horario local do seu navegador. Disparo inicia automaticamente.'
+                          : 'Escolha uma data/hora pelo menos 1 minuto no futuro.'}
+                      </p>
+                    </div>
+                  )}
+                </div>
+
                 <div className="modal-actions">
                   <button className="btn btn-secondary" onClick={resetForm}>Cancelar</button>
-                  <button className="btn btn-primary" onClick={() => setStep(2)} disabled={!newName || !newTemplate || !enoughVariations || !validDelay || !newInstanceId}>Proximo</button>
+                  <button className="btn btn-primary" onClick={() => setStep(2)} disabled={!newName || !newTemplate || !enoughVariations || !validDelay || !newInstanceId || (scheduleEnabled && !validSchedule)}>Proximo</button>
                 </div>
               </>
             )}
@@ -490,6 +544,11 @@ export default function Messages() {
                   <div style={{ fontSize: 13, marginTop: 4 }}><strong>Destinatarios:</strong> {selectedLeads.length} leads</div>
                   <div style={{ fontSize: 13, marginTop: 4 }}><strong>Mensagens diferentes:</strong> {totalMessagesCount} (rotacionadas)</div>
                   <div style={{ fontSize: 13, marginTop: 4 }}><strong>Delay entre envios:</strong> ~{newDelay}s (variacao ±30%)</div>
+                  {scheduleEnabled && scheduledAt && (
+                    <div style={{ fontSize: 13, marginTop: 4 }}>
+                      <strong>📅 Agendado pra:</strong> {new Date(scheduledAt).toLocaleString('pt-BR')}
+                    </div>
+                  )}
                 </div>
 
                 <div style={{ padding: 12, background: 'rgba(91,173,226,0.08)', borderRadius: 8, fontSize: 12, color: '#5DADE2', display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
@@ -497,11 +556,13 @@ export default function Messages() {
                 </div>
 
                 <div style={{ padding: 10, background: 'rgba(255,179,0,0.08)', borderRadius: 8, fontSize: 12, color: '#FFB300' }}>
-                  Disparo criado como rascunho. Voce envia depois clicando no botao "Enviar".
+                  {scheduleEnabled
+                    ? 'Disparo criado como agendado. Vai iniciar automaticamente na data/hora escolhida.'
+                    : 'Disparo criado como rascunho. Voce envia depois clicando no botao "Enviar".'}
                 </div>
                 <div className="modal-actions">
                   <button className="btn btn-secondary" onClick={() => setStep(2)}>Voltar</button>
-                  <button className="btn btn-primary" onClick={handleCreate} disabled={creating}>{creating ? 'Criando...' : 'Criar Disparo'}</button>
+                  <button className="btn btn-primary" onClick={handleCreate} disabled={creating}>{creating ? 'Criando...' : (scheduleEnabled ? 'Agendar Disparo' : 'Criar Disparo')}</button>
                 </div>
               </>
             )}

@@ -200,6 +200,7 @@ db.exec(`
     FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE,
     FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
   );
+  CREATE INDEX IF NOT EXISTS idx_broadcasts_scheduled ON broadcasts(status, scheduled_at);
 
   -- Broadcast recipients
   CREATE TABLE IF NOT EXISTS broadcast_recipients (
