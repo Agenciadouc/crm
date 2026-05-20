@@ -768,6 +768,14 @@ router.post('/sheets/:accountSlug', (req, res) => {
       }
     }
 
+    // Notes — append (nao sobrescreve se ja tinha algo). Usado por importacoes pra preservar feedbacks, perguntas do form, etc.
+    if (body.notes && String(body.notes).trim()) {
+      const newPart = String(body.notes).trim()
+      const cur = (lead.notes || '').trim()
+      const merged = cur ? `${cur}\n\n${newPart}` : newPart
+      db.prepare('UPDATE leads SET notes = ? WHERE id = ?').run(merged, lead.id)
+    }
+
     // Atendente (corretor): busca user da conta pelo nome (case-insensitive, ignora acentos)
     const attendantName = body.attendant_name || body.corretor || body.atendente || ''
     if (attendantName) {
