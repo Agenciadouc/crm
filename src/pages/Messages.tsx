@@ -287,8 +287,8 @@ export default function Messages() {
 
       {/* New broadcast modal */}
       {showNew && (
-        <div className="modal-overlay" onClick={resetForm}>
-          <div className="modal" style={{ maxWidth: 620 }} onClick={e => e.stopPropagation()}>
+        <div className="modal-overlay">
+          <div className="modal" style={{ maxWidth: 620 }}>
             <h2>Novo Disparo — Etapa {step}/3</h2>
 
             {cloneNotice && (
