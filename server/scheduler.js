@@ -216,9 +216,15 @@ async function pollMissedMessages() {
         const dedupJid = isLid ? `${phone}@lid` : `${phone}@s.whatsapp.net`
         let lead = db.prepare('SELECT * FROM leads WHERE account_id = ? AND (wa_remote_jid = ? OR phone = ?) ORDER BY is_archived ASC, created_at DESC LIMIT 1').get(inst.acc_id, dedupJid, phone)
 
+        // Gate: se ja achou lead bloqueado, ignora msg
+        if (lead && lead.is_blocked) {
+          console.log(`[Polling] Msg ignorada — lead ${lead.id} bloqueado`)
+          continue
+        }
+
         // For @lid: also try matching by pushName (same person, different ID)
         if (!lead && isLid && pushName) {
-          lead = db.prepare('SELECT * FROM leads WHERE account_id = ? AND name = ? ORDER BY is_archived ASC, created_at DESC LIMIT 1').get(inst.acc_id, pushName)
+          lead = db.prepare('SELECT * FROM leads WHERE account_id = ? AND name = ? AND is_blocked = 0 ORDER BY is_archived ASC, created_at DESC LIMIT 1').get(inst.acc_id, pushName)
           if (lead) {
             db.prepare("UPDATE leads SET wa_remote_jid = ?, updated_at = datetime('now') WHERE id = ?").run(dedupJid, lead.id)
           }
@@ -232,6 +238,13 @@ async function pollMissedMessages() {
         }
 
         if (!lead) {
+          // ─── GATE: instancia em modo RESTRITO so processa leads ja cadastrados (form/sheets/Novo chat).
+          // Mesmo gate do webhook (server/routes/webhooks.js getOrCreateLead). Polling tb precisa respeitar.
+          if (inst.lead_intake_mode === 'restricted') {
+            console.log(`[Polling] Msg ignorada — instancia ${inst.instance_name} em modo restrito (lead novo nao criado)`)
+            continue
+          }
+
           // Create new lead
           const funnel = db.prepare('SELECT id FROM funnels WHERE account_id = ? AND is_default = 1 AND is_active = 1').get(inst.acc_id)
           if (!funnel) continue
