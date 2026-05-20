@@ -6,7 +6,7 @@ import {
   fetchWhatsAppInstances, fetchLeads, fetchLead, fetchFunnels, fetchUsers, fetchTags,
   sendMessage, sendMessageMedia, updateLead, moveLeadStage, assignLead, addLeadNote, addLeadTag, removeLeadTag,
   fetchLeadCadence, advanceLeadCadence, removeLeadCadence, fetchCadences, assignLeadCadence, createTag,
-  archiveLead, createStandaloneTask, fetchLeadTasks, completeStandaloneTask, deleteStandaloneTask, completeTask, skipTask, fetchLeadConversations, type LeadConversation,
+  archiveLead, blockLead, createStandaloneTask, fetchLeadTasks, completeStandaloneTask, deleteStandaloneTask, completeTask, skipTask, fetchLeadConversations, type LeadConversation,
   fetchReadyMessages, type ReadyMessage,
   createLeadOrFindExisting,
   requestLeadTransfer, acceptTransferRequest, rejectTransferRequest, fetchPendingTransferRequests, grabLead, type TransferRequest,
@@ -17,7 +17,7 @@ import EditTaskModal from '../components/EditTaskModal'
 import FilterDropdown, { type FilterValue } from '../components/FilterDropdown'
 import {
   MessageCircle, Search, Send, Phone, User, Edit3, Save, X, Plus,
-  StickyNote, Tag as TagIcon, GitBranch, Smartphone, ListOrdered, ChevronRight, Check, Clock, Archive, ListTodo, ChevronDown, ChevronUp, Trash2, Paperclip, FileText, MessageSquarePlus, Copy,
+  StickyNote, Tag as TagIcon, GitBranch, Smartphone, ListOrdered, ChevronRight, Check, Clock, Archive, Ban, ListTodo, ChevronDown, ChevronUp, Trash2, Paperclip, FileText, MessageSquarePlus, Copy,
   Menu as MenuIcon, MessagesSquare, Info as InfoIcon, History as HistoryIcon, ChevronLeft,
 } from 'lucide-react'
 import MessageMedia from '../components/MessageMedia'
@@ -311,6 +311,28 @@ export default function Chat() {
     setLeads(prev => prev.filter(l => l.id !== leadId))
     if (selectedLeadId === leadId) setSelectedLeadId(null)
     try { await archiveLead(leadId) } catch { loadLeadsList() }
+  }
+
+  const handleBlockLead = async (leadId: number, leadPhone: string | null, e?: { stopPropagation?: () => void }) => {
+    e?.stopPropagation?.()
+    const phoneLabel = leadPhone || 'esse numero'
+    const ok = confirm(
+      `EXCLUIR este lead e BLOQUEAR o numero ${phoneLabel}?\n\n` +
+      `- O lead some do CRM (chat, pipeline, listas)\n` +
+      `- Mensagens FUTURAS desse numero serao IGNORADAS pelo CRM (nao gravam, nao criam lead)\n` +
+      `- Outros leads NAO sao afetados\n` +
+      `- A acao pode ser desfeita por SQL no banco (lead volta com historico intacto)`
+    )
+    if (!ok) return
+    setLeads(prev => prev.filter(l => l.id !== leadId))
+    if (selectedLeadId === leadId) setSelectedLeadId(null)
+    try {
+      await blockLead(leadId)
+      setNotice({ kind: 'success', title: 'Lead excluido', message: `Numero ${phoneLabel} bloqueado. Msgs futuras serao ignoradas.` })
+    } catch (err: any) {
+      setNotice({ kind: 'error', title: 'Erro ao excluir', message: err?.message || 'Falha desconhecida' })
+      loadLeadsList()
+    }
   }
 
   // Formata conversa como texto plano otimizado pra analise por LLM (ChatGPT/Claude)
@@ -760,6 +782,9 @@ export default function Chat() {
                 )}
                 <button className="btn btn-secondary btn-sm" title="Arquivar" onClick={() => handleArchiveLead(lead.id)} style={{ padding: '4px 8px' }}>
                   <Archive size={12} />
+                </button>
+                <button className="btn btn-danger btn-sm" title="Excluir e bloquear numero (mensagens futuras serao ignoradas)" onClick={() => handleBlockLead(lead.id, lead.phone)} style={{ padding: '4px 8px' }}>
+                  <Ban size={12} />
                 </button>
               </div>
 
@@ -1334,12 +1359,16 @@ export default function Chat() {
                     </button>
                   </div>
 
-                  {/* Archive */}
+                  {/* Archive + Block */}
                   <div className="card" style={{ padding: 12, marginTop: 12 }}>
-                    <div style={{ fontSize: 10, color: '#9B96B0', textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: 3, marginBottom: 6 }}><Archive size={10} /> Arquivar</div>
-                    <div style={{ fontSize: 11, color: '#6B6580', marginBottom: 8 }}>Some do pipeline e do chat. Historico preservado. Ideal para contatos pessoais.</div>
-                    <button className="btn btn-secondary btn-sm" style={{ width: '100%', fontSize: 11 }} onClick={() => handleArchiveLead(lead.id)}>
+                    <div style={{ fontSize: 10, color: '#9B96B0', textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: 3, marginBottom: 6 }}><Archive size={10} /> Arquivar / Excluir</div>
+                    <div style={{ fontSize: 11, color: '#6B6580', marginBottom: 4 }}><strong>Arquivar:</strong> some do pipeline/chat. Msgs futuras ainda chegam. Histórico preservado.</div>
+                    <button className="btn btn-secondary btn-sm" style={{ width: '100%', fontSize: 11, marginBottom: 8 }} onClick={() => handleArchiveLead(lead.id)}>
                       <Archive size={12} /> Arquivar lead
+                    </button>
+                    <div style={{ fontSize: 11, color: '#6B6580', marginBottom: 4 }}><strong>Excluir:</strong> some do CRM e msgs futuras desse número são IGNORADAS.</div>
+                    <button className="btn btn-danger btn-sm" style={{ width: '100%', fontSize: 11 }} onClick={() => handleBlockLead(lead.id, lead.phone)}>
+                      <Ban size={12} /> Excluir lead (bloquear número)
                     </button>
                   </div>
                 </>

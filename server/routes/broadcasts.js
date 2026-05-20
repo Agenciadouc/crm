@@ -69,7 +69,7 @@ router.post('/', requireRole('super_admin', 'gerente'), (req, res) => {
   if (lead_ids && Array.isArray(lead_ids)) {
     const stmt = db.prepare('INSERT INTO broadcast_recipients (broadcast_id, lead_id, phone) VALUES (?, ?, ?)')
     for (const leadId of lead_ids) {
-      const lead = db.prepare('SELECT phone, opted_in_at, opted_out_at FROM leads WHERE id = ? AND phone IS NOT NULL AND is_archived = 0').get(leadId)
+      const lead = db.prepare('SELECT phone, opted_in_at, opted_out_at FROM leads WHERE id = ? AND phone IS NOT NULL AND is_archived = 0 AND is_blocked = 0').get(leadId)
       if (!lead) continue
       if (lead.opted_out_at && (!lead.opted_in_at || lead.opted_out_at > lead.opted_in_at)) { skippedNoOptin++; continue }
       stmt.run(result.lastInsertRowid, leadId, lead.phone)
@@ -95,7 +95,7 @@ router.get('/:id/clone-data', requireRole('super_admin', 'gerente'), (req, res) 
   let validLeads = []
   if (leadIds.length) {
     const placeholders = leadIds.map(() => '?').join(',')
-    validLeads = db.prepare(`SELECT id, name, phone, email, city, source, stage_id, attendant_id, instance_id, last_instance_id, created_at, updated_at, is_active FROM leads WHERE id IN (${placeholders}) AND account_id = ? AND is_active = 1 AND is_archived = 0`).all(...leadIds, req.accountId)
+    validLeads = db.prepare(`SELECT id, name, phone, email, city, source, stage_id, attendant_id, instance_id, last_instance_id, created_at, updated_at, is_active FROM leads WHERE id IN (${placeholders}) AND account_id = ? AND is_active = 1 AND is_archived = 0 AND is_blocked = 0`).all(...leadIds, req.accountId)
   }
 
   let variations = []

@@ -46,6 +46,23 @@ function phoneCompareKey(p) {
 
 function getOrCreateLead(accountId, phone, name, source, waJid, instanceId) {
   phone = normalizePhone(phone)
+
+  // ─── GATE: phone bloqueado nesta conta? Ignora silenciosamente. ───
+  // Match por phone exato OU sufixo 8d (mesma logica de dedup). Se houver QUALQUER lead bloqueado
+  // pra esse numero, retorna blocked=true e nao processa msg.
+  if (phone) {
+    const blockedExact = db.prepare("SELECT id FROM leads WHERE account_id = ? AND phone = ? AND is_blocked = 1 LIMIT 1").get(accountId, phone)
+    if (blockedExact) return { lead: null, isNew: false, blocked: true }
+    const key = phoneCompareKey(phone)
+    if (key) {
+      const last8 = key.slice(-8)
+      const candidates = db.prepare("SELECT phone FROM leads WHERE account_id = ? AND is_blocked = 1 AND phone LIKE ?").all(accountId, '%' + last8)
+      if (candidates.some(c => phoneCompareKey(c.phone) === key)) {
+        return { lead: null, isNew: false, blocked: true }
+      }
+    }
+  }
+
   let lead = null
   if (waJid) lead = db.prepare('SELECT * FROM leads WHERE account_id = ? AND wa_remote_jid = ? ORDER BY is_archived ASC, created_at DESC LIMIT 1').get(accountId, waJid)
   if (!lead && phone) {
@@ -345,8 +362,17 @@ router.post('/evolution/:accountSlug', (req, res) => {
         // Create new lead with LID (no real phone)
         const sourceForNew = adSourceLabel || 'whatsapp'
         const r = getOrCreateLead(account.id, null, leadName, sourceForNew, dedupJid, waInstance?.id || null)
+        if (r.blocked) {
+          console.log(`[Webhook] Mensagem ignorada — phone bloqueado na conta ${account.slug}`)
+          return res.json({ ok: true, blocked: true })
+        }
         lead = r.lead; isNew = r.isNew
       } else {
+        // Se lead ja existe e esta bloqueado, ignora silenciosamente
+        if (lead.is_blocked) {
+          console.log(`[Webhook] Mensagem ignorada — lead ${lead.id} bloqueado na conta ${account.slug}`)
+          return res.json({ ok: true, blocked: true })
+        }
         // Se arquivado, marca has_new_after_archive mas NAO desarquiva (so manual)
         if (lead.is_archived && !fromMe) {
           db.prepare("UPDATE leads SET has_new_after_archive = 1, updated_at = datetime('now') WHERE id = ?").run(lead.id)
@@ -356,6 +382,10 @@ router.post('/evolution/:accountSlug', (req, res) => {
     } else {
       const sourceForNew = adSourceLabel || 'whatsapp'
       const r = getOrCreateLead(account.id, phone, leadName, sourceForNew, dedupJid, waInstance?.id || null)
+      if (r.blocked) {
+        console.log(`[Webhook] Mensagem ignorada — phone ${phone} bloqueado na conta ${account.slug}`)
+        return res.json({ ok: true, blocked: true })
+      }
       lead = r.lead; isNew = r.isNew
     }
     if (!lead) return res.json({ ok: true })
@@ -562,7 +592,8 @@ router.post('/meta-leads/:accountSlug', async (req, res) => {
           else if (field.name === 'zip_code' || field.name === 'post_code') zip = val
         }
 
-        const { lead, isNew } = getOrCreateLead(account.id, phone, name, 'meta_form', null)
+        const { lead, isNew, blocked } = getOrCreateLead(account.id, phone, name, 'meta_form', null)
+        if (blocked) { console.log(`[Webhook Meta Lead] phone ${phone} bloqueado, ignorando`); continue }
         if (!lead) continue
 
         // Salva todos IDs Meta + dados de contato (COALESCE pra nao sobrescrever)
@@ -613,7 +644,8 @@ router.post('/site/:accountSlug', (req, res) => {
     const { name, phone, email, city, state, zip, message } = req.body
     // Tracking Meta: site pode mandar esses no body (capturados via JS no front)
     const { fbp, fbc, fbclid, ctwa_clid, ad_id, campaign_id, form_id, source: src } = req.body
-    const { lead, isNew } = getOrCreateLead(account.id, phone, name, src || 'website', null)
+    const { lead, isNew, blocked } = getOrCreateLead(account.id, phone, name, src || 'website', null)
+    if (blocked) { console.log(`[Webhook Site] phone ${phone} bloqueado, ignorando`); return res.json({ ok: true, blocked: true }) }
     if (!lead) return res.status(500).json({ error: 'Falha ao criar lead' })
 
     // IP/UA do request
@@ -683,7 +715,8 @@ router.post('/sheets/:accountSlug', (req, res) => {
 
     if (!name && !phone) return res.status(400).json({ error: 'name ou phone obrigatorio' })
 
-    const { lead, isNew } = getOrCreateLead(account.id, phone, name, source, null)
+    const { lead, isNew, blocked } = getOrCreateLead(account.id, phone, name, source, null)
+    if (blocked) { console.log(`[Webhook Sheets] phone ${phone} bloqueado, ignorando`); return res.json({ ok: true, blocked: true }) }
     if (!lead) return res.status(400).json({ error: 'Falha ao criar lead (sem funil configurado?)' })
 
     // Atualiza nome se vier mais completo (lead antigo pode estar so com telefone, ou nome incompleto)

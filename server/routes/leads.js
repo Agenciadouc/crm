@@ -38,7 +38,7 @@ router.get('/', (req, res) => {
   if (!req.accountId) return res.status(400).json({ error: 'account_id required' })
 
   const { stage_id, attendant_id, instance_id, funnel_id, source, tag, city, search, date_from, date_to, show_archived, page = '1', limit = '50' } = req.query
-  const where = ['l.account_id = ?', 'l.is_active = 1']
+  const where = ['l.account_id = ?', 'l.is_active = 1', 'l.is_blocked = 0']
   const params = [req.accountId]
 
   // Archive filter: default hides archived; pass show_archived=1 to list only archived, =all to include both
@@ -551,6 +551,31 @@ router.patch('/:id/unarchive', (req, res) => {
   res.json({ lead: updated })
 })
 
+// Block lead — soft-delete: lead some do CRM e mensagens futuras desse numero sao ignoradas pelo webhook.
+// Historico (msgs, tags, etc) e preservado pra eventual unblock futuro.
+router.post('/:id/block', (req, res) => {
+  const lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(req.params.id)
+  if (!lead) return res.status(404).json({ error: 'Lead nao encontrado' })
+  if (req.accountId && lead.account_id !== req.accountId) return res.status(403).json({ error: 'Sem permissao' })
+  if (req.user.role === 'atendente' && lead.attendant_id !== req.user.id && !db.prepare('SELECT 1 FROM lead_instance_assignments WHERE lead_id = ? AND attendant_id = ?').get(lead.id, req.user.id)) return res.status(403).json({ error: 'Sem permissao' })
+  db.prepare("UPDATE leads SET is_blocked = 1, blocked_at = datetime('now'), blocked_by = ?, updated_at = datetime('now') WHERE id = ?").run(req.user.id, lead.id)
+  const updated = db.prepare('SELECT * FROM leads WHERE id = ?').get(lead.id)
+  try { broadcastSSE(lead.account_id, 'lead:archived', { id: lead.id }) } catch {}
+  res.json({ lead: updated })
+})
+
+// Unblock lead — restaura visibilidade e processamento de mensagens
+router.post('/:id/unblock', (req, res) => {
+  const lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(req.params.id)
+  if (!lead) return res.status(404).json({ error: 'Lead nao encontrado' })
+  if (req.accountId && lead.account_id !== req.accountId) return res.status(403).json({ error: 'Sem permissao' })
+  if (req.user.role === 'atendente' && lead.attendant_id !== req.user.id && !db.prepare('SELECT 1 FROM lead_instance_assignments WHERE lead_id = ? AND attendant_id = ?').get(lead.id, req.user.id)) return res.status(403).json({ error: 'Sem permissao' })
+  db.prepare("UPDATE leads SET is_blocked = 0, blocked_at = NULL, blocked_by = NULL, updated_at = datetime('now') WHERE id = ?").run(lead.id)
+  const updated = db.prepare('SELECT * FROM leads WHERE id = ?').get(lead.id)
+  try { broadcastSSE(lead.account_id, 'lead:unarchived', updated) } catch {}
+  res.json({ lead: updated })
+})
+
 // Assign attendant
 router.put('/:id/assign', requireRole('super_admin', 'gerente'), (req, res) => {
   const { attendant_id } = req.body
@@ -605,7 +630,7 @@ router.delete('/:id/tags/:tagId', (req, res) => {
 router.get('/export', requireRole('super_admin', 'gerente'), (req, res) => {
   if (!req.accountId) return res.status(400).json({ error: 'account_id required' })
   const { date_from, date_to, funnel_id } = req.query
-  const where = ['l.account_id = ?']
+  const where = ['l.account_id = ?', 'l.is_blocked = 0']
   const params = [req.accountId]
   if (date_from) { where.push('l.created_at >= ?'); params.push(date_from) }
   if (date_to) { where.push('l.created_at <= ?'); params.push(date_to + ' 23:59:59') }
@@ -771,7 +796,7 @@ router.get('/pipeline/metrics', (req, res) => {
       COUNT(l.id) as lead_count,
       AVG(CASE WHEN l.updated_at != l.created_at THEN (julianday(l.updated_at) - julianday(l.created_at)) * 24 ELSE NULL END) as avg_hours_in_stage
     FROM funnel_stages fs
-    LEFT JOIN leads l ON l.stage_id = fs.id AND l.is_active = 1 AND l.is_archived = 0
+    LEFT JOIN leads l ON l.stage_id = fs.id AND l.is_active = 1 AND l.is_archived = 0 AND l.is_blocked = 0
     WHERE fs.funnel_id = ?
     GROUP BY fs.id
     ORDER BY fs.position
