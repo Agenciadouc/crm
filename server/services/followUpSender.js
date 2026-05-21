@@ -55,14 +55,29 @@ export async function sendFollowUpMessage(leadFollowUpId) {
     }
 
     const lead = db.prepare("SELECT * FROM leads WHERE id = ?").get(lfu.lead_id)
-    if (!lead || !lead.phone) {
-      cancelLeadFollowUp(leadFollowUpId, 'lead_invalid')
+    if (!lead) {
+      cancelLeadFollowUp(leadFollowUpId, 'lead_deleted')
       return
     }
-
-    // Skip se lead bloqueado/arquivado/inativo — cancela follow-up
-    if (lead.is_blocked || lead.is_archived || !lead.is_active) {
-      cancelLeadFollowUp(leadFollowUpId, 'lead_unreachable')
+    if (!lead.phone) {
+      pauseLeadFollowUp(leadFollowUpId, 'lead_no_phone')
+      console.log(`[FollowUp] Pausado lead=${lead.id} — sem telefone`)
+      return
+    }
+    // Pausa se lead foi bloqueado/arquivado/desativado APOS atribuicao (em vez de cancelar silencioso)
+    if (lead.is_blocked) {
+      pauseLeadFollowUp(leadFollowUpId, 'lead_blocked')
+      console.log(`[FollowUp] Pausado lead=${lead.id} — lead bloqueado`)
+      return
+    }
+    if (lead.is_archived) {
+      pauseLeadFollowUp(leadFollowUpId, 'lead_archived')
+      console.log(`[FollowUp] Pausado lead=${lead.id} — lead arquivado`)
+      return
+    }
+    if (!lead.is_active) {
+      pauseLeadFollowUp(leadFollowUpId, 'lead_inactive')
+      console.log(`[FollowUp] Pausado lead=${lead.id} — lead inativo`)
       return
     }
 

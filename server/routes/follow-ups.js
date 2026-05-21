@@ -237,6 +237,10 @@ router.post('/:id/assign', (req, res) => {
 
   const lead = db.prepare('SELECT * FROM leads WHERE id = ? AND account_id = ?').get(lead_id, req.accountId)
   if (!lead) return res.status(404).json({ error: 'Lead nao encontrado' })
+  if (lead.is_blocked) return res.status(400).json({ error: 'Lead esta bloqueado/excluido — desbloqueie antes de atribuir follow-up.' })
+  if (lead.is_archived) return res.status(400).json({ error: 'Lead esta arquivado — desarquive antes de atribuir follow-up.' })
+  if (!lead.is_active) return res.status(400).json({ error: 'Lead esta inativo.' })
+  if (!lead.phone) return res.status(400).json({ error: 'Lead sem telefone — impossivel enviar msg.' })
 
   // Pega step 1
   const firstStep = db.prepare('SELECT * FROM follow_up_steps WHERE follow_up_id = ? ORDER BY position ASC LIMIT 1').get(fu.id)

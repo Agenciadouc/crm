@@ -1323,7 +1323,15 @@ export default function Chat() {
                             <div style={{ fontSize: 11, color: '#FBBC04', marginTop: 4 }}>
                               ⏸ Pausado — {leadFollowUp.paused_reason === 'lead_replied' ? 'lead respondeu' :
                                 leadFollowUp.paused_reason === 'instance_offline' ? 'instância offline' :
-                                leadFollowUp.paused_reason === 'manual' ? 'manual' :
+                                leadFollowUp.paused_reason === 'instance_removed' ? 'instância removida' :
+                                leadFollowUp.paused_reason === 'manual' ? 'pausado manualmente' :
+                                leadFollowUp.paused_reason === 'lead_blocked' ? 'lead bloqueado — desbloqueie pra retomar' :
+                                leadFollowUp.paused_reason === 'lead_archived' ? 'lead arquivado — desarquive pra retomar' :
+                                leadFollowUp.paused_reason === 'lead_inactive' ? 'lead inativo' :
+                                leadFollowUp.paused_reason === 'lead_no_phone' ? 'lead sem telefone' :
+                                leadFollowUp.paused_reason === 'send_failed' ? 'envio recusado pela Evolution' :
+                                leadFollowUp.paused_reason === 'send_error' ? 'erro de rede no envio' :
+                                leadFollowUp.paused_reason === 'follow_up_inactive' ? 'follow-up desativado' :
                                 leadFollowUp.paused_reason || ''}
                             </div>
                             <div style={{ display: 'flex', gap: 4, marginTop: 6 }}>
