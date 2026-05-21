@@ -463,6 +463,58 @@ addColumnIfNotExists('instance_auto_messages', 'greeting_cooldown_hours', 'INTEG
 // proposals.has_comissao + comissao_percent: comissao sobre faturamento (opcional, alguns clientes tem)
 addColumnIfNotExists('proposals', 'has_comissao', 'INTEGER NOT NULL DEFAULT 0')
 addColumnIfNotExists('proposals', 'comissao_percent', 'REAL NOT NULL DEFAULT 0')
+
+// Follow-ups (cadencias automaticas — diferentes das cadencias manuais ja existentes)
+db.exec(`
+  CREATE TABLE IF NOT EXISTS follow_ups (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id      INTEGER NOT NULL,
+    name            TEXT NOT NULL,
+    description     TEXT,
+    instance_id     INTEGER NOT NULL,
+    stop_on_reply   INTEGER NOT NULL DEFAULT 1,
+    is_active       INTEGER NOT NULL DEFAULT 1,
+    created_by      INTEGER,
+    created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at      TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE,
+    FOREIGN KEY (instance_id) REFERENCES whatsapp_instances(id) ON DELETE SET NULL,
+    FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS follow_up_steps (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    follow_up_id      INTEGER NOT NULL,
+    position          INTEGER NOT NULL,
+    delay_minutes     INTEGER NOT NULL DEFAULT 0,
+    message_template  TEXT NOT NULL,
+    created_at        TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (follow_up_id) REFERENCES follow_ups(id) ON DELETE CASCADE
+  );
+  CREATE INDEX IF NOT EXISTS idx_followup_steps ON follow_up_steps(follow_up_id, position);
+
+  CREATE TABLE IF NOT EXISTS lead_follow_ups (
+    id                       INTEGER PRIMARY KEY AUTOINCREMENT,
+    lead_id                  INTEGER NOT NULL,
+    follow_up_id             INTEGER NOT NULL,
+    current_step_id          INTEGER,
+    status                   TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'paused', 'completed', 'cancelled')),
+    next_run_at              TEXT,
+    last_executed_at         TEXT,
+    last_executed_step_id    INTEGER,
+    paused_at                TEXT,
+    paused_reason            TEXT,
+    started_at               TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at               TEXT NOT NULL DEFAULT (datetime('now')),
+    assigned_by              INTEGER,
+    FOREIGN KEY (lead_id) REFERENCES leads(id) ON DELETE CASCADE,
+    FOREIGN KEY (follow_up_id) REFERENCES follow_ups(id) ON DELETE CASCADE,
+    FOREIGN KEY (current_step_id) REFERENCES follow_up_steps(id) ON DELETE SET NULL,
+    FOREIGN KEY (assigned_by) REFERENCES users(id) ON DELETE SET NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_lead_followups_pending ON lead_follow_ups(status, next_run_at);
+  CREATE INDEX IF NOT EXISTS idx_lead_followups_by_lead ON lead_follow_ups(lead_id, status);
+`)
 // whatsapp_instances.lead_intake_mode: 'open' (atual, qualquer msg cria lead) | 'restricted' (so processa leads ja cadastrados no CRM)
 addColumnIfNotExists('whatsapp_instances', 'lead_intake_mode', "TEXT NOT NULL DEFAULT 'open'")
 // leads.is_blocked: bloqueio total (lead some do CRM e mensagens futuras sao silenciosamente ignoradas pelo webhook)

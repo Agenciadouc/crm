@@ -6,18 +6,19 @@ import {
   fetchWhatsAppInstances, fetchLeads, fetchLead, fetchFunnels, fetchUsers, fetchTags,
   sendMessage, sendMessageMedia, updateLead, moveLeadStage, assignLead, addLeadNote, addLeadTag, removeLeadTag,
   fetchLeadCadence, advanceLeadCadence, removeLeadCadence, fetchCadences, assignLeadCadence, createTag,
+  fetchLeadFollowUp, fetchFollowUps, assignFollowUp, pauseLeadFollowUp, resumeLeadFollowUp, cancelLeadFollowUp,
   archiveLead, blockLead, createStandaloneTask, fetchLeadTasks, completeStandaloneTask, deleteStandaloneTask, completeTask, skipTask, fetchLeadConversations, type LeadConversation,
   fetchReadyMessages, type ReadyMessage,
   createLeadOrFindExisting,
   requestLeadTransfer, acceptTransferRequest, rejectTransferRequest, fetchPendingTransferRequests, grabLead, type TransferRequest,
   type WhatsAppInstance, type Lead, type Message, type StageHistoryEntry, type LeadNote,
-  type Funnel, type User as UserType, type Tag, type LeadCadence, type Cadence,
+  type Funnel, type User as UserType, type Tag, type LeadCadence, type Cadence, type LeadFollowUp, type FollowUp,
 } from '../lib/api'
 import EditTaskModal from '../components/EditTaskModal'
 import FilterDropdown, { type FilterValue } from '../components/FilterDropdown'
 import {
   MessageCircle, Search, Send, Phone, User, Edit3, Save, X, Plus,
-  StickyNote, Tag as TagIcon, GitBranch, Smartphone, ListOrdered, ChevronRight, Check, Clock, Archive, Ban, ListTodo, ChevronDown, ChevronUp, Trash2, Paperclip, FileText, MessageSquarePlus, Copy,
+  StickyNote, Tag as TagIcon, GitBranch, Smartphone, ListOrdered, ChevronRight, Check, Clock, Archive, Ban, ListTodo, ChevronDown, ChevronUp, Trash2, Paperclip, FileText, MessageSquarePlus, Copy, Zap, Pause, Play,
   Menu as MenuIcon, MessagesSquare, Info as InfoIcon, History as HistoryIcon, ChevronLeft,
 } from 'lucide-react'
 import MessageMedia from '../components/MessageMedia'
@@ -84,6 +85,9 @@ export default function Chat() {
   const [leadCadence, setLeadCadence] = useState<LeadCadence | null>(null)
   const [cadences, setCadences] = useState<Cadence[]>([])
   const [showCadenceMenu, setShowCadenceMenu] = useState(false)
+  const [leadFollowUp, setLeadFollowUp] = useState<LeadFollowUp | null>(null)
+  const [followUps, setFollowUps] = useState<FollowUp[]>([])
+  const [showFollowUpMenu, setShowFollowUpMenu] = useState(false)
   const [search, setSearch] = useState('')
   const [tagFilter, setTagFilter] = useState<FilterValue[]>([])
   const [attendantFilter, setAttendantFilter] = useState<FilterValue[]>([])
@@ -139,6 +143,7 @@ export default function Chat() {
     fetchUsers(accountId).then(setUsers)
     fetchTags(accountId).then(setTags)
     fetchCadences(accountId).then(setCadences)
+    fetchFollowUps(accountId).then(setFollowUps).catch(() => {})
     fetchReadyMessages(accountId).then(setReadyMessages).catch(() => {})
   }, [accountId])
 
@@ -232,6 +237,10 @@ export default function Chat() {
         }))
       } else setCadenceMsgText('')
     } catch { setLeadCadence(null); setCadenceMsgText('') }
+    try {
+      const lfu = await fetchLeadFollowUp(selectedLeadId, accountId)
+      setLeadFollowUp(lfu)
+    } catch { setLeadFollowUp(null) }
   }, [selectedLeadId, accountId])
   useEffect(() => { loadLead() }, [loadLead])
 
@@ -608,6 +617,31 @@ export default function Chat() {
   const handleAddTag = async (tagId: number) => { if (lead) { await addLeadTag(lead.id, tagId); loadLead(); setShowTagMenu(false) } }
   const handleRemoveTag = async (tagId: number) => { if (lead) { await removeLeadTag(lead.id, tagId); loadLead() } }
   const handleAdvanceCadence = async () => { if (leadCadence && accountId) { await advanceLeadCadence(leadCadence.id, accountId); loadLead() } }
+
+  const handleAssignFollowUp = async (followUpId: number) => {
+    if (!lead || !accountId) return
+    try {
+      await assignFollowUp(followUpId, accountId, lead.id)
+      setShowFollowUpMenu(false)
+      loadLead()
+    } catch (e: any) { setNotice({ kind: 'error', title: 'Erro ao atribuir follow-up', message: e?.message || '' }) }
+  }
+  const handlePauseFollowUp = async () => {
+    if (!leadFollowUp || !accountId) return
+    try { await pauseLeadFollowUp(leadFollowUp.id, accountId); loadLead() }
+    catch (e: any) { setNotice({ kind: 'error', title: 'Erro', message: e?.message || '' }) }
+  }
+  const handleResumeFollowUp = async () => {
+    if (!leadFollowUp || !accountId) return
+    try { await resumeLeadFollowUp(leadFollowUp.id, accountId); loadLead() }
+    catch (e: any) { setNotice({ kind: 'error', title: 'Erro', message: e?.message || '' }) }
+  }
+  const handleCancelFollowUp = async () => {
+    if (!leadFollowUp || !accountId) return
+    if (!confirm('Cancelar follow-up deste lead? Não enviará mais nenhuma mensagem automática.')) return
+    try { await cancelLeadFollowUp(leadFollowUp.id, accountId); loadLead() }
+    catch (e: any) { setNotice({ kind: 'error', title: 'Erro', message: e?.message || '' }) }
+  }
   const handleViewScript = () => { if (leadCadence?.attempt_script) setScriptModal({ text: leadCadence.attempt_script }) }
   const handleSendCadenceMessage = async () => {
     if (!cadenceMsgText.trim() || !lead || !accountId || !leadCadence) return
@@ -1248,6 +1282,83 @@ export default function Chat() {
                     ) : (
                       <div style={{ fontSize: 11, color: '#6B6580' }}>Nenhuma cadencia atribuida</div>
                     ))}
+                  </div>
+
+                  {/* Follow-up (cadencia automatica) */}
+                  <div className="card" style={{ padding: 12, marginTop: 12 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                      <div style={{ fontSize: 10, color: '#9B96B0', textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: 3 }}>
+                        <Zap size={10} /> Follow-up (auto)
+                      </div>
+                      <div style={{ position: 'relative' }}>
+                        <button className="btn btn-secondary btn-sm" onClick={() => setShowFollowUpMenu(!showFollowUpMenu)} style={{ padding: '2px 8px', fontSize: 10 }}>
+                          {leadFollowUp ? 'Trocar' : 'Atribuir'}
+                        </button>
+                        {showFollowUpMenu && (
+                          <div style={{ position: 'absolute', right: 0, top: '100%', marginTop: 4, background: 'var(--bg-card)', border: '1px solid var(--border-medium)', borderRadius: 8, padding: 4, zIndex: 50, minWidth: 220, maxHeight: 220, overflowY: 'auto' }}>
+                            {followUps.length === 0 && <div style={{ padding: 8, fontSize: 11, color: '#9B96B0' }}>Nenhum follow-up. Crie em /follow-ups</div>}
+                            {followUps.filter(f => f.is_active).map(f => (
+                              <button key={f.id} onClick={() => handleAssignFollowUp(f.id)} style={{ display: 'block', padding: '6px 10px', border: 'none', background: 'none', color: '#fff', fontSize: 11, cursor: 'pointer', borderRadius: 4, width: '100%', textAlign: 'left' }}>
+                                {f.name} <span style={{ color: '#6B6580' }}>({f.steps_count} etapas · {f.instance_name})</span>
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                    {leadFollowUp ? (
+                      <>
+                        <div style={{ fontSize: 12, fontWeight: 600 }}>{leadFollowUp.follow_up_name}</div>
+                        <div style={{ fontSize: 11, color: '#9B96B0', marginTop: 2 }}>
+                          <Smartphone size={10} style={{ verticalAlign: -1 }} /> {leadFollowUp.instance_name || '—'}
+                        </div>
+                        {leadFollowUp.status === 'completed' ? (
+                          <div style={{ fontSize: 11, color: '#34C759', marginTop: 4, display: 'flex', alignItems: 'center', gap: 3 }}>
+                            <Check size={10} /> Concluído (todas etapas enviadas)
+                          </div>
+                        ) : leadFollowUp.status === 'cancelled' ? (
+                          <div style={{ fontSize: 11, color: '#9B96B0', marginTop: 4 }}>Cancelado</div>
+                        ) : leadFollowUp.status === 'paused' ? (
+                          <>
+                            <div style={{ fontSize: 11, color: '#FBBC04', marginTop: 4 }}>
+                              ⏸ Pausado — {leadFollowUp.paused_reason === 'lead_replied' ? 'lead respondeu' :
+                                leadFollowUp.paused_reason === 'instance_offline' ? 'instância offline' :
+                                leadFollowUp.paused_reason === 'manual' ? 'manual' :
+                                leadFollowUp.paused_reason || ''}
+                            </div>
+                            <div style={{ display: 'flex', gap: 4, marginTop: 6 }}>
+                              <button className="btn btn-primary btn-sm" style={{ fontSize: 10, padding: '3px 8px', flex: 1 }} onClick={handleResumeFollowUp}>
+                                <Play size={10} /> Retomar
+                              </button>
+                              <button className="btn btn-danger btn-sm" style={{ fontSize: 10, padding: '3px 8px' }} onClick={handleCancelFollowUp}>
+                                <Trash2 size={10} />
+                              </button>
+                            </div>
+                          </>
+                        ) : (
+                          <>
+                            <div style={{ fontSize: 11, color: '#FFB300', marginTop: 4 }}>
+                              Etapa {leadFollowUp.current_position}/{leadFollowUp.total_steps}
+                            </div>
+                            {leadFollowUp.next_run_at && (
+                              <div style={{ fontSize: 10, color: '#9B96B0', marginTop: 2 }}>
+                                Próximo envio: {parseSqlDate(leadFollowUp.next_run_at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                              </div>
+                            )}
+                            <div style={{ display: 'flex', gap: 4, marginTop: 6 }}>
+                              <button className="btn btn-secondary btn-sm" style={{ fontSize: 10, padding: '3px 8px', flex: 1 }} onClick={handlePauseFollowUp}>
+                                <Pause size={10} /> Pausar
+                              </button>
+                              <button className="btn btn-danger btn-sm" style={{ fontSize: 10, padding: '3px 8px' }} onClick={handleCancelFollowUp}>
+                                <Trash2 size={10} />
+                              </button>
+                            </div>
+                          </>
+                        )}
+                      </>
+                    ) : (
+                      <div style={{ fontSize: 11, color: '#6B6580' }}>Nenhum follow-up ativo</div>
+                    )}
                   </div>
 
                   {/* Lead pending tasks */}

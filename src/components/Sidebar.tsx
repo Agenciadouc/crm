@@ -7,7 +7,7 @@ import { apiFetch, fetchTaskCounts, fetchPendingTransferRequests } from '../lib/
 import {
   LayoutDashboard, Kanban, Users, MessageCircle, UserCog, GitBranch,
   Plug, Settings, Building2, LogOut, UsersRound, Menu, X,
-  ListOrdered, MessageSquarePlus, ClipboardList, Rocket, ListTodo, ExternalLink, Tag as TagIcon, FileText, FileSignature, ArrowRightLeft,
+  ListOrdered, MessageSquarePlus, ClipboardList, Rocket, ListTodo, ExternalLink, Tag as TagIcon, FileText, FileSignature, ArrowRightLeft, Zap,
 } from 'lucide-react'
 
 export default function Sidebar() {
@@ -155,6 +155,7 @@ export default function Sidebar() {
               <NavLink to="/settings" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`} onClick={closeMobile}><Settings size={16} /> Configuracoes</NavLink>
               <div className="nav-section">Automacao</div>
               <NavLink to="/cadences" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`} onClick={closeMobile}><ListOrdered size={16} /> Cadencias</NavLink>
+              <NavLink to="/follow-ups" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`} onClick={closeMobile}><Zap size={16} /> Follow-ups</NavLink>
               <NavLink to="/ready-messages" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`} onClick={closeMobile}><MessageSquarePlus size={16} /> Msgs Prontas</NavLink>
               <NavLink to="/qualifications" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`} onClick={closeMobile}><ClipboardList size={16} /> Qualificacao</NavLink>
               <NavLink to="/launches" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`} onClick={closeMobile}><Rocket size={16} /> Lancamentos</NavLink>

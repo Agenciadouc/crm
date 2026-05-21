@@ -359,6 +359,53 @@ export const removeLeadCadence = (lcId: number, accountId: number) => apiFetch(`
 export const fetchLeadCadence = (leadId: number, accountId: number) => apiFetch<{ leadCadence: LeadCadence | null }>(`/api/cadences/lead/${leadId}?account_id=${accountId}`).then(d => d.leadCadence)
 
 // =============================================
+// Follow-ups (cadencias automaticas — envio sozinho via scheduler)
+// =============================================
+export interface FollowUpStep {
+  id?: number; follow_up_id?: number; position?: number;
+  delay_minutes: number; message_template: string;
+}
+export interface FollowUp {
+  id: number; account_id: number; name: string; description: string | null;
+  instance_id: number; instance_name?: string | null; instance_status?: string | null;
+  stop_on_reply: number; is_active: number;
+  steps?: FollowUpStep[]; steps_count?: number; active_leads?: number;
+  created_by: number | null; created_by_name?: string | null;
+  created_at: string; updated_at: string;
+}
+export interface LeadFollowUp {
+  id: number; lead_id: number; follow_up_id: number;
+  follow_up_name?: string; instance_id?: number; instance_name?: string | null;
+  stop_on_reply?: number;
+  current_step_id: number | null; current_position?: number; current_message?: string | null;
+  total_steps?: number;
+  status: 'active' | 'paused' | 'completed' | 'cancelled';
+  next_run_at: string | null;
+  last_executed_at: string | null;
+  paused_at: string | null; paused_reason: string | null;
+  started_at: string;
+}
+
+export const fetchFollowUps = (accountId: number) => apiFetch<{ follow_ups: FollowUp[] }>(`/api/follow-ups?account_id=${accountId}`).then(d => d.follow_ups)
+export const fetchFollowUp = (id: number, accountId: number) => apiFetch<{ follow_up: FollowUp }>(`/api/follow-ups/${id}?account_id=${accountId}`).then(d => d.follow_up)
+export const createFollowUp = (accountId: number, data: { name: string; description?: string; instance_id: number; stop_on_reply: boolean; steps: FollowUpStep[] }) =>
+  apiFetch<{ follow_up: FollowUp }>(`/api/follow-ups?account_id=${accountId}`, { method: 'POST', body: JSON.stringify(data) }).then(d => d.follow_up)
+export const updateFollowUp = (id: number, accountId: number, data: Partial<FollowUp> & { steps?: FollowUpStep[] }) =>
+  apiFetch<{ follow_up: FollowUp }>(`/api/follow-ups/${id}?account_id=${accountId}`, { method: 'PUT', body: JSON.stringify(data) }).then(d => d.follow_up)
+export const deleteFollowUp = (id: number, accountId: number, force = false) =>
+  apiFetch(`/api/follow-ups/${id}?account_id=${accountId}${force ? '&force=1' : ''}`, { method: 'DELETE' })
+export const assignFollowUp = (followUpId: number, accountId: number, leadId: number) =>
+  apiFetch<{ lead_follow_up: LeadFollowUp }>(`/api/follow-ups/${followUpId}/assign?account_id=${accountId}`, { method: 'POST', body: JSON.stringify({ lead_id: leadId }) }).then(d => d.lead_follow_up)
+export const pauseLeadFollowUp = (lfuId: number, accountId: number) =>
+  apiFetch(`/api/follow-ups/lead/${lfuId}/pause?account_id=${accountId}`, { method: 'POST' })
+export const resumeLeadFollowUp = (lfuId: number, accountId: number) =>
+  apiFetch(`/api/follow-ups/lead/${lfuId}/resume?account_id=${accountId}`, { method: 'POST' })
+export const cancelLeadFollowUp = (lfuId: number, accountId: number) =>
+  apiFetch(`/api/follow-ups/lead/${lfuId}/cancel?account_id=${accountId}`, { method: 'POST' })
+export const fetchLeadFollowUp = (leadId: number, accountId: number) =>
+  apiFetch<{ lead_follow_up: LeadFollowUp | null }>(`/api/follow-ups/lead/${leadId}?account_id=${accountId}`).then(d => d.lead_follow_up)
+
+// =============================================
 // Tasks (cadence steps that need execution)
 // =============================================
 

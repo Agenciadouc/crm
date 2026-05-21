@@ -2,6 +2,7 @@ import fetch from 'node-fetch'
 import db from './db.js'
 import { broadcastSSE } from './sse.js'
 import { resumeBroadcastIfPaused, runBroadcastLoop } from './routes/broadcasts.js'
+import { sendFollowUpMessage, resumeFollowUpsIfPaused } from './services/followUpSender.js'
 import { triggerCapiForStageChange } from './services/metaCapi.js'
 
 // Roda a cada 1min — precisao do agendamento <= 60s. Custo desprezivel (1 SELECT/min).
@@ -35,9 +36,10 @@ async function checkWhatsAppInstances() {
       if (newStatus !== inst.status) {
         db.prepare("UPDATE whatsapp_instances SET status = ?, updated_at = datetime('now') WHERE id = ?").run(newStatus, inst.id)
         console.log(`[Health] ${inst.instance_name}: ${inst.status} → ${newStatus}`)
-        // Se reconectou, retoma broadcasts pausados desta instancia
+        // Se reconectou, retoma broadcasts e follow-ups pausados desta instancia
         if (newStatus === 'connected' && inst.status !== 'connected') {
           try { resumeBroadcastIfPaused(inst.id) } catch (e) { console.error('[Health] Resume broadcast error:', e.message) }
+          try { resumeFollowUpsIfPaused(inst.id) } catch (e) { console.error('[Health] Resume follow-up error:', e.message) }
         }
       }
 
@@ -326,6 +328,21 @@ function cleanupStaleQRCodes() {
   `).run()
 }
 
+// ─── Follow-ups due ─────────────────────────────────────────────
+async function processFollowUps() {
+  const due = db.prepare(`
+    SELECT id FROM lead_follow_ups
+    WHERE status='active' AND next_run_at IS NOT NULL AND datetime(next_run_at) <= datetime('now')
+    ORDER BY next_run_at ASC
+    LIMIT 50
+  `).all()
+  if (due.length === 0) return
+  console.log(`[FollowUp] Processando ${due.length} follow-up(s) due`)
+  for (const r of due) {
+    sendFollowUpMessage(r.id).catch(err => console.error(`[FollowUp] Erro envio id=${r.id}:`, err.message))
+  }
+}
+
 // ─── Main tick (every 5 min) ─────────────────────────────────────
 async function tick() {
   try {
@@ -333,6 +350,7 @@ async function tick() {
       checkWhatsAppInstances(),
       processCadences(),
       processScheduledBroadcasts(),
+      processFollowUps(),
     ])
     cleanupStaleQRCodes()
     // Re-register webhooks every tick to prevent stale webhooks

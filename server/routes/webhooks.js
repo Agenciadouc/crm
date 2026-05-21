@@ -541,6 +541,20 @@ router.post('/evolution/:accountSlug', (req, res) => {
     // Inbound messages from client don't auto-advance (attendant controls flow)
     if (fromMe && content) autoDetectStage(lead, content)
 
+    // Auto-pausa follow-up se lead respondeu (stop_on_reply=1 no follow-up)
+    if (!fromMe && lead) {
+      const activeFu = db.prepare(`
+        SELECT lfu.id FROM lead_follow_ups lfu
+        JOIN follow_ups fu ON fu.id = lfu.follow_up_id
+        WHERE lfu.lead_id = ? AND lfu.status = 'active' AND fu.stop_on_reply = 1
+        LIMIT 1
+      `).get(lead.id)
+      if (activeFu) {
+        db.prepare("UPDATE lead_follow_ups SET status='paused', paused_at=datetime('now'), paused_reason='lead_replied', updated_at=datetime('now') WHERE id=?").run(activeFu.id)
+        console.log(`[FollowUp] Pausado lead=${lead.id} (respondeu)`)
+      }
+    }
+
     // Update lead name if we have pushName REAL (nao fromMe) e lead nao tem nome
     // OU lead tem nome igual ao telefone (placeholder), trocar pelo pushName real
     if (leadName && (!lead.name || lead.name === lead.phone || lead.name === 'Sem nome')) {
