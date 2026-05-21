@@ -464,6 +464,14 @@ addColumnIfNotExists('instance_auto_messages', 'greeting_cooldown_hours', 'INTEG
 addColumnIfNotExists('proposals', 'has_comissao', 'INTEGER NOT NULL DEFAULT 0')
 addColumnIfNotExists('proposals', 'comissao_percent', 'REAL NOT NULL DEFAULT 0')
 
+// Follow-ups v2: tipo (sequence/inactivity) + campos especificos de inactivity + datas absolutas em steps
+addColumnIfNotExists('follow_ups', 'type', "TEXT NOT NULL DEFAULT 'sequence'")
+addColumnIfNotExists('follow_ups', 'inactivity_stage_id', 'INTEGER REFERENCES funnel_stages(id) ON DELETE SET NULL')
+addColumnIfNotExists('follow_ups', 'inactivity_days', 'INTEGER NOT NULL DEFAULT 2')
+addColumnIfNotExists('follow_ups', 'variation_delay_seconds', 'INTEGER NOT NULL DEFAULT 30')
+addColumnIfNotExists('follow_up_steps', 'schedule_mode', "TEXT NOT NULL DEFAULT 'relative'")
+addColumnIfNotExists('follow_up_steps', 'scheduled_at', 'TEXT')
+
 // Follow-ups (cadencias automaticas — diferentes das cadencias manuais ja existentes)
 db.exec(`
   CREATE TABLE IF NOT EXISTS follow_ups (

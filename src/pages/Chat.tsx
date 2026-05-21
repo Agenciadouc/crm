@@ -1297,7 +1297,7 @@ export default function Chat() {
                         {showFollowUpMenu && (
                           <div style={{ position: 'absolute', right: 0, top: '100%', marginTop: 4, background: 'var(--bg-card)', border: '1px solid var(--border-medium)', borderRadius: 8, padding: 4, zIndex: 50, minWidth: 220, maxHeight: 220, overflowY: 'auto' }}>
                             {followUps.length === 0 && <div style={{ padding: 8, fontSize: 11, color: '#9B96B0' }}>Nenhum follow-up. Crie em /follow-ups</div>}
-                            {followUps.filter(f => f.is_active).map(f => (
+                            {followUps.filter(f => f.is_active && (f.type || 'sequence') === 'sequence').map(f => (
                               <button key={f.id} onClick={() => handleAssignFollowUp(f.id)} style={{ display: 'block', padding: '6px 10px', border: 'none', background: 'none', color: '#fff', fontSize: 11, cursor: 'pointer', borderRadius: 4, width: '100%', textAlign: 'left' }}>
                                 {f.name} <span style={{ color: '#6B6580' }}>({f.steps_count} etapas · {f.instance_name})</span>
                               </button>

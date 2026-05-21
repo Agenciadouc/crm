@@ -112,10 +112,35 @@ export async function sendFollowUpMessage(leadFollowUpId) {
       VALUES (?, ?, 'outbound', ?, 'text', 'Follow-up auto', ?, datetime('now'), ?)
     `).run(lead.id, lead.account_id, text, wamsgId, instance.id)
 
-    // Avanca step
+    // Inactivity: one-shot, NAO avanca pra proximo step (cada execucao = uma variacao independente)
+    if ((followUp.type || 'sequence') === 'inactivity') {
+      db.prepare(`
+        UPDATE lead_follow_ups SET
+          status = 'completed',
+          current_step_id = NULL,
+          last_executed_at = datetime('now'),
+          last_executed_step_id = ?,
+          next_run_at = NULL,
+          updated_at = datetime('now')
+        WHERE id = ?
+      `).run(step.id, leadFollowUpId)
+      try { broadcastSSE(lead.account_id, 'followup:completed', { lead_id: lead.id, follow_up_id: followUp.id }) } catch {}
+      try { broadcastSSE(lead.account_id, 'lead:message', { lead_id: lead.id }) } catch {}
+      return
+    }
+
+    // Sequence: avanca pro proximo step (respeita modo absolute/relative)
     const nextStep = db.prepare("SELECT * FROM follow_up_steps WHERE follow_up_id = ? AND position > ? ORDER BY position ASC LIMIT 1").get(followUp.id, step.position)
     if (nextStep) {
-      const nextRun = new Date(Date.now() + (nextStep.delay_minutes || 0) * 60_000).toISOString().replace('T', ' ').slice(0, 19)
+      // computeNextRun: se mode='absolute' usa scheduled_at, senao now+delay
+      let nextRunDate
+      if (nextStep.schedule_mode === 'absolute' && nextStep.scheduled_at) {
+        const target = new Date(nextStep.scheduled_at.replace(' ', 'T') + (nextStep.scheduled_at.endsWith('Z') ? '' : 'Z'))
+        nextRunDate = (isNaN(target.getTime()) || target.getTime() < Date.now()) ? new Date() : target
+      } else {
+        nextRunDate = new Date(Date.now() + (nextStep.delay_minutes || 0) * 60_000)
+      }
+      const nextRun = nextRunDate.toISOString().replace('T', ' ').slice(0, 19)
       db.prepare(`
         UPDATE lead_follow_ups SET
           current_step_id = ?,

@@ -3,6 +3,7 @@ import db from './db.js'
 import { broadcastSSE } from './sse.js'
 import { resumeBroadcastIfPaused, runBroadcastLoop } from './routes/broadcasts.js'
 import { sendFollowUpMessage, resumeFollowUpsIfPaused } from './services/followUpSender.js'
+import { processInactivityFollowUps } from './services/inactivityScanner.js'
 import { triggerCapiForStageChange } from './services/metaCapi.js'
 
 // Roda a cada 1min — precisao do agendamento <= 60s. Custo desprezivel (1 SELECT/min).
@@ -351,6 +352,7 @@ async function tick() {
       processCadences(),
       processScheduledBroadcasts(),
       processFollowUps(),
+      processInactivityFollowUps(),
     ])
     cleanupStaleQRCodes()
     // Re-register webhooks every tick to prevent stale webhooks

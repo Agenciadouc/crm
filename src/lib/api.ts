@@ -364,11 +364,17 @@ export const fetchLeadCadence = (leadId: number, accountId: number) => apiFetch<
 export interface FollowUpStep {
   id?: number; follow_up_id?: number; position?: number;
   delay_minutes: number; message_template: string;
+  schedule_mode?: 'relative' | 'absolute';
+  scheduled_at?: string | null;
 }
 export interface FollowUp {
   id: number; account_id: number; name: string; description: string | null;
   instance_id: number; instance_name?: string | null; instance_status?: string | null;
   stop_on_reply: number; is_active: number;
+  type?: 'sequence' | 'inactivity';
+  inactivity_stage_id?: number | null;
+  inactivity_days?: number;
+  variation_delay_seconds?: number;
   steps?: FollowUpStep[]; steps_count?: number; active_leads?: number;
   created_by: number | null; created_by_name?: string | null;
   created_at: string; updated_at: string;
