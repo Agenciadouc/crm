@@ -46,6 +46,13 @@ function renderTemplate(p) {
     html = html.replace(/<!--\s*BEGIN:NO_PRODUCTION\s*-->/g, '').replace(/<!--\s*END:NO_PRODUCTION\s*-->/g, '')
   }
 
+  // Comissao sobre faturamento — bloco condicional
+  if (p.has_comissao && p.comissao_percent > 0) {
+    html = html.replace(/<!--\s*BEGIN:COMISSAO\s*-->/g, '').replace(/<!--\s*END:COMISSAO\s*-->/g, '')
+  } else {
+    html = html.replace(/<!--\s*BEGIN:COMISSAO\s*-->[\s\S]*?<!--\s*END:COMISSAO\s*-->/g, '')
+  }
+
   const replacements = {
     CLIENT_NAME: p.client_name || '',
     CLIENT_NAME_URL: encodeURIComponent(p.client_name || ''),
@@ -53,6 +60,7 @@ function renderTemplate(p) {
     NUM_IMAGES: String(p.num_images || 0),
     VALOR: formatBRL(p.valor),
     CONTRATO_MESES: String(p.contrato_meses || 3),
+    COMISSAO_PERCENT: String(p.comissao_percent || 0).replace('.', ','),
   }
 
   for (const [k, v] of Object.entries(replacements)) {
@@ -103,7 +111,7 @@ router.get('/:id', (req, res) => {
 })
 
 router.post('/', (req, res) => {
-  const { client_name, phone, segmento, has_production, num_videos, num_images, valor, contrato_meses, observacoes } = req.body
+  const { client_name, phone, segmento, has_production, num_videos, num_images, valor, contrato_meses, observacoes, has_comissao, comissao_percent } = req.body
   if (!client_name) return res.status(400).json({ error: 'client_name obrigatorio' })
 
   const baseSlug = slugify(client_name)
@@ -111,8 +119,8 @@ router.post('/', (req, res) => {
   const slug = uniqueSlug(baseSlug)
 
   const result = db.prepare(`
-    INSERT INTO proposals (slug, client_name, phone, segmento, has_production, num_videos, num_images, valor, contrato_meses, observacoes, created_by)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO proposals (slug, client_name, phone, segmento, has_production, num_videos, num_images, valor, contrato_meses, observacoes, has_comissao, comissao_percent, created_by)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     slug, client_name, phone || null, segmento || null,
     has_production ? 1 : 0,
@@ -120,6 +128,8 @@ router.post('/', (req, res) => {
     parseFloat(valor) || 0,
     parseInt(contrato_meses) || 3,
     observacoes || null,
+    has_comissao ? 1 : 0,
+    parseFloat(comissao_percent) || 0,
     req.user.id
   )
 
@@ -131,7 +141,7 @@ router.put('/:id', (req, res) => {
   const existing = db.prepare('SELECT * FROM proposals WHERE id = ?').get(req.params.id)
   if (!existing) return res.status(404).json({ error: 'Proposta nao encontrada' })
 
-  const { client_name, phone, segmento, has_production, num_videos, num_images, valor, contrato_meses, observacoes } = req.body
+  const { client_name, phone, segmento, has_production, num_videos, num_images, valor, contrato_meses, observacoes, has_comissao, comissao_percent } = req.body
 
   // Slug nao muda em edit (mantem URL fixa)
   const newName = client_name !== undefined ? client_name : existing.client_name
@@ -141,7 +151,7 @@ router.put('/:id', (req, res) => {
     UPDATE proposals SET
       client_name = ?, phone = ?, segmento = ?, has_production = ?,
       num_videos = ?, num_images = ?, valor = ?, contrato_meses = ?,
-      observacoes = ?, updated_at = datetime('now')
+      observacoes = ?, has_comissao = ?, comissao_percent = ?, updated_at = datetime('now')
     WHERE id = ?
   `).run(
     newName,
@@ -153,6 +163,8 @@ router.put('/:id', (req, res) => {
     valor !== undefined ? (parseFloat(valor) || 0) : existing.valor,
     contrato_meses !== undefined ? (parseInt(contrato_meses) || 3) : existing.contrato_meses,
     observacoes !== undefined ? (observacoes || null) : existing.observacoes,
+    has_comissao !== undefined ? (has_comissao ? 1 : 0) : existing.has_comissao,
+    comissao_percent !== undefined ? (parseFloat(comissao_percent) || 0) : existing.comissao_percent,
     req.params.id
   )
 

@@ -154,6 +154,7 @@ export interface Proposal {
   num_videos: number; num_images: number;
   valor: number; contrato_meses: number;
   observacoes: string | null;
+  has_comissao: number; comissao_percent: number;
   created_by: number | null; created_by_name?: string;
   created_at: string; updated_at: string;
 }
@@ -163,6 +164,7 @@ export interface ProposalInput {
   num_videos?: number; num_images?: number;
   valor: number; contrato_meses: number;
   observacoes?: string;
+  has_comissao?: boolean; comissao_percent?: number;
 }
 export const fetchProposals = () => apiFetch<{ proposals: Proposal[] }>('/api/proposals').then(d => d.proposals)
 export const createProposal = (data: ProposalInput) => apiFetch<{ proposal: Proposal }>('/api/proposals', { method: 'POST', body: JSON.stringify(data) }).then(d => d.proposal)

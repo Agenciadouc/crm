@@ -12,6 +12,8 @@ const BLANK: ProposalInput & { has_production: boolean } = {
   valor: 3500,
   contrato_meses: 3,
   observacoes: '',
+  has_comissao: false,
+  comissao_percent: 1,
 }
 
 const PROPOSAL_BASE_URL = `${window.location.protocol}//${window.location.host}/crm/proposta`
@@ -53,6 +55,8 @@ export default function Propostas() {
       valor: p.valor,
       contrato_meses: p.contrato_meses,
       observacoes: p.observacoes || '',
+      has_comissao: p.has_comissao === 1,
+      comissao_percent: p.comissao_percent || 1,
     })
     setModalMode(p.id)
   }
@@ -175,6 +179,31 @@ export default function Propostas() {
             <div className="form-row">
               <div className="form-group"><label>Mensalidade (R$) *</label><input className="input" type="number" step="0.01" min="0" value={form.valor} onChange={e => setForm(p => ({ ...p, valor: parseFloat(e.target.value) || 0 }))} /></div>
               <div className="form-group"><label>Contrato (meses) *</label><input className="input" type="number" min="1" max="60" value={form.contrato_meses} onChange={e => setForm(p => ({ ...p, contrato_meses: parseInt(e.target.value) || 3 }))} /></div>
+            </div>
+
+            <div className="form-group" style={{ padding: 10, background: form.has_comissao ? 'rgba(255,179,0,0.06)' : 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,179,0,0.15)', borderRadius: 8 }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', marginBottom: 0 }}>
+                <input type="checkbox" checked={!!form.has_comissao} onChange={e => setForm(p => ({ ...p, has_comissao: e.target.checked }))} />
+                <span style={{ fontWeight: 600 }}>+ Comissão sobre faturamento</span>
+              </label>
+              {form.has_comissao && (
+                <div style={{ marginTop: 8 }}>
+                  <label style={{ fontSize: 11, color: '#9B96B0' }}>Percentual (%) sobre faturamento excedente</label>
+                  <input
+                    className="input"
+                    type="number"
+                    step="0.1"
+                    min="0"
+                    max="100"
+                    value={form.comissao_percent ?? 1}
+                    onChange={e => setForm(p => ({ ...p, comissao_percent: parseFloat(e.target.value) || 0 }))}
+                    style={{ width: 100, marginTop: 4 }}
+                  />
+                  <p style={{ fontSize: 11, color: '#9B96B0', marginTop: 6, lineHeight: 1.4 }}>
+                    Vai aparecer na proposta como: <em>"Comissão de performance: {form.comissao_percent || 0}% sobre o faturamento bruto mensal que exceder o faturamento base."</em>
+                  </p>
+                </div>
+              )}
             </div>
 
             <div className="form-group">
