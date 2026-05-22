@@ -415,46 +415,85 @@ export async function processInboundMessage(lead, msgContent, mediaType, instanc
     // 9. Define tools
     const tools = getToolsForAgent(availableTags, availableStages)
 
-    // 10. Chama Haiku
-    let result
-    try {
-      result = await callHaiku({
-        systemPrompt,
-        messages: history,
-        tools,
-        maxTokens: 300,
-        toolChoice: 'auto',
-      })
-    } catch (e) {
-      console.error(`[AI Agent] Erro chamando Haiku agent=${agent.id}:`, e.message)
-      return
-    }
-
-    // 11. Log de uso (sempre, antes de processar tools)
-    db.prepare(`
-      INSERT INTO ai_agent_token_log (agent_id, account_id, lead_id, input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, cost_usd)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(agent.id, agent.account_id, lead.id, result.usage.input, result.usage.output, result.usage.cacheRead, result.usage.cacheCreation, result.costUsd)
-    const totalTokens = result.usage.input + result.usage.output + result.usage.cacheRead + result.usage.cacheCreation
-    db.prepare("UPDATE ai_agents SET tokens_used_this_month = tokens_used_this_month + ? WHERE id = ?").run(totalTokens, agent.id)
-
-    // 12. Executa tool_uses (se houver)
+    // 10-12. Multi-turn loop: chama Haiku, executa tools, se nao houver texto e teve tool, chama de novo com tool_results
+    const MAX_ITERATIONS = 4
+    let workingMessages = [...history]
+    let finalText = ''
+    let totalToolsExecuted = 0
+    let totalTokens = 0
+    let totalCost = 0
     let handoffTriggered = false
-    for (const tu of result.toolUses || []) {
-      const tr = await executeTool(tu, agent, lead, instanceId, availableTags, availableStages)
-      if (tr.handoff) handoffTriggered = true
+    let iterationsRun = 0
+
+    for (let i = 0; i < MAX_ITERATIONS; i++) {
+      iterationsRun++
+      let result
+      try {
+        result = await callHaiku({
+          systemPrompt,
+          messages: workingMessages,
+          tools,
+          maxTokens: 400,
+          toolChoice: 'auto',
+        })
+      } catch (e) {
+        console.error(`[AI Agent] Erro chamando Haiku agent=${agent.id} iter=${i}:`, e.message)
+        break
+      }
+
+      // Log de uso (cada chamada)
+      db.prepare(`
+        INSERT INTO ai_agent_token_log (agent_id, account_id, lead_id, input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, cost_usd)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(agent.id, agent.account_id, lead.id, result.usage.input, result.usage.output, result.usage.cacheRead, result.usage.cacheCreation, result.costUsd)
+      const iterTokens = result.usage.input + result.usage.output + result.usage.cacheRead + result.usage.cacheCreation
+      totalTokens += iterTokens
+      totalCost += result.costUsd
+      db.prepare("UPDATE ai_agents SET tokens_used_this_month = tokens_used_this_month + ? WHERE id = ?").run(iterTokens, agent.id)
+
+      // Acumula texto
+      if (result.content && result.content.trim()) finalText += (finalText ? ' ' : '') + result.content.trim()
+
+      // Sem tool_uses -> termina
+      if (!result.toolUses || result.toolUses.length === 0) break
+
+      // Executa tools e monta tool_results pra proxima iteracao
+      const toolResults = []
+      for (const tu of result.toolUses) {
+        totalToolsExecuted++
+        const tr = await executeTool(tu, agent, lead, instanceId, availableTags, availableStages)
+        if (tr.handoff) handoffTriggered = true
+        toolResults.push({
+          type: 'tool_result',
+          tool_use_id: tu.id,
+          content: tr.handoff ? `Handoff executado (reason=${tr.reason}). Termine a conversa.` : 'OK',
+        })
+      }
+
+      // Se handoff foi disparado, nao precisa continuar pedindo mais output
+      if (handoffTriggered) break
+
+      // Monta a proxima rodada: adiciona resposta do assistant (text + tool_uses) e o tool_result
+      const assistantContent = []
+      if (result.content && result.content.trim()) assistantContent.push({ type: 'text', text: result.content })
+      for (const tu of result.toolUses) assistantContent.push({ type: 'tool_use', id: tu.id, name: tu.name, input: tu.input })
+      workingMessages = [
+        ...workingMessages,
+        { role: 'assistant', content: assistantContent },
+        { role: 'user', content: toolResults },
+      ]
     }
 
-    // 13. Envia resposta texto (se houver content + nao houve handoff sem texto)
-    if (result.content && result.content.trim()) {
+    // 13. Envia resposta texto (se houver)
+    if (finalText && finalText.trim()) {
       const inst = db.prepare('SELECT * FROM whatsapp_instances WHERE id = ?').get(instanceId)
       if (inst && inst.status === 'connected') {
-        const sendRes = await sendEvolutionText(inst, lead.phone, result.content.trim())
+        const sendRes = await sendEvolutionText(inst, lead.phone, finalText.trim())
         if (sendRes.ok) {
           db.prepare(`
             INSERT INTO messages (lead_id, account_id, direction, content, media_type, sender_name, wa_msg_id, wa_timestamp, instance_id, ai_agent_id)
             VALUES (?, ?, 'outbound', ?, 'text', 'AI', ?, datetime('now'), ?, ?)
-          `).run(lead.id, lead.account_id, result.content.trim(), sendRes.wamsgId, instanceId, agent.id)
+          `).run(lead.id, lead.account_id, finalText.trim(), sendRes.wamsgId, instanceId, agent.id)
           try { broadcastSSE(lead.account_id, 'lead:message', { lead_id: lead.id }) } catch {}
         } else {
           console.error(`[AI Agent] Falha envio agent=${agent.id} lead=${lead.id}:`, JSON.stringify(sendRes.raw).substring(0, 200))
@@ -462,7 +501,7 @@ export async function processInboundMessage(lead, msgContent, mediaType, instanc
       }
     }
 
-    console.log(`[AI Agent] Processed lead=${lead.id} agent=${agent.id} tokens=${totalTokens} cost_usd=${result.costUsd.toFixed(6)} tools=${(result.toolUses || []).length} handoff=${handoffTriggered}`)
+    console.log(`[AI Agent] Processed lead=${lead.id} agent=${agent.id} iters=${iterationsRun} tokens=${totalTokens} cost_usd=${totalCost.toFixed(6)} tools=${totalToolsExecuted} handoff=${handoffTriggered} text_len=${finalText.length}`)
   } catch (err) {
     console.error('[AI Agent] processInboundMessage erro:', err.message)
   }
