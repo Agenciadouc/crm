@@ -43,6 +43,13 @@ router.post('/login', rateLimit, (req, res) => {
 router.get('/me', authenticate, (req, res) => {
   const user = db.prepare('SELECT id, email, name, role, account_id, avatar_url, can_manage_proposals, can_manage_contracts, can_grab_leads FROM users WHERE id = ?').get(req.user.id)
   if (!user) return res.status(401).json({ error: 'User not found' })
+  // Adiciona feature gate da conta (ai_agents_enabled) pro frontend mostrar/esconder aba
+  if (user.account_id) {
+    const acc = db.prepare('SELECT ai_agents_enabled FROM accounts WHERE id = ?').get(user.account_id)
+    user.account_ai_agents_enabled = acc?.ai_agents_enabled || 0
+  } else {
+    user.account_ai_agents_enabled = 0
+  }
   res.json({ user })
 })
 
