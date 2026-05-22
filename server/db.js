@@ -472,6 +472,89 @@ addColumnIfNotExists('follow_ups', 'variation_delay_seconds', 'INTEGER NOT NULL 
 addColumnIfNotExists('follow_up_steps', 'schedule_mode', "TEXT NOT NULL DEFAULT 'relative'")
 addColumnIfNotExists('follow_up_steps', 'scheduled_at', 'TEXT')
 
+// Agentes de IA (Claude Haiku 4.5) — F0+1 schema
+addColumnIfNotExists('accounts', 'ai_agents_enabled', 'INTEGER NOT NULL DEFAULT 0')
+addColumnIfNotExists('users', 'is_bot', 'INTEGER NOT NULL DEFAULT 0')
+addColumnIfNotExists('messages', 'ai_agent_id', 'INTEGER')
+addColumnIfNotExists('leads', 'ai_handed_off_at', 'TEXT')
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS ai_agents (
+    id                          INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id                  INTEGER NOT NULL,
+    user_id                     INTEGER NOT NULL,
+    name                        TEXT NOT NULL,
+    is_active                   INTEGER NOT NULL DEFAULT 1,
+    identifies_as_bot           INTEGER NOT NULL DEFAULT 1,
+    persona                     TEXT,
+    knowledge_base              TEXT,
+    never_mention               TEXT,
+    qualification_criteria      TEXT,
+    required_fields             TEXT,
+    responds_to_audio           INTEGER NOT NULL DEFAULT 0,
+    audio_decline_message       TEXT DEFAULT 'Oi! Por enquanto só leio mensagens de texto. Pode digitar pra mim?',
+    max_messages_before_handoff INTEGER NOT NULL DEFAULT 15,
+    handoff_keywords            TEXT DEFAULT 'humano,atendente,vendedor,corretor,pessoa',
+    activation_mode             TEXT NOT NULL DEFAULT 'conditional',
+    required_tag_id             INTEGER,
+    monthly_token_limit         INTEGER NOT NULL DEFAULT 500000,
+    tokens_used_this_month      INTEGER NOT NULL DEFAULT 0,
+    current_month               TEXT,
+    created_at                  TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at                  TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (required_tag_id) REFERENCES tags(id) ON DELETE SET NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS ai_agent_stages (
+    agent_id INTEGER NOT NULL,
+    stage_id INTEGER NOT NULL,
+    PRIMARY KEY (agent_id, stage_id),
+    FOREIGN KEY (agent_id) REFERENCES ai_agents(id) ON DELETE CASCADE,
+    FOREIGN KEY (stage_id) REFERENCES funnel_stages(id) ON DELETE CASCADE
+  );
+
+  CREATE TABLE IF NOT EXISTS ai_agent_instances (
+    agent_id    INTEGER NOT NULL,
+    instance_id INTEGER NOT NULL,
+    PRIMARY KEY (agent_id, instance_id),
+    FOREIGN KEY (agent_id) REFERENCES ai_agents(id) ON DELETE CASCADE,
+    FOREIGN KEY (instance_id) REFERENCES whatsapp_instances(id) ON DELETE CASCADE
+  );
+
+  CREATE TABLE IF NOT EXISTS ai_agent_handoff_rules (
+    agent_id              INTEGER NOT NULL,
+    reason                TEXT NOT NULL,
+    target_type           TEXT NOT NULL,
+    target_user_id        INTEGER,
+    fallback_to_roulette  INTEGER NOT NULL DEFAULT 1,
+    move_to_stage_id      INTEGER,
+    add_tag_id            INTEGER,
+    PRIMARY KEY (agent_id, reason),
+    FOREIGN KEY (agent_id) REFERENCES ai_agents(id) ON DELETE CASCADE,
+    FOREIGN KEY (target_user_id) REFERENCES users(id) ON DELETE SET NULL,
+    FOREIGN KEY (move_to_stage_id) REFERENCES funnel_stages(id) ON DELETE SET NULL,
+    FOREIGN KEY (add_tag_id) REFERENCES tags(id) ON DELETE SET NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS ai_agent_token_log (
+    id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+    agent_id              INTEGER NOT NULL,
+    account_id            INTEGER NOT NULL,
+    lead_id               INTEGER,
+    input_tokens          INTEGER NOT NULL DEFAULT 0,
+    output_tokens         INTEGER NOT NULL DEFAULT 0,
+    cache_read_tokens     INTEGER NOT NULL DEFAULT 0,
+    cache_creation_tokens INTEGER NOT NULL DEFAULT 0,
+    cost_usd              REAL,
+    created_at            TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (agent_id) REFERENCES ai_agents(id) ON DELETE CASCADE
+  );
+  CREATE INDEX IF NOT EXISTS idx_ai_agents_account ON ai_agents(account_id, is_active);
+  CREATE INDEX IF NOT EXISTS idx_ai_token_log_month ON ai_agent_token_log(agent_id, created_at);
+`)
+
 // Follow-ups (cadencias automaticas — diferentes das cadencias manuais ja existentes)
 db.exec(`
   CREATE TABLE IF NOT EXISTS follow_ups (
