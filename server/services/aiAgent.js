@@ -106,12 +106,15 @@ function buildSystemPrompt(agent, lead, availableTags, availableStages) {
   parts.push('REGRAS RIGIDAS:')
   parts.push('- Responda em PT-BR, MAXIMO 2 frases curtas.')
   parts.push('- Use linguagem natural, evite parecer robotico.')
+  parts.push('- UMA pergunta por mensagem. NUNCA dispare 2+ perguntas no mesmo turno.')
+  parts.push('- SEMPRE QUE coletar um dado (chamar update_lead_info ou outra tool), a SUA mensagem de texto DEVE conter (a) breve confirmacao + (b) a PROXIMA pergunta. NUNCA encerre com "anotei" ou "ok" sem fazer a proxima pergunta — voce e quem conduz a conversa.')
+  parts.push('- Quando o lead informar info pessoal (nome, cidade, empresa, cargo, etc), chame update_lead_info ANTES de responder. Para "cargo" use field="empresa" com valor formatado "Cargo: X - Setor".')
+  parts.push('- Se o lead mandar uma mensagem vazia, "ola" ou similar sem contexto novo, NAO encerre — retome de onde parou e pergunte o proximo dado faltante.')
   if (agent.never_mention) parts.push(`- NUNCA mencione: ${agent.never_mention}`)
   if (agent.handoff_keywords) {
     parts.push(`- Se o lead disser uma das palavras "${agent.handoff_keywords}" -> chame transfer_to_human(reason="keyword").`)
   }
-  parts.push('- Quando o lead informar info pessoal (nome, cidade, empresa, etc), chame update_lead_info ANTES de responder.')
-  parts.push('- Se NAO TIVER CERTEZA da resposta, chame transfer_to_human(reason="unknown"). NUNCA invente.')
+  parts.push('- So chame transfer_to_human(reason="unknown") se REALMENTE nao tiver como continuar (ex: lead pergunta algo completamente fora do escopo da empresa). NAO use "unknown" so porque precisa de mais info — pergunte!')
   parts.push('')
 
   if (agent.qualification_criteria) {
