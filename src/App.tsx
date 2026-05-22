@@ -20,6 +20,7 @@ import Integrations from './pages/Integrations'
 import SettingsPage from './pages/Settings'
 import Cadences from './pages/Cadences'
 import FollowUps from './pages/FollowUps'
+import Agents from './pages/Agents'
 import ReadyMessages from './pages/ReadyMessages'
 import Qualifications from './pages/Qualifications'
 import Launches from './pages/Launches'
@@ -102,6 +103,7 @@ function AppRoutes() {
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="/cadences" element={<Cadences />} />
             <Route path="/follow-ups" element={<FollowUps />} />
+            <Route path="/agents" element={<Agents />} />
             <Route path="/ready-messages" element={<ReadyMessages />} />
             <Route path="/qualifications" element={<Qualifications />} />
             <Route path="/launches" element={<Launches />} />

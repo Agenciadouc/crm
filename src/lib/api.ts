@@ -412,6 +412,116 @@ export const fetchLeadFollowUp = (leadId: number, accountId: number) =>
   apiFetch<{ lead_follow_up: LeadFollowUp | null }>(`/api/follow-ups/lead/${leadId}?account_id=${accountId}`).then(d => d.lead_follow_up)
 
 // =============================================
+// AI Agents (Haiku 4.5)
+// =============================================
+export type AgentActivationMode = 'default_attendant' | 'roulette' | 'conditional' | 'manual'
+export type AgentHandoffReason = 'qualified' | 'keyword' | 'unknown' | 'max_messages' | 'audio_received'
+
+export interface AgentHandoffRule {
+  agent_id?: number
+  reason: AgentHandoffReason
+  target_type: 'roulette' | 'specific_user'
+  target_user_id: number | null
+  fallback_to_roulette: number
+  move_to_stage_id: number | null
+  add_tag_id: number | null
+  target_user_name?: string
+  stage_name?: string
+  tag_name?: string
+}
+
+export interface AgentStage { id: number; name: string; color: string; funnel_id: number; funnel_name: string }
+export interface AgentInstance { id: number; instance_name: string; status: string }
+
+export interface Agent {
+  id: number
+  account_id: number
+  user_id: number
+  name: string
+  is_active: number
+  identifies_as_bot: number
+  persona: string | null
+  knowledge_base: string | null
+  never_mention: string | null
+  qualification_criteria: string | null
+  required_fields: string | null  // JSON
+  required_fields_arr?: string[]
+  responds_to_audio: number
+  audio_decline_message: string
+  max_messages_before_handoff: number
+  handoff_keywords: string
+  activation_mode: AgentActivationMode
+  required_tag_id: number | null
+  monthly_token_limit: number
+  tokens_used_this_month: number
+  current_month: string | null
+  created_at: string
+  updated_at: string
+  // Joined
+  bot_user_name?: string
+  stages_count?: number
+  instances_count?: number
+  stages?: AgentStage[]
+  instances?: AgentInstance[]
+  handoff_rules?: AgentHandoffRule[]
+}
+
+export interface AgentInput {
+  name: string
+  persona?: string
+  knowledge_base?: string
+  never_mention?: string
+  qualification_criteria?: string
+  required_fields?: string[]
+  responds_to_audio?: boolean
+  audio_decline_message?: string
+  max_messages_before_handoff?: number
+  handoff_keywords?: string
+  activation_mode?: AgentActivationMode
+  required_tag_id?: number | null
+  monthly_token_limit?: number
+  identifies_as_bot?: boolean
+  is_active?: boolean
+  stage_ids?: number[]
+  instance_ids?: number[]
+  handoff_rules?: Omit<AgentHandoffRule, 'agent_id'>[]
+}
+
+export interface AgentUsage {
+  monthly_limit: number
+  tokens_used_this_month: number
+  cost_usd_this_month: number
+  current_month: string | null
+  recent_log: Array<{
+    id: number; agent_id: number; lead_id: number | null; lead_name: string | null
+    input_tokens: number; output_tokens: number
+    cache_read_tokens: number; cache_creation_tokens: number
+    cost_usd: number; created_at: string
+  }>
+}
+
+export const fetchAgents = (accountId: number) =>
+  apiFetch<{ feature_enabled: boolean; agents: Agent[] }>(`/api/agents?account_id=${accountId}`)
+
+export const fetchAgent = (id: number, accountId: number) =>
+  apiFetch<{ agent: Agent }>(`/api/agents/${id}?account_id=${accountId}`).then(d => d.agent)
+
+export const createAgent = (accountId: number, data: AgentInput) =>
+  apiFetch<{ agent: Agent }>(`/api/agents?account_id=${accountId}`, { method: 'POST', body: JSON.stringify(data) }).then(d => d.agent)
+
+export const updateAgent = (id: number, accountId: number, data: Partial<AgentInput>) =>
+  apiFetch<{ agent: Agent }>(`/api/agents/${id}?account_id=${accountId}`, { method: 'PUT', body: JSON.stringify(data) }).then(d => d.agent)
+
+export const deleteAgent = (id: number, accountId: number) =>
+  apiFetch(`/api/agents/${id}?account_id=${accountId}`, { method: 'DELETE' })
+
+export const fetchAgentUsage = (id: number, accountId: number) =>
+  apiFetch<AgentUsage>(`/api/agents/${id}/usage?account_id=${accountId}`)
+
+export const testAgent = (id: number, accountId: number, message: string, history: Array<{ role: 'user' | 'assistant'; content: string }> = []) =>
+  apiFetch<{ response: string; usage: { input: number; output: number; cacheRead: number; cacheCreation: number; total: number }; cost_usd: number; stop_reason: string }>(`/api/agents/${id}/test?account_id=${accountId}`, { method: 'POST', body: JSON.stringify({ message, history }) })
+
+// =============================================
 // Tasks (cadence steps that need execution)
 // =============================================
 
