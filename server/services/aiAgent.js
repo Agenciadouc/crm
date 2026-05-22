@@ -37,57 +37,40 @@ function resetMonthlyTokensIfNeeded(agent) {
 // ─── findAgentForLead ─────────────────────────────────────────────────
 
 export function findAgentForLead(lead, instanceId) {
-  if (!lead) { console.log('[AI Agent DEBUG] findAgent: lead null'); return null }
+  if (!lead) return null
 
   // 0. Account tem feature gate?
   const account = getAccount(lead.account_id)
-  if (!account || !account.ai_agents_enabled) {
-    console.log(`[AI Agent DEBUG] findAgent lead=${lead.id}: feature off (ai_agents_enabled=${account?.ai_agents_enabled})`)
-    return null
-  }
+  if (!account || !account.ai_agents_enabled) return null
 
   // 1. Lead pode receber bot?
-  if (lead.is_blocked || lead.is_archived || !lead.is_active) {
-    console.log(`[AI Agent DEBUG] findAgent lead=${lead.id}: blocked=${lead.is_blocked} archived=${lead.is_archived} active=${lead.is_active}`)
-    return null
-  }
+  if (lead.is_blocked || lead.is_archived || !lead.is_active) return null
 
   // 2. Lead ja foi handoff'ed por bot? Nao volta a atender.
-  if (lead.ai_handed_off_at) {
-    console.log(`[AI Agent DEBUG] findAgent lead=${lead.id}: ja teve handoff em ${lead.ai_handed_off_at}`)
-    return null
-  }
+  if (lead.ai_handed_off_at) return null
 
   // 3. Lead ja tem atendente HUMANO definido? Bot nao interfere.
   if (lead.attendant_id) {
     const att = getUser(lead.attendant_id)
-    if (att && !att.is_bot) {
-      console.log(`[AI Agent DEBUG] findAgent lead=${lead.id}: atendente humano ${att.name} (id=${att.id})`)
-      return null
-    }
+    if (att && !att.is_bot) return null
   }
 
   // 4. Busca agentes ativos
   const agents = db.prepare("SELECT * FROM ai_agents WHERE account_id = ? AND is_active = 1 ORDER BY id ASC").all(lead.account_id)
-  console.log(`[AI Agent DEBUG] findAgent lead=${lead.id}: ${agents.length} agentes ativos na conta ${lead.account_id}`)
 
   for (const agent of agents) {
     // Filtro etapa
     const hasStage = db.prepare('SELECT 1 FROM ai_agent_stages WHERE agent_id = ? AND stage_id = ?').get(agent.id, lead.stage_id)
-    if (!hasStage) { console.log(`[AI Agent DEBUG] agent=${agent.id}: stage ${lead.stage_id} nao configurada`); continue }
+    if (!hasStage) continue
     // Filtro instancia (se instanceId presente)
     if (instanceId) {
       const hasInstance = db.prepare('SELECT 1 FROM ai_agent_instances WHERE agent_id = ? AND instance_id = ?').get(agent.id, instanceId)
-      if (!hasInstance) { console.log(`[AI Agent DEBUG] agent=${agent.id}: instance ${instanceId} nao configurada`); continue }
+      if (!hasInstance) continue
     }
     // Filtro tag obrigatoria
-    if (agent.required_tag_id && !leadHasTag(lead.id, agent.required_tag_id)) {
-      console.log(`[AI Agent DEBUG] agent=${agent.id}: tag ${agent.required_tag_id} nao no lead`)
-      continue
-    }
+    if (agent.required_tag_id && !leadHasTag(lead.id, agent.required_tag_id)) continue
 
     // Modo de ativacao
-    console.log(`[AI Agent DEBUG] agent=${agent.id} mode=${agent.activation_mode} agent.user_id=${agent.user_id} lead.attendant_id=${lead.attendant_id}`)
     switch (agent.activation_mode) {
       case 'default_attendant':
         if (lead.attendant_id === agent.user_id || !lead.attendant_id) return agent
@@ -102,7 +85,6 @@ export function findAgentForLead(lead, instanceId) {
         break
     }
   }
-  console.log(`[AI Agent DEBUG] findAgent lead=${lead.id}: nenhum agente aplicavel`)
   return null
 }
 

@@ -581,7 +581,20 @@ router.put('/:id/assign', requireRole('super_admin', 'gerente'), (req, res) => {
   const { attendant_id } = req.body
   const lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(req.params.id)
   if (!lead) return res.status(404).json({ error: 'Lead nao encontrado' })
-  db.prepare("UPDATE leads SET attendant_id = ?, updated_at = datetime('now') WHERE id = ?").run(attendant_id || null, lead.id)
+
+  // Se novo atendente eh um bot (is_bot=1), limpa ai_handed_off_at pra bot voltar a atender
+  let clearHandoff = false
+  if (attendant_id) {
+    const newAttendant = db.prepare('SELECT is_bot FROM users WHERE id = ?').get(attendant_id)
+    if (newAttendant?.is_bot === 1) clearHandoff = true
+  }
+
+  if (clearHandoff) {
+    db.prepare("UPDATE leads SET attendant_id = ?, ai_handed_off_at = NULL, updated_at = datetime('now') WHERE id = ?").run(attendant_id, lead.id)
+  } else {
+    db.prepare("UPDATE leads SET attendant_id = ?, updated_at = datetime('now') WHERE id = ?").run(attendant_id || null, lead.id)
+  }
+
   const updated = db.prepare('SELECT * FROM leads WHERE id = ?').get(lead.id)
   try { broadcastSSE(lead.account_id, 'lead:updated', updated) } catch {}
   res.json({ lead: updated })
