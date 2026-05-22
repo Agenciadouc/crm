@@ -156,7 +156,7 @@ export default function Sidebar() {
               <div className="nav-section">Automacao</div>
               <NavLink to="/cadences" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`} onClick={closeMobile}><ListOrdered size={16} /> Cadencias</NavLink>
               <NavLink to="/follow-ups" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`} onClick={closeMobile}><Zap size={16} /> Follow-ups</NavLink>
-              {(user as any)?.account_ai_agents_enabled === 1 && (
+              {(isAdmin || (user as any)?.account_ai_agents_enabled === 1) && (
                 <NavLink to="/agents" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`} onClick={closeMobile}><Bot size={16} /> Agentes de IA</NavLink>
               )}
               <NavLink to="/ready-messages" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`} onClick={closeMobile}><MessageSquarePlus size={16} /> Msgs Prontas</NavLink>

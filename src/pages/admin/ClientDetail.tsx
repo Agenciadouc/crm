@@ -118,6 +118,20 @@ export default function ClientDetail() {
             <div className="form-group"><label>Investimento em Anuncios (R$)</label><input className="input" type="number" step="0.01" value={account.investimento_anuncios || ''} onChange={e => setAccount({ ...account, investimento_anuncios: parseFloat(e.target.value) || null })} placeholder="5000.00" /></div>
           </div>
           <div className="form-group"><label>Observacoes</label><textarea className="input" rows={3} value={account.observacoes || ''} onChange={e => setAccount({ ...account, observacoes: e.target.value })} style={{ resize: 'vertical' }} /></div>
+
+          <div className="form-group" style={{ padding: 10, background: 'rgba(255,179,0,0.05)', border: '1px solid rgba(255,179,0,0.2)', borderRadius: 6, marginTop: 8 }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', marginBottom: 0 }}>
+              <input
+                type="checkbox"
+                checked={(account as any).ai_agents_enabled === 1}
+                onChange={e => setAccount({ ...account, ai_agents_enabled: e.target.checked ? 1 : 0 } as any)}
+              />
+              <span><strong>🤖 Habilitar Agentes de IA</strong></span>
+            </label>
+            <small style={{ color: 'var(--text-muted)', fontSize: 11, marginLeft: 24, display: 'block', marginTop: 2 }}>
+              Libera o módulo "Agentes de IA" no painel do gerente desta conta. Permite cobrar separado se quiser.
+            </small>
+          </div>
         </div>
       </section>
 
