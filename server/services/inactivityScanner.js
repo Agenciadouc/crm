@@ -40,7 +40,7 @@ export async function processInactivityFollowUps() {
         AND COALESCE(l.is_archived, 0) = 0
         AND COALESCE(l.is_blocked, 0) = 0
         AND COALESCE(
-          (SELECT MAX(wa_timestamp) FROM messages WHERE lead_id = l.id),
+          (SELECT MAX(datetime(wa_timestamp)) FROM messages WHERE lead_id = l.id),
           l.created_at
         ) <= datetime('now', '-' || ? || ' minutes')
         AND NOT EXISTS (
