@@ -5,6 +5,7 @@ import fetch from 'node-fetch'
 import db from '../db.js'
 import { callHaiku } from './anthropicClient.js'
 import { broadcastSSE } from '../sse.js'
+import { pickFromRoulette as rouletteUtil } from './roulette.js'
 
 // ─── Helpers ──────────────────────────────────────────────────────────
 
@@ -172,38 +173,10 @@ function countBotMessagesInThread(agent, leadId) {
   `).get(leadId, agent.id).c
 }
 
-// ─── pickFromRoulette ─────────────────────────────────────────────────
+// ─── pickFromRoulette (wrapper do util — handoff sempre exclui bots) ─────
 
 function pickFromRoulette(accountId, instanceId, excludeUserId) {
-  // Tenta default_attendant_id da instancia primeiro (se nao for o bot)
-  if (instanceId) {
-    const inst = db.prepare('SELECT default_attendant_id FROM whatsapp_instances WHERE id = ?').get(instanceId)
-    if (inst?.default_attendant_id && inst.default_attendant_id !== excludeUserId) {
-      const u = getUser(inst.default_attendant_id)
-      if (u && u.is_active && !u.is_bot) return u.id
-    }
-  }
-  // Fallback: round-robin via distribution_rules
-  const funnel = db.prepare("SELECT id FROM funnels WHERE account_id = ? AND is_default = 1 AND is_active = 1").get(accountId)
-  if (funnel) {
-    const rule = db.prepare('SELECT * FROM distribution_rules WHERE account_id = ? AND funnel_id = ?').get(accountId, funnel.id)
-    if (rule && rule.type === 'round_robin' && rule.active_attendants) {
-      try {
-        const attendants = JSON.parse(rule.active_attendants).filter(uid => {
-          if (uid === excludeUserId) return false
-          const u = getUser(uid)
-          return u && u.is_active && !u.is_bot
-        })
-        if (attendants.length > 0) {
-          const idx = rule.last_assigned_index % attendants.length
-          const picked = attendants[idx]
-          db.prepare("UPDATE distribution_rules SET last_assigned_index = ?, updated_at = datetime('now') WHERE id = ?").run(rule.last_assigned_index + 1, rule.id)
-          return picked
-        }
-      } catch {}
-    }
-  }
-  return null
+  return rouletteUtil(accountId, instanceId, { excludeUserId, excludeBots: true })
 }
 
 // ─── executeHandoff ───────────────────────────────────────────────────

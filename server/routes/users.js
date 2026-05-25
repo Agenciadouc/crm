@@ -8,7 +8,7 @@ const router = Router()
 // List users (admin sees all, gerente sees own account)
 // Includes account_name via JOIN — frontend usa pra exibir/ocultar permissoes restritas a conta da agencia
 router.get('/', scopeToAccount, (req, res) => {
-  const baseSelect = `SELECT u.id, u.account_id, u.name, u.email, u.role, u.is_active, u.primary_instance_id, u.can_manage_proposals, u.can_manage_contracts, u.can_grab_leads, u.created_at, a.name as account_name FROM users u LEFT JOIN accounts a ON a.id = u.account_id`
+  const baseSelect = `SELECT u.id, u.account_id, u.name, u.email, u.role, u.is_active, u.is_bot, u.primary_instance_id, u.can_manage_proposals, u.can_manage_contracts, u.can_grab_leads, u.created_at, a.name as account_name FROM users u LEFT JOIN accounts a ON a.id = u.account_id`
   if (req.user.role === 'super_admin') {
     const accountId = req.query.account_id
     const users = accountId

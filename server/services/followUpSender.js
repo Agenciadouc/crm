@@ -18,6 +18,17 @@ function renderTemplate(template, lead) {
     .replace(/\{\{first_name\}\}/g, firstName)
 }
 
+// Escolhe texto da variação se step.variations tem array. Fallback message_template.
+function pickVariationText(step) {
+  if (step?.variations) {
+    try {
+      const arr = JSON.parse(step.variations)
+      if (Array.isArray(arr) && arr.length > 0) return arr[Math.floor(Math.random() * arr.length)]
+    } catch {}
+  }
+  return step?.message_template || ''
+}
+
 function pauseLeadFollowUp(leadFollowUpId, reason) {
   db.prepare("UPDATE lead_follow_ups SET status='paused', paused_at=datetime('now'), paused_reason=?, updated_at=datetime('now') WHERE id=?").run(reason, leadFollowUpId)
 }
@@ -94,8 +105,8 @@ export async function sendFollowUpMessage(leadFollowUpId) {
       return
     }
 
-    // Renderiza msg
-    const text = renderTemplate(step.message_template, lead)
+    // Renderiza msg (escolhe variação aleatoria se step.variations existe, senao usa message_template)
+    const text = renderTemplate(pickVariationText(step), lead)
     const number = (lead.phone || '').replace(/[^\d]/g, '').replace(/^(?!55)(\d{10,11})$/, '55$1')
 
     // Envia
@@ -127,8 +138,10 @@ export async function sendFollowUpMessage(leadFollowUpId) {
       VALUES (?, ?, 'outbound', ?, 'text', 'Follow-up auto', ?, datetime('now'), ?)
     `).run(lead.id, lead.account_id, text, wamsgId, instance.id)
 
-    // Inactivity: one-shot, NAO avanca pra proximo step (cada execucao = uma variacao independente)
-    if ((followUp.type || 'sequence') === 'inactivity') {
+    // Inactivity-rotation (legacy): one-shot, NAO avanca pra proximo step (cada execucao = uma variacao independente)
+    // Inactivity-sequence (novo): comporta como sequence — avanca pra step 2, 3...
+    const isInactivityRotation = (followUp.type === 'inactivity') && (followUp.inactivity_mode || 'rotation') === 'rotation'
+    if (isInactivityRotation) {
       db.prepare(`
         UPDATE lead_follow_ups SET
           status = 'completed',
@@ -144,7 +157,7 @@ export async function sendFollowUpMessage(leadFollowUpId) {
       return
     }
 
-    // Sequence: avanca pro proximo step (respeita modo absolute/relative)
+    // Sequence (e Inactivity-sequence): avanca pro proximo step (respeita modo absolute/relative)
     const nextStep = db.prepare("SELECT * FROM follow_up_steps WHERE follow_up_id = ? AND position > ? ORDER BY position ASC LIMIT 1").get(followUp.id, step.position)
     if (nextStep) {
       // computeNextRun: se mode='absolute' usa scheduled_at, senao now+delay

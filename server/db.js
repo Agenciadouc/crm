@@ -472,6 +472,13 @@ addColumnIfNotExists('follow_ups', 'variation_delay_seconds', 'INTEGER NOT NULL 
 addColumnIfNotExists('follow_up_steps', 'schedule_mode', "TEXT NOT NULL DEFAULT 'relative'")
 addColumnIfNotExists('follow_up_steps', 'scheduled_at', 'TEXT')
 
+// Follow-ups v3: inactivity multi-step (cadência) + variações por step + on-reply action
+addColumnIfNotExists('follow_ups', 'inactivity_minutes', 'INTEGER')
+addColumnIfNotExists('follow_ups', 'inactivity_mode', "TEXT NOT NULL DEFAULT 'rotation'")
+addColumnIfNotExists('follow_ups', 'on_reply_action', "TEXT NOT NULL DEFAULT 'pause'")
+addColumnIfNotExists('follow_ups', 'on_reply_user_id', 'INTEGER REFERENCES users(id) ON DELETE SET NULL')
+addColumnIfNotExists('follow_up_steps', 'variations', 'TEXT')
+
 // Agentes de IA (Claude Haiku 4.5) — F0+1 schema
 addColumnIfNotExists('accounts', 'ai_agents_enabled', 'INTEGER NOT NULL DEFAULT 0')
 addColumnIfNotExists('users', 'is_bot', 'INTEGER NOT NULL DEFAULT 0')

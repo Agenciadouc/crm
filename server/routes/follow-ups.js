@@ -63,10 +63,33 @@ router.get('/:id', (req, res) => {
   res.json({ follow_up: { ...fu, steps } })
 })
 
+// ─── helpers v3 (validação on-reply + variations) ──────────────────────
+function normalizeOnReply(body, accountId) {
+  const action = ['pause', 'roulette', 'assign_user'].includes(body.on_reply_action) ? body.on_reply_action : 'pause'
+  let userId = null
+  if (action === 'assign_user') {
+    const uid = parseInt(body.on_reply_user_id)
+    if (!uid) throw new Error('on_reply_user_id obrigatorio quando on_reply_action=assign_user')
+    const u = db.prepare('SELECT id FROM users WHERE id = ? AND account_id = ? AND is_active = 1').get(uid, accountId)
+    if (!u) throw new Error('Atendente alvo invalido ou inativo')
+    userId = u.id
+  }
+  return { action, userId }
+}
+
+function normalizeStepVariations(s) {
+  // Aceita s.variations como array de strings; armazena JSON ou null
+  if (Array.isArray(s.variations)) {
+    const cleaned = s.variations.map(v => String(v || '').trim()).filter(Boolean)
+    if (cleaned.length > 0) return JSON.stringify(cleaned)
+  }
+  return null
+}
+
 // ─── POST criar (com steps) ────────────────────────────────────────────
 router.post('/', requireRole('super_admin', 'gerente'), (req, res) => {
   if (!req.accountId) return res.status(400).json({ error: 'account_id required' })
-  const { name, description, instance_id, stop_on_reply, steps, type, inactivity_stage_id, inactivity_days, variation_delay_seconds } = req.body
+  const { name, description, instance_id, stop_on_reply, steps, type, inactivity_stage_id, inactivity_days, inactivity_minutes, inactivity_mode, variation_delay_seconds } = req.body
   if (!name || !instance_id) return res.status(400).json({ error: 'name e instance_id obrigatorios' })
   if (!Array.isArray(steps) || steps.length === 0) return res.status(400).json({ error: 'pelo menos 1 step obrigatorio' })
 
@@ -76,22 +99,43 @@ router.post('/', requireRole('super_admin', 'gerente'), (req, res) => {
 
   // Validacoes especificas por tipo
   const finalType = type === 'inactivity' ? 'inactivity' : 'sequence'
-  let finalInactivityStage = null, finalInactivityDays = 2, finalVariationDelay = 30
+  let finalInactivityStage = null, finalInactivityDays = 2, finalInactivityMinutes = null, finalInactivityMode = 'rotation', finalVariationDelay = 30
 
   if (finalType === 'inactivity') {
-    if (steps.length < 3) return res.status(400).json({ error: 'Follow-up de inatividade exige no minimo 3 variacoes de mensagem' })
+    finalInactivityMode = inactivity_mode === 'sequence' ? 'sequence' : 'rotation'
+    if (finalInactivityMode === 'rotation' && steps.length < 3) return res.status(400).json({ error: 'Modo rotation exige no minimo 3 variacoes de mensagem' })
+    if (finalInactivityMode === 'sequence') {
+      // cada step precisa ter pelo menos 3 variations OU message_template valido (variation_template eh fallback)
+      for (const s of steps) {
+        const hasVars = Array.isArray(s.variations) && s.variations.filter(v => String(v || '').trim()).length >= 3
+        const hasTpl = s.message_template && s.message_template.trim()
+        if (!hasVars && !hasTpl) return res.status(400).json({ error: 'Cada step precisa ter mensagem principal ou no mínimo 3 variações' })
+      }
+    }
     if (!inactivity_stage_id) return res.status(400).json({ error: 'Etapa do funil obrigatoria pra follow-up de inatividade' })
     const stage = db.prepare('SELECT s.id FROM funnel_stages s JOIN funnels f ON f.id = s.funnel_id WHERE s.id = ? AND f.account_id = ?').get(inactivity_stage_id, req.accountId)
     if (!stage) return res.status(400).json({ error: 'Etapa do funil invalida pra essa conta' })
     finalInactivityStage = inactivity_stage_id
     finalInactivityDays = Math.max(1, parseInt(inactivity_days) || 2)
-    finalVariationDelay = Math.max(30, parseInt(variation_delay_seconds) || 30)
+    if (inactivity_minutes !== undefined && inactivity_minutes !== null && inactivity_minutes !== '') {
+      const m = parseInt(inactivity_minutes)
+      if (isNaN(m) || m < 1) return res.status(400).json({ error: 'inactivity_minutes invalido' })
+      finalInactivityMinutes = m
+    }
+    finalVariationDelay = Math.max(30, parseInt(variation_delay_seconds) || 60)
   }
+
+  // On-reply
+  let onReply
+  try { onReply = normalizeOnReply(req.body, req.accountId) }
+  catch (e) { return res.status(400).json({ error: e.message }) }
 
   // Valida cada step
   const normalizedSteps = []
   for (const s of steps) {
-    if (!s.message_template || !s.message_template.trim()) return res.status(400).json({ error: 'Toda etapa precisa de mensagem' })
+    const variationsJson = normalizeStepVariations(s)
+    const hasTpl = s.message_template && s.message_template.trim()
+    if (!variationsJson && !hasTpl) return res.status(400).json({ error: 'Toda etapa precisa de mensagem ou variações' })
     const stepMode = s.schedule_mode === 'absolute' ? 'absolute' : 'relative'
     let stepScheduledAt = null
     if (finalType === 'sequence' && stepMode === 'absolute') {
@@ -102,20 +146,21 @@ router.post('/', requireRole('super_admin', 'gerente'), (req, res) => {
       delay_minutes: parseInt(s.delay_minutes) || 0,
       schedule_mode: finalType === 'inactivity' ? 'relative' : stepMode,
       scheduled_at: stepScheduledAt,
-      message_template: s.message_template.trim(),
+      message_template: hasTpl ? s.message_template.trim() : '',
+      variations: variationsJson,
     })
   }
 
   const trans = db.transaction(() => {
     const result = db.prepare(`
-      INSERT INTO follow_ups (account_id, name, description, instance_id, stop_on_reply, created_by, type, inactivity_stage_id, inactivity_days, variation_delay_seconds)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(req.accountId, name, description || null, instance_id, stop_on_reply ? 1 : 0, req.user.id, finalType, finalInactivityStage, finalInactivityDays, finalVariationDelay)
+      INSERT INTO follow_ups (account_id, name, description, instance_id, stop_on_reply, created_by, type, inactivity_stage_id, inactivity_days, inactivity_minutes, inactivity_mode, variation_delay_seconds, on_reply_action, on_reply_user_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(req.accountId, name, description || null, instance_id, stop_on_reply ? 1 : 0, req.user.id, finalType, finalInactivityStage, finalInactivityDays, finalInactivityMinutes, finalInactivityMode, finalVariationDelay, onReply.action, onReply.userId)
 
     const fuId = result.lastInsertRowid
-    const stmt = db.prepare('INSERT INTO follow_up_steps (follow_up_id, position, delay_minutes, message_template, schedule_mode, scheduled_at) VALUES (?, ?, ?, ?, ?, ?)')
+    const stmt = db.prepare('INSERT INTO follow_up_steps (follow_up_id, position, delay_minutes, message_template, schedule_mode, scheduled_at, variations) VALUES (?, ?, ?, ?, ?, ?, ?)')
     normalizedSteps.forEach((s, i) => {
-      stmt.run(fuId, i + 1, s.delay_minutes, s.message_template, s.schedule_mode, s.scheduled_at)
+      stmt.run(fuId, i + 1, s.delay_minutes, s.message_template, s.schedule_mode, s.scheduled_at, s.variations)
     })
     return fuId
   })
@@ -131,7 +176,7 @@ router.put('/:id', requireRole('super_admin', 'gerente'), (req, res) => {
   const fu = db.prepare('SELECT * FROM follow_ups WHERE id = ? AND account_id = ?').get(req.params.id, req.accountId)
   if (!fu) return res.status(404).json({ error: 'Follow-up nao encontrado' })
 
-  const { name, description, instance_id, stop_on_reply, is_active, steps, inactivity_stage_id, inactivity_days, variation_delay_seconds } = req.body
+  const { name, description, instance_id, stop_on_reply, is_active, steps, inactivity_stage_id, inactivity_days, inactivity_minutes, inactivity_mode, variation_delay_seconds } = req.body
   // Tipo nao muda em edit (pra simplificar — se quiser mudar de sequence pra inactivity, cria outro)
   if (instance_id) {
     const inst = db.prepare('SELECT id FROM whatsapp_instances WHERE id = ? AND account_id = ?').get(instance_id, req.accountId)
@@ -141,17 +186,49 @@ router.put('/:id', requireRole('super_admin', 'gerente'), (req, res) => {
   const finalType = fu.type || 'sequence'
   let finalInactivityStage = fu.inactivity_stage_id
   let finalInactivityDays = fu.inactivity_days
+  let finalInactivityMinutes = fu.inactivity_minutes
+  let finalInactivityMode = fu.inactivity_mode || 'rotation'
   let finalVariationDelay = fu.variation_delay_seconds
 
   if (finalType === 'inactivity') {
+    if (inactivity_mode !== undefined) finalInactivityMode = inactivity_mode === 'sequence' ? 'sequence' : 'rotation'
     if (inactivity_stage_id !== undefined) {
       const stage = db.prepare('SELECT s.id FROM funnel_stages s JOIN funnels f ON f.id = s.funnel_id WHERE s.id = ? AND f.account_id = ?').get(inactivity_stage_id, req.accountId)
       if (!stage) return res.status(400).json({ error: 'Etapa do funil invalida' })
       finalInactivityStage = inactivity_stage_id
     }
     if (inactivity_days !== undefined) finalInactivityDays = Math.max(1, parseInt(inactivity_days) || 2)
+    if (inactivity_minutes !== undefined) {
+      if (inactivity_minutes === null || inactivity_minutes === '') {
+        finalInactivityMinutes = null
+      } else {
+        const m = parseInt(inactivity_minutes)
+        if (isNaN(m) || m < 1) return res.status(400).json({ error: 'inactivity_minutes invalido' })
+        finalInactivityMinutes = m
+      }
+    }
     if (variation_delay_seconds !== undefined) finalVariationDelay = Math.max(30, parseInt(variation_delay_seconds) || 30)
-    if (Array.isArray(steps) && steps.length < 3) return res.status(400).json({ error: 'Follow-up de inatividade exige no minimo 3 variacoes' })
+    if (Array.isArray(steps)) {
+      if (finalInactivityMode === 'rotation' && steps.length < 3) return res.status(400).json({ error: 'Modo rotation exige no minimo 3 variacoes' })
+      if (finalInactivityMode === 'sequence') {
+        for (const s of steps) {
+          const hasVars = Array.isArray(s.variations) && s.variations.filter(v => String(v || '').trim()).length >= 3
+          const hasTpl = s.message_template && s.message_template.trim()
+          if (!hasVars && !hasTpl) return res.status(400).json({ error: 'Cada step precisa ter mensagem principal ou no mínimo 3 variações' })
+        }
+      }
+    }
+  }
+
+  // On-reply
+  let onReplyAction = fu.on_reply_action || 'pause'
+  let onReplyUserId = fu.on_reply_user_id
+  if (req.body.on_reply_action !== undefined) {
+    try {
+      const onReply = normalizeOnReply(req.body, req.accountId)
+      onReplyAction = onReply.action
+      onReplyUserId = onReply.userId
+    } catch (e) { return res.status(400).json({ error: e.message }) }
   }
 
   // Normaliza steps se vier
@@ -159,18 +236,21 @@ router.put('/:id', requireRole('super_admin', 'gerente'), (req, res) => {
   if (Array.isArray(steps)) {
     normalizedSteps = []
     for (const s of steps) {
-      if (!s.message_template || !s.message_template.trim()) return res.status(400).json({ error: 'Toda etapa precisa de mensagem' })
+      const variationsJson = normalizeStepVariations(s)
+      const hasTpl = s.message_template && s.message_template.trim()
+      if (!variationsJson && !hasTpl) return res.status(400).json({ error: 'Toda etapa precisa de mensagem ou variações' })
       const stepMode = s.schedule_mode === 'absolute' ? 'absolute' : 'relative'
       let stepScheduledAt = null
       if (finalType === 'sequence' && stepMode === 'absolute') {
-        try { stepScheduledAt = normalizeScheduledAt(s.scheduled_at, true) }  // allowPast em edit (pode editar follow-up com data antiga)
+        try { stepScheduledAt = normalizeScheduledAt(s.scheduled_at, true) }  // allowPast em edit
         catch (e) { return res.status(400).json({ error: e.message }) }
       }
       normalizedSteps.push({
         delay_minutes: parseInt(s.delay_minutes) || 0,
         schedule_mode: finalType === 'inactivity' ? 'relative' : stepMode,
         scheduled_at: stepScheduledAt,
-        message_template: s.message_template.trim(),
+        message_template: hasTpl ? s.message_template.trim() : '',
+        variations: variationsJson,
       })
     }
   }
@@ -179,7 +259,8 @@ router.put('/:id', requireRole('super_admin', 'gerente'), (req, res) => {
     db.prepare(`
       UPDATE follow_ups SET
         name = ?, description = ?, instance_id = ?, stop_on_reply = ?, is_active = ?,
-        inactivity_stage_id = ?, inactivity_days = ?, variation_delay_seconds = ?,
+        inactivity_stage_id = ?, inactivity_days = ?, inactivity_minutes = ?, inactivity_mode = ?,
+        variation_delay_seconds = ?, on_reply_action = ?, on_reply_user_id = ?,
         updated_at = datetime('now')
       WHERE id = ?
     `).run(
@@ -188,15 +269,16 @@ router.put('/:id', requireRole('super_admin', 'gerente'), (req, res) => {
       instance_id || fu.instance_id,
       stop_on_reply !== undefined ? (stop_on_reply ? 1 : 0) : fu.stop_on_reply,
       is_active !== undefined ? (is_active ? 1 : 0) : fu.is_active,
-      finalInactivityStage, finalInactivityDays, finalVariationDelay,
+      finalInactivityStage, finalInactivityDays, finalInactivityMinutes, finalInactivityMode,
+      finalVariationDelay, onReplyAction, onReplyUserId,
       fu.id
     )
 
     if (normalizedSteps) {
       db.prepare('DELETE FROM follow_up_steps WHERE follow_up_id = ?').run(fu.id)
-      const stmt = db.prepare('INSERT INTO follow_up_steps (follow_up_id, position, delay_minutes, message_template, schedule_mode, scheduled_at) VALUES (?, ?, ?, ?, ?, ?)')
+      const stmt = db.prepare('INSERT INTO follow_up_steps (follow_up_id, position, delay_minutes, message_template, schedule_mode, scheduled_at, variations) VALUES (?, ?, ?, ?, ?, ?, ?)')
       normalizedSteps.forEach((s, i) => {
-        stmt.run(fu.id, i + 1, s.delay_minutes, s.message_template, s.schedule_mode, s.scheduled_at)
+        stmt.run(fu.id, i + 1, s.delay_minutes, s.message_template, s.schedule_mode, s.scheduled_at, s.variations)
       })
     }
   })
