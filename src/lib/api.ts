@@ -380,6 +380,8 @@ export interface FollowUp {
   variation_delay_seconds?: number;
   on_reply_action?: 'pause' | 'roulette' | 'assign_user';
   on_reply_user_id?: number | null;
+  on_reply_move_to_stage_id?: number | null;
+  on_reply_add_tag_id?: number | null;
   steps?: FollowUpStep[]; steps_count?: number; active_leads?: number;
   created_by: number | null; created_by_name?: string | null;
   created_at: string; updated_at: string;

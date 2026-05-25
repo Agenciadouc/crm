@@ -478,6 +478,9 @@ addColumnIfNotExists('follow_ups', 'inactivity_mode', "TEXT NOT NULL DEFAULT 'ro
 addColumnIfNotExists('follow_ups', 'on_reply_action', "TEXT NOT NULL DEFAULT 'pause'")
 addColumnIfNotExists('follow_ups', 'on_reply_user_id', 'INTEGER REFERENCES users(id) ON DELETE SET NULL')
 addColumnIfNotExists('follow_up_steps', 'variations', 'TEXT')
+// Follow-ups v3.1: on-reply move stage + add tag
+addColumnIfNotExists('follow_ups', 'on_reply_move_to_stage_id', 'INTEGER REFERENCES funnel_stages(id) ON DELETE SET NULL')
+addColumnIfNotExists('follow_ups', 'on_reply_add_tag_id', 'INTEGER REFERENCES tags(id) ON DELETE SET NULL')
 
 // Agentes de IA (Claude Haiku 4.5) — F0+1 schema
 addColumnIfNotExists('accounts', 'ai_agents_enabled', 'INTEGER NOT NULL DEFAULT 0')

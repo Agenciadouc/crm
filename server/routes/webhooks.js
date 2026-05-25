@@ -526,10 +526,10 @@ router.post('/evolution/:accountSlug', (req, res) => {
     // Inbound messages from client don't auto-advance (attendant controls flow)
     if (fromMe && content) autoDetectStage(lead, content)
 
-    // Auto-pausa follow-up se lead respondeu (stop_on_reply=1) + executa on_reply_action
+    // Auto-pausa follow-up se lead respondeu (stop_on_reply=1) + executa on_reply_action + move etapa + add tag
     if (!fromMe && lead) {
       const activeFu = db.prepare(`
-        SELECT lfu.id, fu.on_reply_action, fu.on_reply_user_id, fu.instance_id
+        SELECT lfu.id, fu.on_reply_action, fu.on_reply_user_id, fu.on_reply_move_to_stage_id, fu.on_reply_add_tag_id, fu.instance_id
         FROM lead_follow_ups lfu
         JOIN follow_ups fu ON fu.id = lfu.follow_up_id
         WHERE lfu.lead_id = ? AND lfu.status = 'active' AND fu.stop_on_reply = 1
@@ -555,6 +555,24 @@ router.post('/evolution/:accountSlug', (req, res) => {
           db.prepare(`UPDATE leads SET attendant_id = ?${clearAi}, updated_at = datetime('now') WHERE id = ?`).run(newAttendantId, lead.id)
           try { broadcastSSE(account.id, 'lead:updated', { id: lead.id }) } catch {}
           console.log(`[FollowUp] Reatribuido lead=${lead.id} -> user=${newAttendantId} (action=${action})`)
+        }
+
+        // 3. Move etapa (opcional)
+        if (activeFu.on_reply_move_to_stage_id) {
+          const freshLead = db.prepare('SELECT stage_id FROM leads WHERE id = ?').get(lead.id)
+          if (freshLead && freshLead.stage_id !== activeFu.on_reply_move_to_stage_id) {
+            const prev = freshLead.stage_id
+            db.prepare("UPDATE leads SET stage_id = ?, updated_at = datetime('now') WHERE id = ?").run(activeFu.on_reply_move_to_stage_id, lead.id)
+            const histRes = db.prepare('INSERT INTO stage_history (lead_id, from_stage_id, to_stage_id, trigger_type) VALUES (?, ?, ?, ?)').run(lead.id, prev, activeFu.on_reply_move_to_stage_id, 'followup_reply')
+            try { triggerCapiForStageChange(lead.id, activeFu.on_reply_move_to_stage_id, histRes.lastInsertRowid) } catch (e) { console.error('[FollowUp CAPI]', e.message) }
+            console.log(`[FollowUp] Stage lead=${lead.id} ${prev} -> ${activeFu.on_reply_move_to_stage_id}`)
+          }
+        }
+
+        // 4. Adiciona tag (opcional)
+        if (activeFu.on_reply_add_tag_id) {
+          db.prepare('INSERT OR IGNORE INTO lead_tags (lead_id, tag_id) VALUES (?, ?)').run(lead.id, activeFu.on_reply_add_tag_id)
+          console.log(`[FollowUp] Tag adicionada lead=${lead.id} tag=${activeFu.on_reply_add_tag_id}`)
         }
       }
     }

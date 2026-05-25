@@ -2,8 +2,8 @@ import { useState, useEffect } from 'react'
 import { useAccount } from '../context/AccountContext'
 import {
   fetchFollowUps, createFollowUp, updateFollowUp, deleteFollowUp,
-  fetchWhatsAppInstances, fetchFunnels, fetchUsers,
-  type FollowUp, type FollowUpStep, type WhatsAppInstance, type Funnel, type User,
+  fetchWhatsAppInstances, fetchFunnels, fetchUsers, fetchTags,
+  type FollowUp, type FollowUpStep, type WhatsAppInstance, type Funnel, type User, type Tag,
 } from '../lib/api'
 import { Zap, Plus, Edit3, Trash2, MessageSquare, Clock, Smartphone, Trash, Calendar, Activity } from 'lucide-react'
 
@@ -59,6 +59,7 @@ export default function FollowUps() {
   const [instances, setInstances] = useState<WhatsAppInstance[]>([])
   const [funnels, setFunnels] = useState<Funnel[]>([])
   const [users, setUsers] = useState<User[]>([])
+  const [tags, setTags] = useState<Tag[]>([])
   const [loading, setLoading] = useState(true)
   const [modalMode, setModalMode] = useState<'new' | number | null>(null)
   const [saving, setSaving] = useState(false)
@@ -79,6 +80,8 @@ export default function FollowUps() {
   // On-reply
   const [onReplyAction, setOnReplyAction] = useState<OnReplyAction>('pause')
   const [onReplyUserId, setOnReplyUserId] = useState<number | ''>('')
+  const [onReplyStageId, setOnReplyStageId] = useState<number | ''>('')
+  const [onReplyTagId, setOnReplyTagId] = useState<number | ''>('')
 
   const isEditing = typeof modalMode === 'number'
 
@@ -90,11 +93,13 @@ export default function FollowUps() {
       fetchWhatsAppInstances(accountId),
       fetchFunnels(accountId),
       fetchUsers(accountId),
-    ]).then(([fus, insts, fns, usrs]) => {
+      fetchTags(accountId),
+    ]).then(([fus, insts, fns, usrs, tgs]) => {
       setFollowUps(fus)
       setInstances(insts)
       setFunnels(fns)
       setUsers(usrs.filter(u => u.is_active === 1))
+      setTags(tgs)
     }).finally(() => setLoading(false))
   }
   useEffect(load, [accountId])
@@ -106,6 +111,7 @@ export default function FollowUps() {
     setInactivityStageId(''); setInactivityValue(2); setInactivityUnit('days')
     setInactivityMode('sequence'); setVariationDelay(60)
     setOnReplyAction('pause'); setOnReplyUserId('')
+    setOnReplyStageId(''); setOnReplyTagId('')
     setModalMode(null)
   }
 
@@ -138,6 +144,8 @@ export default function FollowUps() {
     setVariationDelay(fu.variation_delay_seconds || 60)
     setOnReplyAction((fu.on_reply_action as OnReplyAction) || 'pause')
     setOnReplyUserId(fu.on_reply_user_id || '')
+    setOnReplyStageId(fu.on_reply_move_to_stage_id || '')
+    setOnReplyTagId(fu.on_reply_add_tag_id || '')
     if (fu.steps && fu.steps.length > 0) {
       setSteps(fu.steps.map(s => {
         const { value, unit } = fromMinutes(s.delay_minutes)
@@ -266,6 +274,8 @@ export default function FollowUps() {
         payload.variation_delay_seconds = variationDelay
         payload.on_reply_action = onReplyAction
         payload.on_reply_user_id = onReplyAction === 'assign_user' ? Number(onReplyUserId) : null
+        payload.on_reply_move_to_stage_id = onReplyStageId ? Number(onReplyStageId) : null
+        payload.on_reply_add_tag_id = onReplyTagId ? Number(onReplyTagId) : null
       }
       if (isEditing) await updateFollowUp(modalMode as number, accountId, payload)
       else await createFollowUp(accountId, payload)
@@ -480,6 +490,27 @@ export default function FollowUps() {
                         ))}
                       </select>
                     )}
+                  </div>
+
+                  {/* Ações adicionais opcionais — independentes do action escolhido */}
+                  <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid rgba(93,173,226,0.2)' }}>
+                    <label style={{ fontSize: 11, fontWeight: 600, color: '#5DADE2' }}>Ações adicionais ao responder (opcionais)</label>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 6 }}>
+                      <div>
+                        <label style={{ fontSize: 11 }}>Mover lead pra etapa</label>
+                        <select className="select" value={onReplyStageId} onChange={e => setOnReplyStageId(e.target.value ? +e.target.value : '')}>
+                          <option value="">— não move —</option>
+                          {allStages.map(s => <option key={s.id} value={s.id}>{s.funnel_name} · {s.name}</option>)}
+                        </select>
+                      </div>
+                      <div>
+                        <label style={{ fontSize: 11 }}>Adicionar tag</label>
+                        <select className="select" value={onReplyTagId} onChange={e => setOnReplyTagId(e.target.value ? +e.target.value : '')}>
+                          <option value="">— sem tag —</option>
+                          {tags.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                        </select>
+                      </div>
+                    </div>
                   </div>
                 </div>
               </>

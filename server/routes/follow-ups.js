@@ -74,7 +74,28 @@ function normalizeOnReply(body, accountId) {
     if (!u) throw new Error('Atendente alvo invalido ou inativo')
     userId = u.id
   }
-  return { action, userId }
+  // Acoes adicionais opcionais (independentes do action)
+  let stageId = null
+  if (body.on_reply_move_to_stage_id) {
+    const sid = parseInt(body.on_reply_move_to_stage_id)
+    if (!sid) throw new Error('on_reply_move_to_stage_id invalido')
+    const s = db.prepare(`
+      SELECT s.id FROM funnel_stages s
+      JOIN funnels f ON f.id = s.funnel_id
+      WHERE s.id = ? AND f.account_id = ?
+    `).get(sid, accountId)
+    if (!s) throw new Error('Etapa de destino invalida pra essa conta')
+    stageId = s.id
+  }
+  let tagId = null
+  if (body.on_reply_add_tag_id) {
+    const tid = parseInt(body.on_reply_add_tag_id)
+    if (!tid) throw new Error('on_reply_add_tag_id invalido')
+    const t = db.prepare('SELECT id FROM tags WHERE id = ? AND account_id = ?').get(tid, accountId)
+    if (!t) throw new Error('Tag invalida pra essa conta')
+    tagId = t.id
+  }
+  return { action, userId, stageId, tagId }
 }
 
 function normalizeStepVariations(s) {
@@ -153,9 +174,9 @@ router.post('/', requireRole('super_admin', 'gerente'), (req, res) => {
 
   const trans = db.transaction(() => {
     const result = db.prepare(`
-      INSERT INTO follow_ups (account_id, name, description, instance_id, stop_on_reply, created_by, type, inactivity_stage_id, inactivity_days, inactivity_minutes, inactivity_mode, variation_delay_seconds, on_reply_action, on_reply_user_id)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(req.accountId, name, description || null, instance_id, stop_on_reply ? 1 : 0, req.user.id, finalType, finalInactivityStage, finalInactivityDays, finalInactivityMinutes, finalInactivityMode, finalVariationDelay, onReply.action, onReply.userId)
+      INSERT INTO follow_ups (account_id, name, description, instance_id, stop_on_reply, created_by, type, inactivity_stage_id, inactivity_days, inactivity_minutes, inactivity_mode, variation_delay_seconds, on_reply_action, on_reply_user_id, on_reply_move_to_stage_id, on_reply_add_tag_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(req.accountId, name, description || null, instance_id, stop_on_reply ? 1 : 0, req.user.id, finalType, finalInactivityStage, finalInactivityDays, finalInactivityMinutes, finalInactivityMode, finalVariationDelay, onReply.action, onReply.userId, onReply.stageId, onReply.tagId)
 
     const fuId = result.lastInsertRowid
     const stmt = db.prepare('INSERT INTO follow_up_steps (follow_up_id, position, delay_minutes, message_template, schedule_mode, scheduled_at, variations) VALUES (?, ?, ?, ?, ?, ?, ?)')
@@ -223,11 +244,23 @@ router.put('/:id', requireRole('super_admin', 'gerente'), (req, res) => {
   // On-reply
   let onReplyAction = fu.on_reply_action || 'pause'
   let onReplyUserId = fu.on_reply_user_id
-  if (req.body.on_reply_action !== undefined) {
+  let onReplyStageId = fu.on_reply_move_to_stage_id
+  let onReplyTagId = fu.on_reply_add_tag_id
+  // Roda normalize se qualquer um dos campos on_reply_* foi enviado
+  if (req.body.on_reply_action !== undefined || req.body.on_reply_move_to_stage_id !== undefined || req.body.on_reply_add_tag_id !== undefined) {
     try {
-      const onReply = normalizeOnReply(req.body, req.accountId)
+      // Preserva action atual se nao mandou
+      const body = {
+        on_reply_action: req.body.on_reply_action !== undefined ? req.body.on_reply_action : onReplyAction,
+        on_reply_user_id: req.body.on_reply_user_id !== undefined ? req.body.on_reply_user_id : onReplyUserId,
+        on_reply_move_to_stage_id: req.body.on_reply_move_to_stage_id !== undefined ? req.body.on_reply_move_to_stage_id : onReplyStageId,
+        on_reply_add_tag_id: req.body.on_reply_add_tag_id !== undefined ? req.body.on_reply_add_tag_id : onReplyTagId,
+      }
+      const onReply = normalizeOnReply(body, req.accountId)
       onReplyAction = onReply.action
       onReplyUserId = onReply.userId
+      onReplyStageId = onReply.stageId
+      onReplyTagId = onReply.tagId
     } catch (e) { return res.status(400).json({ error: e.message }) }
   }
 
@@ -260,7 +293,7 @@ router.put('/:id', requireRole('super_admin', 'gerente'), (req, res) => {
       UPDATE follow_ups SET
         name = ?, description = ?, instance_id = ?, stop_on_reply = ?, is_active = ?,
         inactivity_stage_id = ?, inactivity_days = ?, inactivity_minutes = ?, inactivity_mode = ?,
-        variation_delay_seconds = ?, on_reply_action = ?, on_reply_user_id = ?,
+        variation_delay_seconds = ?, on_reply_action = ?, on_reply_user_id = ?, on_reply_move_to_stage_id = ?, on_reply_add_tag_id = ?,
         updated_at = datetime('now')
       WHERE id = ?
     `).run(
@@ -270,7 +303,7 @@ router.put('/:id', requireRole('super_admin', 'gerente'), (req, res) => {
       stop_on_reply !== undefined ? (stop_on_reply ? 1 : 0) : fu.stop_on_reply,
       is_active !== undefined ? (is_active ? 1 : 0) : fu.is_active,
       finalInactivityStage, finalInactivityDays, finalInactivityMinutes, finalInactivityMode,
-      finalVariationDelay, onReplyAction, onReplyUserId,
+      finalVariationDelay, onReplyAction, onReplyUserId, onReplyStageId, onReplyTagId,
       fu.id
     )
 
