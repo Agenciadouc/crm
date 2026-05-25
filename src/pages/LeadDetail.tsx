@@ -181,91 +181,17 @@ export default function LeadDetail() {
               {attendants.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
             </select>
           )}
+          <button className="btn btn-primary btn-sm" onClick={() => navigate(`/chat?lead=${lead.id}`)} title="Abrir conversa">
+            <MessageCircle size={14} /> Abrir Chat
+          </button>
           <button className="btn btn-secondary btn-sm" onClick={handleToggleArchive} title={lead.is_archived ? 'Desarquivar' : 'Arquivar'}>
             {lead.is_archived ? <><ArchiveRestore size={14} /> Desarquivar</> : <><Archive size={14} /> Arquivar</>}
           </button>
         </div>
       </div>
 
-      {/* Chat + Tabs (sempre visivel, fora do grid 2-cols) */}
-      <div style={{ marginBottom: 16 }}>
-        <button onClick={() => navigate(`/chat?lead=${lead.id}`)} style={{ width: '100%', padding: '14px 16px', background: 'linear-gradient(135deg, #34C759, #2BA84A)', color: '#fff', border: 'none', borderRadius: 8, fontSize: 14, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, marginBottom: 10, boxShadow: '0 2px 8px rgba(52,199,89,0.25)' }}>
-          <MessageCircle size={18} /> Abrir Chat {messages.length > 0 ? `(${messages.length} ${messages.length === 1 ? 'mensagem' : 'mensagens'})` : '— iniciar conversa'}
-        </button>
-        <div style={{ display: 'flex', gap: 4, marginBottom: 8, flexWrap: 'wrap' }}>
-          {(['notes', 'qualification', 'history'] as const).map(tab => (
-            <button key={tab} className={`btn btn-sm ${activeTab === tab ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setActiveTab(tab)}>
-              {tab === 'notes' ? <><StickyNote size={12} /> Notas ({notes.length})</> : tab === 'qualification' ? <><ClipboardList size={12} /> Qualificacao</> : <><GitBranch size={12} /> Historico</>}
-            </button>
-          ))}
-        </div>
-        {activeTab === 'notes' && (
-          <div className="card">
-            <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
-              <input className="input" placeholder="Adicionar nota interna..." value={noteText} onChange={e => setNoteText(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleAddNote()} />
-              <button className="btn btn-primary btn-icon" onClick={handleAddNote} disabled={!noteText.trim()}><Plus size={16} /></button>
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {notes.map(n => (
-                <div key={n.id} style={{ padding: '10px 12px', background: 'rgba(255,179,0,0.05)', borderRadius: 8, border: '1px solid rgba(255,179,0,0.1)' }}>
-                  <div style={{ fontSize: 13 }}>{n.content}</div>
-                  <div style={{ fontSize: 10, color: '#6B6580', marginTop: 4 }}>{n.user_name} · {parseSqlDate(n.created_at).toLocaleString('pt-BR')}</div>
-                </div>
-              ))}
-              {notes.length === 0 && <div style={{ textAlign: 'center', color: '#6B6580', padding: 20 }}>Nenhuma nota ainda</div>}
-            </div>
-          </div>
-        )}
-        {activeTab === 'qualification' && (
-          <div className="card">
-            {qualifications.length > 0 ? (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {qualifications.map((q, i) => (
-                  <div key={q.sequence_id} style={{ padding: '10px 12px', background: q.answer ? 'rgba(52,199,89,0.05)' : 'rgba(255,179,0,0.03)', borderRadius: 8, border: `1px solid ${q.answer ? 'rgba(52,199,89,0.15)' : 'var(--border-subtle)'}` }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
-                      <div style={{ width: 20, height: 20, borderRadius: '50%', background: q.answer ? '#34C75920' : '#FFB30020', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                        {q.answer ? <Check size={10} style={{ color: '#34C759' }} /> : <span style={{ fontSize: 10, fontWeight: 700, color: '#FFB300' }}>{i + 1}</span>}
-                      </div>
-                      <span style={{ fontSize: 13, fontWeight: 500 }}>{q.question}</span>
-                    </div>
-                    {q.answer ? (
-                      <div style={{ marginLeft: 26 }}>
-                        <div style={{ fontSize: 12, color: '#C8C4D4' }}>{q.answer}</div>
-                        <div style={{ fontSize: 10, color: '#6B6580', marginTop: 2 }}>{q.answered_by_name} · {q.answered_at ? new Date(q.answered_at).toLocaleString('pt-BR') : ''}</div>
-                      </div>
-                    ) : (
-                      <div style={{ marginLeft: 26, display: 'flex', gap: 6 }}>
-                        <input className="input" placeholder="Resposta..." value={qualAnswers[q.sequence_id] || ''} onChange={e => setQualAnswers(prev => ({ ...prev, [q.sequence_id]: e.target.value }))} onKeyDown={e => e.key === 'Enter' && handleAnswerQual(q.sequence_id)} style={{ flex: 1, fontSize: 12 }} />
-                        <button className="btn btn-primary btn-sm btn-icon" onClick={() => handleAnswerQual(q.sequence_id)} disabled={savingQual === q.sequence_id || !qualAnswers[q.sequence_id]?.trim()}><Check size={12} /></button>
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div style={{ textAlign: 'center', color: '#6B6580', padding: 20 }}>Nenhuma pergunta de qualificacao configurada</div>
-            )}
-          </div>
-        )}
-        {activeTab === 'history' && (
-          <div className="card">
-            {history.map((h, i) => (
-              <div key={h.id} style={{ display: 'flex', gap: 10, padding: '8px 0', borderBottom: i < history.length - 1 ? '1px solid var(--border-subtle)' : 'none' }}>
-                <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#FFB300', marginTop: 5, flexShrink: 0 }} />
-                <div>
-                  <div style={{ fontSize: 13 }}>{h.from_stage_name ? `${h.from_stage_name} → ${h.to_stage_name}` : `Entrada: ${h.to_stage_name}`}</div>
-                  <div style={{ fontSize: 11, color: '#6B6580' }}>{h.trigger_type}{h.user_name ? ` por ${h.user_name}` : ''}</div>
-                  <div style={{ fontSize: 10, color: '#6B6580' }}>{parseSqlDate(h.created_at).toLocaleString('pt-BR')}</div>
-                </div>
-              </div>
-            ))}
-            {history.length === 0 && <div style={{ textAlign: 'center', color: '#6B6580', padding: 20 }}>Sem historico</div>}
-          </div>
-        )}
-      </div>
-
-      <div>
-        {/* Info + Tags + History stack */}
+      <div className="lead-detail">
+        {/* Left column: Info + Tags + History */}
         <div>
           {/* Lead Info Card */}
           <div className="card" style={{ marginBottom: 16 }}>
@@ -457,6 +383,91 @@ export default function LeadDetail() {
           )}
         </div>
 
+        {/* Right column: Chat + Notes tabs */}
+        <div>
+          {/* Botao destacado pra abrir o chat */}
+          <button onClick={() => navigate(`/chat?lead=${lead.id}`)} style={{ width: '100%', padding: '14px 16px', background: 'linear-gradient(135deg, #34C759, #2BA84A)', color: '#fff', border: 'none', borderRadius: 8, fontSize: 14, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, marginBottom: 10, boxShadow: '0 2px 8px rgba(52,199,89,0.25)' }}>
+            <MessageCircle size={18} /> Abrir Chat {messages.length > 0 ? `(${messages.length} ${messages.length === 1 ? 'mensagem' : 'mensagens'})` : '— iniciar conversa'}
+          </button>
+
+          {/* Tab switcher (sem chat) */}
+          <div style={{ display: 'flex', gap: 4, marginBottom: 8, flexWrap: 'wrap' }}>
+            {(['notes', 'qualification', 'history'] as const).map(tab => (
+              <button key={tab} className={`btn btn-sm ${activeTab === tab ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setActiveTab(tab)}>
+                {tab === 'notes' ? <><StickyNote size={12} /> Notas ({notes.length})</> : tab === 'qualification' ? <><ClipboardList size={12} /> Qualificacao</> : <><GitBranch size={12} /> Historico</>}
+              </button>
+            ))}
+          </div>
+
+          {/* Notes tab */}
+          {activeTab === 'notes' && (
+            <div className="card" style={{ minHeight: 400 }}>
+              <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+                <input className="input" placeholder="Adicionar nota interna..." value={noteText} onChange={e => setNoteText(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleAddNote()} />
+                <button className="btn btn-primary btn-icon" onClick={handleAddNote} disabled={!noteText.trim()}><Plus size={16} /></button>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {notes.map(n => (
+                  <div key={n.id} style={{ padding: '10px 12px', background: 'rgba(255,179,0,0.05)', borderRadius: 8, border: '1px solid rgba(255,179,0,0.1)' }}>
+                    <div style={{ fontSize: 13 }}>{n.content}</div>
+                    <div style={{ fontSize: 10, color: '#6B6580', marginTop: 4 }}>{n.user_name} · {parseSqlDate(n.created_at).toLocaleString('pt-BR')}</div>
+                  </div>
+                ))}
+                {notes.length === 0 && <div style={{ textAlign: 'center', color: '#6B6580', padding: 30 }}>Nenhuma nota ainda</div>}
+              </div>
+            </div>
+          )}
+
+          {/* Qualification tab */}
+          {activeTab === 'qualification' && (
+            <div className="card" style={{ minHeight: 400 }}>
+              {qualifications.length > 0 ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {qualifications.map((q, i) => (
+                    <div key={q.sequence_id} style={{ padding: '10px 12px', background: q.answer ? 'rgba(52,199,89,0.05)' : 'rgba(255,179,0,0.03)', borderRadius: 8, border: `1px solid ${q.answer ? 'rgba(52,199,89,0.15)' : 'var(--border-subtle)'}` }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+                        <div style={{ width: 20, height: 20, borderRadius: '50%', background: q.answer ? '#34C75920' : '#FFB30020', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                          {q.answer ? <Check size={10} style={{ color: '#34C759' }} /> : <span style={{ fontSize: 10, fontWeight: 700, color: '#FFB300' }}>{i + 1}</span>}
+                        </div>
+                        <span style={{ fontSize: 13, fontWeight: 500 }}>{q.question}</span>
+                      </div>
+                      {q.answer ? (
+                        <div style={{ marginLeft: 26 }}>
+                          <div style={{ fontSize: 12, color: '#C8C4D4' }}>{q.answer}</div>
+                          <div style={{ fontSize: 10, color: '#6B6580', marginTop: 2 }}>{q.answered_by_name} · {q.answered_at ? new Date(q.answered_at).toLocaleString('pt-BR') : ''}</div>
+                        </div>
+                      ) : (
+                        <div style={{ marginLeft: 26, display: 'flex', gap: 6 }}>
+                          <input className="input" placeholder="Resposta..." value={qualAnswers[q.sequence_id] || ''} onChange={e => setQualAnswers(prev => ({ ...prev, [q.sequence_id]: e.target.value }))} onKeyDown={e => e.key === 'Enter' && handleAnswerQual(q.sequence_id)} style={{ flex: 1, fontSize: 12 }} />
+                          <button className="btn btn-primary btn-sm btn-icon" onClick={() => handleAnswerQual(q.sequence_id)} disabled={savingQual === q.sequence_id || !qualAnswers[q.sequence_id]?.trim()}><Check size={12} /></button>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div style={{ textAlign: 'center', color: '#6B6580', padding: 30 }}>Nenhuma pergunta de qualificacao configurada</div>
+              )}
+            </div>
+          )}
+
+          {/* Full history tab */}
+          {activeTab === 'history' && (
+            <div className="card" style={{ minHeight: 400 }}>
+              {history.map((h, i) => (
+                <div key={h.id} style={{ display: 'flex', gap: 10, padding: '8px 0', borderBottom: i < history.length - 1 ? '1px solid var(--border-subtle)' : 'none' }}>
+                  <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#FFB300', marginTop: 5, flexShrink: 0 }} />
+                  <div>
+                    <div style={{ fontSize: 13 }}>{h.from_stage_name ? `${h.from_stage_name} → ${h.to_stage_name}` : `Entrada: ${h.to_stage_name}`}</div>
+                    <div style={{ fontSize: 11, color: '#6B6580' }}>{h.trigger_type}{h.user_name ? ` por ${h.user_name}` : ''}</div>
+                    <div style={{ fontSize: 10, color: '#6B6580' }}>{parseSqlDate(h.created_at).toLocaleString('pt-BR')}</div>
+                  </div>
+                </div>
+              ))}
+              {history.length === 0 && <div style={{ textAlign: 'center', color: '#6B6580', padding: 30 }}>Sem historico</div>}
+            </div>
+          )}
+        </div>
       </div>
       {scriptModal && (
         <div className="modal-overlay" onClick={() => setScriptModal(null)}>
