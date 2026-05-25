@@ -90,7 +90,9 @@ router.post('/:leadId', async (req, res) => {
     const instance = resolveInstanceForSend({ lead, user: req.user, override: overrideInstanceId })
     if (!instance) return res.status(400).json({ error: 'Nenhuma instancia WhatsApp conectada' })
 
-    let jid = lead.wa_remote_jid || lead.phone
+    // Prefere telefone real (s.whatsapp.net) sobre LID (@lid eh identificador interno do WhatsApp, nao eh telefone valido pra envio)
+    const isLidJid = lead.wa_remote_jid && lead.wa_remote_jid.endsWith('@lid')
+    let jid = (isLidJid && lead.phone) ? lead.phone : (lead.wa_remote_jid || lead.phone)
     if (!jid) return res.status(400).json({ error: 'Lead sem telefone' })
     // Check if it's a @lid without real phone
     if (jid.endsWith('@lid') && !lead.phone) return res.status(400).json({ error: 'Lead sem telefone real (ID temporario do WhatsApp). Edite o lead e adicione o telefone manualmente.' })
@@ -206,7 +208,9 @@ router.post('/:leadId/media', jsonBodyParser({ limit: '150mb' }), async (req, re
     const instance = resolveInstanceForSend({ lead, user: req.user, override: overrideInstanceId })
     if (!instance) return res.status(400).json({ error: 'Nenhuma instancia WhatsApp conectada' })
 
-    let jid = lead.wa_remote_jid || lead.phone
+    // Prefere telefone real (s.whatsapp.net) sobre LID (@lid eh identificador interno do WhatsApp, nao eh telefone valido pra envio)
+    const isLidJid = lead.wa_remote_jid && lead.wa_remote_jid.endsWith('@lid')
+    let jid = (isLidJid && lead.phone) ? lead.phone : (lead.wa_remote_jid || lead.phone)
     if (!jid) return res.status(400).json({ error: 'Lead sem telefone' })
     if (jid.endsWith('@lid') && !lead.phone) return res.status(400).json({ error: 'Lead sem telefone real' })
 
