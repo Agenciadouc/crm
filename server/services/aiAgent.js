@@ -341,7 +341,7 @@ async function sendEvolutionText(instance, phone, text) {
   const res = await fetch(`${instance.api_url}/message/sendText/${instance.instance_name}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'apikey': instance.api_key },
-    body: JSON.stringify({ number, text, delay: 3000 }),
+    body: JSON.stringify({ number, text, delay: 7000 }),
   })
   const data = await res.json()
   return { ok: !!data.key?.id, wamsgId: data.key?.id || null, raw: data }
