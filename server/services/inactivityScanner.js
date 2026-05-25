@@ -46,13 +46,13 @@ export async function processInactivityFollowUps() {
         AND NOT EXISTS (
           SELECT 1 FROM lead_follow_ups lfu
           WHERE lfu.lead_id = l.id AND lfu.follow_up_id = ?
-            AND (
-              lfu.status = 'active'
-              OR (lfu.last_executed_at IS NOT NULL AND lfu.last_executed_at >= datetime('now', '-' || ? || ' minutes'))
+            AND lfu.started_at >= COALESCE(
+              (SELECT MAX(created_at) FROM stage_history WHERE lead_id = l.id AND to_stage_id = l.stage_id),
+              l.created_at
             )
         )
       LIMIT 200
-    `).all(fu.account_id, fu.inactivity_stage_id, minutes, fu.id, minutes)
+    `).all(fu.account_id, fu.inactivity_stage_id, minutes, fu.id)
 
     if (candidates.length === 0) continue
     console.log(`[InactivityScan] Follow-up "${fu.name}" (mode=${mode}) — ${candidates.length} candidato(s)`)

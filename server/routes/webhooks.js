@@ -536,9 +536,9 @@ router.post('/evolution/:accountSlug', (req, res) => {
         LIMIT 1
       `).get(lead.id)
       if (activeFu) {
-        // 1. Pausa cadência
-        db.prepare("UPDATE lead_follow_ups SET status='paused', paused_at=datetime('now'), paused_reason='lead_replied', updated_at=datetime('now') WHERE id=?").run(activeFu.id)
-        console.log(`[FollowUp] Pausado lead=${lead.id} (respondeu)`)
+        // 1. Cancela cadência (status='cancelled' = lead saiu desse FU permanentemente; volta só se sair+voltar da etapa)
+        db.prepare("UPDATE lead_follow_ups SET status='cancelled', paused_at=datetime('now'), paused_reason='lead_replied', current_step_id=NULL, next_run_at=NULL, updated_at=datetime('now') WHERE id=?").run(activeFu.id)
+        console.log(`[FollowUp] Cancelado lead=${lead.id} (respondeu)`)
 
         // 2. Reatribui conforme on_reply_action
         const action = activeFu.on_reply_action || 'pause'
