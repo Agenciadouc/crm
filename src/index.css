@@ -380,6 +380,8 @@ th.right, td.right { text-align: right; }
    ========================================= */
 
 .lead-detail { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+.lead-detail > div { min-width: 0; }
+.lead-detail .card { overflow-wrap: anywhere; word-break: break-word; }
 .lead-info { display: flex; flex-direction: column; }
 .lead-info-row { display: flex; justify-content: space-between; align-items: center; font-size: 13px; padding: 10px 0; border-bottom: 1px solid var(--border-subtle); }
 .lead-info-label { color: var(--text-muted); display: flex; align-items: center; gap: 6px; font-weight: 500; }
