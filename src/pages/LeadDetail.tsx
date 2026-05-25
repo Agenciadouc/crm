@@ -181,6 +181,9 @@ export default function LeadDetail() {
               {attendants.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
             </select>
           )}
+          <button className="btn btn-primary btn-sm" onClick={() => navigate(`/chat?lead=${lead.id}`)} title="Abrir conversa">
+            <MessageCircle size={14} /> Abrir Chat
+          </button>
           <button className="btn btn-secondary btn-sm" onClick={handleToggleArchive} title={lead.is_archived ? 'Desarquivar' : 'Arquivar'}>
             {lead.is_archived ? <><ArchiveRestore size={14} /> Desarquivar</> : <><Archive size={14} /> Arquivar</>}
           </button>
