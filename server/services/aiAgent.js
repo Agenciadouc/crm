@@ -229,7 +229,7 @@ function getToolsForAgent(availableTags, availableStages) {
       input_schema: {
         type: 'object',
         properties: {
-          field: { type: 'string', enum: ['name', 'email', 'phone', 'city', 'empresa', 'instagram'] },
+          field: { type: 'string', enum: ['name', 'email', 'city', 'empresa', 'instagram'] },
           value: { type: 'string', description: 'Valor informado pelo lead' },
         },
         required: ['field', 'value'],
@@ -277,7 +277,7 @@ async function executeTool(toolUse, agent, lead, instanceId, availableTags, avai
   const { name, input } = toolUse
   try {
     if (name === 'update_lead_info') {
-      const allowed = ['name', 'email', 'phone', 'city', 'empresa', 'instagram']
+      const allowed = ['name', 'email', 'city', 'empresa', 'instagram']
       if (allowed.includes(input.field) && input.value) {
         db.prepare(`UPDATE leads SET ${input.field} = ? WHERE id = ?`).run(String(input.value).substring(0, 200), lead.id)
         console.log(`[AI Agent] update_lead_info lead=${lead.id} ${input.field}="${input.value}"`)
