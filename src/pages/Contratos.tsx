@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
-import { fetchContracts, createContract, updateContract, deleteContract, type Contract, type ContractInput } from '../lib/api'
-import { FileSignature, Plus, Edit3, Trash2, Download } from 'lucide-react'
+import { fetchContracts, createContract, updateContract, deleteContract, approveContract, type Contract, type ContractInput } from '../lib/api'
+import { FileSignature, Plus, Edit3, Trash2, Download, CheckCircle2 } from 'lucide-react'
 
 const today = () => new Date().toISOString().slice(0, 10)
 
@@ -140,6 +140,18 @@ export default function Contratos() {
     catch (e: any) { alert('Erro: ' + e.message) }
   }
 
+  const handleApprove = async (c: Contract) => {
+    if (c.approved_at) { alert('Contrato ja aprovado em ' + formatDate(c.approved_at.slice(0, 10))); return }
+    if (!confirm(`Aprovar contrato ${c.numero} de "${c.razao_social}"?\n\nIsso vai CRIAR um cliente no CRM com:\n• Conta: ${c.razao_social}\n• Email: <slug>@drosagencia.com.br (gerado automaticamente)\n• Senha: dros2026\n\nNao pode desfazer.`)) return
+    try {
+      const result = await approveContract(c.id)
+      alert(`Contrato aprovado!\n\nCliente criado:\nEmail: ${result.credentials.email}\nSenha: ${result.credentials.password}\n\nEntregue essas credenciais pro cliente.`)
+      load()
+    } catch (e: any) {
+      alert('Erro ao aprovar: ' + (e?.message || 'desconhecido'))
+    }
+  }
+
   const handleDownload = async (c: Contract) => {
     // Endpoint exige JWT — window.open direto perde o header.
     // Faz fetch autenticado, abre nova aba com about:blank, escreve o HTML e dispara print.
@@ -184,6 +196,7 @@ export default function Contratos() {
             <thead>
               <tr>
                 <th>Numero</th>
+                <th>Status</th>
                 <th>Razao Social</th>
                 <th>CNPJ</th>
                 <th>Fee</th>
@@ -197,6 +210,17 @@ export default function Contratos() {
               {contracts.map(c => (
                 <tr key={c.id}>
                   <td><span className="strong">{c.numero}</span></td>
+                  <td>
+                    {c.approved_at ? (
+                      <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 10, background: 'rgba(52,199,89,0.15)', color: '#34C759', fontWeight: 600 }}>
+                        ✅ Aprovado
+                      </span>
+                    ) : (
+                      <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 10, background: 'rgba(155,150,176,0.15)', color: '#9B96B0' }}>
+                        Rascunho
+                      </span>
+                    )}
+                  </td>
                   <td>{c.razao_social}</td>
                   <td style={{ fontSize: 11, color: 'var(--text-muted)' }}>{c.cnpj}</td>
                   <td>{formatBRL(c.fee_mensal)}</td>
@@ -204,6 +228,11 @@ export default function Contratos() {
                   <td>{c.vigencia_meses}m</td>
                   <td style={{ fontSize: 11, color: 'var(--text-muted)' }}>{c.created_by_name || '—'}</td>
                   <td style={{ textAlign: 'right' }}>
+                    {!c.approved_at && (
+                      <button className="btn btn-primary btn-sm" onClick={() => handleApprove(c)} title="Aprovar contrato (cria cliente no CRM)" style={{ marginRight: 4, background: '#34C759', borderColor: '#2BA84A' }}>
+                        <CheckCircle2 size={12} /> Aprovar
+                      </button>
+                    )}
                     <button className="btn btn-secondary btn-sm" onClick={() => handleDownload(c)} title="Baixar PDF" style={{ marginRight: 4 }}>
                       <Download size={12} />
                     </button>

@@ -190,6 +190,11 @@ export interface Contract {
   local_assinatura: string; data_assinatura: string;
   created_by: number | null; created_by_name?: string;
   created_at: string; updated_at: string;
+  // v2: aprovacao (cria cliente)
+  approved_at?: string | null;
+  approved_by?: number | null;
+  approved_email?: string | null;
+  account_id?: number | null;
 }
 export interface ContractInput {
   razao_social: string; cnpj: string; inscricao_estadual?: string;
@@ -210,6 +215,7 @@ export const fetchContracts = () => apiFetch<{ contracts: Contract[] }>('/api/co
 export const createContract = (data: ContractInput) => apiFetch<{ contract: Contract }>('/api/contracts', { method: 'POST', body: JSON.stringify(data) }).then(d => d.contract)
 export const updateContract = (id: number, data: Partial<ContractInput>) => apiFetch<{ contract: Contract }>(`/api/contracts/${id}`, { method: 'PUT', body: JSON.stringify(data) }).then(d => d.contract)
 export const deleteContract = (id: number) => apiFetch(`/api/contracts/${id}`, { method: 'DELETE' })
+export const approveContract = (id: number) => apiFetch<{ contract: Contract; credentials: { email: string; password: string; account_id: number }; message: string }>(`/api/contracts/${id}/approve`, { method: 'POST' })
 
 // Dashboard
 export const fetchDashboardStats = (accountId: number, days = 7) => apiFetch<DashboardStats>(`/api/dashboard/stats?account_id=${accountId}&days=${days}`)
