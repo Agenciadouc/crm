@@ -61,6 +61,11 @@ export default function Contratos() {
   const [modalMode, setModalMode] = useState<'new' | number | null>(null)
   const [form, setForm] = useState<ContractInput>(BLANK)
   const [saving, setSaving] = useState(false)
+  // Modal de aprovacao
+  const [approveModal, setApproveModal] = useState<{ contract: Contract; email: string } | null>(null)
+  const [approving, setApproving] = useState(false)
+  // Modal de sucesso pós-aprovacao
+  const [credentialsModal, setCredentialsModal] = useState<{ email: string; password: string; razao: string } | null>(null)
 
   const isEditing = typeof modalMode === 'number'
 
@@ -140,24 +145,35 @@ export default function Contratos() {
     catch (e: any) { alert('Erro: ' + e.message) }
   }
 
-  const handleApprove = async (c: Contract) => {
-    if (c.approved_at) { alert('Contrato ja aprovado em ' + formatDate(c.approved_at.slice(0, 10))); return }
-    // Sugere email = primeira palavra da razao social, slugificada (sem acentos, lowercase, alfanumerica)
+  const openApprove = (c: Contract) => {
+    if (c.approved_at) { alert('Contrato ja aprovado'); return }
+    // Sugere email = primeira palavra slugificada
     const firstWord = (c.razao_social || '').trim().split(/\s+/)[0] || ''
     const slug = firstWord.toLowerCase()
       .normalize('NFD').replace(/[̀-ͯ]/g, '')
       .replace(/[^a-z0-9]+/g, '')
       .substring(0, 20)
     const defaultEmail = slug ? `${slug}@drosagencia.com.br` : ''
-    const email = prompt(`Aprovar contrato ${c.numero} de "${c.razao_social}"?\n\nVai criar cliente no CRM com email abaixo (edite se quiser) e senha dros2026:`, defaultEmail)
-    if (!email || !email.trim()) return
+    setApproveModal({ contract: c, email: defaultEmail })
+  }
+
+  const handleApprove = async () => {
+    if (!approveModal) return
+    if (!approveModal.email.trim()) { alert('Email obrigatório'); return }
+    setApproving(true)
     try {
-      const result = await approveContract(c.id, email.trim())
-      alert(`Contrato aprovado!\n\nCliente criado:\nEmail: ${result.credentials.email}\nSenha: ${result.credentials.password}\n\nEntregue essas credenciais pro cliente.`)
+      const result = await approveContract(approveModal.contract.id, approveModal.email.trim())
+      setCredentialsModal({
+        email: result.credentials.email,
+        password: result.credentials.password,
+        razao: approveModal.contract.razao_social,
+      })
+      setApproveModal(null)
       load()
     } catch (e: any) {
       alert('Erro ao aprovar: ' + (e?.message || 'desconhecido'))
     }
+    setApproving(false)
   }
 
   const handleDownload = async (c: Contract) => {
@@ -237,7 +253,7 @@ export default function Contratos() {
                   <td style={{ fontSize: 11, color: 'var(--text-muted)' }}>{c.created_by_name || '—'}</td>
                   <td style={{ textAlign: 'right' }}>
                     {!c.approved_at && (
-                      <button className="btn btn-primary btn-sm" onClick={() => handleApprove(c)} title="Aprovar contrato (cria cliente no CRM)" style={{ marginRight: 4, background: '#34C759', borderColor: '#2BA84A' }}>
+                      <button className="btn btn-primary btn-sm" onClick={() => openApprove(c)} title="Aprovar contrato (cria cliente no CRM)" style={{ marginRight: 4, background: '#34C759', borderColor: '#2BA84A' }}>
                         <CheckCircle2 size={12} /> Aprovar
                       </button>
                     )}
@@ -450,6 +466,85 @@ export default function Contratos() {
               <button className="btn btn-primary" onClick={handleSave} disabled={saving}>
                 {saving ? 'Salvando...' : (isEditing ? 'Salvar Alteracoes' : 'Criar Contrato')}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de aprovacao */}
+      {approveModal && (
+        <div className="modal-overlay" onClick={() => !approving && setApproveModal(null)}>
+          <div className="modal" style={{ maxWidth: 520 }} onClick={e => e.stopPropagation()}>
+            <h2 style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#34C759', marginBottom: 4 }}>
+              <CheckCircle2 size={20} /> Aprovar contrato
+            </h2>
+            <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 16 }}>
+              <strong>{approveModal.contract.numero}</strong> · {approveModal.contract.razao_social}
+            </p>
+
+            <div style={{ padding: 12, background: 'rgba(52,199,89,0.08)', border: '1px solid rgba(52,199,89,0.2)', borderRadius: 8, marginBottom: 16, fontSize: 12, lineHeight: 1.6 }}>
+              Isso vai <strong>criar um cliente no CRM</strong> com:
+              <ul style={{ margin: '8px 0 0 18px', padding: 0 }}>
+                <li>Conta: <strong>{approveModal.contract.razao_social}</strong></li>
+                <li>Usuário <strong>gerente</strong></li>
+                <li>Senha: <code style={{ background: 'rgba(0,0,0,0.3)', padding: '1px 5px', borderRadius: 3 }}>dros2026</code></li>
+              </ul>
+              <div style={{ marginTop: 8, color: '#FFB300' }}>⚠ Não pode desfazer pelo botão (precisa apagar conta manualmente).</div>
+            </div>
+
+            <div className="form-group">
+              <label>Email do gerente *</label>
+              <input
+                className="input"
+                type="email"
+                value={approveModal.email}
+                onChange={e => setApproveModal({ ...approveModal, email: e.target.value })}
+                placeholder="cliente@drosagencia.com.br"
+                autoFocus
+                onKeyDown={e => { if (e.key === 'Enter' && !approving) handleApprove() }}
+              />
+              <small style={{ color: 'var(--text-muted)', fontSize: 11 }}>
+                Edite se quiser. Sistema bloqueia se email já estiver em uso.
+              </small>
+            </div>
+
+            <div className="modal-actions" style={{ marginTop: 20 }}>
+              <button className="btn btn-secondary" onClick={() => setApproveModal(null)} disabled={approving}>Cancelar</button>
+              <button className="btn btn-primary" onClick={handleApprove} disabled={approving || !approveModal.email.trim()} style={{ background: '#34C759', borderColor: '#2BA84A' }}>
+                {approving ? 'Aprovando...' : '✓ Aprovar e criar cliente'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de sucesso com credenciais */}
+      {credentialsModal && (
+        <div className="modal-overlay" onClick={() => setCredentialsModal(null)}>
+          <div className="modal" style={{ maxWidth: 480 }} onClick={e => e.stopPropagation()}>
+            <h2 style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#34C759', marginBottom: 4 }}>
+              <CheckCircle2 size={20} /> Cliente criado!
+            </h2>
+            <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 16 }}>
+              {credentialsModal.razao}
+            </p>
+
+            <div style={{ padding: 16, background: 'rgba(52,199,89,0.08)', border: '1px solid rgba(52,199,89,0.3)', borderRadius: 8, marginBottom: 16 }}>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 4 }}>Email de acesso</div>
+              <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 12, fontFamily: 'monospace' }}>{credentialsModal.email}</div>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 4 }}>Senha</div>
+              <div style={{ fontSize: 15, fontWeight: 600, fontFamily: 'monospace' }}>{credentialsModal.password}</div>
+            </div>
+
+            <div style={{ fontSize: 12, color: '#FFB300', marginBottom: 16 }}>
+              📋 Copie e envie pro cliente. Senha pode ser trocada por ele depois.
+            </div>
+
+            <div className="modal-actions">
+              <button className="btn btn-secondary" onClick={() => {
+                navigator.clipboard?.writeText(`Email: ${credentialsModal.email}\nSenha: ${credentialsModal.password}`)
+              }}>📋 Copiar</button>
+              <button className="btn btn-primary" onClick={() => setCredentialsModal(null)}>Fechar</button>
             </div>
           </div>
         </div>
