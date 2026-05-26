@@ -109,7 +109,8 @@ export default function Integrations() {
       setInstances(insts)
       setEvoUrl(config.api_url || '')
       setEvoKey(config.api_key || '')
-      setEvoConfigured(!!(config.api_url && config.api_key))
+      // Prefere a flag `configured` do back (sanitizada pra atendente); fallback pro check antigo.
+      setEvoConfigured(typeof config.configured === 'boolean' ? config.configured : !!(config.api_url && config.api_key))
     }).finally(() => setLoading(false))
     // Load account slug for webhook URLs
     apiFetch(`/api/accounts/${accountId}`).then((d: any) => {
@@ -341,7 +342,7 @@ export default function Integrations() {
               {syncing ? <Loader size={14} className="spinning" /> : <Download size={14} />} Sincronizar agora
             </button>
           )}
-          {evoConfigured && isGerenteOuAdmin && (
+          {evoConfigured && (
             <button className="btn btn-primary btn-sm" onClick={() => setShowNew(true)}><Plus size={14} /> Conectar WhatsApp</button>
           )}
         </div>
@@ -414,7 +415,7 @@ export default function Integrations() {
                     <div>
                       <div style={{ fontWeight: 600, fontSize: 15 }}>{inst.instance_name}</div>
                       {inst.phone_number && <div style={{ fontSize: 12, color: '#C8C4D4' }}>{inst.phone_number}</div>}
-                      {isGerenteOuAdmin && (
+                      {(
                         <>
                           <div style={{ fontSize: 11, color: '#9B96B0', marginTop: 6, display: 'flex', alignItems: 'center', gap: 6 }}>
                             <User size={11} /> Leads novos vao para:
@@ -472,7 +473,7 @@ export default function Integrations() {
                             💬 Msg inicial
                           </button>
                         )}
-                        {isGerenteOuAdmin && (
+                        {(
                           <>
                             <button
                               className="btn btn-secondary btn-sm"
@@ -502,7 +503,7 @@ export default function Integrations() {
                         )}
                       </>
                     )}
-                    {isGerenteOuAdmin && (
+                    {(
                       <button className="btn btn-danger btn-sm btn-icon" onClick={() => handleDelete(inst)} title="Excluir"><Trash2 size={12} /></button>
                     )}
                   </div>

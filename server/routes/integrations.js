@@ -17,14 +17,18 @@ function getOwnedInstance(req, res) {
 }
 
 // ─── Get Evolution API config for account ────────────────────────
-router.get('/evolution-config', requireRole('super_admin', 'gerente'), (req, res) => {
+// Atendente le tambem (precisa pra UI ja saber que ta configurado e mostrar instancias),
+// mas recebe versao saneada — apenas a flag `configured`, sem api_url/api_key.
+router.get('/evolution-config', requireRole('super_admin', 'gerente', 'atendente'), (req, res) => {
   if (!req.accountId) return res.status(400).json({ error: 'account_id required' })
   const account = db.prepare('SELECT evolution_api_url, evolution_api_key FROM accounts WHERE id = ?').get(req.accountId)
-  // Fallback pros defaults se a conta nao tiver config propria salva
-  res.json({
-    api_url: account?.evolution_api_url || DEFAULT_EVOLUTION_API_URL,
-    api_key: account?.evolution_api_key || DEFAULT_EVOLUTION_API_KEY,
-  })
+  const apiUrl = account?.evolution_api_url || DEFAULT_EVOLUTION_API_URL
+  const apiKey = account?.evolution_api_key || DEFAULT_EVOLUTION_API_KEY
+  const configured = !!(apiUrl && apiKey)
+  if (req.user.role === 'atendente') {
+    return res.json({ api_url: null, api_key: null, configured })
+  }
+  res.json({ api_url: apiUrl, api_key: apiKey, configured })
 })
 
 // ─── Save Evolution API config for account ───────────────────────
@@ -66,7 +70,7 @@ async function registerEvolutionWebhook(baseUrl, apiKey, instanceName, accountSl
 }
 
 // ─── Create instance on Evolution API + get QR code ──────────────
-router.post('/whatsapp', requireRole('super_admin', 'gerente'), async (req, res) => {
+router.post('/whatsapp', requireRole('super_admin', 'gerente', 'atendente'), async (req, res) => {
   if (!req.accountId) return res.status(400).json({ error: 'account_id required' })
   const { instance_name, lead_intake_mode = 'open' } = req.body
   if (!instance_name) return res.status(400).json({ error: 'instance_name obrigatorio' })
@@ -256,7 +260,7 @@ router.post('/whatsapp/:id/qrcode', allowInstanceOwner, async (req, res) => {
 })
 
 // ─── Disconnect (logout from WhatsApp) ───────────────────────────
-router.post('/whatsapp/:id/disconnect', requireRole('super_admin', 'gerente'), async (req, res) => {
+router.post('/whatsapp/:id/disconnect', requireRole('super_admin', 'gerente', 'atendente'), async (req, res) => {
   const instance = getOwnedInstance(req, res)
   if (!instance) return
 
@@ -274,7 +278,7 @@ router.post('/whatsapp/:id/disconnect', requireRole('super_admin', 'gerente'), a
 })
 
 // ─── Delete instance ─────────────────────────────────────────────
-router.delete('/whatsapp/:id', requireRole('super_admin', 'gerente'), async (req, res) => {
+router.delete('/whatsapp/:id', requireRole('super_admin', 'gerente', 'atendente'), async (req, res) => {
   const instance = getOwnedInstance(req, res)
   if (instance) {
     // Try to delete from Evolution API too
@@ -290,7 +294,7 @@ router.delete('/whatsapp/:id', requireRole('super_admin', 'gerente'), async (req
 })
 
 // ─── Re-set webhook URL on Evolution API ─────────────────────────
-router.post('/whatsapp/:id/setup-webhook', requireRole('super_admin', 'gerente'), async (req, res) => {
+router.post('/whatsapp/:id/setup-webhook', requireRole('super_admin', 'gerente', 'atendente'), async (req, res) => {
   const instance = getOwnedInstance(req, res)
   if (!instance) return
   const account = db.prepare('SELECT slug FROM accounts WHERE id = ?').get(instance.account_id)
@@ -305,7 +309,7 @@ router.post('/whatsapp/:id/setup-webhook', requireRole('super_admin', 'gerente')
 })
 
 // ─── Update lead intake mode (open vs restricted) ─────────────────
-router.put('/whatsapp/:id/mode', requireRole('super_admin', 'gerente'), (req, res) => {
+router.put('/whatsapp/:id/mode', requireRole('super_admin', 'gerente', 'atendente'), (req, res) => {
   const instance = getOwnedInstance(req, res)
   if (!instance) return
   const { mode } = req.body
@@ -316,7 +320,7 @@ router.put('/whatsapp/:id/mode', requireRole('super_admin', 'gerente'), (req, re
 })
 
 // ─── Update default attendant for an instance ────────────────────
-router.put('/whatsapp/:id/attendant', requireRole('super_admin', 'gerente'), (req, res) => {
+router.put('/whatsapp/:id/attendant', requireRole('super_admin', 'gerente', 'atendente'), (req, res) => {
   const instance = getOwnedInstance(req, res)
   if (!instance) return
   const { attendant_id } = req.body
@@ -332,7 +336,7 @@ router.put('/whatsapp/:id/attendant', requireRole('super_admin', 'gerente'), (re
 })
 
 // ─── Restart Baileys session on Evolution (fixes "open but no msgs" zombie state) ───
-router.post('/whatsapp/:id/restart', requireRole('super_admin', 'gerente'), async (req, res) => {
+router.post('/whatsapp/:id/restart', requireRole('super_admin', 'gerente', 'atendente'), async (req, res) => {
   const instance = getOwnedInstance(req, res)
   if (!instance) return
   try {
@@ -348,7 +352,7 @@ router.post('/whatsapp/:id/restart', requireRole('super_admin', 'gerente'), asyn
 })
 
 // ─── Force run polling now (catch missed inbound messages immediately) ──
-router.post('/whatsapp/sync-now', requireRole('super_admin', 'gerente'), async (req, res) => {
+router.post('/whatsapp/sync-now', requireRole('super_admin', 'gerente', 'atendente'), async (req, res) => {
   if (!req.accountId) return res.status(400).json({ error: 'account_id required' })
   try {
     await runPollNow()
@@ -359,7 +363,7 @@ router.post('/whatsapp/sync-now', requireRole('super_admin', 'gerente'), async (
 })
 
 // ─── Test connection (legacy, kept for compatibility) ────────────
-router.post('/whatsapp/:id/test', requireRole('super_admin', 'gerente'), async (req, res) => {
+router.post('/whatsapp/:id/test', requireRole('super_admin', 'gerente', 'atendente'), async (req, res) => {
   const instance = getOwnedInstance(req, res)
   if (!instance) return
 
@@ -387,7 +391,7 @@ router.get('/whatsapp/:id/auto-messages', (req, res) => {
 })
 
 // PUT: salva config (upsert)
-router.put('/whatsapp/:id/auto-messages', requireRole('super_admin', 'gerente'), (req, res) => {
+router.put('/whatsapp/:id/auto-messages', requireRole('super_admin', 'gerente', 'atendente'), (req, res) => {
   const instance = getOwnedInstance(req, res)
   if (!instance) return
   const {
