@@ -2,6 +2,17 @@ import { useState, useEffect } from 'react'
 import { fetchProposals, createProposal, updateProposal, deleteProposal, type Proposal, type ProposalInput } from '../lib/api'
 import { FileText, Plus, Edit3, Trash2, Copy, ExternalLink, Check } from 'lucide-react'
 
+// Title Case PT-BR: 1ª letra de cada palavra maiuscula, exceto conectores (de, da, do, e)
+const LOWER_PT = new Set(['de', 'da', 'do', 'das', 'dos', 'e'])
+function titleCase(s: string | null | undefined): string {
+  if (!s) return ''
+  return String(s).toLowerCase().split(/\s+/).map((w, i) => {
+    if (!w) return ''
+    if (i > 0 && LOWER_PT.has(w)) return w
+    return w[0].toUpperCase() + w.slice(1)
+  }).join(' ')
+}
+
 const BLANK: ProposalInput & { has_production: boolean } = {
   client_name: '',
   phone: '',
@@ -116,8 +127,8 @@ export default function Propostas() {
               {proposals.map(p => (
                 <tr key={p.id}>
                   <td className="name">
-                    <div style={{ fontWeight: 600 }}>{p.client_name}</div>
-                    {p.segmento && <div style={{ fontSize: 11, color: '#9B96B0' }}>{p.segmento}</div>}
+                    <div style={{ fontWeight: 600 }}>{titleCase(p.client_name)}</div>
+                    {p.segmento && <div style={{ fontSize: 11, color: '#9B96B0' }}>{titleCase(p.segmento)}</div>}
                   </td>
                   <td>
                     {p.has_production
