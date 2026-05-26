@@ -195,6 +195,7 @@ export interface Contract {
   approved_by?: number | null;
   approved_email?: string | null;
   account_id?: number | null;
+  hub_client_id?: number | null;
 }
 export interface ContractInput {
   razao_social: string; cnpj: string; inscricao_estadual?: string;

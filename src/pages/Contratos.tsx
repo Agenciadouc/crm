@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
-import { fetchContracts, createContract, updateContract, deleteContract, approveContract, type Contract, type ContractInput } from '../lib/api'
-import { FileSignature, Plus, Edit3, Trash2, Download, CheckCircle2 } from 'lucide-react'
+import { fetchContracts, createContract, updateContract, deleteContract, approveContract, syncContractHub, type Contract, type ContractInput } from '../lib/api'
+import { FileSignature, Plus, Edit3, Trash2, Download, CheckCircle2, RefreshCw } from 'lucide-react'
 
 const today = () => new Date().toISOString().slice(0, 10)
 
@@ -157,6 +157,24 @@ export default function Contratos() {
     setApproveModal({ contract: c, email: defaultEmail })
   }
 
+  const [syncingHub, setSyncingHub] = useState<number | null>(null)
+  const handleSyncHub = async (c: Contract) => {
+    if (!confirm(`Sincronizar contrato ${c.numero} (${c.razao_social}) com o HUB?\n\nIsso cria o cliente no HUB com o mesmo email + senha 'dros2026' que ja foi gerado no CRM.`)) return
+    setSyncingHub(c.id)
+    try {
+      const r = await syncContractHub(c.id)
+      if (r.ok) {
+        alert(`✅ Cliente criado no HUB!\nID: ${r.client_id}`)
+        load()
+      } else {
+        alert('HUB rejeitou: ' + (r.reason || 'erro desconhecido'))
+      }
+    } catch (e: any) {
+      alert('Erro: ' + (e?.message || 'desconhecido'))
+    }
+    setSyncingHub(null)
+  }
+
   const handleApprove = async () => {
     if (!approveModal) return
     if (!approveModal.email.trim()) { alert('Email obrigatório'); return }
@@ -256,6 +274,17 @@ export default function Contratos() {
                     {!c.approved_at && (
                       <button className="btn btn-primary btn-sm" onClick={() => openApprove(c)} title="Aprovar contrato (cria cliente no CRM)" style={{ marginRight: 4, background: '#34C759', borderColor: '#2BA84A' }}>
                         <CheckCircle2 size={12} /> Aprovar
+                      </button>
+                    )}
+                    {c.approved_at && !c.hub_client_id && (
+                      <button
+                        className="btn btn-secondary btn-sm"
+                        onClick={() => handleSyncHub(c)}
+                        disabled={syncingHub === c.id}
+                        title="Contrato aprovado no CRM mas nao criado no HUB. Clique pra criar agora."
+                        style={{ marginRight: 4, background: 'rgba(255,179,0,0.15)', borderColor: 'rgba(255,179,0,0.4)', color: '#FFB300' }}
+                      >
+                        <RefreshCw size={12} /> {syncingHub === c.id ? 'Enviando...' : 'Sync HUB'}
                       </button>
                     )}
                     <button className="btn btn-secondary btn-sm" onClick={() => handleDownload(c)} title="Baixar PDF" style={{ marginRight: 4 }}>
