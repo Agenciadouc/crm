@@ -3,6 +3,7 @@ import { useEffect } from 'react'
 import { AuthProvider, useAuth } from './context/AuthContext'
 import { AccountProvider } from './context/AccountContext'
 import { SSEProvider } from './context/SSEContext'
+import { ThemeProvider } from './context/ThemeContext'
 import Sidebar from './components/Sidebar'
 import DisconnectedInstancesAlert from './components/DisconnectedInstancesAlert'
 import Login from './pages/Login'
@@ -130,9 +131,11 @@ function AppRoutes() {
 export default function App() {
   return (
     <BrowserRouter basename={import.meta.env.BASE_URL}>
-      <AuthProvider>
-        <AppRoutes />
-      </AuthProvider>
+      <ThemeProvider>
+        <AuthProvider>
+          <AppRoutes />
+        </AuthProvider>
+      </ThemeProvider>
     </BrowserRouter>
   )
 }

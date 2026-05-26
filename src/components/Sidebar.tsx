@@ -3,16 +3,25 @@ import { NavLink } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { useAccount } from '../context/AccountContext'
 import { useSSE } from '../context/SSEContext'
+import { useTheme } from '../context/ThemeContext'
 import { apiFetch, fetchTaskCounts, fetchPendingTransferRequests } from '../lib/api'
 import {
   LayoutDashboard, Kanban, Users, MessageCircle, UserCog, GitBranch,
   Plug, Settings, Building2, LogOut, UsersRound, Menu, X,
-  ListOrdered, MessageSquarePlus, ClipboardList, Rocket, ListTodo, ExternalLink, Tag as TagIcon, FileText, FileSignature, ArrowRightLeft, Zap, Bot,
+  ListOrdered, MessageSquarePlus, ClipboardList, Rocket, ListTodo, ExternalLink, Tag as TagIcon, FileText, FileSignature, ArrowRightLeft, Zap, Bot, Sun, Moon,
 } from 'lucide-react'
+
+function getInitials(name: string): string {
+  if (!name) return '?'
+  const parts = name.trim().split(/\s+/)
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase()
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
+}
 
 export default function Sidebar() {
   const { user, logout } = useAuth()
   const { accountId, accounts, setAccountId } = useAccount()
+  const { theme, setTheme } = useTheme()
   const [newLeadsCount, setNewLeadsCount] = useState(0)
   const [taskCount, setTaskCount] = useState(0)
   const [transferCount, setTransferCount] = useState(0)
@@ -73,8 +82,8 @@ export default function Sidebar() {
         </div>
 
         {isAdmin && accounts.length > 0 && (
-          <div style={{ padding: '8px 16px', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
-            <label style={{ fontSize: 10, color: '#6B6580', textTransform: 'uppercase', letterSpacing: 0.5, display: 'block', marginBottom: 4 }}>Visualizando conta</label>
+          <div style={{ padding: '8px 16px', borderBottom: '1px solid var(--border-subtle)' }}>
+            <label style={{ fontSize: 10, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 0.5, display: 'block', marginBottom: 4 }}>Visualizando conta</label>
             <select className="select" value={accountId || ''} onChange={e => setAccountId(Number(e.target.value))} style={{ width: '100%', fontSize: 12, padding: '6px 8px' }}>
               {accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
             </select>
@@ -174,11 +183,36 @@ export default function Sidebar() {
         </nav>
 
         <div className="sidebar-footer">
-          <div>
-            <div className="sidebar-user">{user.name}</div>
-            <div className="sidebar-role">{user.role === 'super_admin' ? 'Admin' : user.role === 'gerente' ? 'Gerente' : 'Atendente'}</div>
+          <div className="theme-toggle" role="tablist" aria-label="Alternar tema">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={theme === 'light'}
+              className={`theme-toggle-option ${theme === 'light' ? 'active' : ''}`}
+              onClick={() => setTheme('light')}
+              title="Tema claro"
+            >
+              <Sun size={13} /> Claro
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={theme === 'dark'}
+              className={`theme-toggle-option ${theme === 'dark' ? 'active' : ''}`}
+              onClick={() => setTheme('dark')}
+              title="Tema escuro"
+            >
+              <Moon size={13} /> Escuro
+            </button>
           </div>
-          <button className="logout-btn" onClick={logout} title="Sair"><LogOut size={16} /></button>
+          <div className="sidebar-user-row">
+            <div className="sidebar-avatar" aria-hidden="true">{getInitials(user.name)}</div>
+            <div className="sidebar-user-info">
+              <div className="sidebar-user">{user.name}</div>
+              <div className="sidebar-role">{user.role === 'super_admin' ? 'Admin' : user.role === 'gerente' ? 'Gerente' : 'Atendente'}</div>
+            </div>
+            <button className="logout-btn" onClick={logout} title="Sair"><LogOut size={16} /></button>
+          </div>
         </div>
       </aside>
     </>
