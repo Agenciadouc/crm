@@ -142,9 +142,17 @@ export default function Contratos() {
 
   const handleApprove = async (c: Contract) => {
     if (c.approved_at) { alert('Contrato ja aprovado em ' + formatDate(c.approved_at.slice(0, 10))); return }
-    if (!confirm(`Aprovar contrato ${c.numero} de "${c.razao_social}"?\n\nIsso vai CRIAR um cliente no CRM com:\n• Conta: ${c.razao_social}\n• Email: <slug>@drosagencia.com.br (gerado automaticamente)\n• Senha: dros2026\n\nNao pode desfazer.`)) return
+    // Sugere email = primeira palavra da razao social, slugificada (sem acentos, lowercase, alfanumerica)
+    const firstWord = (c.razao_social || '').trim().split(/\s+/)[0] || ''
+    const slug = firstWord.toLowerCase()
+      .normalize('NFD').replace(/[̀-ͯ]/g, '')
+      .replace(/[^a-z0-9]+/g, '')
+      .substring(0, 20)
+    const defaultEmail = slug ? `${slug}@drosagencia.com.br` : ''
+    const email = prompt(`Aprovar contrato ${c.numero} de "${c.razao_social}"?\n\nVai criar cliente no CRM com email abaixo (edite se quiser) e senha dros2026:`, defaultEmail)
+    if (!email || !email.trim()) return
     try {
-      const result = await approveContract(c.id)
+      const result = await approveContract(c.id, email.trim())
       alert(`Contrato aprovado!\n\nCliente criado:\nEmail: ${result.credentials.email}\nSenha: ${result.credentials.password}\n\nEntregue essas credenciais pro cliente.`)
       load()
     } catch (e: any) {

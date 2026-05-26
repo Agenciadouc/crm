@@ -68,16 +68,19 @@ function renderTemplate(c) {
   // Inscrição estadual opcional
   conditional('TEM_IE', !!(c.inscricao_estadual && String(c.inscricao_estadual).trim()))
 
+  // Helper pra normalizar dados da empresa em CAIXA ALTA (visual no contrato impresso)
+  const upper = (v) => String(v || '').toUpperCase()
+
   const replacements = {
     NUMERO: c.numero || '',
-    RAZAO_SOCIAL: c.razao_social || '',
-    CNPJ: c.cnpj || '',
-    INSCRICAO_ESTADUAL: c.inscricao_estadual || '',
-    ENDERECO_LOGRADOURO: c.endereco_logradouro || '',
-    ENDERECO_BAIRRO: c.endereco_bairro || '',
-    ENDERECO_CEP: c.endereco_cep || '',
-    ENDERECO_CIDADE: c.endereco_cidade || '',
-    ENDERECO_ESTADO: c.endereco_estado || '',
+    RAZAO_SOCIAL: upper(c.razao_social),
+    CNPJ: upper(c.cnpj),
+    INSCRICAO_ESTADUAL: upper(c.inscricao_estadual),
+    ENDERECO_LOGRADOURO: upper(c.endereco_logradouro),
+    ENDERECO_BAIRRO: upper(c.endereco_bairro),
+    ENDERECO_CEP: upper(c.endereco_cep),
+    ENDERECO_CIDADE: upper(c.endereco_cidade),
+    ENDERECO_ESTADO: upper(c.endereco_estado),
     FEE_MENSAL: formatBRL(c.fee_mensal),
     COMISSAO_PERCENT: String(c.comissao_percent || 0).replace('.', ','),
     VIGENCIA_MESES: String(c.vigencia_meses || 3),
@@ -267,20 +270,33 @@ router.post('/:id/approve', requireRole('super_admin', 'gerente'), (req, res) =>
     return res.status(400).json({ error: 'Razao Social obrigatoria pra aprovar contrato' })
   }
 
-  // Gera slug do razao_social pra usar como prefixo do email + slug da conta
+  // Resolve email: usa o que o usuario mandou OU gera default (primeira palavra slugificada)
   const slugify = (s) => String(s || '').toLowerCase()
     .normalize('NFD').replace(/[̀-ͯ]/g, '')  // remove acentos
-    .replace(/[^a-z0-9]+/g, '').substring(0, 30)
-  const emailPrefix = slugify(contract.razao_social)
-  if (!emailPrefix) return res.status(400).json({ error: 'Razao Social invalida (sem caracteres alfanumericos)' })
+    .replace(/[^a-z0-9]+/g, '')
 
-  // Encontra email disponivel (adiciona sufixo numerico se ja existe)
-  let email = `${emailPrefix}@drosagencia.com.br`
-  let suffix = 2
-  while (db.prepare('SELECT id FROM users WHERE email = ?').get(email)) {
-    email = `${emailPrefix}${suffix}@drosagencia.com.br`
-    suffix++
-    if (suffix > 99) return res.status(500).json({ error: 'Nao foi possivel gerar email unico' })
+  let email
+  if (req.body.email && typeof req.body.email === 'string' && req.body.email.trim()) {
+    email = req.body.email.trim().toLowerCase()
+    // Valida formato basico
+    if (!/^[a-z0-9._-]+@[a-z0-9.-]+\.[a-z]{2,}$/.test(email)) {
+      return res.status(400).json({ error: 'Email invalido' })
+    }
+    if (db.prepare('SELECT id FROM users WHERE email = ?').get(email)) {
+      return res.status(400).json({ error: 'Email ja em uso. Escolha outro.' })
+    }
+  } else {
+    // Default: primeira palavra slugificada (max 20 chars)
+    const firstWord = String(contract.razao_social || '').trim().split(/\s+/)[0] || ''
+    const emailPrefix = slugify(firstWord).substring(0, 20)
+    if (!emailPrefix) return res.status(400).json({ error: 'Razao Social invalida (sem caracteres alfanumericos)' })
+    email = `${emailPrefix}@drosagencia.com.br`
+    let suffix = 2
+    while (db.prepare('SELECT id FROM users WHERE email = ?').get(email)) {
+      email = `${emailPrefix}${suffix}@drosagencia.com.br`
+      suffix++
+      if (suffix > 99) return res.status(500).json({ error: 'Nao foi possivel gerar email unico' })
+    }
   }
 
   // Gera slug da conta
