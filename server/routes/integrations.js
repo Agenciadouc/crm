@@ -161,6 +161,41 @@ router.post('/whatsapp/:id/connect', allowInstanceOwner, async (req, res) => {
   }
 })
 
+// POST /whatsapp/sync-phones — backfill: popula phone_number de todas as inst connected sem phone (super_admin)
+router.post('/whatsapp/sync-phones', requireRole('super_admin'), async (req, res) => {
+  const insts = db.prepare("SELECT * FROM whatsapp_instances WHERE status='connected' AND (phone_number IS NULL OR phone_number = '')").all()
+  const results = []
+  for (const inst of insts) {
+    const phone = await syncInstancePhoneIfMissing(inst)
+    results.push({ id: inst.id, instance_name: inst.instance_name, phone: phone || '(falhou)' })
+  }
+  res.json({ ok: true, synced: results.length, results })
+})
+
+// Helper: busca + salva phone_number da Evolution se estiver vazio no banco
+async function syncInstancePhoneIfMissing(instance) {
+  if (instance.phone_number) return instance.phone_number
+  try {
+    const r = await fetch(`${instance.api_url}/instance/fetchInstances?instanceName=${encodeURIComponent(instance.instance_name)}`, {
+      headers: { apikey: instance.api_key },
+    })
+    const data = await r.json()
+    const arr = Array.isArray(data) ? data : (data?.instance ? [data.instance] : [])
+    const inst = arr[0] || {}
+    // Evolution retorna ownerJid (ex: 554891574922@s.whatsapp.net) — extrai só digitos
+    const jid = inst.ownerJid || inst.owner || inst.number || ''
+    const phone = String(jid).replace(/@.*$/, '').replace(/[^\d]/g, '')
+    if (phone && phone.length >= 10) {
+      db.prepare("UPDATE whatsapp_instances SET phone_number = ?, updated_at = datetime('now') WHERE id = ?").run(phone, instance.id)
+      console.log(`[Integrations] phone_number sincronizado: inst=${instance.id} (${instance.instance_name}) -> ${phone}`)
+      return phone
+    }
+  } catch (e) {
+    console.error('[Integrations] sync phone falhou:', e.message)
+  }
+  return null
+}
+
 // ─── Check connection status ─────────────────────────────────────
 router.get('/whatsapp/:id/status', async (req, res) => {
   const instance = getOwnedInstance(req, res)
@@ -176,6 +211,11 @@ router.get('/whatsapp/:id/status', async (req, res) => {
     let status = 'disconnected'
     if (state === 'open' || state === 'connected') status = 'connected'
     else if (state === 'connecting') status = 'connecting'
+
+    // Auto-popula phone_number se estiver vazio (executado tambem quando o status check roda — frontend pinga)
+    if (status === 'connected' && !instance.phone_number) {
+      await syncInstancePhoneIfMissing(instance)
+    }
 
     // If connected, clear QR code and save phone number if available
     const updates = { status }
