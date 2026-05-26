@@ -321,7 +321,7 @@ export default function LeadDetail() {
                     {availableTags.length > 0 && (
                       <>
                         {availableTags.map(t => (
-                          <button key={t.id} onClick={() => handleAddTag(t.id)} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 10px', border: 'none', background: 'none', color: '#fff', fontSize: 12, cursor: 'pointer', borderRadius: 4, width: '100%', textAlign: 'left' }}>
+                          <button key={t.id} onClick={() => handleAddTag(t.id)} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 10px', border: 'none', background: 'none', color: 'var(--text-primary)', fontSize: 12, cursor: 'pointer', borderRadius: 4, width: '100%', textAlign: 'left' }}>
                             <span style={{ width: 8, height: 8, borderRadius: '50%', background: t.color }} />{t.name}
                           </button>
                         ))}
@@ -357,8 +357,8 @@ export default function LeadDetail() {
                 {showCadenceMenu && cadences.length > 0 && (
                   <div style={{ position: 'absolute', right: 0, top: '100%', marginTop: 4, background: 'var(--bg-card)', border: '1px solid var(--border-medium)', borderRadius: 8, padding: 6, zIndex: 50, minWidth: 180 }}>
                     {cadences.map(c => (
-                      <button key={c.id} onClick={() => handleAssignCadence(c.id)} style={{ display: 'block', padding: '6px 10px', border: 'none', background: 'none', color: '#fff', fontSize: 12, cursor: 'pointer', borderRadius: 4, width: '100%', textAlign: 'left' }}>
-                        {c.name} <span style={{ color: '#6B6580' }}>({c.attempts.length} etapas)</span>
+                      <button key={c.id} onClick={() => handleAssignCadence(c.id)} style={{ display: 'block', padding: '6px 10px', border: 'none', background: 'none', color: 'var(--text-primary)', fontSize: 12, cursor: 'pointer', borderRadius: 4, width: '100%', textAlign: 'left' }}>
+                        {c.name} <span style={{ color: 'var(--text-muted)' }}>({c.attempts.length} etapas)</span>
                       </button>
                     ))}
                   </div>

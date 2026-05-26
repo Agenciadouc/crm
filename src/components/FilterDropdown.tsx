@@ -43,12 +43,12 @@ export default function FilterDropdown({ label, options, selected, onChange, wid
       {open && (
         <div style={{
           position: 'absolute', top: '100%', left: 0, right: 0, marginTop: 4,
-          background: '#1a1625', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 6,
+          background: 'var(--bg-card)', border: '1px solid var(--border-medium)', borderRadius: 6,
           maxHeight: 280, overflowY: 'auto', zIndex: 50, padding: 4,
-          boxShadow: '0 4px 14px rgba(0,0,0,0.4)'
+          boxShadow: 'var(--shadow-md)', color: 'var(--text-primary)'
         }}>
           {options.length === 0 && (
-            <div style={{ padding: '6px 10px', fontSize: 11, color: '#6B6580' }}>Sem opcoes</div>
+            <div style={{ padding: '6px 10px', fontSize: 11, color: 'var(--text-muted)' }}>Sem opcoes</div>
           )}
           {options.map(opt => {
             const isSel = selected.includes(opt.value)
@@ -56,14 +56,15 @@ export default function FilterDropdown({ label, options, selected, onChange, wid
               <label key={String(opt.value)} style={{
                 display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px',
                 cursor: 'pointer', fontSize: 12, borderRadius: 4,
-                background: isSel ? 'rgba(255,179,0,0.08)' : 'transparent',
-                color: isSel ? '#FFCB45' : 'inherit',
+                background: isSel ? 'rgba(255,179,0,0.10)' : 'transparent',
+                color: isSel ? 'var(--accent)' : 'var(--text-primary)',
+                fontWeight: isSel ? 600 : 400,
               }}>
                 <input
                   type="checkbox"
                   checked={isSel}
                   onChange={() => toggle(opt.value)}
-                  style={{ cursor: 'pointer' }}
+                  style={{ cursor: 'pointer', accentColor: 'var(--accent)' }}
                 />
                 {opt.label}
               </label>
