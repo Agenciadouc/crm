@@ -93,8 +93,9 @@ export async function notifyAndOpenLead(leadId, attendantUserId, opts = {}) {
     }
 
     // ETAPA 1: Primeira msg pro lead via primary_instance do vendedor
-    // Skip se: vendedor sem primary_instance, mesma inst do lead, ja foi enviada
+    // Skip se: opts.skipFirstMsg (manual sem checkbox), vendedor sem primary, mesma inst do lead, ja foi enviada
     const shouldSendFirstMsg = (
+      !opts.skipFirstMsg &&
       user.primary_instance_id &&
       user.primary_instance_id !== lead.instance_id &&  // skip se mesma inst (caso Oxi)
       (!lead.first_msg_sent_at || opts.forceFirstMsg)

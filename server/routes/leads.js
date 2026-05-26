@@ -600,11 +600,13 @@ router.put('/:id/assign', requireRole('super_admin', 'gerente'), (req, res) => {
   const updated = db.prepare('SELECT * FROM leads WHERE id = ?').get(lead.id)
   try { broadcastSSE(lead.account_id, 'lead:updated', updated) } catch {}
 
-  // Handoff: se gerente marcou checkbox, dispara 1a msg + notif (so pra humano)
-  if (notify_attendant && attendant_id && !isBot) {
+  // Handoff: sempre dispara pra humanos (notif sempre, 1a msg opcional via checkbox)
+  if (attendant_id && !isBot) {
     setImmediate(() => {
-      notifyAndOpenLead(lead.id, attendant_id, { source: 'manual_assign' })
-        .catch(e => console.error('[Handoff manual]', e.message))
+      notifyAndOpenLead(lead.id, attendant_id, {
+        source: 'manual_assign',
+        skipFirstMsg: !notify_attendant,  // checkbox controla SO a 1a msg; notif sempre vai
+      }).catch(e => console.error('[Handoff manual]', e.message))
     })
   }
 

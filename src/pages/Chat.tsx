@@ -1727,8 +1727,8 @@ export default function Chat() {
                 <span style={{ fontSize: 13 }}>
                   <strong>Enviar mensagem inicial automática do novo atendente</strong>
                   <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4, lineHeight: 1.5 }}>
-                    Dispara a msg de boas-vindas da instância do vendedor + notifica ele do recebimento.
-                    Se o vendedor atende na mesma instância do lead, só a notificação sai.
+                    Se marcado: o sistema envia a msg de boas-vindas da instância do vendedor pro lead.
+                    <br /><strong>A notificação ao vendedor é enviada de qualquer jeito</strong> (mesmo desmarcado).
                   </div>
                 </span>
               </label>
