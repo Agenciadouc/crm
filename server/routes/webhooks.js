@@ -6,6 +6,7 @@ import { triggerCapiForStageChange } from '../services/metaCapi.js'
 import { getInstanceConfig, wasAutoMsgSentRecently, sendAutoMessage, shouldSendAway } from '../services/autoMessages.js'
 import { processInboundMessage } from '../services/aiAgent.js'
 import { pickFromRoulette } from '../services/roulette.js'
+import { notifyAndOpenLead } from '../services/leadHandoff.js'
 
 const router = Router()
 
@@ -122,6 +123,15 @@ function getOrCreateLead(accountId, phone, name, source, waJid, instanceId) {
   db.prepare('INSERT INTO stage_history (lead_id, to_stage_id, trigger_type) VALUES (?, ?, ?)').run(result.lastInsertRowid, firstStage.id, 'webhook')
 
   lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(result.lastInsertRowid)
+
+  // Lead handoff: se atribuiu via roleta/default, dispara 1a msg + notif (fire-and-forget)
+  if (attendantId) {
+    setImmediate(() => {
+      notifyAndOpenLead(lead.id, attendantId, { source: 'webhook' })
+        .catch(e => console.error('[Handoff webhook]', e.message))
+    })
+  }
+
   return { lead, isNew: true }
 }
 
@@ -555,6 +565,13 @@ router.post('/evolution/:accountSlug', (req, res) => {
           db.prepare(`UPDATE leads SET attendant_id = ?${clearAi}, updated_at = datetime('now') WHERE id = ?`).run(newAttendantId, lead.id)
           try { broadcastSSE(account.id, 'lead:updated', { id: lead.id }) } catch {}
           console.log(`[FollowUp] Reatribuido lead=${lead.id} -> user=${newAttendantId} (action=${action})`)
+          // Handoff: dispara 1a msg + notif pro novo atendente (se humano)
+          if (newUser?.is_bot !== 1) {
+            setImmediate(() => {
+              notifyAndOpenLead(lead.id, newAttendantId, { source: 'followup_reply' })
+                .catch(e => console.error('[Handoff followup]', e.message))
+            })
+          }
         }
 
         // 3. Move etapa (opcional)

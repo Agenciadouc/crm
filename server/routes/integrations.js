@@ -117,7 +117,26 @@ router.post('/whatsapp', requireRole('super_admin', 'gerente'), async (req, res)
 })
 
 // ─── Connect (get QR code for existing instance) ─────────────────
-router.post('/whatsapp/:id/connect', requireRole('super_admin', 'gerente'), async (req, res) => {
+// Middleware: permite gerente/admin OU atendente DONO da instância (primary_instance_id)
+function allowInstanceOwner(req, res, next) {
+  if (req.user.role === 'super_admin' || req.user.role === 'gerente') return next()
+  // Atendente: tem que ser primary_instance dele
+  const userPrimary = db.prepare('SELECT primary_instance_id FROM users WHERE id = ?').get(req.user.id)
+  if (userPrimary?.primary_instance_id && Number(req.params.id) === Number(userPrimary.primary_instance_id)) return next()
+  return res.status(403).json({ error: 'Sem permissao (so o gerente ou o atendente dono da instancia)' })
+}
+
+// PUT /whatsapp/:id/first-msg-template — atendente edita SO o template da PROPRIA inst
+router.put('/whatsapp/:id/first-msg-template', allowInstanceOwner, (req, res) => {
+  const instance = getOwnedInstance(req, res)
+  if (!instance) return
+  const tpl = req.body.first_msg_template != null ? String(req.body.first_msg_template) : null
+  db.prepare("UPDATE whatsapp_instances SET first_msg_template = ?, updated_at = datetime('now') WHERE id = ?").run(tpl || null, instance.id)
+  const updated = db.prepare('SELECT * FROM whatsapp_instances WHERE id = ?').get(instance.id)
+  res.json({ instance: updated })
+})
+
+router.post('/whatsapp/:id/connect', allowInstanceOwner, async (req, res) => {
   const instance = getOwnedInstance(req, res)
   if (!instance) return
 
@@ -177,7 +196,7 @@ router.get('/whatsapp/:id/status', async (req, res) => {
 })
 
 // ─── Refresh QR code ─────────────────────────────────────────────
-router.post('/whatsapp/:id/qrcode', requireRole('super_admin', 'gerente'), async (req, res) => {
+router.post('/whatsapp/:id/qrcode', allowInstanceOwner, async (req, res) => {
   const instance = getOwnedInstance(req, res)
   if (!instance) return
 

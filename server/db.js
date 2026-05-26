@@ -633,6 +633,21 @@ addColumnIfNotExists('contracts', 'approved_at', 'TEXT')
 addColumnIfNotExists('contracts', 'approved_by', 'INTEGER REFERENCES users(id) ON DELETE SET NULL')
 addColumnIfNotExists('contracts', 'account_id', 'INTEGER REFERENCES accounts(id) ON DELETE SET NULL')
 addColumnIfNotExists('contracts', 'approved_email', 'TEXT')
+
+// Lead handoff v1: primeira msg automatica do vendedor + notificacao
+addColumnIfNotExists('whatsapp_instances', 'first_msg_template', 'TEXT')
+addColumnIfNotExists('users', 'notification_instance_id', 'INTEGER REFERENCES whatsapp_instances(id) ON DELETE SET NULL')
+addColumnIfNotExists('leads', 'first_msg_sent_at', 'TEXT')
+addColumnIfNotExists('funnels', 'first_msg_template', 'TEXT')
+
+// Tabela de configs globais (notifier instance configuravel via UI super_admin)
+db.exec(`
+  CREATE TABLE IF NOT EXISTS app_settings (
+    key TEXT PRIMARY KEY,
+    value TEXT,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  )
+`)
 // users.can_grab_leads: permite ao atendente "tomar" leads de outros sem precisar aprovacao
 addColumnIfNotExists('users', 'can_grab_leads', 'INTEGER NOT NULL DEFAULT 0')
 // messages.instance_id: qual instancia enviou/recebeu cada mensagem (mostrado internamente no chat)

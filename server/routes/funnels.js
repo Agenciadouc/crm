@@ -98,10 +98,11 @@ router.put('/:id/stages', requireRole('super_admin', 'gerente'), (req, res) => {
 
 // Update funnel name
 router.put('/:id', requireRole('super_admin', 'gerente'), (req, res) => {
-  const { name, is_active } = req.body
+  const { name, is_active, first_msg_template } = req.body
   const sets = []; const params = []
   if (name !== undefined) { sets.push('name = ?'); params.push(name) }
   if (is_active !== undefined) { sets.push('is_active = ?'); params.push(is_active ? 1 : 0) }
+  if (first_msg_template !== undefined) { sets.push('first_msg_template = ?'); params.push(first_msg_template || null) }
   if (sets.length === 0) return res.status(400).json({ error: 'Nada pra atualizar' })
   params.push(req.params.id)
   db.prepare(`UPDATE funnels SET ${sets.join(', ')} WHERE id = ?`).run(...params)

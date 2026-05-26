@@ -110,7 +110,34 @@ export default function LeadDetail() {
   }
 
   const handleStageChange = async (stageId: number) => { if (lead) { await moveLeadStage(lead.id, stageId); loadLead() } }
-  const handleAssign = async (attId: number | null) => { if (lead) { await assignLead(lead.id, attId); loadLead() } }
+  // Assign com modal de confirmacao + checkbox "enviar 1a msg"
+  const [assignModal, setAssignModal] = useState<{ attId: number; userName: string } | null>(null)
+  const [assignNotify, setAssignNotify] = useState(false)
+  const [assignSaving, setAssignSaving] = useState(false)
+  const handleAssign = async (attId: number | null) => {
+    if (!lead) return
+    if (attId == null) {
+      // Despatribuicao direta sem modal
+      await assignLead(lead.id, null); loadLead(); return
+    }
+    if (attId === lead.attendant_id) return // sem mudanca
+    // Encontra nome do atendente pra mostrar no modal
+    const u = (users || []).find((x: any) => x.id === attId)
+    setAssignNotify(false)
+    setAssignModal({ attId, userName: u?.name || `User ${attId}` })
+  }
+  const confirmAssign = async () => {
+    if (!lead || !assignModal) return
+    setAssignSaving(true)
+    try {
+      await assignLead(lead.id, assignModal.attId, assignNotify)
+      setAssignModal(null)
+      loadLead()
+    } catch (e: any) {
+      alert('Erro: ' + (e?.message || 'desconhecido'))
+    }
+    setAssignSaving(false)
+  }
   const handleAddTag = async (tagId: number) => { if (lead) { await addLeadTag(lead.id, tagId); loadLead(); setShowTagMenu(false) } }
   const handleCreateTag = async () => {
     if (!accountId || !newTagName.trim() || !lead) return
@@ -478,6 +505,43 @@ export default function LeadDetail() {
             </div>
             <div className="modal-actions">
               <button className="btn btn-primary" onClick={() => setScriptModal(null)}>Fechar</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de atribuicao de atendente — pergunta se quer enviar 1a msg automatica */}
+      {assignModal && (
+        <div className="modal-overlay" onClick={() => !assignSaving && setAssignModal(null)}>
+          <div className="modal" style={{ maxWidth: 480 }} onClick={e => e.stopPropagation()}>
+            <h2 style={{ marginBottom: 8 }}>Atribuir lead pra atendente</h2>
+            <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 16 }}>
+              Novo atendente: <strong>{assignModal.userName}</strong>
+            </p>
+
+            <div className="form-group">
+              <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, cursor: 'pointer' }}>
+                <input
+                  type="checkbox"
+                  checked={assignNotify}
+                  onChange={e => setAssignNotify(e.target.checked)}
+                  style={{ marginTop: 3 }}
+                />
+                <span style={{ fontSize: 13 }}>
+                  <strong>Enviar mensagem inicial automática do novo atendente</strong>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4, lineHeight: 1.5 }}>
+                    Dispara a msg de boas-vindas da instância do vendedor + notifica ele do recebimento.
+                    Se o vendedor atende na mesma instância do lead, só a notificação sai.
+                  </div>
+                </span>
+              </label>
+            </div>
+
+            <div className="modal-actions" style={{ marginTop: 16 }}>
+              <button className="btn btn-secondary" onClick={() => setAssignModal(null)} disabled={assignSaving}>Cancelar</button>
+              <button className="btn btn-primary" onClick={confirmAssign} disabled={assignSaving}>
+                {assignSaving ? 'Atribuindo...' : 'Confirmar atribuição'}
+              </button>
             </div>
           </div>
         </div>

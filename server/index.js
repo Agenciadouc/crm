@@ -30,6 +30,7 @@ import contractRoutes from './routes/contracts.js'
 import followUpRoutes from './routes/follow-ups.js'
 import agentRoutes from './routes/agents.js'
 import adminRoutes from './routes/admin.js'
+import appSettingsRoutes from './routes/app-settings.js'
 import { authenticate, scopeToAccount } from './middleware/auth.js'
 import { addSSEClient, removeSSEClient } from './sse.js'
 import { startScheduler } from './scheduler.js'
@@ -78,6 +79,7 @@ app.use('/api/contracts', authenticate, contractRoutes)
 app.use('/api/follow-ups', authenticate, scopeToAccount, followUpRoutes)
 app.use('/api/agents', authenticate, scopeToAccount, agentRoutes)
 app.use('/api/admin', authenticate, adminRoutes)
+app.use('/api/app-settings', authenticate, appSettingsRoutes)
 
 // Settings: distribution rules
 app.get('/api/settings/distribution', authenticate, scopeToAccount, (req, res) => {

@@ -4,6 +4,7 @@ import db from '../db.js'
 import { requireRole } from '../middleware/auth.js'
 import { broadcastSSE } from '../sse.js'
 import { triggerCapiForStageChange } from '../services/metaCapi.js'
+import { notifyAndOpenLead } from '../services/leadHandoff.js'
 
 const router = Router()
 
@@ -578,15 +579,16 @@ router.post('/:id/unblock', (req, res) => {
 
 // Assign attendant
 router.put('/:id/assign', requireRole('super_admin', 'gerente'), (req, res) => {
-  const { attendant_id } = req.body
+  const { attendant_id, notify_attendant } = req.body
   const lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(req.params.id)
   if (!lead) return res.status(404).json({ error: 'Lead nao encontrado' })
 
   // Se novo atendente eh um bot (is_bot=1), limpa ai_handed_off_at pra bot voltar a atender
   let clearHandoff = false
+  let isBot = false
   if (attendant_id) {
     const newAttendant = db.prepare('SELECT is_bot FROM users WHERE id = ?').get(attendant_id)
-    if (newAttendant?.is_bot === 1) clearHandoff = true
+    if (newAttendant?.is_bot === 1) { clearHandoff = true; isBot = true }
   }
 
   if (clearHandoff) {
@@ -597,6 +599,15 @@ router.put('/:id/assign', requireRole('super_admin', 'gerente'), (req, res) => {
 
   const updated = db.prepare('SELECT * FROM leads WHERE id = ?').get(lead.id)
   try { broadcastSSE(lead.account_id, 'lead:updated', updated) } catch {}
+
+  // Handoff: se gerente marcou checkbox, dispara 1a msg + notif (so pra humano)
+  if (notify_attendant && attendant_id && !isBot) {
+    setImmediate(() => {
+      notifyAndOpenLead(lead.id, attendant_id, { source: 'manual_assign' })
+        .catch(e => console.error('[Handoff manual]', e.message))
+    })
+  }
+
   res.json({ lead: updated })
 })
 

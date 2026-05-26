@@ -1,10 +1,11 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useAccount } from '../context/AccountContext'
+import { useAuth } from '../context/AuthContext'
 import {
   fetchWhatsAppInstances, createWhatsAppInstance, connectWhatsAppInstance,
   checkWhatsAppStatus, refreshWhatsAppQR, disconnectWhatsApp, deleteWhatsAppInstance,
   fetchEvolutionConfig, saveEvolutionConfig, setupWhatsAppWebhook, restartWhatsAppInstance, syncWhatsAppNow, setInstanceAttendant, setInstanceMode, fetchUsers, apiFetch,
-  updateMetaCapi, testMetaCapi,
+  updateMetaCapi, testMetaCapi, updateInstanceFirstMsgTemplate,
   fetchTags, fetchTagInstanceMappings, upsertTagInstanceMapping, deleteTagInstanceMapping,
   fetchDefaultFormInstance, setDefaultFormInstance, fetchSheetsStatus,
   type WhatsAppInstance, type User as UserType, type Account, type Tag, type TagInstanceMapping,
@@ -26,8 +27,14 @@ function sheetsTimeAgo(s: string | null) {
 
 export default function Integrations() {
   const { accountId } = useAccount()
+  const { user } = useAuth()
+  const isAtendente = user?.role === 'atendente'
+  const isGerenteOuAdmin = user?.role === 'gerente' || user?.role === 'super_admin'
   const [instances, setInstances] = useState<WhatsAppInstance[]>([])
   const [loading, setLoading] = useState(true)
+  // First msg template editor
+  const [tplModal, setTplModal] = useState<{ inst: WhatsAppInstance; value: string } | null>(null)
+  const [tplSaving, setTplSaving] = useState(false)
   const [showNew, setShowNew] = useState(false)
   const [newName, setNewName] = useState('')
   const [newMode, setNewMode] = useState<'open' | 'restricted'>('open')
@@ -334,13 +341,14 @@ export default function Integrations() {
               {syncing ? <Loader size={14} className="spinning" /> : <Download size={14} />} Sincronizar agora
             </button>
           )}
-          {evoConfigured && (
+          {evoConfigured && isGerenteOuAdmin && (
             <button className="btn btn-primary btn-sm" onClick={() => setShowNew(true)}><Plus size={14} /> Conectar WhatsApp</button>
           )}
         </div>
       </div>
 
-      {/* Evolution API Config */}
+      {/* Evolution API Config — gerente/admin only */}
+      {isGerenteOuAdmin && (
       <section className="dash-section">
         <div className="section-title"><Settings size={14} /> Configuracao Evolution API</div>
         <div className="card">
@@ -363,6 +371,7 @@ export default function Integrations() {
           {evoConfigured && <div style={{ fontSize: 11, color: '#34C759', marginTop: 8, display: 'flex', alignItems: 'center', gap: 4 }}><Check size={12} /> Evolution API configurada</div>}
         </div>
       </section>
+      )}
 
       {/* QR Code Panel */}
       {qrInstance && qrInstance.qr_code && qrInstance.status === 'connecting' && (
@@ -405,34 +414,38 @@ export default function Integrations() {
                     <div>
                       <div style={{ fontWeight: 600, fontSize: 15 }}>{inst.instance_name}</div>
                       {inst.phone_number && <div style={{ fontSize: 12, color: '#C8C4D4' }}>{inst.phone_number}</div>}
-                      <div style={{ fontSize: 11, color: '#9B96B0', marginTop: 6, display: 'flex', alignItems: 'center', gap: 6 }}>
-                        <User size={11} /> Leads novos vao para:
-                        <select
-                          className="select"
-                          value={inst.default_attendant_id ?? ''}
-                          onChange={e => handleAttendantChange(inst, e.target.value ? parseInt(e.target.value) : null)}
-                          style={{ height: 26, fontSize: 11, padding: '2px 8px', minWidth: 180 }}
-                          title="Quando uma mensagem chega nesse numero, o lead criado e atribuido a este atendente. Em branco = usa a roleta do funil."
-                        >
-                          <option value="">Roleta do funil</option>
-                          {users.filter(u => u.is_active && (u.role === 'atendente' || u.role === 'gerente')).map(u => (
-                            <option key={u.id} value={u.id}>{u.name}</option>
-                          ))}
-                        </select>
-                      </div>
-                      <div style={{ fontSize: 11, color: '#9B96B0', marginTop: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
-                        Modo:
-                        <select
-                          className="select"
-                          value={inst.lead_intake_mode || 'open'}
-                          onChange={e => handleModeChange(inst, e.target.value as 'open' | 'restricted')}
-                          style={{ height: 26, fontSize: 11, padding: '2px 8px', minWidth: 180, color: inst.lead_intake_mode === 'restricted' ? '#FBBC04' : undefined }}
-                          title={inst.lead_intake_mode === 'restricted' ? 'Restrito: só processa msgs de leads ja cadastrados (form, planilha, Novo chat). Numeros novos sao ignorados.' : 'Aberto: qualquer mensagem cria lead novo automaticamente.'}
-                        >
-                          <option value="open">📥 Aberto (recebe todos)</option>
-                          <option value="restricted">🔒 Restrito (so leads cadastrados)</option>
-                        </select>
-                      </div>
+                      {isGerenteOuAdmin && (
+                        <>
+                          <div style={{ fontSize: 11, color: '#9B96B0', marginTop: 6, display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <User size={11} /> Leads novos vao para:
+                            <select
+                              className="select"
+                              value={inst.default_attendant_id ?? ''}
+                              onChange={e => handleAttendantChange(inst, e.target.value ? parseInt(e.target.value) : null)}
+                              style={{ height: 26, fontSize: 11, padding: '2px 8px', minWidth: 180 }}
+                              title="Quando uma mensagem chega nesse numero, o lead criado e atribuido a este atendente. Em branco = usa a roleta do funil."
+                            >
+                              <option value="">Roleta do funil</option>
+                              {users.filter(u => u.is_active && (u.role === 'atendente' || u.role === 'gerente')).map(u => (
+                                <option key={u.id} value={u.id}>{u.name}</option>
+                              ))}
+                            </select>
+                          </div>
+                          <div style={{ fontSize: 11, color: '#9B96B0', marginTop: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
+                            Modo:
+                            <select
+                              className="select"
+                              value={inst.lead_intake_mode || 'open'}
+                              onChange={e => handleModeChange(inst, e.target.value as 'open' | 'restricted')}
+                              style={{ height: 26, fontSize: 11, padding: '2px 8px', minWidth: 180, color: inst.lead_intake_mode === 'restricted' ? '#FBBC04' : undefined }}
+                              title={inst.lead_intake_mode === 'restricted' ? 'Restrito: só processa msgs de leads ja cadastrados (form, planilha, Novo chat). Numeros novos sao ignorados.' : 'Aberto: qualquer mensagem cria lead novo automaticamente.'}
+                            >
+                              <option value="open">📥 Aberto (recebe todos)</option>
+                              <option value="restricted">🔒 Restrito (so leads cadastrados)</option>
+                            </select>
+                          </div>
+                        </>
+                      )}
                     </div>
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -449,33 +462,49 @@ export default function Integrations() {
                     )}
                     {inst.status === 'connected' && (
                       <>
-                        <button
-                          className="btn btn-secondary btn-sm"
-                          onClick={() => handleReconfigureWebhook(inst)}
-                          disabled={reconfiguring === inst.id}
-                          title="Reenvia o webhook pra Evolution. Use se os leads pararem de entrar em tempo real."
-                        >
-                          {reconfiguring === inst.id ? <Loader size={12} className="spinning" /> : <Webhook size={12} />} Webhook
-                        </button>
-                        <button
-                          className="btn btn-secondary btn-sm"
-                          onClick={() => handleRestart(inst)}
-                          disabled={restarting === inst.id}
-                          title="Reinicia a sessao Baileys da Evolution. Use quando a instancia mostra Conectada mas nao recebe nem envia mensagens."
-                        >
-                          {restarting === inst.id ? <Loader size={12} className="spinning" /> : <RotateCw size={12} />} Reiniciar sessao
-                        </button>
-                        <button
-                          className="btn btn-secondary btn-sm"
-                          onClick={() => setAutoMsgInstance(inst)}
-                          title="Configurar saudacao, ausencia e inatividade"
-                        >
-                          <MessageSquare size={12} /> Auto-mensagens
-                        </button>
-                        <button className="btn btn-secondary btn-sm" onClick={() => handleDisconnect(inst)}><PowerOff size={12} /> Desconectar</button>
+                        {/* Botao Msg Inicial: visivel pra todos (atendente edita SO se for primary dele — validado no back) */}
+                        {(isGerenteOuAdmin || user?.primary_instance_id === inst.id) && (
+                          <button
+                            className="btn btn-secondary btn-sm"
+                            onClick={() => setTplModal({ inst, value: inst.first_msg_template || '' })}
+                            title="Mensagem inicial automatica quando lead novo cair com esta inst como atendente"
+                          >
+                            💬 Msg inicial
+                          </button>
+                        )}
+                        {isGerenteOuAdmin && (
+                          <>
+                            <button
+                              className="btn btn-secondary btn-sm"
+                              onClick={() => handleReconfigureWebhook(inst)}
+                              disabled={reconfiguring === inst.id}
+                              title="Reenvia o webhook pra Evolution. Use se os leads pararem de entrar em tempo real."
+                            >
+                              {reconfiguring === inst.id ? <Loader size={12} className="spinning" /> : <Webhook size={12} />} Webhook
+                            </button>
+                            <button
+                              className="btn btn-secondary btn-sm"
+                              onClick={() => handleRestart(inst)}
+                              disabled={restarting === inst.id}
+                              title="Reinicia a sessao Baileys da Evolution. Use quando a instancia mostra Conectada mas nao recebe nem envia mensagens."
+                            >
+                              {restarting === inst.id ? <Loader size={12} className="spinning" /> : <RotateCw size={12} />} Reiniciar sessao
+                            </button>
+                            <button
+                              className="btn btn-secondary btn-sm"
+                              onClick={() => setAutoMsgInstance(inst)}
+                              title="Configurar saudacao, ausencia e inatividade"
+                            >
+                              <MessageSquare size={12} /> Auto-mensagens
+                            </button>
+                            <button className="btn btn-secondary btn-sm" onClick={() => handleDisconnect(inst)}><PowerOff size={12} /> Desconectar</button>
+                          </>
+                        )}
                       </>
                     )}
-                    <button className="btn btn-danger btn-sm btn-icon" onClick={() => handleDelete(inst)} title="Excluir"><Trash2 size={12} /></button>
+                    {isGerenteOuAdmin && (
+                      <button className="btn btn-danger btn-sm btn-icon" onClick={() => handleDelete(inst)} title="Excluir"><Trash2 size={12} /></button>
+                    )}
                   </div>
                 </div>
               </div>
@@ -498,8 +527,8 @@ export default function Integrations() {
         </div>
       )}
 
-      {/* Roteamento de leads de formulario (tag → instancia) */}
-      {evoConfigured && (() => {
+      {/* Roteamento de leads de formulario (tag → instancia) — gerente/admin only */}
+      {isGerenteOuAdmin && evoConfigured && (() => {
         const connectedInsts = instances.filter(i => i.status === 'connected')
         const attendants = users.filter(u => (u.role === 'atendente' || u.role === 'gerente') && u.is_active)
         if (connectedInsts.length === 0) return null
@@ -656,8 +685,8 @@ export default function Integrations() {
         </div>
       )}
 
-      {/* Google Sheets Integration */}
-      {accountSlug && (
+      {/* Google Sheets Integration — gerente/admin only */}
+      {isGerenteOuAdmin && accountSlug && (
         <section className="dash-section" style={{ marginTop: 24 }}>
           <div className="section-title"><FileSpreadsheet size={14} /> Integracao Google Sheets</div>
           <div className="card">
@@ -823,8 +852,8 @@ function onChange(e) {
         </section>
       )}
 
-      {/* Meta Pixel / Conversions API */}
-      {accountId && account && (
+      {/* Meta Pixel / Conversions API — gerente/admin only */}
+      {isGerenteOuAdmin && accountId && account && (
         <section className="dash-section" style={{ marginTop: 24 }}>
           <div className="section-title"><Activity size={14} /> Meta Pixel / Conversions API</div>
           <div className="card">
@@ -1035,6 +1064,57 @@ function onChange(e) {
           accountId={accountId}
           onClose={() => setAutoMsgInstance(null)}
         />
+      )}
+
+      {/* Modal: editor de mensagem inicial automatica */}
+      {tplModal && (
+        <div className="modal-overlay" onClick={() => !tplSaving && setTplModal(null)}>
+          <div className="modal" style={{ maxWidth: 560 }} onClick={e => e.stopPropagation()}>
+            <h2 style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+              💬 Mensagem inicial — {tplModal.inst.instance_name}
+            </h2>
+            <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 12, lineHeight: 1.5 }}>
+              Quando um lead novo for atribuido (roleta, bot ou manual) a esta instancia, essa msg sai automaticamente do numero <strong>{tplModal.inst.phone_number || tplModal.inst.instance_name}</strong> pro lead.
+              <br />Deixe em branco pra desativar.
+            </p>
+
+            <div className="form-group">
+              <label>Mensagem (use variáveis abaixo)</label>
+              <textarea
+                className="input"
+                rows={6}
+                value={tplModal.value}
+                onChange={e => setTplModal({ ...tplModal, value: e.target.value })}
+                placeholder="Ex: Olá {{primeiro_nome}}! Sou {{vendedor_primeiro_nome}}. Recebi seu interesse e gostaria de te ajudar..."
+                style={{ resize: 'vertical', fontFamily: 'inherit', fontSize: 13, lineHeight: 1.5 }}
+              />
+              <small style={{ color: 'var(--text-muted)', fontSize: 11 }}>
+                Variáveis: <code>{'{{primeiro_nome}}'}</code>, <code>{'{{nome}}'}</code>, <code>{'{{vendedor}}'}</code>, <code>{'{{vendedor_primeiro_nome}}'}</code>, <code>{'{{cidade}}'}</code>, <code>{'{{etapa}}'}</code>, <code>{'{{funil}}'}</code>
+              </small>
+            </div>
+
+            <div className="modal-actions" style={{ marginTop: 16 }}>
+              <button className="btn btn-secondary" onClick={() => setTplModal(null)} disabled={tplSaving}>Cancelar</button>
+              <button
+                className="btn btn-primary"
+                disabled={tplSaving}
+                onClick={async () => {
+                  setTplSaving(true)
+                  try {
+                    const updated = await updateInstanceFirstMsgTemplate(tplModal.inst.id, tplModal.value.trim() || null)
+                    setInstances(prev => prev.map(i => i.id === updated.id ? updated : i))
+                    setTplModal(null)
+                  } catch (e: any) {
+                    alert('Erro: ' + (e?.message || 'desconhecido'))
+                  }
+                  setTplSaving(false)
+                }}
+              >
+                {tplSaving ? 'Salvando...' : 'Salvar'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )

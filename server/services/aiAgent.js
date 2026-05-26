@@ -6,6 +6,7 @@ import db from '../db.js'
 import { callHaiku } from './anthropicClient.js'
 import { broadcastSSE } from '../sse.js'
 import { pickFromRoulette as rouletteUtil } from './roulette.js'
+import { notifyAndOpenLead } from './leadHandoff.js'
 
 // ─── Helpers ──────────────────────────────────────────────────────────
 
@@ -217,6 +218,14 @@ function executeHandoff(agent, lead, reason, instanceId) {
 
   console.log(`[AI Agent] Handoff lead=${lead.id} reason=${reason} target_user=${targetUserId}`)
   try { broadcastSSE(lead.account_id, 'lead:updated', { id: lead.id }) } catch {}
+
+  // Dispara handoff de primeira msg + notif (se target eh humano valido)
+  if (targetUserId) {
+    setImmediate(() => {
+      notifyAndOpenLead(lead.id, targetUserId, { source: 'bot_handoff' })
+        .catch(e => console.error('[Handoff bot]', e.message))
+    })
+  }
 }
 
 // ─── Tools (function calling) ─────────────────────────────────────────

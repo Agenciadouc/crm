@@ -99,7 +99,6 @@ function AppRoutes() {
             <Route path="/messages/:id" element={<BroadcastDetail />} />
             <Route path="/team" element={<Team />} />
             <Route path="/funnels" element={<Funnels />} />
-            <Route path="/integrations" element={<Integrations />} />
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="/cadences" element={<Cadences />} />
             <Route path="/follow-ups" element={<FollowUps />} />
@@ -111,6 +110,7 @@ function AppRoutes() {
           </>}
 
           {/* All authenticated users */}
+          <Route path="/integrations" element={<Integrations />} />
           <Route path="/pipeline" element={<Pipeline />} />
           <Route path="/chat" element={<Chat />} />
           <Route path="/tasks" element={<Tasks />} />

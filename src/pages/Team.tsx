@@ -12,7 +12,7 @@ export default function Team() {
   const [showNew, setShowNew] = useState(false)
   const [newUser, setNewUser] = useState({ name: '', email: '', password: '' })
   const [editingUser, setEditingUser] = useState<UserType | null>(null)
-  const [editForm, setEditForm] = useState({ name: '', email: '', password: '', primary_instance_id: '' as string, can_manage_proposals: false, can_manage_contracts: false, can_grab_leads: false })
+  const [editForm, setEditForm] = useState({ name: '', email: '', password: '', primary_instance_id: '' as string, notification_instance_id: '' as string, can_manage_proposals: false, can_manage_contracts: false, can_grab_leads: false })
   const [instances, setInstances] = useState<WhatsAppInstance[]>([])
 
   const isAdmin = user?.role === 'super_admin'
@@ -32,10 +32,10 @@ export default function Team() {
     setShowNew(false); setNewUser({ name: '', email: '', password: '' }); load()
   }
 
-  const openEdit = (u: UserType) => { setEditingUser(u); setEditForm({ name: u.name, email: u.email, password: '', primary_instance_id: u.primary_instance_id ? String(u.primary_instance_id) : '', can_manage_proposals: u.can_manage_proposals === 1, can_manage_contracts: u.can_manage_contracts === 1, can_grab_leads: u.can_grab_leads === 1 }) }
+  const openEdit = (u: UserType) => { setEditingUser(u); setEditForm({ name: u.name, email: u.email, password: '', primary_instance_id: u.primary_instance_id ? String(u.primary_instance_id) : '', notification_instance_id: u.notification_instance_id ? String(u.notification_instance_id) : '', can_manage_proposals: u.can_manage_proposals === 1, can_manage_contracts: u.can_manage_contracts === 1, can_grab_leads: u.can_grab_leads === 1 }) }
   const handleSaveEdit = async () => {
     if (!editingUser) return
-    const data: any = { name: editForm.name, email: editForm.email, primary_instance_id: editForm.primary_instance_id ? +editForm.primary_instance_id : null, can_manage_proposals: editForm.can_manage_proposals ? 1 : 0, can_manage_contracts: editForm.can_manage_contracts ? 1 : 0, can_grab_leads: editForm.can_grab_leads ? 1 : 0 }
+    const data: any = { name: editForm.name, email: editForm.email, primary_instance_id: editForm.primary_instance_id ? +editForm.primary_instance_id : null, notification_instance_id: editForm.notification_instance_id ? +editForm.notification_instance_id : null, can_manage_proposals: editForm.can_manage_proposals ? 1 : 0, can_manage_contracts: editForm.can_manage_contracts ? 1 : 0, can_grab_leads: editForm.can_grab_leads ? 1 : 0 }
     if (editForm.password) data.password = editForm.password
     await updateUser(editingUser.id, data)
     setEditingUser(null); load()
@@ -127,6 +127,14 @@ export default function Team() {
                 {instances.map(i => <option key={i.id} value={i.id}>{i.instance_name}{i.status === 'connected' ? ' ✓' : ' ✗'}</option>)}
               </select>
               <small style={{ color: '#9B96B0', fontSize: 11 }}>Usado quando lead nao tem conversa previa. Casos normais: lead manda primeiro, sistema usa o numero que recebeu.</small>
+            </div>
+            <div className="form-group">
+              <label>Instancia de notificacao (recebe alertas de novo lead)</label>
+              <select className="select" value={editForm.notification_instance_id} onChange={e => setEditForm(p => ({ ...p, notification_instance_id: e.target.value }))}>
+                <option value="">Nenhuma (sem notificação WhatsApp)</option>
+                {instances.map(i => <option key={i.id} value={i.id}>{i.instance_name}{i.phone_number ? ` (${i.phone_number})` : ''}</option>)}
+              </select>
+              <small style={{ color: '#9B96B0', fontSize: 11 }}>Quando esse vendedor receber um lead novo, uma notificação chega no WhatsApp dessa instância (vinda do número Comercial Dros).</small>
             </div>
             {editingUser?.account_name === 'Dros | Deivid' && (
               <>

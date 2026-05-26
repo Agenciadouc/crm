@@ -6,6 +6,8 @@ export interface User {
   name: string
   role: 'super_admin' | 'gerente' | 'atendente'
   account_id: number | null
+  primary_instance_id?: number | null
+  notification_instance_id?: number | null
   can_manage_proposals?: number
   can_grab_leads?: number
 }

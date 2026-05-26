@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react'
 import { useAuth } from '../context/AuthContext'
 import { useAccount } from '../context/AccountContext'
-import { fetchFunnels, fetchUsers, apiFetch, type Funnel, type User as UserType } from '../lib/api'
-import { Settings as SettingsIcon, RotateCw, Users, Save, Check } from 'lucide-react'
+import { fetchFunnels, fetchUsers, apiFetch, fetchAppSettings, updateAppSetting, fetchAllInstancesAdmin, type Funnel, type User as UserType } from '../lib/api'
+import { Settings as SettingsIcon, RotateCw, Users, Save, Check, Bell } from 'lucide-react'
 
 interface DistRule { id?: number; funnel_id: number; type: 'round_robin' | 'manual'; active_attendants: number[] }
 
@@ -14,6 +14,17 @@ export default function SettingsPage() {
   const [rules, setRules] = useState<Map<number, DistRule>>(new Map())
   const [loading, setLoading] = useState(true)
   const [saved, setSaved] = useState(false)
+  // Super_admin: notifier instance global
+  const isSuperAdmin = user?.role === 'super_admin'
+  const [allInstances, setAllInstances] = useState<Array<{ id: number; instance_name: string; phone_number: string | null; status: string; account_name: string | null }>>([])
+  const [notifierInstanceId, setNotifierInstanceId] = useState<string>('')
+  const [savingNotifier, setSavingNotifier] = useState(false)
+
+  useEffect(() => {
+    if (!isSuperAdmin) return
+    fetchAppSettings().then(s => setNotifierInstanceId(s.notifier_instance_id || '')).catch(() => {})
+    fetchAllInstancesAdmin().then(setAllInstances).catch(() => {})
+  }, [isSuperAdmin])
 
   useEffect(() => {
     if (!accountId) return
@@ -82,6 +93,48 @@ export default function SettingsPage() {
           {saved ? <><Check size={14} /> Salvo!</> : <><Save size={14} /> Salvar</>}
         </button>
       </div>
+
+      {/* Notifier Instance (super_admin only) */}
+      {isSuperAdmin && (
+        <section className="dash-section" style={{ marginBottom: 16 }}>
+          <div className="section-title"><Bell size={12} style={{ marginRight: 6 }} /> Notificacao Global de Novo Lead</div>
+          <div className="card">
+            <p style={{ fontSize: 12, color: '#9B96B0', marginBottom: 12, lineHeight: 1.5 }}>
+              Quando um lead é atribuído pra um vendedor (em qualquer conta), uma notificação automatica vai pra inst de notif do vendedor.
+              <br /><strong>Quem envia essa notif</strong> é a instância escolhida abaixo (geralmente o número "Comercial Dros" da agência).
+            </p>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
+              <div style={{ flex: 1 }}>
+                <label style={{ fontSize: 11, color: '#9B96B0', display: 'block', marginBottom: 4 }}>Instancia notifier</label>
+                <select className="select" value={notifierInstanceId} onChange={e => setNotifierInstanceId(e.target.value)}>
+                  <option value="">— Nenhuma (desativa notificacoes) —</option>
+                  {allInstances.map(i => (
+                    <option key={i.id} value={i.id}>
+                      [{i.account_name || 'sem conta'}] {i.instance_name}{i.phone_number ? ` (${i.phone_number})` : ''}{i.status === 'connected' ? ' ✓' : ' ✗'}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <button
+                className="btn btn-primary"
+                disabled={savingNotifier}
+                onClick={async () => {
+                  setSavingNotifier(true)
+                  try {
+                    await updateAppSetting('notifier_instance_id', notifierInstanceId || null)
+                    alert('Notifier atualizado.')
+                  } catch (e: any) {
+                    alert('Erro: ' + (e?.message || 'desconhecido'))
+                  }
+                  setSavingNotifier(false)
+                }}
+              >
+                {savingNotifier ? 'Salvando...' : 'Salvar notifier'}
+              </button>
+            </div>
+          </div>
+        </section>
+      )}
 
       {/* Distribution Rules */}
       <section className="dash-section">

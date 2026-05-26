@@ -144,6 +144,11 @@ export default function Sidebar() {
             {transferCount > 0 && <span className="nav-badge" style={{ background: '#FF6B6B' }}>{transferCount > 99 ? '99+' : transferCount}</span>}
           </NavLink>
 
+          {/* Integracoes: tambem visivel pra atendente (UI da pagina restringe o que ele edita) */}
+          {!isGerente && !isAdmin && (
+            <NavLink to="/integrations" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`} onClick={closeMobile}><Plug size={16} /> Integracoes</NavLink>
+          )}
+
           {(isGerente || isAdmin) && (
             <>
               <div className="nav-section">Configuracoes</div>

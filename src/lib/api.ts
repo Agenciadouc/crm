@@ -21,9 +21,9 @@ export function pctChange(c: number, p: number) { if (p === 0) return c > 0 ? 10
 // =============================================
 
 export interface Account { id: number; name: string; slug: string; logo_url: string | null; is_active: number; created_at: string; lead_count?: number; user_count?: number; cnpj?: string | null; razao_social?: string | null; segmento?: string | null; website?: string | null; instagram?: string | null; whatsapp_comercial?: string | null; valor_mensal?: number | null; contrato_inicio?: string | null; cidade?: string | null; estado?: string | null; observacoes?: string | null; trabalha_anuncio?: number; investimento_anuncios?: number | null; meta_pixel_id?: string | null; meta_capi_token?: string | null; meta_capi_test_event_code?: string | null; meta_capi_enabled?: number; ai_agents_enabled?: number }
-export interface User { id: number; account_id: number | null; account_name?: string | null; name: string; email: string; role: string; is_active: number; is_bot?: number; primary_instance_id?: number | null; can_manage_proposals?: number; can_manage_contracts?: number; can_grab_leads?: number; created_at: string }
+export interface User { id: number; account_id: number | null; account_name?: string | null; name: string; email: string; role: string; is_active: number; is_bot?: number; primary_instance_id?: number | null; notification_instance_id?: number | null; can_manage_proposals?: number; can_manage_contracts?: number; can_grab_leads?: number; created_at: string }
 export interface FunnelStage { id: number; funnel_id: number; name: string; position: number; color: string; is_conversion: number; is_terminal: number; auto_keywords: string | null; meta_event_name?: string | null }
-export interface Funnel { id: number; account_id: number; name: string; is_default: number; is_active: number; stages: FunnelStage[] }
+export interface Funnel { id: number; account_id: number; name: string; is_default: number; is_active: number; first_msg_template?: string | null; stages: FunnelStage[] }
 export interface Tag { id: number; account_id: number; name: string; color: string }
 export interface Lead {
   id: number; account_id: number; funnel_id: number; stage_id: number; attendant_id: number | null
@@ -52,7 +52,7 @@ export interface DashboardStats {
   daily: { date: string; count: number }[]
 }
 export interface AgentStat { id: number; name: string; is_active: number; leads_period: number; leads_total: number; conversions: number }
-export interface WhatsAppInstance { id: number; account_id: number; instance_name: string; api_url: string; api_key: string; status: string; phone_number: string | null; qr_code: string | null; default_attendant_id: number | null; lead_intake_mode?: 'open' | 'restricted' }
+export interface WhatsAppInstance { id: number; account_id: number; instance_name: string; api_url: string; api_key: string; status: string; phone_number: string | null; qr_code: string | null; default_attendant_id: number | null; lead_intake_mode?: 'open' | 'restricted'; first_msg_template?: string | null }
 export interface Broadcast {
   id: number; account_id?: number; name: string; message_template: string; message_variations?: string | null
   status: string; sent_count: number; failed_count: number; total_count: number
@@ -130,7 +130,7 @@ export const updateLead = (id: number, data: Partial<Lead>) => apiFetch(`/api/le
 export const optInLead = (id: number) => apiFetch(`/api/leads/${id}/opt-in`, { method: 'POST' })
 export const optOutLead = (id: number) => apiFetch(`/api/leads/${id}/opt-out`, { method: 'POST' })
 export const moveLeadStage = (id: number, stageId: number) => apiFetch(`/api/leads/${id}/stage`, { method: 'PUT', body: JSON.stringify({ stage_id: stageId }) })
-export const assignLead = (id: number, attendantId: number | null) => apiFetch(`/api/leads/${id}/assign`, { method: 'PUT', body: JSON.stringify({ attendant_id: attendantId }) })
+export const assignLead = (id: number, attendantId: number | null, notify?: boolean) => apiFetch(`/api/leads/${id}/assign`, { method: 'PUT', body: JSON.stringify({ attendant_id: attendantId, notify_attendant: !!notify }) })
 export const refreshProfilePic = (id: number) => apiFetch<{ profile_pic_url: string | null }>(`/api/leads/${id}/refresh-profile-pic`, { method: 'POST' })
 export const archiveLead = (id: number) => apiFetch<{ lead: Lead }>(`/api/leads/${id}/archive`, { method: 'PATCH' }).then(d => d.lead)
 export const unarchiveLead = (id: number) => apiFetch<{ lead: Lead }>(`/api/leads/${id}/unarchive`, { method: 'PATCH' }).then(d => d.lead)
@@ -423,6 +423,21 @@ export const cancelLeadFollowUp = (lfuId: number, accountId: number) =>
   apiFetch(`/api/follow-ups/lead/${lfuId}/cancel?account_id=${accountId}`, { method: 'POST' })
 export const fetchLeadFollowUp = (leadId: number, accountId: number) =>
   apiFetch<{ lead_follow_up: LeadFollowUp | null }>(`/api/follow-ups/lead/${leadId}?account_id=${accountId}`).then(d => d.lead_follow_up)
+
+// =============================================
+// Lead Handoff: first_msg_template + app-settings
+// =============================================
+export const updateInstanceFirstMsgTemplate = (instanceId: number, template: string | null) =>
+  apiFetch<{ instance: WhatsAppInstance }>(`/api/integrations/whatsapp/${instanceId}/first-msg-template`, { method: 'PUT', body: JSON.stringify({ first_msg_template: template }) }).then(d => d.instance)
+
+export const fetchAppSettings = () =>
+  apiFetch<{ settings: Record<string, string | null> }>('/api/app-settings').then(d => d.settings)
+
+export const fetchAllInstancesAdmin = () =>
+  apiFetch<{ instances: Array<{ id: number; instance_name: string; phone_number: string | null; status: string; account_id: number | null; account_name: string | null }> }>('/api/app-settings/all-instances').then(d => d.instances)
+
+export const updateAppSetting = (key: string, value: string | null) =>
+  apiFetch<{ ok: boolean; key: string; value: string | null }>(`/api/app-settings/${key}`, { method: 'PUT', body: JSON.stringify({ value }) })
 
 // =============================================
 // AI Agents (Haiku 4.5)
