@@ -5,6 +5,7 @@ import path from 'path'
 import { fileURLToPath } from 'url'
 import db, { DEFAULT_EVOLUTION_API_URL, DEFAULT_EVOLUTION_API_KEY } from '../db.js'
 import { requireRole } from '../middleware/auth.js'
+import { createHubClient } from '../services/hubClient.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -262,7 +263,7 @@ router.delete('/:id', (req, res) => {
 // ─── POST /:id/approve — Aprova contrato e cria conta + gerente no CRM ───
 // Email gerado: <slug-razao-social>@drosagencia.com.br
 // Senha: dros2026
-router.post('/:id/approve', requireRole('super_admin', 'gerente'), (req, res) => {
+router.post('/:id/approve', requireRole('super_admin', 'gerente'), async (req, res) => {
   const contract = db.prepare('SELECT * FROM contracts WHERE id = ?').get(req.params.id)
   if (!contract) return res.status(404).json({ error: 'Contrato nao encontrado' })
   if (contract.approved_at) return res.status(400).json({ error: 'Contrato ja aprovado em ' + contract.approved_at })
@@ -364,6 +365,19 @@ router.post('/:id/approve', requireRole('super_admin', 'gerente'), (req, res) =>
     return { accountId, email, password }
   })()
 
+  // Best-effort: tambem cria cliente no HUB (best effort — se falhar, CRM ja foi criado OK)
+  let hubResult = { ok: false, reason: 'nao_tentado' }
+  try {
+    hubResult = await createHubClient(contract, result.email, result.password)
+    if (hubResult.ok && hubResult.client?.id) {
+      db.prepare("UPDATE contracts SET hub_client_id = ?, updated_at = datetime('now') WHERE id = ?")
+        .run(hubResult.client.id, contract.id)
+    }
+  } catch (e) {
+    console.error('[Contract Approve] HUB create catch:', e.message)
+    hubResult = { ok: false, reason: e.message }
+  }
+
   const updated = db.prepare('SELECT * FROM contracts WHERE id = ?').get(contract.id)
   res.json({
     contract: updated,
@@ -372,8 +386,31 @@ router.post('/:id/approve', requireRole('super_admin', 'gerente'), (req, res) =>
       password: result.password,
       account_id: result.accountId,
     },
-    message: 'Contrato aprovado e cliente criado no CRM',
+    hub: hubResult.ok
+      ? { created: true, client_id: hubResult.client?.id, client_name: hubResult.client?.name }
+      : { created: false, reason: hubResult.reason },
+    message: hubResult.ok
+      ? 'Contrato aprovado. Cliente criado no CRM e no HUB.'
+      : 'Contrato aprovado. Cliente criado no CRM (HUB falhou: ' + (hubResult.reason || 'desconhecido') + ' — pode tentar reaprovar via endpoint de re-sync).',
   })
+})
+
+// POST /:id/sync-hub — retry cria no HUB se o approve original falhou la
+router.post('/:id/sync-hub', requireRole('super_admin', 'gerente'), async (req, res) => {
+  const contract = db.prepare('SELECT * FROM contracts WHERE id = ?').get(req.params.id)
+  if (!contract) return res.status(404).json({ error: 'Contrato nao encontrado' })
+  if (!contract.approved_at) return res.status(400).json({ error: 'Contrato nao foi aprovado ainda' })
+  if (contract.hub_client_id) return res.status(400).json({ error: 'Contrato ja sincronizado com HUB (client_id=' + contract.hub_client_id + ')' })
+  if (!contract.approved_email) return res.status(400).json({ error: 'Email do gerente nao encontrado no contrato' })
+
+  const password = 'dros2026'  // padrao usado na aprovacao original
+  const hubResult = await createHubClient(contract, contract.approved_email, password)
+  if (hubResult.ok && hubResult.client?.id) {
+    db.prepare("UPDATE contracts SET hub_client_id = ?, updated_at = datetime('now') WHERE id = ?")
+      .run(hubResult.client.id, contract.id)
+    return res.json({ ok: true, client_id: hubResult.client.id, message: 'Cliente criado no HUB' })
+  }
+  res.status(500).json({ ok: false, reason: hubResult.reason })
 })
 
 export default router

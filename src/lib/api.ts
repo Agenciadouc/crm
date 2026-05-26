@@ -215,7 +215,8 @@ export const fetchContracts = () => apiFetch<{ contracts: Contract[] }>('/api/co
 export const createContract = (data: ContractInput) => apiFetch<{ contract: Contract }>('/api/contracts', { method: 'POST', body: JSON.stringify(data) }).then(d => d.contract)
 export const updateContract = (id: number, data: Partial<ContractInput>) => apiFetch<{ contract: Contract }>(`/api/contracts/${id}`, { method: 'PUT', body: JSON.stringify(data) }).then(d => d.contract)
 export const deleteContract = (id: number) => apiFetch(`/api/contracts/${id}`, { method: 'DELETE' })
-export const approveContract = (id: number, email?: string) => apiFetch<{ contract: Contract; credentials: { email: string; password: string; account_id: number }; message: string }>(`/api/contracts/${id}/approve`, { method: 'POST', body: JSON.stringify(email ? { email } : {}) })
+export const approveContract = (id: number, email?: string) => apiFetch<{ contract: Contract; credentials: { email: string; password: string; account_id: number }; hub?: { created: boolean; client_id?: number; client_name?: string; reason?: string }; message: string }>(`/api/contracts/${id}/approve`, { method: 'POST', body: JSON.stringify(email ? { email } : {}) })
+export const syncContractHub = (id: number) => apiFetch<{ ok: boolean; client_id?: number; reason?: string; message?: string }>(`/api/contracts/${id}/sync-hub`, { method: 'POST' })
 
 // Dashboard
 export const fetchDashboardStats = (accountId: number, days = 7) => apiFetch<DashboardStats>(`/api/dashboard/stats?account_id=${accountId}&days=${days}`)

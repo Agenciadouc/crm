@@ -65,7 +65,7 @@ export default function Contratos() {
   const [approveModal, setApproveModal] = useState<{ contract: Contract; email: string } | null>(null)
   const [approving, setApproving] = useState(false)
   // Modal de sucesso pós-aprovacao
-  const [credentialsModal, setCredentialsModal] = useState<{ email: string; password: string; razao: string } | null>(null)
+  const [credentialsModal, setCredentialsModal] = useState<{ email: string; password: string; razao: string; hub?: { created: boolean; client_id?: number; reason?: string } } | null>(null)
 
   const isEditing = typeof modalMode === 'number'
 
@@ -167,6 +167,7 @@ export default function Contratos() {
         email: result.credentials.email,
         password: result.credentials.password,
         razao: approveModal.contract.razao_social,
+        hub: result.hub,
       })
       setApproveModal(null)
       load()
@@ -534,6 +535,19 @@ export default function Contratos() {
               <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 12, fontFamily: 'monospace' }}>{credentialsModal.email}</div>
               <div style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 4 }}>Senha</div>
               <div style={{ fontSize: 15, fontWeight: 600, fontFamily: 'monospace' }}>{credentialsModal.password}</div>
+            </div>
+
+            {/* Status sistemas integrados */}
+            <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
+              <div style={{ flex: 1, padding: 10, background: 'rgba(52,199,89,0.08)', border: '1px solid rgba(52,199,89,0.25)', borderRadius: 6, fontSize: 12 }}>
+                ✅ <strong>CRM:</strong> conta criada
+              </div>
+              <div style={{ flex: 1, padding: 10, background: credentialsModal.hub?.created ? 'rgba(52,199,89,0.08)' : 'rgba(255,179,0,0.08)', border: `1px solid ${credentialsModal.hub?.created ? 'rgba(52,199,89,0.25)' : 'rgba(255,179,0,0.25)'}`, borderRadius: 6, fontSize: 12 }}>
+                {credentialsModal.hub?.created
+                  ? <>✅ <strong>HUB:</strong> cliente criado (id={credentialsModal.hub.client_id})</>
+                  : <>⚠ <strong>HUB:</strong> não criado{credentialsModal.hub?.reason ? ` (${credentialsModal.hub.reason})` : ''}<div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 2 }}>Pode re-tentar via "Re-sync HUB" depois</div></>
+                }
+              </div>
             </div>
 
             <div style={{ fontSize: 12, color: '#FFB300', marginBottom: 16 }}>

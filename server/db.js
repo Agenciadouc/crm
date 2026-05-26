@@ -633,6 +633,8 @@ addColumnIfNotExists('contracts', 'approved_at', 'TEXT')
 addColumnIfNotExists('contracts', 'approved_by', 'INTEGER REFERENCES users(id) ON DELETE SET NULL')
 addColumnIfNotExists('contracts', 'account_id', 'INTEGER REFERENCES accounts(id) ON DELETE SET NULL')
 addColumnIfNotExists('contracts', 'approved_email', 'TEXT')
+// Contracts v3: integracao com HUB ao aprovar
+addColumnIfNotExists('contracts', 'hub_client_id', 'INTEGER')
 
 // Lead handoff v1: primeira msg automatica do vendedor + notificacao
 addColumnIfNotExists('whatsapp_instances', 'first_msg_template', 'TEXT')
