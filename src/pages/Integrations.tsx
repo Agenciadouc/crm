@@ -532,25 +532,15 @@ export default function Integrations() {
       {isGerenteOuAdmin && evoConfigured && (() => {
         const connectedInsts = instances.filter(i => i.status === 'connected')
         const attendants = users.filter(u => (u.role === 'atendente' || u.role === 'gerente') && u.is_active)
+        if (connectedInsts.length === 0) return null
         return (
           <section className="dash-section" style={{ marginTop: 24 }}>
             <div className="section-title"><GitBranch size={14} /> Roteamento de leads (formulários)</div>
             <div className="card">
-              <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 16 }}>
+              <p style={{ fontSize: 12, color: '#9B96B0', marginBottom: 16 }}>
                 Leads que chegam via Google Sheets, Meta Lead Form ou site não tem WhatsApp na origem.
                 Configure pra qual número essas conversas vão.
               </p>
-              {connectedInsts.length === 0 && (
-                <div style={{
-                  display: 'flex', alignItems: 'center', gap: 8,
-                  padding: '10px 14px', borderRadius: 8, marginBottom: 16,
-                  background: 'var(--warning-bg)', border: '1px solid var(--warning)',
-                  color: 'var(--warning)', fontSize: 12, fontWeight: 500,
-                }}>
-                  <AlertTriangle size={14} />
-                  <span>Conecte ao menos uma instância WhatsApp acima pra escolher o número que recebe os leads.</span>
-                </div>
-              )}
 
               {/* Default — fallback */}
               <div style={{ background: 'rgba(255,255,255,0.03)', padding: 12, borderRadius: 8, marginBottom: 16 }}>
