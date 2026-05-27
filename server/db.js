@@ -565,6 +565,11 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_ai_token_log_month ON ai_agent_token_log(agent_id, created_at);
 `)
 
+// STT (speech-to-text) — colunas pra rastrear custo de transcricao de audio (Deepgram)
+addColumnIfNotExists('ai_agent_token_log', 'stt_seconds', 'REAL DEFAULT 0')
+addColumnIfNotExists('ai_agent_token_log', 'stt_cost_usd', 'REAL DEFAULT 0')
+addColumnIfNotExists('ai_agent_token_log', 'stt_provider', 'TEXT')
+
 // Follow-ups (cadencias automaticas — diferentes das cadencias manuais ja existentes)
 db.exec(`
   CREATE TABLE IF NOT EXISTS follow_ups (

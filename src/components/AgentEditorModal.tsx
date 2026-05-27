@@ -444,16 +444,17 @@ export default function AgentEditorModal({ agentId, accountId, onClose, onSaved 
           <>
             <div className="form-group">
               <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
-                <input type="checkbox" checked={respondsToAudio} onChange={e => setRespondsToAudio(e.target.checked)} disabled />
+                <input type="checkbox" checked={respondsToAudio} onChange={e => setRespondsToAudio(e.target.checked)} />
                 <span>Responde áudio</span>
-                <span style={{ fontSize: 10, color: '#FF6B6B', marginLeft: 8 }}>(em breve)</span>
               </label>
-              <small style={{ color: 'var(--text-muted)', fontSize: 11, marginLeft: 24, display: 'block' }}>
-                Por enquanto bot não transcreve áudio (custo extra). Quando lead manda áudio, bot manda a mensagem abaixo.
+              <small style={{ color: 'var(--text-muted)', fontSize: 11, marginLeft: 24, display: 'block', lineHeight: 1.5 }}>
+                Quando ativo: bot transcreve o áudio do lead via Deepgram (~$0.002 por áudio de 30s) e responde como se fosse texto.
+                Se a transcrição falhar (Deepgram offline, áudio corrompido), cai automaticamente na mensagem de recusa abaixo + transfere pra humano.
+                <br />Quando desativo: bot recusa o áudio com a mensagem abaixo e transfere pra humano.
               </small>
             </div>
             <div className="form-group">
-              <label>Resposta automática quando lead manda áudio</label>
+              <label>Mensagem de recusa (quando bot não responde áudio ou transcrição falha)</label>
               <textarea className="input" rows={3} value={audioDeclineMessage} onChange={e => setAudioDeclineMessage(e.target.value)} />
             </div>
           </>

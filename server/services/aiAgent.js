@@ -7,6 +7,7 @@ import { callHaiku } from './anthropicClient.js'
 import { broadcastSSE } from '../sse.js'
 import { pickFromRoulette as rouletteUtil } from './roulette.js'
 import { notifyAndOpenLead } from './leadHandoff.js'
+import { transcribeAudio, fetchAudioBuffer } from './deepgramClient.js'
 
 // ─── Helpers ──────────────────────────────────────────────────────────
 
@@ -349,22 +350,78 @@ export async function processInboundMessage(lead, msgContent, mediaType, instanc
       return
     }
 
-    // 4. Audio sem suporte?
-    if (mediaType === 'audio' && !agent.responds_to_audio) {
-      const inst = db.prepare('SELECT * FROM whatsapp_instances WHERE id = ?').get(instanceId)
-      if (inst && inst.status === 'connected') {
-        const declineMsg = agent.audio_decline_message || 'Oi! Por enquanto so leio mensagens de texto. Pode digitar pra mim?'
-        const sendRes = await sendEvolutionText(inst, lead.phone, declineMsg)
-        if (sendRes.ok) {
-          db.prepare(`
-            INSERT INTO messages (lead_id, account_id, direction, content, media_type, sender_name, wa_msg_id, wa_timestamp, instance_id, ai_agent_id)
-            VALUES (?, ?, 'outbound', ?, 'text', 'AI', ?, datetime('now'), ?, ?)
-          `).run(lead.id, lead.account_id, declineMsg, sendRes.wamsgId, instanceId, agent.id)
-          try { broadcastSSE(lead.account_id, 'lead:message', { lead_id: lead.id }) } catch {}
+    // 4. Audio: flag OFF = recusa + handoff; flag ON = transcreve via Deepgram e segue
+    let sttSec = 0
+    let sttCost = 0
+    let sttProvider = null
+
+    if (mediaType === 'audio') {
+      const declineAndHandoff = async (reason) => {
+        const inst = db.prepare('SELECT * FROM whatsapp_instances WHERE id = ?').get(instanceId)
+        if (inst && inst.status === 'connected') {
+          const declineMsg = agent.audio_decline_message || 'Oi! Por enquanto so leio mensagens de texto. Pode digitar pra mim?'
+          const sendRes = await sendEvolutionText(inst, lead.phone, declineMsg)
+          if (sendRes.ok) {
+            db.prepare(`
+              INSERT INTO messages (lead_id, account_id, direction, content, media_type, sender_name, wa_msg_id, wa_timestamp, instance_id, ai_agent_id)
+              VALUES (?, ?, 'outbound', ?, 'text', 'AI', ?, datetime('now'), ?, ?)
+            `).run(lead.id, lead.account_id, declineMsg, sendRes.wamsgId, instanceId, agent.id)
+            try { broadcastSSE(lead.account_id, 'lead:message', { lead_id: lead.id }) } catch {}
+          }
         }
+        executeHandoff(agent, lead, reason, instanceId)
       }
-      executeHandoff(agent, lead, 'audio_received', instanceId)
-      return
+
+      if (!agent.responds_to_audio) {
+        // Flag OFF — comportamento atual preservado
+        await declineAndHandoff('audio_received')
+        return
+      }
+
+      // Flag ON — baixa audio da Evolution + transcreve via Deepgram + injeta texto
+      const inst = db.prepare('SELECT * FROM whatsapp_instances WHERE id = ?').get(instanceId)
+      if (!inst || inst.status !== 'connected') {
+        console.error(`[AI Agent] STT: instancia ${instanceId} indisponivel`)
+        await declineAndHandoff('stt_failed')
+        return
+      }
+
+      // Pega wa_msg_id da ultima msg de audio inbound do lead
+      const lastAudio = db.prepare(`
+        SELECT wa_msg_id FROM messages
+        WHERE lead_id = ? AND direction = 'inbound' AND media_type = 'audio' AND wa_msg_id IS NOT NULL
+        ORDER BY id DESC LIMIT 1
+      `).get(lead.id)
+
+      if (!lastAudio?.wa_msg_id) {
+        console.error(`[AI Agent] STT: wa_msg_id nao encontrado pra lead=${lead.id}`)
+        await declineAndHandoff('stt_failed')
+        return
+      }
+
+      try {
+        const { buffer, mimetype } = await fetchAudioBuffer(inst, lastAudio.wa_msg_id)
+        const result = await transcribeAudio(buffer, { mimetype, language: 'pt-BR' })
+        if (!result.ok) throw new Error(result.reason || 'unknown')
+
+        if (!result.transcript.trim()) {
+          console.warn(`[AI Agent] STT vazio lead=${lead.id} — handoff`)
+          await declineAndHandoff('audio_received')
+          return
+        }
+
+        sttSec = result.durationSec
+        sttCost = result.costUsd
+        sttProvider = 'deepgram'
+        console.log(`[AI Agent] STT lead=${lead.id} dur=${sttSec.toFixed(1)}s cost=$${sttCost.toFixed(4)} txt="${result.transcript.slice(0, 80)}${result.transcript.length > 80 ? '...' : ''}"`)
+
+        // Reassign msgContent (parametro) pro Haiku ver o texto transcrito
+        msgContent = `[Audio transcrito] ${result.transcript}`
+      } catch (e) {
+        console.error(`[AI Agent] STT falhou lead=${lead.id}:`, e.message)
+        await declineAndHandoff('stt_failed')
+        return
+      }
     }
 
     // 5. Checa max_messages
@@ -423,11 +480,14 @@ export async function processInboundMessage(lead, msgContent, mediaType, instanc
         break
       }
 
-      // Log de uso (cada chamada)
+      // Log de uso (cada chamada). STT loga so na primeira iteracao pra nao duplicar.
+      const logSttSec = i === 0 ? sttSec : 0
+      const logSttCost = i === 0 ? sttCost : 0
+      const logSttProvider = i === 0 ? sttProvider : null
       db.prepare(`
-        INSERT INTO ai_agent_token_log (agent_id, account_id, lead_id, input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, cost_usd)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(agent.id, agent.account_id, lead.id, result.usage.input, result.usage.output, result.usage.cacheRead, result.usage.cacheCreation, result.costUsd)
+        INSERT INTO ai_agent_token_log (agent_id, account_id, lead_id, input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, cost_usd, stt_seconds, stt_cost_usd, stt_provider)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(agent.id, agent.account_id, lead.id, result.usage.input, result.usage.output, result.usage.cacheRead, result.usage.cacheCreation, result.costUsd, logSttSec, logSttCost, logSttProvider)
       const iterTokens = result.usage.input + result.usage.output + result.usage.cacheRead + result.usage.cacheCreation
       totalTokens += iterTokens
       totalCost += result.costUsd
