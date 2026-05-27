@@ -449,6 +449,10 @@ export async function processInboundMessage(lead, msgContent, mediaType, instanc
     // Garante que a ultima msg eh do lead (user)
     if (history.length === 0 || history[history.length - 1].role !== 'user') {
       history.push({ role: 'user', content: msgContent || '(mensagem vazia)' })
+    } else if (mediaType === 'audio' && sttProvider) {
+      // Audio foi transcrito (sttProvider setado) — substitui o '[Audio]' que veio do
+      // historico DB pela transcricao, senao Haiku ve '[Audio]' e dispara handoff sem motivo.
+      history[history.length - 1] = { role: 'user', content: msgContent }
     }
 
     // 9. Define tools
