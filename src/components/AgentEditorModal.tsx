@@ -84,7 +84,7 @@ export default function AgentEditorModal({ agentId, accountId, onClose, onSaved 
   const [sandboxHistory, setSandboxHistory] = useState<Array<{ role: 'user' | 'assistant'; content: string }>>([])
   const [sandboxLoading, setSandboxLoading] = useState(false)
   const [sandboxCost, setSandboxCost] = useState(0)
-  const [usage, setUsage] = useState<{ tokens: number; limit: number; cost: number } | null>(null)
+  const [usage, setUsage] = useState<{ tokens: number; limit: number; cost: number; sttSec: number; sttCost: number; audioCount: number; totalCost: number } | null>(null)
 
   // Carrega dados externos + agente se editando
   useEffect(() => {
@@ -119,8 +119,16 @@ export default function AgentEditorModal({ agentId, accountId, onClose, onSaved 
         setHandoffRules(map)
       }).finally(() => setLoading(false))
 
-      fetchAgentUsage(agentId, accountId).then(u => {
-        setUsage({ tokens: u.tokens_used_this_month, limit: u.monthly_limit, cost: u.cost_usd_this_month })
+      fetchAgentUsage(agentId, accountId).then((u: any) => {
+        setUsage({
+          tokens: u.tokens_used_this_month,
+          limit: u.monthly_limit,
+          cost: u.cost_usd_this_month,
+          sttSec: u.stt_seconds_this_month || 0,
+          sttCost: u.stt_cost_usd_this_month || 0,
+          audioCount: u.audio_count_this_month || 0,
+          totalCost: u.total_cost_usd_this_month || u.cost_usd_this_month,
+        })
       }).catch(() => {})
     }
   }, [agentId, accountId, isNew])
@@ -475,12 +483,27 @@ export default function AgentEditorModal({ agentId, accountId, onClose, onSaved 
               <div className="form-group">
                 <label>Uso este mês</label>
                 <div style={{ padding: 10, background: 'rgba(255,179,0,0.05)', borderRadius: 6 }}>
+                  {/* Haiku (texto) */}
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 6 }}>
-                    <span>{usage.tokens.toLocaleString()} / {usage.limit.toLocaleString()} tokens</span>
-                    <span style={{ color: '#FFCB45' }}>~US$ {usage.cost.toFixed(4)}</span>
+                    <span>📝 {usage.tokens.toLocaleString()} / {usage.limit.toLocaleString()} tokens (Haiku)</span>
+                    <span style={{ color: 'var(--accent-light)' }}>~US$ {usage.cost.toFixed(4)}</span>
                   </div>
-                  <div style={{ height: 6, background: 'rgba(255,255,255,0.06)', borderRadius: 3 }}>
-                    <div style={{ height: '100%', width: `${Math.min(100, (usage.tokens / usage.limit) * 100)}%`, background: '#FFB300', borderRadius: 3 }} />
+                  <div style={{ height: 6, background: 'var(--bg-hover)', borderRadius: 3 }}>
+                    <div style={{ height: '100%', width: `${Math.min(100, (usage.tokens / usage.limit) * 100)}%`, background: 'var(--accent)', borderRadius: 3 }} />
+                  </div>
+
+                  {/* STT (audio) — só mostra se houve algum áudio */}
+                  {usage.audioCount > 0 && (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginTop: 10, paddingTop: 10, borderTop: '1px solid var(--border-subtle)' }}>
+                      <span>🔊 {usage.audioCount} áudios · {usage.sttSec.toFixed(0)}s transcritos (Deepgram)</span>
+                      <span style={{ color: 'var(--accent-light)' }}>~US$ {usage.sttCost.toFixed(4)}</span>
+                    </div>
+                  )}
+
+                  {/* Total */}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, marginTop: 10, paddingTop: 10, borderTop: '1px solid var(--border-medium)', fontWeight: 700 }}>
+                    <span>Total mês</span>
+                    <span style={{ color: 'var(--accent)' }}>US$ {usage.totalCost.toFixed(4)}</span>
                   </div>
                 </div>
               </div>

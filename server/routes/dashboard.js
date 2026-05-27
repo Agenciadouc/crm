@@ -118,4 +118,68 @@ router.get('/global', requireRole('super_admin'), (req, res) => {
   res.json({ accounts, totalLeads, leadsToday })
 })
 
+// Uso de IA cross-conta (super_admin only) — total + breakdown por conta e por agente.
+// Periodo padrao: mes corrente. Aceita ?days=N pra trocar a janela.
+router.get('/ai-usage', requireRole('super_admin'), (req, res) => {
+  const days = Math.max(1, Math.min(365, parseInt(req.query.days) || 0))
+  // Se days=0 (default), usa mes corrente
+  const since = days > 0
+    ? `datetime('now', '-' || ${days} || ' days')`
+    : `date('now', 'start of month') || ' 00:00:00'`
+
+  const total = db.prepare(`
+    SELECT
+      COALESCE(SUM(input_tokens + output_tokens + cache_read_tokens + cache_creation_tokens), 0) as total_tokens,
+      COALESCE(SUM(cost_usd), 0) as haiku_cost_usd,
+      COALESCE(SUM(stt_seconds), 0) as stt_seconds,
+      COALESCE(SUM(stt_cost_usd), 0) as stt_cost_usd,
+      COALESCE(SUM(CASE WHEN stt_seconds > 0 THEN 1 ELSE 0 END), 0) as audio_count,
+      COUNT(*) as message_count
+    FROM ai_agent_token_log
+    WHERE created_at >= ${since}
+  `).get()
+  total.total_cost_usd = (total.haiku_cost_usd || 0) + (total.stt_cost_usd || 0)
+
+  const byAccount = db.prepare(`
+    SELECT a.id, a.name,
+      COALESCE(SUM(tl.input_tokens + tl.output_tokens + tl.cache_read_tokens + tl.cache_creation_tokens), 0) as total_tokens,
+      COALESCE(SUM(tl.cost_usd), 0) as haiku_cost_usd,
+      COALESCE(SUM(tl.stt_seconds), 0) as stt_seconds,
+      COALESCE(SUM(tl.stt_cost_usd), 0) as stt_cost_usd,
+      COALESCE(SUM(CASE WHEN tl.stt_seconds > 0 THEN 1 ELSE 0 END), 0) as audio_count,
+      COUNT(tl.id) as message_count
+    FROM accounts a
+    LEFT JOIN ai_agent_token_log tl ON tl.account_id = a.id AND tl.created_at >= ${since}
+    WHERE a.is_active = 1
+    GROUP BY a.id
+    HAVING message_count > 0
+    ORDER BY (haiku_cost_usd + stt_cost_usd) DESC
+  `).all()
+  byAccount.forEach(r => { r.total_cost_usd = (r.haiku_cost_usd || 0) + (r.stt_cost_usd || 0) })
+
+  const byAgent = db.prepare(`
+    SELECT ag.id, ag.name as agent_name, a.name as account_name,
+      COALESCE(SUM(tl.input_tokens + tl.output_tokens + tl.cache_read_tokens + tl.cache_creation_tokens), 0) as total_tokens,
+      COALESCE(SUM(tl.cost_usd), 0) as haiku_cost_usd,
+      COALESCE(SUM(tl.stt_seconds), 0) as stt_seconds,
+      COALESCE(SUM(tl.stt_cost_usd), 0) as stt_cost_usd,
+      COALESCE(SUM(CASE WHEN tl.stt_seconds > 0 THEN 1 ELSE 0 END), 0) as audio_count,
+      COUNT(tl.id) as message_count
+    FROM ai_agents ag
+    JOIN accounts a ON a.id = ag.account_id
+    LEFT JOIN ai_agent_token_log tl ON tl.agent_id = ag.id AND tl.created_at >= ${since}
+    GROUP BY ag.id
+    HAVING message_count > 0
+    ORDER BY (haiku_cost_usd + stt_cost_usd) DESC
+  `).all()
+  byAgent.forEach(r => { r.total_cost_usd = (r.haiku_cost_usd || 0) + (r.stt_cost_usd || 0) })
+
+  res.json({
+    period: days > 0 ? `${days} dias` : 'mes corrente',
+    total,
+    byAccount,
+    byAgent,
+  })
+})
+
 export default router

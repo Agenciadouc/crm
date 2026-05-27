@@ -224,6 +224,22 @@ export const fetchDashboardStats = (accountId: number, days = 7) => apiFetch<Das
 export const fetchAgentStats = (accountId: number, days = 7) => apiFetch<{ agents: AgentStat[] }>(`/api/dashboard/agents?account_id=${accountId}&days=${days}`).then(d => d.agents)
 export const fetchGlobalDashboard = () => apiFetch<{ accounts: any[]; totalLeads: number; leadsToday: number }>('/api/dashboard/global')
 
+export interface AiUsageData {
+  period: string
+  total: {
+    total_tokens: number
+    haiku_cost_usd: number
+    stt_seconds: number
+    stt_cost_usd: number
+    audio_count: number
+    message_count: number
+    total_cost_usd: number
+  }
+  byAccount: Array<{ id: number; name: string; total_tokens: number; haiku_cost_usd: number; stt_seconds: number; stt_cost_usd: number; audio_count: number; message_count: number; total_cost_usd: number }>
+  byAgent: Array<{ id: number; agent_name: string; account_name: string; total_tokens: number; haiku_cost_usd: number; stt_seconds: number; stt_cost_usd: number; audio_count: number; message_count: number; total_cost_usd: number }>
+}
+export const fetchAiUsageGlobal = (days?: number) => apiFetch<AiUsageData>(`/api/dashboard/ai-usage${days ? `?days=${days}` : ''}`)
+
 // Integrations
 export interface EvolutionConfig { api_url: string | null; api_key: string | null; configured?: boolean }
 export const fetchEvolutionConfig = (accountId: number) => apiFetch<EvolutionConfig>(`/api/integrations/evolution-config?account_id=${accountId}`)

@@ -292,7 +292,10 @@ router.get('/:id/usage', (req, res) => {
   const monthStart = `${currentMonth}-01 00:00:00`
   const totalCost = db.prepare(`
     SELECT COALESCE(SUM(cost_usd), 0) as cost_usd,
-      COALESCE(SUM(input_tokens + output_tokens + cache_read_tokens + cache_creation_tokens), 0) as total_tokens
+      COALESCE(SUM(input_tokens + output_tokens + cache_read_tokens + cache_creation_tokens), 0) as total_tokens,
+      COALESCE(SUM(stt_seconds), 0) as stt_seconds,
+      COALESCE(SUM(stt_cost_usd), 0) as stt_cost_usd,
+      COALESCE(SUM(CASE WHEN stt_seconds > 0 THEN 1 ELSE 0 END), 0) as audio_count
     FROM ai_agent_token_log
     WHERE agent_id = ? AND created_at >= ?
   `).get(req.params.id, monthStart)
@@ -309,6 +312,11 @@ router.get('/:id/usage', (req, res) => {
     monthly_limit: agent.monthly_token_limit,
     tokens_used_this_month: totalCost.total_tokens,
     cost_usd_this_month: totalCost.cost_usd,
+    // STT (audio) — gasto separado do Haiku
+    stt_seconds_this_month: totalCost.stt_seconds,
+    stt_cost_usd_this_month: totalCost.stt_cost_usd,
+    audio_count_this_month: totalCost.audio_count,
+    total_cost_usd_this_month: totalCost.cost_usd + totalCost.stt_cost_usd,
     current_month: agent.current_month,
     recent_log: recentLog,
   })
