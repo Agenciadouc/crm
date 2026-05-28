@@ -486,7 +486,8 @@ addColumnIfNotExists('follow_ups', 'on_reply_add_tag_id', 'INTEGER REFERENCES ta
 // Follow-up vinculado ao agente IA (lead atendido pelo bot parou de responder).
 // NULL pra follow-ups stage-based existentes (intocados).
 addColumnIfNotExists('follow_ups', 'agent_id', 'INTEGER REFERENCES ai_agents(id) ON DELETE CASCADE')
-try { db.exec('CREATE INDEX IF NOT EXISTS idx_follow_ups_agent_id ON follow_ups(agent_id) WHERE agent_id IS NOT NULL') } catch (e) { console.warn('[db] idx_follow_ups_agent_id:', e.message) }
+// Sem WHERE clause: sqlite3 CLI do CentOS 7 nao parseia partial index, quebra inspecao manual.
+try { db.exec('CREATE INDEX IF NOT EXISTS idx_follow_ups_agent_id ON follow_ups(agent_id)') } catch (e) { console.warn('[db] idx_follow_ups_agent_id:', e.message) }
 
 // ─── Dashboard de Análise de Atendimentos ───
 // 1. Insights extraídos por Haiku por conversa (lead) — 1 linha por lead
@@ -649,9 +650,10 @@ addColumnIfNotExists('messages', 'read_at', 'TEXT')
 // Contador denormalizado de msgs inbound nao lidas por lead — zerado quando vendedor abre o chat.
 addColumnIfNotExists('leads', 'unread_count', 'INTEGER NOT NULL DEFAULT 0')
 
-// Indexes pra lookup de status (webhook update por wa_msg_id) e badge sidebar (filtro unread > 0).
-try { db.exec('CREATE INDEX IF NOT EXISTS idx_messages_wa_msg_id ON messages(wa_msg_id) WHERE wa_msg_id IS NOT NULL') } catch (e) { console.warn('[db] idx_messages_wa_msg_id:', e.message) }
-try { db.exec('CREATE INDEX IF NOT EXISTS idx_leads_unread ON leads(account_id, unread_count) WHERE unread_count > 0') } catch (e) { console.warn('[db] idx_leads_unread:', e.message) }
+// Indexes pra lookup de status (webhook update por wa_msg_id) e badge sidebar.
+// Sem WHERE clause: sqlite3 CLI do CentOS 7 nao parseia partial index, quebra inspecao manual.
+try { db.exec('CREATE INDEX IF NOT EXISTS idx_messages_wa_msg_id ON messages(wa_msg_id)') } catch (e) { console.warn('[db] idx_messages_wa_msg_id:', e.message) }
+try { db.exec('CREATE INDEX IF NOT EXISTS idx_leads_unread ON leads(account_id, unread_count)') } catch (e) { console.warn('[db] idx_leads_unread:', e.message) }
 
 // Follow-ups (cadencias automaticas — diferentes das cadencias manuais ja existentes)
 db.exec(`
