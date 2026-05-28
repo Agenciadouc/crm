@@ -38,7 +38,8 @@ export async function processInactivityFollowUps() {
     let candidates
     if (fu.agent_id) {
       // MODO AGENT: lead atendido pelo user-bot do agente, inativo ha >= N min,
-      // E que ja teve pelo menos 1 msg outbound do bot (evita lead recem-atribuido).
+      // E que JA TEVE CONVERSA REAL com o bot — ou seja: bot mandou msg E lead respondeu pelo menos 1x.
+      // Isso evita disparar follow-up pra leads recem-atribuidos que nunca interagiram.
       const agent = db.prepare('SELECT user_id FROM ai_agents WHERE id = ? AND is_active = 1').get(fu.agent_id)
       if (!agent) continue
       candidates = db.prepare(`
@@ -53,9 +54,15 @@ export async function processInactivityFollowUps() {
             (SELECT MAX(created_at) FROM messages WHERE lead_id = l.id),
             l.created_at
           ) <= datetime('now', '-' || ? || ' minutes')
+          -- Conversa bidirecional: bot ja mandou pelo menos 1 msg
           AND EXISTS (
             SELECT 1 FROM messages m
             WHERE m.lead_id = l.id AND m.direction = 'outbound' AND m.ai_agent_id = ?
+          )
+          -- E o lead ja respondeu pelo menos 1 vez (prova que ha conversa de verdade, nao so bot falando sozinho)
+          AND EXISTS (
+            SELECT 1 FROM messages m2
+            WHERE m2.lead_id = l.id AND m2.direction = 'inbound'
           )
           AND NOT EXISTS (
             SELECT 1 FROM lead_follow_ups lfu
