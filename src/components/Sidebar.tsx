@@ -8,7 +8,7 @@ import { apiFetch, fetchTaskCounts, fetchPendingTransferRequests } from '../lib/
 import {
   LayoutDashboard, Kanban, Users, MessageCircle, UserCog, GitBranch,
   Plug, Settings, Building2, LogOut, UsersRound, Menu, X,
-  ListOrdered, MessageSquarePlus, ClipboardList, Rocket, ListTodo, ExternalLink, Tag as TagIcon, FileText, FileSignature, ArrowRightLeft, Zap, Bot, Sun, Moon,
+  ListOrdered, MessageSquarePlus, ClipboardList, Rocket, ListTodo, ExternalLink, Tag as TagIcon, FileText, FileSignature, ArrowRightLeft, Zap, Bot, Sun, Moon, BarChart3,
 } from 'lucide-react'
 
 function getInitials(name: string): string {
@@ -132,6 +132,11 @@ export default function Sidebar() {
           {(isGerente || isAdmin) && (
             <NavLink to="/dashboard" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`} onClick={closeMobile}>
               <LayoutDashboard size={16} /> Dashboard
+            </NavLink>
+          )}
+          {(isGerente || isAdmin) && (
+            <NavLink to="/atendimentos" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`} onClick={closeMobile}>
+              <BarChart3 size={16} /> Atendimentos
             </NavLink>
           )}
           <NavLink to="/chat" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`} onClick={closeMobile}>

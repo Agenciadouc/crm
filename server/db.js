@@ -488,6 +488,60 @@ addColumnIfNotExists('follow_ups', 'on_reply_add_tag_id', 'INTEGER REFERENCES ta
 addColumnIfNotExists('follow_ups', 'agent_id', 'INTEGER REFERENCES ai_agents(id) ON DELETE CASCADE')
 try { db.exec('CREATE INDEX IF NOT EXISTS idx_follow_ups_agent_id ON follow_ups(agent_id) WHERE agent_id IS NOT NULL') } catch (e) { console.warn('[db] idx_follow_ups_agent_id:', e.message) }
 
+// ─── Dashboard de Análise de Atendimentos ───
+// 1. Insights extraídos por Haiku por conversa (lead) — 1 linha por lead
+db.exec(`
+  CREATE TABLE IF NOT EXISTS conversation_insights (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    lead_id INTEGER NOT NULL REFERENCES leads(id) ON DELETE CASCADE,
+    account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    analyzed_at TEXT NOT NULL DEFAULT (datetime('now')),
+    last_message_id INTEGER,
+    summary TEXT,
+    lead_intent TEXT,
+    lost_sale_signals TEXT,
+    attendant_errors TEXT,
+    attendant_score INTEGER,
+    score_reasoning TEXT,
+    suggested_next_step TEXT,
+    last_message_quality TEXT,
+    attendant_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    tokens_used INTEGER DEFAULT 0,
+    cost_usd REAL DEFAULT 0,
+    UNIQUE (lead_id)
+  )
+`)
+try { db.exec('CREATE INDEX IF NOT EXISTS idx_insights_account_attendant ON conversation_insights(account_id, attendant_user_id, analyzed_at)') } catch (e) { console.warn('[db] idx_insights:', e.message) }
+try { db.exec('CREATE INDEX IF NOT EXISTS idx_insights_score ON conversation_insights(account_id, attendant_score)') } catch (e) {}
+
+// 2. Métricas operacionais pré-calculadas por dia (agregador SQL noturno)
+db.exec(`
+  CREATE TABLE IF NOT EXISTS attendant_metrics_daily (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    date TEXT NOT NULL,
+    leads_assigned INTEGER DEFAULT 0,
+    leads_responded INTEGER DEFAULT 0,
+    leads_converted INTEGER DEFAULT 0,
+    ttfr_avg_seconds REAL,
+    tmr_avg_seconds REAL,
+    leads_under_5min INTEGER DEFAULT 0,
+    leads_under_30min INTEGER DEFAULT 0,
+    leads_under_1h INTEGER DEFAULT 0,
+    open_conversations INTEGER DEFAULT 0,
+    abandoned_leads INTEGER DEFAULT 0,
+    computed_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (account_id, user_id, date)
+  )
+`)
+try { db.exec('CREATE INDEX IF NOT EXISTS idx_metrics_daily_lookup ON attendant_metrics_daily(account_id, date, user_id)') } catch (e) {}
+
+// Rate limit do "Analisar agora" + limite mensal de tokens p/ análise + timestamp do último cron noturno
+addColumnIfNotExists('accounts', 'last_analysis_at', 'TEXT')
+addColumnIfNotExists('accounts', 'last_nightly_at', 'TEXT')
+addColumnIfNotExists('accounts', 'analysis_token_limit', 'INTEGER NOT NULL DEFAULT 200000')
+
 // Agentes de IA (Claude Haiku 4.5) — F0+1 schema
 addColumnIfNotExists('accounts', 'ai_agents_enabled', 'INTEGER NOT NULL DEFAULT 0')
 addColumnIfNotExists('users', 'is_bot', 'INTEGER NOT NULL DEFAULT 0')

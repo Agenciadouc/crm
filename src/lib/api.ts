@@ -243,6 +243,57 @@ export interface AiUsageData {
 }
 export const fetchAiUsageGlobal = (days?: number) => apiFetch<AiUsageData>(`/api/dashboard/ai-usage${days ? `?days=${days}` : ''}`)
 
+// ─── Dashboard de Análise de Atendimentos ───
+export interface AttendantMetrics {
+  user_id: number; user_name: string; role: 'atendente' | 'gerente'
+  leads_assigned: number; leads_responded: number; leads_converted: number
+  ttfr_avg_seconds: number | null; tmr_avg_seconds: number | null
+  leads_under_5min: number; leads_under_30min: number; leads_under_1h: number
+  open_conversations: number; abandoned_leads: number
+  ai_score_avg: number | null; ai_errors_total: number | null; lost_sales_detected: number
+}
+export interface AttendantDailyMetric {
+  date: string; leads_assigned: number; leads_responded: number; leads_converted: number
+  ttfr_avg_seconds: number | null; tmr_avg_seconds: number | null
+  leads_under_5min: number; leads_under_30min: number; leads_under_1h: number
+  open_conversations: number; abandoned_leads: number
+}
+export interface ConversationInsight {
+  id: number; lead_id: number; lead_name: string; lead_phone?: string
+  summary: string; lead_intent: 'hot' | 'warm' | 'cold' | 'not_qualified'
+  lost_sale_signals: string | null
+  attendant_errors: string[]; attendant_score: number | null
+  score_reasoning: string; suggested_next_step: string
+  last_message_quality: 'excellent' | 'good' | 'mediocre' | 'poor'
+  attendant_user_id: number | null; attendant_name: string | null
+  analyzed_at: string
+}
+export interface AttendantDetail {
+  user: { id: number; name: string; role: string }
+  days: number
+  daily: AttendantDailyMetric[]
+  recent_insights: ConversationInsight[]
+  top_errors: Array<{ error: string; count: number }>
+}
+export const fetchAttendants = (accountId: number, days = 30) =>
+  apiFetch<{ days: number; attendants: AttendantMetrics[] }>(`/api/dashboard/attendants?account_id=${accountId}&days=${days}`)
+export const fetchAttendantDetail = (userId: number, accountId: number, days = 30) =>
+  apiFetch<AttendantDetail>(`/api/dashboard/attendants/${userId}?account_id=${accountId}&days=${days}`)
+export const fetchConversationInsights = (accountId: number, opts: { days?: number; filter?: string; attendant_id?: number; limit?: number } = {}) => {
+  const q = new URLSearchParams({ account_id: String(accountId) })
+  if (opts.days) q.set('days', String(opts.days))
+  if (opts.filter) q.set('filter', opts.filter)
+  if (opts.attendant_id) q.set('attendant_id', String(opts.attendant_id))
+  if (opts.limit) q.set('limit', String(opts.limit))
+  return apiFetch<{ insights: ConversationInsight[] }>(`/api/dashboard/conversation-insights?${q.toString()}`)
+}
+export const fetchLeadInsight = (leadId: number, accountId: number) =>
+  apiFetch<{ insight: ConversationInsight | null }>(`/api/dashboard/conversation-insights/lead/${leadId}?account_id=${accountId}`)
+export const triggerAnalysisNow = (accountId: number) =>
+  apiFetch<{ ok: boolean; message?: string; error?: string; retry_after_min?: number }>(`/api/dashboard/analyze-now?account_id=${accountId}`, { method: 'POST' })
+export const updateAnalysisLimit = (accountId: number, limit: number) =>
+  apiFetch<{ ok: boolean; analysis_token_limit: number }>(`/api/dashboard/analysis-limit?account_id=${accountId}`, { method: 'PUT', body: JSON.stringify({ limit }) })
+
 // Integrations
 export interface EvolutionConfig { api_url: string | null; api_key: string | null; configured?: boolean }
 export const fetchEvolutionConfig = (accountId: number) => apiFetch<EvolutionConfig>(`/api/integrations/evolution-config?account_id=${accountId}`)

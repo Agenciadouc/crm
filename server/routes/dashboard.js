@@ -1,6 +1,8 @@
 import { Router } from 'express'
 import db from '../db.js'
 import { requireRole } from '../middleware/auth.js'
+import { analyzeConversationsBatch } from '../services/conversationAnalyzer.js'
+import { aggregateAllAccounts } from '../services/attendantMetrics.js'
 
 const router = Router()
 
@@ -180,6 +182,191 @@ router.get('/ai-usage', requireRole('super_admin'), (req, res) => {
     byAccount,
     byAgent,
   })
+})
+
+// ─── Dashboard de Análise de Atendimentos (super_admin + gerente) ───
+
+// Lista atendentes da conta com métricas agregadas dos últimos N dias
+router.get('/attendants', requireRole('super_admin', 'gerente'), (req, res) => {
+  if (!req.accountId) return res.status(400).json({ error: 'account_id required' })
+  const days = Math.max(1, Math.min(365, parseInt(req.query.days) || 30))
+  const sinceDate = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10)
+
+  // Agrega métricas dos últimos N dias por user
+  const rows = db.prepare(`
+    SELECT
+      u.id as user_id, u.name as user_name, u.role,
+      COALESCE(SUM(amd.leads_assigned), 0) as leads_assigned,
+      COALESCE(SUM(amd.leads_responded), 0) as leads_responded,
+      COALESCE(SUM(amd.leads_converted), 0) as leads_converted,
+      AVG(NULLIF(amd.ttfr_avg_seconds, 0)) as ttfr_avg_seconds,
+      AVG(NULLIF(amd.tmr_avg_seconds, 0)) as tmr_avg_seconds,
+      COALESCE(SUM(amd.leads_under_5min), 0) as leads_under_5min,
+      COALESCE(SUM(amd.leads_under_30min), 0) as leads_under_30min,
+      COALESCE(SUM(amd.leads_under_1h), 0) as leads_under_1h,
+      MAX(amd.open_conversations) as open_conversations,
+      MAX(amd.abandoned_leads) as abandoned_leads,
+      (
+        SELECT AVG(ci.attendant_score)
+        FROM conversation_insights ci
+        WHERE ci.attendant_user_id = u.id AND ci.account_id = u.account_id
+          AND ci.analyzed_at >= ?
+      ) as ai_score_avg,
+      (
+        SELECT COUNT(*) FROM conversation_insights ci
+        WHERE ci.attendant_user_id = u.id AND ci.account_id = u.account_id
+          AND ci.analyzed_at >= ? AND ci.lost_sale_signals IS NOT NULL
+      ) as lost_sales_detected,
+      (
+        SELECT SUM(json_array_length(COALESCE(ci.attendant_errors, '[]')))
+        FROM conversation_insights ci
+        WHERE ci.attendant_user_id = u.id AND ci.account_id = u.account_id
+          AND ci.analyzed_at >= ?
+      ) as ai_errors_total
+    FROM users u
+    LEFT JOIN attendant_metrics_daily amd ON amd.user_id = u.id AND amd.date >= ?
+    WHERE u.account_id = ? AND u.role IN ('atendente', 'gerente') AND u.is_active = 1
+      AND COALESCE(u.is_bot, 0) = 0
+    GROUP BY u.id
+    ORDER BY ai_score_avg DESC NULLS LAST, leads_responded DESC
+  `).all(sinceDate, sinceDate, sinceDate, sinceDate, req.accountId)
+
+  res.json({ days, attendants: rows })
+})
+
+// Detalhe de um atendente específico
+router.get('/attendants/:userId', requireRole('super_admin', 'gerente'), (req, res) => {
+  if (!req.accountId) return res.status(400).json({ error: 'account_id required' })
+  const userId = parseInt(req.params.userId)
+  const days = Math.max(1, Math.min(365, parseInt(req.query.days) || 30))
+  const sinceDate = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10)
+
+  const user = db.prepare('SELECT id, name, role FROM users WHERE id = ? AND account_id = ?').get(userId, req.accountId)
+  if (!user) return res.status(404).json({ error: 'Atendente nao encontrado' })
+
+  const daily = db.prepare(`
+    SELECT date, leads_assigned, leads_responded, leads_converted,
+           ttfr_avg_seconds, tmr_avg_seconds,
+           leads_under_5min, leads_under_30min, leads_under_1h,
+           open_conversations, abandoned_leads
+    FROM attendant_metrics_daily
+    WHERE user_id = ? AND account_id = ? AND date >= ?
+    ORDER BY date DESC
+  `).all(userId, req.accountId, sinceDate)
+
+  const recentInsights = db.prepare(`
+    SELECT ci.lead_id, l.name as lead_name, ci.summary, ci.lead_intent,
+           ci.attendant_score, ci.last_message_quality, ci.lost_sale_signals,
+           ci.suggested_next_step, ci.analyzed_at
+    FROM conversation_insights ci
+    JOIN leads l ON l.id = ci.lead_id
+    WHERE ci.attendant_user_id = ? AND ci.account_id = ?
+      AND ci.analyzed_at >= ?
+    ORDER BY ci.analyzed_at DESC
+    LIMIT 20
+  `).all(userId, req.accountId, sinceDate)
+
+  // Top errors deste atendente (agrega via JSON)
+  const allErrorsRows = db.prepare(`
+    SELECT attendant_errors FROM conversation_insights
+    WHERE attendant_user_id = ? AND account_id = ? AND analyzed_at >= ?
+      AND attendant_errors IS NOT NULL
+  `).all(userId, req.accountId, sinceDate)
+  const errorCount = {}
+  for (const r of allErrorsRows) {
+    try {
+      const arr = JSON.parse(r.attendant_errors || '[]')
+      for (const e of arr) errorCount[e] = (errorCount[e] || 0) + 1
+    } catch {}
+  }
+  const topErrors = Object.entries(errorCount)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 10)
+    .map(([error, count]) => ({ error, count }))
+
+  res.json({ user, days, daily, recent_insights: recentInsights, top_errors: topErrors })
+})
+
+// Lista insights de conversas com filtros
+router.get('/conversation-insights', requireRole('super_admin', 'gerente'), (req, res) => {
+  if (!req.accountId) return res.status(400).json({ error: 'account_id required' })
+  const days = Math.max(1, Math.min(365, parseInt(req.query.days) || 30))
+  const sinceDate = new Date(Date.now() - days * 86400000).toISOString().slice(0, 19).replace('T', ' ')
+  const filter = req.query.filter || '' // 'lost_sales' | 'low_score' | 'errors' | ''
+  const attendantId = req.query.attendant_id ? parseInt(req.query.attendant_id) : null
+  const limit = Math.max(1, Math.min(200, parseInt(req.query.limit) || 50))
+
+  let where = 'ci.account_id = ? AND ci.analyzed_at >= ?'
+  const params = [req.accountId, sinceDate]
+  if (attendantId) { where += ' AND ci.attendant_user_id = ?'; params.push(attendantId) }
+  if (filter === 'lost_sales') where += " AND ci.lost_sale_signals IS NOT NULL AND ci.lost_sale_signals != ''"
+  if (filter === 'low_score') where += ' AND ci.attendant_score <= 5'
+  if (filter === 'errors') where += " AND ci.attendant_errors IS NOT NULL AND ci.attendant_errors != '[]'"
+
+  const rows = db.prepare(`
+    SELECT ci.*, l.name as lead_name, l.phone as lead_phone,
+           u.name as attendant_name
+    FROM conversation_insights ci
+    JOIN leads l ON l.id = ci.lead_id
+    LEFT JOIN users u ON u.id = ci.attendant_user_id
+    WHERE ${where}
+    ORDER BY ci.analyzed_at DESC
+    LIMIT ?
+  `).all(...params, limit)
+
+  // Parse JSON dos erros
+  const parsed = rows.map(r => ({ ...r, attendant_errors: (() => { try { return JSON.parse(r.attendant_errors || '[]') } catch { return [] } })() }))
+  res.json({ insights: parsed })
+})
+
+// Insight de um lead específico
+router.get('/conversation-insights/lead/:leadId', requireRole('super_admin', 'gerente', 'atendente'), (req, res) => {
+  if (!req.accountId) return res.status(400).json({ error: 'account_id required' })
+  const leadId = parseInt(req.params.leadId)
+  const lead = db.prepare('SELECT id, account_id FROM leads WHERE id = ?').get(leadId)
+  if (!lead) return res.status(404).json({ error: 'Lead nao encontrado' })
+  if (req.user.role !== 'super_admin' && lead.account_id !== req.accountId) return res.status(403).json({ error: 'Sem permissao' })
+
+  const ci = db.prepare(`
+    SELECT ci.*, u.name as attendant_name
+    FROM conversation_insights ci
+    LEFT JOIN users u ON u.id = ci.attendant_user_id
+    WHERE ci.lead_id = ?
+  `).get(leadId)
+  if (!ci) return res.json({ insight: null })
+
+  try { ci.attendant_errors = JSON.parse(ci.attendant_errors || '[]') } catch { ci.attendant_errors = [] }
+  res.json({ insight: ci })
+})
+
+// Força análise on-demand (rate limited 1x/30min por conta)
+router.post('/analyze-now', requireRole('super_admin', 'gerente'), (req, res) => {
+  if (!req.accountId) return res.status(400).json({ error: 'account_id required' })
+  const acc = db.prepare('SELECT last_analysis_at FROM accounts WHERE id = ?').get(req.accountId)
+  if (acc?.last_analysis_at) {
+    const sinceMs = Date.now() - new Date(acc.last_analysis_at.replace(' ', 'T') + 'Z').getTime()
+    if (sinceMs < 30 * 60 * 1000) {
+      const retryMin = Math.ceil((30 * 60 * 1000 - sinceMs) / 60000)
+      return res.status(429).json({ error: 'Aguarde antes de re-analisar', retry_after_min: retryMin })
+    }
+  }
+  db.prepare("UPDATE accounts SET last_analysis_at = datetime('now') WHERE id = ?").run(req.accountId)
+  setImmediate(() => {
+    analyzeConversationsBatch(req.accountId, { maxLeads: 50, sinceHours: 168 }) // ultimo 7d on-demand
+      .catch(e => console.error('[Analyze-now]', e.message))
+    // Tambem agrega metricas do dia atual on-demand
+    const today = new Date().toISOString().slice(0, 10)
+    try { aggregateAllAccounts(today) } catch (e) { console.error('[Aggregate-now]', e.message) }
+  })
+  res.json({ ok: true, message: 'Analise iniciada em background. Aguarde ~2min e atualize a pagina.' })
+})
+
+// Configura limite mensal de tokens de análise da conta
+router.put('/analysis-limit', requireRole('super_admin', 'gerente'), (req, res) => {
+  if (!req.accountId) return res.status(400).json({ error: 'account_id required' })
+  const limit = Math.max(0, Math.min(10000000, parseInt(req.body.limit) || 0))
+  db.prepare("UPDATE accounts SET analysis_token_limit = ?, updated_at = datetime('now') WHERE id = ?").run(limit, req.accountId)
+  res.json({ ok: true, analysis_token_limit: limit })
 })
 
 export default router

@@ -5,6 +5,8 @@ import { resumeBroadcastIfPaused, runBroadcastLoop } from './routes/broadcasts.j
 import { sendFollowUpMessage, resumeFollowUpsIfPaused } from './services/followUpSender.js'
 import { processInactivityFollowUps } from './services/inactivityScanner.js'
 import { triggerCapiForStageChange } from './services/metaCapi.js'
+import { aggregateAllAccounts } from './services/attendantMetrics.js'
+import { analyzeAllAccounts } from './services/conversationAnalyzer.js'
 
 // Roda a cada 1min — precisao do agendamento <= 60s. Custo desprezivel (1 SELECT/min).
 const INTERVAL_MS = 60 * 1000
@@ -344,6 +346,45 @@ async function processFollowUps() {
   }
 }
 
+// ─── Nightly Analysis — roda 1x por dia entre 3h00-3h05 UTC ────────
+// Agrega metricas operacionais + roda Haiku pra extrair insights de conversas
+let nightlyRunning = false
+export async function runNightlyAnalysis() {
+  if (nightlyRunning) return
+  nightlyRunning = true
+  try {
+    // Date string YYYY-MM-DD do dia anterior (UTC)
+    const yesterday = new Date(Date.now() - 86400000)
+    const dateStr = yesterday.toISOString().slice(0, 10)
+    console.log(`[Nightly] Iniciando agregacao + analise (date=${dateStr})...`)
+
+    // 1. Agrega metricas operacionais (SQL puro, rapido)
+    const metricsResult = aggregateAllAccounts(dateStr)
+    console.log(`[Nightly] Metrics: ${JSON.stringify(metricsResult)}`)
+
+    // 2. Analisa conversas via Haiku (mais lento)
+    const analysisResult = await analyzeAllAccounts()
+    console.log(`[Nightly] Analysis: ${JSON.stringify(analysisResult)}`)
+
+    // Marca timestamp pra evitar dupla execucao
+    db.prepare("UPDATE accounts SET last_nightly_at = datetime('now') WHERE is_active = 1").run()
+  } catch (e) {
+    console.error('[Nightly] erro:', e.message)
+  } finally {
+    nightlyRunning = false
+  }
+}
+
+function shouldRunNightly() {
+  const now = new Date()
+  // Janela 3h00-3h05 UTC = 0h-0h05 BR (Brasilia UTC-3)
+  if (now.getUTCHours() !== 3 || now.getUTCMinutes() >= 5) return false
+  // Verifica se ja rodou hoje (qualquer conta com last_nightly_at > 3h atrás)
+  const todayStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0)).toISOString().slice(0, 19).replace('T', ' ')
+  const ranToday = db.prepare("SELECT COUNT(*) as n FROM accounts WHERE last_nightly_at >= ? AND is_active = 1").get(todayStart)
+  return (ranToday?.n || 0) === 0
+}
+
 // ─── Main tick (every 5 min) ─────────────────────────────────────
 async function tick() {
   try {
@@ -357,6 +398,8 @@ async function tick() {
     cleanupStaleQRCodes()
     // Re-register webhooks every tick to prevent stale webhooks
     await reRegisterWebhooks()
+    // Nightly analysis (roda so 1x por dia na janela 3h UTC)
+    if (shouldRunNightly()) runNightlyAnalysis().catch(e => console.error('[Nightly]', e.message))
   } catch (err) {
     console.error('[Scheduler] Tick error:', err.message)
   }
