@@ -483,6 +483,10 @@ addColumnIfNotExists('follow_up_steps', 'variations', 'TEXT')
 // Follow-ups v3.1: on-reply move stage + add tag
 addColumnIfNotExists('follow_ups', 'on_reply_move_to_stage_id', 'INTEGER REFERENCES funnel_stages(id) ON DELETE SET NULL')
 addColumnIfNotExists('follow_ups', 'on_reply_add_tag_id', 'INTEGER REFERENCES tags(id) ON DELETE SET NULL')
+// Follow-up vinculado ao agente IA (lead atendido pelo bot parou de responder).
+// NULL pra follow-ups stage-based existentes (intocados).
+addColumnIfNotExists('follow_ups', 'agent_id', 'INTEGER REFERENCES ai_agents(id) ON DELETE CASCADE')
+try { db.exec('CREATE INDEX IF NOT EXISTS idx_follow_ups_agent_id ON follow_ups(agent_id) WHERE agent_id IS NOT NULL') } catch (e) { console.warn('[db] idx_follow_ups_agent_id:', e.message) }
 
 // Agentes de IA (Claude Haiku 4.5) — F0+1 schema
 addColumnIfNotExists('accounts', 'ai_agents_enabled', 'INTEGER NOT NULL DEFAULT 0')

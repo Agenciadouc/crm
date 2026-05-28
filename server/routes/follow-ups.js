@@ -55,6 +55,18 @@ router.get('/', (req, res) => {
   res.json({ follow_ups: result })
 })
 
+// ─── GET follow-up vinculado a um agente (1:1 ou null) ───────────────
+// Usado pelo AgentEditorModal pra carregar o follow-up de inatividade do bot.
+router.get('/by-agent/:agentId', (req, res) => {
+  if (!req.accountId) return res.status(400).json({ error: 'account_id required' })
+  const agent = db.prepare('SELECT id FROM ai_agents WHERE id = ? AND account_id = ?').get(req.params.agentId, req.accountId)
+  if (!agent) return res.status(404).json({ error: 'Agente nao encontrado' })
+  const fu = db.prepare('SELECT * FROM follow_ups WHERE agent_id = ? AND account_id = ?').get(req.params.agentId, req.accountId)
+  if (!fu) return res.json({ follow_up: null })
+  const steps = db.prepare('SELECT * FROM follow_up_steps WHERE follow_up_id = ? ORDER BY position').all(fu.id)
+  res.json({ follow_up: { ...fu, steps } })
+})
+
 // ─── GET detalhe ───────────────────────────────────────────────────────
 router.get('/:id', (req, res) => {
   const fu = db.prepare('SELECT * FROM follow_ups WHERE id = ? AND account_id = ?').get(req.params.id, req.accountId)
@@ -110,13 +122,21 @@ function normalizeStepVariations(s) {
 // ─── POST criar (com steps) ────────────────────────────────────────────
 router.post('/', requireRole('super_admin', 'gerente'), (req, res) => {
   if (!req.accountId) return res.status(400).json({ error: 'account_id required' })
-  const { name, description, instance_id, stop_on_reply, steps, type, inactivity_stage_id, inactivity_days, inactivity_minutes, inactivity_mode, variation_delay_seconds } = req.body
+  const { name, description, instance_id, stop_on_reply, steps, type, inactivity_stage_id, inactivity_days, inactivity_minutes, inactivity_mode, variation_delay_seconds, agent_id } = req.body
   if (!name || !instance_id) return res.status(400).json({ error: 'name e instance_id obrigatorios' })
   if (!Array.isArray(steps) || steps.length === 0) return res.status(400).json({ error: 'pelo menos 1 step obrigatorio' })
 
   // Valida instance pertence a conta
   const inst = db.prepare('SELECT id FROM whatsapp_instances WHERE id = ? AND account_id = ?').get(instance_id, req.accountId)
   if (!inst) return res.status(400).json({ error: 'Instancia invalida pra essa conta' })
+
+  // Valida agente (se vinculado) pertence a conta — usado pra follow-up agent-based
+  let finalAgentId = null
+  if (agent_id) {
+    const ag = db.prepare('SELECT id FROM ai_agents WHERE id = ? AND account_id = ?').get(agent_id, req.accountId)
+    if (!ag) return res.status(400).json({ error: 'Agente invalido pra essa conta' })
+    finalAgentId = ag.id
+  }
 
   // Validacoes especificas por tipo
   const finalType = type === 'inactivity' ? 'inactivity' : 'sequence'
@@ -133,10 +153,14 @@ router.post('/', requireRole('super_admin', 'gerente'), (req, res) => {
         if (!hasVars && !hasTpl) return res.status(400).json({ error: 'Cada step precisa ter mensagem principal ou no mínimo 3 variações' })
       }
     }
-    if (!inactivity_stage_id) return res.status(400).json({ error: 'Etapa do funil obrigatoria pra follow-up de inatividade' })
-    const stage = db.prepare('SELECT s.id FROM funnel_stages s JOIN funnels f ON f.id = s.funnel_id WHERE s.id = ? AND f.account_id = ?').get(inactivity_stage_id, req.accountId)
-    if (!stage) return res.status(400).json({ error: 'Etapa do funil invalida pra essa conta' })
-    finalInactivityStage = inactivity_stage_id
+    // Stage obrigatorio APENAS quando NAO eh agent-based.
+    // Em agent-based: scanner busca por attendant_id (user_bot), nao por stage.
+    if (!finalAgentId) {
+      if (!inactivity_stage_id) return res.status(400).json({ error: 'Etapa do funil obrigatoria pra follow-up de inatividade (ou vincule a um agente)' })
+      const stage = db.prepare('SELECT s.id FROM funnel_stages s JOIN funnels f ON f.id = s.funnel_id WHERE s.id = ? AND f.account_id = ?').get(inactivity_stage_id, req.accountId)
+      if (!stage) return res.status(400).json({ error: 'Etapa do funil invalida pra essa conta' })
+      finalInactivityStage = inactivity_stage_id
+    }
     finalInactivityDays = Math.max(1, parseInt(inactivity_days) || 2)
     if (inactivity_minutes !== undefined && inactivity_minutes !== null && inactivity_minutes !== '') {
       const m = parseInt(inactivity_minutes)
@@ -174,9 +198,9 @@ router.post('/', requireRole('super_admin', 'gerente'), (req, res) => {
 
   const trans = db.transaction(() => {
     const result = db.prepare(`
-      INSERT INTO follow_ups (account_id, name, description, instance_id, stop_on_reply, created_by, type, inactivity_stage_id, inactivity_days, inactivity_minutes, inactivity_mode, variation_delay_seconds, on_reply_action, on_reply_user_id, on_reply_move_to_stage_id, on_reply_add_tag_id)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(req.accountId, name, description || null, instance_id, stop_on_reply ? 1 : 0, req.user.id, finalType, finalInactivityStage, finalInactivityDays, finalInactivityMinutes, finalInactivityMode, finalVariationDelay, onReply.action, onReply.userId, onReply.stageId, onReply.tagId)
+      INSERT INTO follow_ups (account_id, name, description, instance_id, stop_on_reply, created_by, type, inactivity_stage_id, inactivity_days, inactivity_minutes, inactivity_mode, variation_delay_seconds, on_reply_action, on_reply_user_id, on_reply_move_to_stage_id, on_reply_add_tag_id, agent_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(req.accountId, name, description || null, instance_id, stop_on_reply ? 1 : 0, req.user.id, finalType, finalInactivityStage, finalInactivityDays, finalInactivityMinutes, finalInactivityMode, finalVariationDelay, onReply.action, onReply.userId, onReply.stageId, onReply.tagId, finalAgentId)
 
     const fuId = result.lastInsertRowid
     const stmt = db.prepare('INSERT INTO follow_up_steps (follow_up_id, position, delay_minutes, message_template, schedule_mode, scheduled_at, variations) VALUES (?, ?, ?, ?, ?, ?, ?)')

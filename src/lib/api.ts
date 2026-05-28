@@ -414,6 +414,7 @@ export interface FollowUp {
   on_reply_user_id?: number | null;
   on_reply_move_to_stage_id?: number | null;
   on_reply_add_tag_id?: number | null;
+  agent_id?: number | null;  // se setado, follow-up agent-based (lead atendido pelo bot) em vez de stage-based
   steps?: FollowUpStep[]; steps_count?: number; active_leads?: number;
   created_by: number | null; created_by_name?: string | null;
   created_at: string; updated_at: string;
@@ -575,6 +576,22 @@ export const deleteAgent = (id: number, accountId: number) =>
 
 export const fetchAgentUsage = (id: number, accountId: number) =>
   apiFetch<AgentUsage>(`/api/agents/${id}/usage?account_id=${accountId}`)
+
+// Follow-up de inatividade vinculado ao agente (1:1)
+export interface AgentInactivityFollowUpInput {
+  enabled: boolean
+  instance_id?: number | null
+  inactivity_minutes?: number
+  variation_delay_seconds?: number
+  stop_on_reply?: boolean
+  on_reply_action?: 'pause' | 'roulette' | 'assign_user'
+  on_reply_user_id?: number | null
+  steps: Array<{ delay_minutes: number; message_template: string }>
+}
+export const fetchAgentInactivityFollowUp = (agentId: number, accountId: number) =>
+  apiFetch<{ follow_up: FollowUp | null }>(`/api/follow-ups/by-agent/${agentId}?account_id=${accountId}`).then(d => d.follow_up)
+export const saveAgentInactivityFollowUp = (agentId: number, accountId: number, data: AgentInactivityFollowUpInput) =>
+  apiFetch<{ ok: boolean; follow_up: FollowUp | null }>(`/api/agents/${agentId}/inactivity-followup?account_id=${accountId}`, { method: 'PUT', body: JSON.stringify(data) })
 
 export const testAgent = (id: number, accountId: number, message: string, history: Array<{ role: 'user' | 'assistant'; content: string }> = []) =>
   apiFetch<{ response: string; usage: { input: number; output: number; cacheRead: number; cacheCreation: number; total: number }; cost_usd: number; stop_reason: string }>(`/api/agents/${id}/test?account_id=${accountId}`, { method: 'POST', body: JSON.stringify({ message, history }) })

@@ -9,11 +9,15 @@ function toSqlDate(d) {
 }
 
 export async function processInactivityFollowUps() {
+  // Aceita 2 modos:
+  //  - stage-based (legado): fu.inactivity_stage_id setado, fu.agent_id NULL
+  //  - agent-based (novo): fu.agent_id setado (lead atendido pelo bot inativo)
   const followUps = db.prepare(`
     SELECT fu.*, wi.status as instance_status
     FROM follow_ups fu
     LEFT JOIN whatsapp_instances wi ON wi.id = fu.instance_id
-    WHERE fu.type = 'inactivity' AND fu.is_active = 1 AND fu.inactivity_stage_id IS NOT NULL
+    WHERE fu.type = 'inactivity' AND fu.is_active = 1
+      AND (fu.inactivity_stage_id IS NOT NULL OR fu.agent_id IS NOT NULL)
   `).all()
 
   for (const fu of followUps) {
@@ -30,32 +34,68 @@ export async function processInactivityFollowUps() {
     // Threshold em minutos (fallback days*1440 pra back-compat)
     const minutes = fu.inactivity_minutes != null ? fu.inactivity_minutes : (fu.inactivity_days || 2) * 1440
 
-    // Acha leads candidatos (na etapa, inativos ha >= N minutos, sem follow-up ativo/recente)
-    const candidates = db.prepare(`
-      SELECT l.id, l.name
-      FROM leads l
-      WHERE l.account_id = ?
-        AND l.stage_id = ?
-        AND l.is_active = 1
-        AND COALESCE(l.is_archived, 0) = 0
-        AND COALESCE(l.is_blocked, 0) = 0
-        AND COALESCE(
-          (SELECT MAX(created_at) FROM messages WHERE lead_id = l.id),
-          l.created_at
-        ) <= datetime('now', '-' || ? || ' minutes')
-        AND NOT EXISTS (
-          SELECT 1 FROM lead_follow_ups lfu
-          WHERE lfu.lead_id = l.id AND lfu.follow_up_id = ?
-            AND lfu.started_at >= COALESCE(
-              (SELECT MAX(created_at) FROM stage_history WHERE lead_id = l.id AND to_stage_id = l.stage_id),
-              l.created_at
-            )
-        )
-      LIMIT 200
-    `).all(fu.account_id, fu.inactivity_stage_id, minutes, fu.id)
+    // Acha leads candidatos — 2 modos isolados
+    let candidates
+    if (fu.agent_id) {
+      // MODO AGENT: lead atendido pelo user-bot do agente, inativo ha >= N min,
+      // E que ja teve pelo menos 1 msg outbound do bot (evita lead recem-atribuido).
+      const agent = db.prepare('SELECT user_id FROM ai_agents WHERE id = ? AND is_active = 1').get(fu.agent_id)
+      if (!agent) continue
+      candidates = db.prepare(`
+        SELECT l.id, l.name
+        FROM leads l
+        WHERE l.account_id = ?
+          AND l.attendant_id = ?
+          AND l.is_active = 1
+          AND COALESCE(l.is_archived, 0) = 0
+          AND COALESCE(l.is_blocked, 0) = 0
+          AND COALESCE(
+            (SELECT MAX(created_at) FROM messages WHERE lead_id = l.id),
+            l.created_at
+          ) <= datetime('now', '-' || ? || ' minutes')
+          AND EXISTS (
+            SELECT 1 FROM messages m
+            WHERE m.lead_id = l.id AND m.direction = 'outbound' AND m.ai_agent_id = ?
+          )
+          AND NOT EXISTS (
+            SELECT 1 FROM lead_follow_ups lfu
+            WHERE lfu.lead_id = l.id AND lfu.follow_up_id = ?
+              AND lfu.started_at >= COALESCE(
+                (SELECT MAX(created_at) FROM messages WHERE lead_id = l.id AND direction = 'inbound'),
+                l.created_at
+              )
+          )
+        LIMIT 200
+      `).all(fu.account_id, agent.user_id, minutes, fu.agent_id, fu.id)
+    } else {
+      // MODO STAGE (legado, intocado): lead parado na etapa configurada ha N min
+      candidates = db.prepare(`
+        SELECT l.id, l.name
+        FROM leads l
+        WHERE l.account_id = ?
+          AND l.stage_id = ?
+          AND l.is_active = 1
+          AND COALESCE(l.is_archived, 0) = 0
+          AND COALESCE(l.is_blocked, 0) = 0
+          AND COALESCE(
+            (SELECT MAX(created_at) FROM messages WHERE lead_id = l.id),
+            l.created_at
+          ) <= datetime('now', '-' || ? || ' minutes')
+          AND NOT EXISTS (
+            SELECT 1 FROM lead_follow_ups lfu
+            WHERE lfu.lead_id = l.id AND lfu.follow_up_id = ?
+              AND lfu.started_at >= COALESCE(
+                (SELECT MAX(created_at) FROM stage_history WHERE lead_id = l.id AND to_stage_id = l.stage_id),
+                l.created_at
+              )
+          )
+        LIMIT 200
+      `).all(fu.account_id, fu.inactivity_stage_id, minutes, fu.id)
+    }
 
     if (candidates.length === 0) continue
-    console.log(`[InactivityScan] Follow-up "${fu.name}" (mode=${mode}) — ${candidates.length} candidato(s)`)
+    const modeLabel = fu.agent_id ? `agent=${fu.agent_id}` : `stage=${fu.inactivity_stage_id}`
+    console.log(`[InactivityScan] Follow-up "${fu.name}" (${modeLabel}, mode=${mode}) — ${candidates.length} candidato(s)`)
 
     const delaySec = fu.variation_delay_seconds || 30
     const insert = db.prepare(`

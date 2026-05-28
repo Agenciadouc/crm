@@ -283,6 +283,127 @@ router.delete('/:id', requireRole('super_admin', 'gerente'), (req, res) => {
   res.json({ ok: true })
 })
 
+// Follow-up de inatividade do agente — cria/atualiza/desativa o follow_up vinculado.
+// Body: { enabled, inactivity_minutes, steps[], stop_on_reply, on_reply_action, on_reply_user_id, instance_id }
+// Reusa a tabela follow_ups (type='inactivity', agent_id=this.agent). 1 follow-up por agente.
+router.put('/:id/inactivity-followup', requireRole('super_admin', 'gerente'), (req, res) => {
+  if (!req.accountId) return res.status(400).json({ error: 'account_id required' })
+  const agent = db.prepare('SELECT * FROM ai_agents WHERE id = ? AND account_id = ?').get(req.params.id, req.accountId)
+  if (!agent) return res.status(404).json({ error: 'Agente nao encontrado' })
+
+  const b = req.body || {}
+  const enabled = !!b.enabled
+
+  // Acha o follow_up existente vinculado (se houver)
+  const existing = db.prepare('SELECT * FROM follow_ups WHERE agent_id = ? AND account_id = ?').get(agent.id, req.accountId)
+
+  // Caso 1: desativando → marca is_active=0 (preserva dado pra reativar depois)
+  if (!enabled) {
+    if (existing) {
+      db.prepare("UPDATE follow_ups SET is_active = 0, updated_at = datetime('now') WHERE id = ?").run(existing.id)
+    }
+    return res.json({ ok: true, follow_up: existing ? { ...existing, is_active: 0 } : null })
+  }
+
+  // Caso 2: ativando — precisa de instance_id (qual inst envia)
+  const instanceId = b.instance_id ? parseInt(b.instance_id) : null
+  if (!instanceId) return res.status(400).json({ error: 'instance_id obrigatorio quando enabled=true' })
+  const inst = db.prepare('SELECT id FROM whatsapp_instances WHERE id = ? AND account_id = ?').get(instanceId, req.accountId)
+  if (!inst) return res.status(400).json({ error: 'Instancia invalida pra essa conta' })
+
+  // Steps
+  if (!Array.isArray(b.steps) || b.steps.length === 0) return res.status(400).json({ error: 'pelo menos 1 step obrigatorio' })
+  if (b.steps.length > 5) return res.status(400).json({ error: 'maximo 5 steps' })
+  const normalizedSteps = []
+  for (const s of b.steps) {
+    const msg = String(s.message_template || '').trim()
+    if (!msg) return res.status(400).json({ error: 'Cada step precisa de mensagem' })
+    normalizedSteps.push({
+      delay_minutes: Math.max(0, parseInt(s.delay_minutes) || 0),
+      message_template: msg,
+      variations: null, // simplifica — UI sequencia variacoes via msg principal
+    })
+  }
+
+  // Threshold de inatividade
+  const inactivityMinutes = Math.max(30, parseInt(b.inactivity_minutes) || 30)
+  const variationDelay = Math.max(30, parseInt(b.variation_delay_seconds) || 60)
+
+  // On-reply
+  const validActions = ['pause', 'roulette', 'assign_user']
+  const onReplyAction = validActions.includes(b.on_reply_action) ? b.on_reply_action : 'pause'
+  let onReplyUserId = null
+  if (onReplyAction === 'assign_user' && b.on_reply_user_id) {
+    const u = db.prepare('SELECT id FROM users WHERE id = ? AND account_id = ? AND is_active = 1').get(b.on_reply_user_id, req.accountId)
+    if (!u) return res.status(400).json({ error: 'Usuario invalido pra on_reply_user_id' })
+    onReplyUserId = u.id
+  }
+
+  const trans = db.transaction(() => {
+    let fuId
+    if (existing) {
+      // Update no existente — reativa, atualiza parametros
+      db.prepare(`
+        UPDATE follow_ups SET
+          name = ?, instance_id = ?, stop_on_reply = ?, is_active = 1,
+          type = 'inactivity', inactivity_minutes = ?, inactivity_mode = 'sequence',
+          variation_delay_seconds = ?, on_reply_action = ?, on_reply_user_id = ?,
+          inactivity_stage_id = NULL, agent_id = ?,
+          updated_at = datetime('now')
+        WHERE id = ?
+      `).run(
+        `[BOT] ${agent.name}`,
+        instanceId,
+        b.stop_on_reply === false ? 0 : 1,
+        inactivityMinutes,
+        variationDelay,
+        onReplyAction,
+        onReplyUserId,
+        agent.id,
+        existing.id
+      )
+      fuId = existing.id
+      // Limpa steps antigos e reinsere
+      db.prepare('DELETE FROM follow_up_steps WHERE follow_up_id = ?').run(fuId)
+    } else {
+      // Cria novo follow_up vinculado ao agente
+      const result = db.prepare(`
+        INSERT INTO follow_ups (account_id, name, description, instance_id, stop_on_reply, created_by, type, inactivity_stage_id, inactivity_days, inactivity_minutes, inactivity_mode, variation_delay_seconds, on_reply_action, on_reply_user_id, agent_id, is_active)
+        VALUES (?, ?, ?, ?, ?, ?, 'inactivity', NULL, 1, ?, 'sequence', ?, ?, ?, ?, 1)
+      `).run(
+        req.accountId,
+        `[BOT] ${agent.name}`,
+        `Follow-up de inatividade do agente ${agent.name}`,
+        instanceId,
+        b.stop_on_reply === false ? 0 : 1,
+        req.user.id,
+        inactivityMinutes,
+        variationDelay,
+        onReplyAction,
+        onReplyUserId,
+        agent.id
+      )
+      fuId = result.lastInsertRowid
+    }
+
+    // Insere steps na ordem
+    const stmtStep = db.prepare(`
+      INSERT INTO follow_up_steps (follow_up_id, position, delay_minutes, message_template, schedule_mode, variations)
+      VALUES (?, ?, ?, ?, 'relative', NULL)
+    `)
+    normalizedSteps.forEach((s, i) => {
+      stmtStep.run(fuId, i + 1, s.delay_minutes, s.message_template)
+    })
+
+    return fuId
+  })
+
+  const newId = trans()
+  const fu = db.prepare('SELECT * FROM follow_ups WHERE id = ?').get(newId)
+  const stepsOut = db.prepare('SELECT * FROM follow_up_steps WHERE follow_up_id = ? ORDER BY position').all(newId)
+  res.json({ ok: true, follow_up: { ...fu, steps: stepsOut } })
+})
+
 // Uso de tokens — gauge consumido X/Y + log das ultimas chamadas
 router.get('/:id/usage', (req, res) => {
   if (!req.accountId) return res.status(400).json({ error: 'account_id required' })
