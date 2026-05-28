@@ -428,6 +428,14 @@ export async function analyzeConversation(leadId) {
 
   const ins = toolUse.input
   const scores = ins.scores || {}
+  // Guards: Haiku as vezes retorna campo como null/objeto em vez de array.
+  const safeArr = (v) => Array.isArray(v) ? v : []
+  ins.erros = safeArr(ins.erros)
+  ins.acertos = safeArr(ins.acertos)
+  ins.objecoes = safeArr(ins.objecoes)
+  ins.motivos_perda = safeArr(ins.motivos_perda)
+  ins.riscos = safeArr(ins.riscos)
+  ins.participants_analysis = safeArr(ins.participants_analysis)
 
   // Map V2 → V1 backcompat
   const lead_intent_v1 = TEMP_TO_INTENT[ins.temperatura_lead] || 'cold'

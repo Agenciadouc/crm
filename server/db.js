@@ -849,6 +849,48 @@ addColumnIfNotExists('ai_agent_token_log', 'stt_provider', 'TEXT')
 // cao auto pra lead novo de planilha). Permite filtrar custos por tipo no dashboard.
 addColumnIfNotExists('ai_agent_token_log', 'source', 'TEXT')
 
+// Migração: ai_agent_token_log.agent_id NOT NULL bloqueia analise V2 e coaching (que nao tem agente conversacional).
+// SQLite nao permite ALTER COLUMN — recria tabela + copia dados.
+try {
+  const cols = db.prepare("PRAGMA table_info(ai_agent_token_log)").all()
+  const agentIdCol = cols.find(c => c.name === 'agent_id')
+  if (agentIdCol && agentIdCol.notnull === 1) {
+    console.log('[DB] Migracao: ai_agent_token_log.agent_id NOT NULL -> NULL')
+    db.exec(`
+      CREATE TABLE ai_agent_token_log_new (
+        id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+        agent_id              INTEGER,
+        account_id            INTEGER NOT NULL,
+        lead_id               INTEGER,
+        input_tokens          INTEGER NOT NULL DEFAULT 0,
+        output_tokens         INTEGER NOT NULL DEFAULT 0,
+        cache_read_tokens     INTEGER NOT NULL DEFAULT 0,
+        cache_creation_tokens INTEGER NOT NULL DEFAULT 0,
+        cost_usd              REAL,
+        created_at            TEXT NOT NULL DEFAULT (datetime('now')),
+        stt_seconds           REAL DEFAULT 0,
+        stt_cost_usd          REAL DEFAULT 0,
+        stt_provider          TEXT,
+        source                TEXT,
+        FOREIGN KEY (agent_id) REFERENCES ai_agents(id) ON DELETE CASCADE
+      );
+      INSERT INTO ai_agent_token_log_new
+        (id, agent_id, account_id, lead_id, input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, cost_usd, created_at, stt_seconds, stt_cost_usd, stt_provider, source)
+      SELECT
+        id, agent_id, account_id, lead_id, input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, cost_usd, created_at,
+        COALESCE(stt_seconds, 0), COALESCE(stt_cost_usd, 0), stt_provider, source
+      FROM ai_agent_token_log;
+      DROP TABLE ai_agent_token_log;
+      ALTER TABLE ai_agent_token_log_new RENAME TO ai_agent_token_log;
+      CREATE INDEX IF NOT EXISTS idx_ai_token_log_month ON ai_agent_token_log(agent_id, created_at);
+      CREATE INDEX IF NOT EXISTS idx_ai_token_log_source ON ai_agent_token_log(account_id, source, created_at);
+    `)
+    console.log('[DB] Migracao concluida')
+  }
+} catch (e) {
+  console.warn('[DB] Migracao ai_agent_token_log falhou:', e.message)
+}
+
 // Welcome msg pra leads novos de planilha (Haiku-gerada) — opt-in por agente.
 addColumnIfNotExists('ai_agents', 'send_welcome_for_sheets_leads', 'INTEGER NOT NULL DEFAULT 0')
 addColumnIfNotExists('ai_agents', 'welcome_extra_instructions', 'TEXT')
