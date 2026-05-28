@@ -716,3 +716,179 @@ export const createLaunch = (accountId: number, data: { title: string; identific
 export const updateLaunch = (id: number, accountId: number, data: Partial<Launch>) => apiFetch(`/api/launches/${id}?account_id=${accountId}`, { method: 'PUT', body: JSON.stringify(data) })
 export const updateLaunchMessages = (id: number, accountId: number, messages: Partial<LaunchMessage>[]) => apiFetch(`/api/launches/${id}/messages?account_id=${accountId}`, { method: 'PUT', body: JSON.stringify({ messages }) })
 export const deleteLaunch = (id: number, accountId: number) => apiFetch(`/api/launches/${id}?account_id=${accountId}`, { method: 'DELETE' })
+
+// =============================================
+// Conversation Intelligence V2
+// =============================================
+
+export interface OverviewV2 {
+  cards: {
+    conversas_analisadas: number
+    score_medio: number | null
+    sla_humano_pct: number | null
+    leads_quentes_em_risco: number
+    vendas_perdidas: number
+    receita_em_risco: number
+    erros_criticos_count: number
+    proximas_acoes_pendentes: number
+    bot_taxa_resolucao: number | null
+    follow_ups_atrasados: number
+  }
+  days: number
+}
+
+export interface RankingRowV2 {
+  user_id: number
+  user_name: string
+  role: 'atendente' | 'gerente'
+  leads_assigned: number
+  leads_responded: number
+  leads_converted: number
+  ttfr_human: number | null
+  tmr_human: number | null
+  under5: number
+  idle24: number
+  score_v2: number | null
+  lost_sales: number
+  quentes: number
+  sla_5min_pct: number | null
+  conversion_pct: number | null
+  principal_erro: string | null
+  principal_forte: string | null
+}
+
+export interface CriticalConversation {
+  lead_id: number
+  lead_name: string
+  lead_phone: string
+  attendant_name: string | null
+  attendant_user_id: number | null
+  temperatura_lead: 'frio' | 'morno' | 'quente' | null
+  conversation_score: number | null
+  summary: string
+  prioridade_revisao: 'baixa' | 'media' | 'alta' | 'critica' | null
+  mensagem_retomada: string | null
+  suggested_next_step: string | null
+  chance_conversao: number | null
+  lost_sale_signals: string | null
+  erro_critico: string | null
+}
+
+export interface ConversationErrorDetail {
+  id: number
+  actor_type: 'bot' | 'atendente' | 'gerente' | 'processo'
+  code: string | null
+  category: string | null
+  gravity: 'baixa' | 'media' | 'alta' | 'critica'
+  description: string
+  impact: string | null
+  how_to_fix: string | null
+  evidence_message_ids: number[]
+}
+
+export interface ConversationStrengthDetail {
+  id: number
+  actor_type: 'bot' | 'atendente' | 'gerente' | 'processo'
+  code: string | null
+  description: string
+  impact: string | null
+  evidence_message_ids: number[]
+}
+
+export interface ParticipantAnalysis {
+  actor_type: 'bot' | 'atendente' | 'gerente'
+  actor_user_id: number | null
+  actor_ai_agent_id: number | null
+  actor_name: string
+  score: number | null
+  acertos_summary: string | null
+  erros_summary: string | null
+  recomendacao: string | null
+}
+
+export interface ConversationDetailV2 {
+  insight: any  // shape detalhado preserva V1+V2
+  errors: ConversationErrorDetail[]
+  strengths: ConversationStrengthDetail[]
+  participants: ParticipantAnalysis[]
+}
+
+export interface AnalystAlert {
+  id: number
+  account_id: number
+  lead_id: number | null
+  lead_name: string | null
+  lead_phone: string | null
+  insight_id: number | null
+  type: 'lead_quente_abandonado' | 'proposta_sem_retorno' | 'erro_critico' | 'bot_falhou'
+  severity: 'media' | 'alta' | 'critica'
+  title: string
+  description: string | null
+  suggested_action: string | null
+  assigned_to_user_id: number | null
+  assigned_to_name: string | null
+  status: 'open' | 'resolved' | 'dismissed'
+  created_at: string
+  resolved_at: string | null
+}
+
+export interface CoachingWeekly {
+  id: number
+  account_id: number
+  user_id: number
+  week_start: string
+  summary: string
+  strengths: string[]
+  improvements: string[]
+  conversations_to_review: number[]
+  training_recommended: string
+  suggested_script: string
+  goal_next_week: string
+  ai_score_avg_week: number | null
+  cost_usd: number
+  created_at: string
+}
+
+export interface MarketIntel {
+  objecoes_top: Array<{ label: string; count: number }>
+  motivos_perda_top: Array<{ label: string; count: number }>
+  riscos_top: Array<{ label: string; count: number }>
+  days: number
+  sample_size: number
+}
+
+export interface AnalyzeEstimate {
+  leads_to_analyze: number
+  estimated_cost_usd: number
+  month_spent_usd: number
+  month_limit_usd: number
+  account_has_flag: boolean
+  is_super_admin_bypass: boolean
+}
+
+export const fetchOverviewV2 = (accountId: number, days: number = 30) =>
+  apiFetch<OverviewV2>(`/api/dashboard/overview-v2?account_id=${accountId}&days=${days}`)
+export const fetchRankingV2 = (accountId: number, days: number = 30) =>
+  apiFetch<{ days: number; attendants: RankingRowV2[] }>(`/api/dashboard/ranking-v2?account_id=${accountId}&days=${days}`)
+export const fetchCriticalConversations = (accountId: number, days: number = 30, limit: number = 50) =>
+  apiFetch<{ conversations: CriticalConversation[] }>(`/api/dashboard/critical-conversations?account_id=${accountId}&days=${days}&limit=${limit}`).then(d => d.conversations)
+export const fetchConversationDetailV2 = (leadId: number, accountId: number) =>
+  apiFetch<ConversationDetailV2>(`/api/dashboard/conversation-detail/${leadId}?account_id=${accountId}`)
+export const fetchAlerts = (accountId: number, status: 'open' | 'resolved' | 'dismissed' = 'open') =>
+  apiFetch<{ alerts: AnalystAlert[] }>(`/api/dashboard/alerts?account_id=${accountId}&status=${status}`).then(d => d.alerts)
+export const resolveAlert = (id: number, accountId: number, status: 'resolved' | 'dismissed' = 'resolved') =>
+  apiFetch(`/api/dashboard/alerts/${id}/resolve?account_id=${accountId}`, { method: 'POST', body: JSON.stringify({ status }) })
+export const assignAlert = (id: number, accountId: number, userId: number | null) =>
+  apiFetch(`/api/dashboard/alerts/${id}/assign?account_id=${accountId}`, { method: 'POST', body: JSON.stringify({ user_id: userId }) })
+export const fetchCoaching = (userId: number, accountId: number, weeks: number = 4) =>
+  apiFetch<{ weekly: CoachingWeekly[] }>(`/api/dashboard/coaching/${userId}?account_id=${accountId}&weeks=${weeks}`).then(d => d.weekly)
+export const generateCoachingNow = (userId: number, accountId: number) =>
+  apiFetch<{ ok: boolean; week_start: string; message: string }>(`/api/dashboard/coaching/${userId}/generate?account_id=${accountId}`, { method: 'POST' })
+export const fetchMarketIntel = (accountId: number, days: number = 30) =>
+  apiFetch<MarketIntel>(`/api/dashboard/market-intelligence?account_id=${accountId}&days=${days}`)
+export const fetchAnalyzeEstimate = (accountId: number, days: number = 7) =>
+  apiFetch<AnalyzeEstimate>(`/api/dashboard/analyze-estimate?account_id=${accountId}&days=${days}`)
+export const markProposalSent = (leadId: number, accountId: number) =>
+  apiFetch(`/api/dashboard/leads/${leadId}/mark-proposal-sent?account_id=${accountId}`, { method: 'POST' })
+export const updateLeadValue = (leadId: number, accountId: number, value: number) =>
+  apiFetch(`/api/dashboard/leads/${leadId}/value?account_id=${accountId}`, { method: 'PUT', body: JSON.stringify({ value_estimated: value }) })

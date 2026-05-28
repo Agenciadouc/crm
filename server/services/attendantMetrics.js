@@ -113,15 +113,138 @@ export function aggregateAttendantMetricsForDate(accountId, userId, dateStr) {
       AND EXISTS (SELECT 1 FROM messages WHERE lead_id = l.id)
   `).get(accountId, userId, dayEnd)?.n || 0
 
-  // UPSERT
+  // ─── Métricas V2 ───
+  // 8. TTFR humano vs bot (separados): pra cada newLead, mede primeira outbound humana e primeira do bot.
+  const ttfrHumanSamples = []
+  const ttfrBotSamples = []
+  for (const lead of newLeads) {
+    const firstHuman = db.prepare(`
+      SELECT created_at FROM messages
+      WHERE lead_id = ? AND direction = 'outbound' AND ai_agent_id IS NULL
+      ORDER BY id ASC LIMIT 1
+    `).get(lead.id)
+    if (firstHuman) {
+      const sec = (new Date(firstHuman.created_at).getTime() - new Date(lead.created_at).getTime()) / 1000
+      if (sec >= 0) ttfrHumanSamples.push(sec)
+    }
+    const firstBot = db.prepare(`
+      SELECT created_at FROM messages
+      WHERE lead_id = ? AND direction = 'outbound' AND ai_agent_id IS NOT NULL
+      ORDER BY id ASC LIMIT 1
+    `).get(lead.id)
+    if (firstBot) {
+      const sec = (new Date(firstBot.created_at).getTime() - new Date(lead.created_at).getTime()) / 1000
+      if (sec >= 0) ttfrBotSamples.push(sec)
+    }
+  }
+  const ttfrHumanAvg = ttfrHumanSamples.length ? ttfrHumanSamples.reduce((s, x) => s + x, 0) / ttfrHumanSamples.length : null
+  const ttfrBotAvg = ttfrBotSamples.length ? ttfrBotSamples.reduce((s, x) => s + x, 0) / ttfrBotSamples.length : null
+  // P90 humano: ordena ASC, pega elemento no índice ceil(n * 0.9) - 1
+  let ttfrHumanP90 = null
+  if (ttfrHumanSamples.length) {
+    const sorted = [...ttfrHumanSamples].sort((a, b) => a - b)
+    const idx = Math.max(0, Math.ceil(sorted.length * 0.9) - 1)
+    ttfrHumanP90 = sorted[idx]
+  }
+
+  // 9. TMR humano: pares (inbound → próxima outbound humana). Usa msgs do dia inteiro.
+  const tmrHumanSamples = []
+  for (const leadId of activeLeadIds) {
+    const msgs = db.prepare(`
+      SELECT direction, ai_agent_id, created_at FROM messages
+      WHERE lead_id = ? AND created_at BETWEEN ? AND ?
+      ORDER BY id ASC
+    `).all(leadId, dayStart, dayEnd)
+    let lastInbound = null
+    for (const m of msgs) {
+      if (m.direction === 'inbound') {
+        lastInbound = m.created_at
+      } else if (m.direction === 'outbound' && m.ai_agent_id == null && lastInbound) {
+        const gap = (new Date(m.created_at).getTime() - new Date(lastInbound).getTime()) / 1000
+        if (gap > 0 && gap < 86400) tmrHumanSamples.push(gap)
+        lastInbound = null
+      } else if (m.direction === 'outbound' && m.ai_agent_id != null) {
+        // bot respondeu primeiro — reset lastInbound (já foi respondido pelo bot)
+        lastInbound = null
+      }
+    }
+  }
+  const tmrHumanAvg = tmrHumanSamples.length ? tmrHumanSamples.reduce((s, x) => s + x, 0) / tmrHumanSamples.length : null
+
+  // 10. Leads sem resposta humana: do user no dia, sem nenhuma outbound humana até o fim do dia
+  const leadsWithoutHumanRow = db.prepare(`
+    SELECT COUNT(*) as n FROM leads l
+    WHERE l.account_id = ? AND l.attendant_id = ?
+      AND l.created_at BETWEEN ? AND ?
+      AND NOT EXISTS (
+        SELECT 1 FROM messages
+        WHERE lead_id = l.id AND direction = 'outbound' AND ai_agent_id IS NULL
+          AND created_at <= ?
+      )
+  `).get(accountId, userId, dayStart, dayEnd, dayEnd)
+  const leadsWithoutHuman = leadsWithoutHumanRow?.n || 0
+
+  // 11. Leads ociosos 24h/72h (snapshot fim do dia): ativos, sem outbound humana há >24h/72h
+  const idle24Row = db.prepare(`
+    SELECT COUNT(*) as n FROM leads l
+    WHERE l.account_id = ? AND l.attendant_id = ?
+      AND l.is_active = 1 AND COALESCE(l.is_archived, 0) = 0
+      AND EXISTS (SELECT 1 FROM messages WHERE lead_id = l.id)
+      AND NOT EXISTS (
+        SELECT 1 FROM messages
+        WHERE lead_id = l.id AND direction = 'outbound' AND ai_agent_id IS NULL
+          AND created_at >= datetime(?, '-1 day')
+      )
+  `).get(accountId, userId, dayEnd)
+  const leadsIdle24h = idle24Row?.n || 0
+
+  const idle72Row = db.prepare(`
+    SELECT COUNT(*) as n FROM leads l
+    WHERE l.account_id = ? AND l.attendant_id = ?
+      AND l.is_active = 1 AND COALESCE(l.is_archived, 0) = 0
+      AND EXISTS (SELECT 1 FROM messages WHERE lead_id = l.id)
+      AND NOT EXISTS (
+        SELECT 1 FROM messages
+        WHERE lead_id = l.id AND direction = 'outbound' AND ai_agent_id IS NULL
+          AND created_at >= datetime(?, '-3 day')
+      )
+  `).get(accountId, userId, dayEnd)
+  const leadsIdle72h = idle72Row?.n || 0
+
+  // 12. Tempo até qualificação: leads qualificados nesse dia, AVG(qualified_at - created_at)
+  const ttqRow = db.prepare(`
+    SELECT AVG((julianday(qualified_at) - julianday(created_at)) * 86400) as avg_seconds
+    FROM leads
+    WHERE account_id = ? AND attendant_id = ?
+      AND qualified_at IS NOT NULL
+      AND qualified_at BETWEEN ? AND ?
+  `).get(accountId, userId, dayStart, dayEnd)
+  const timeToQualifiedAvg = ttqRow?.avg_seconds ?? null
+
+  // 13. Tempo até proposta enviada
+  const ttpRow = db.prepare(`
+    SELECT AVG((julianday(proposal_sent_at) - julianday(created_at)) * 86400) as avg_seconds
+    FROM leads
+    WHERE account_id = ? AND attendant_id = ?
+      AND proposal_sent_at IS NOT NULL
+      AND proposal_sent_at BETWEEN ? AND ?
+  `).get(accountId, userId, dayStart, dayEnd)
+  const timeToProposalAvg = ttpRow?.avg_seconds ?? null
+
+  // UPSERT (V1 + V2 colunas)
   db.prepare(`
     INSERT INTO attendant_metrics_daily (
       account_id, user_id, date,
       leads_assigned, leads_responded, leads_converted,
       ttfr_avg_seconds, tmr_avg_seconds,
       leads_under_5min, leads_under_30min, leads_under_1h,
-      open_conversations, abandoned_leads, computed_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+      open_conversations, abandoned_leads,
+      ttfr_human_avg_seconds, ttfr_human_p90_seconds, ttfr_bot_avg_seconds,
+      tmr_human_avg_seconds,
+      leads_without_human_response, leads_idle_24h, leads_idle_72h,
+      time_to_qualified_avg_seconds, time_to_proposal_avg_seconds,
+      computed_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
     ON CONFLICT(account_id, user_id, date) DO UPDATE SET
       leads_assigned = excluded.leads_assigned,
       leads_responded = excluded.leads_responded,
@@ -133,13 +256,26 @@ export function aggregateAttendantMetricsForDate(accountId, userId, dateStr) {
       leads_under_1h = excluded.leads_under_1h,
       open_conversations = excluded.open_conversations,
       abandoned_leads = excluded.abandoned_leads,
+      ttfr_human_avg_seconds = excluded.ttfr_human_avg_seconds,
+      ttfr_human_p90_seconds = excluded.ttfr_human_p90_seconds,
+      ttfr_bot_avg_seconds = excluded.ttfr_bot_avg_seconds,
+      tmr_human_avg_seconds = excluded.tmr_human_avg_seconds,
+      leads_without_human_response = excluded.leads_without_human_response,
+      leads_idle_24h = excluded.leads_idle_24h,
+      leads_idle_72h = excluded.leads_idle_72h,
+      time_to_qualified_avg_seconds = excluded.time_to_qualified_avg_seconds,
+      time_to_proposal_avg_seconds = excluded.time_to_proposal_avg_seconds,
       computed_at = datetime('now')
   `).run(
     accountId, userId, dateStr,
     newLeads.length, leadsResponded, conversions,
     ttfrAvg, tmrAvg,
     under5, under30, under1h,
-    openConvs, abandoned
+    openConvs, abandoned,
+    ttfrHumanAvg, ttfrHumanP90, ttfrBotAvg,
+    tmrHumanAvg,
+    leadsWithoutHuman, leadsIdle24h, leadsIdle72h,
+    timeToQualifiedAvg, timeToProposalAvg
   )
 
   return {
@@ -148,6 +284,9 @@ export function aggregateAttendantMetricsForDate(accountId, userId, dateStr) {
     leads_converted: conversions,
     ttfr_avg_seconds: ttfrAvg,
     tmr_avg_seconds: tmrAvg,
+    ttfr_human_avg_seconds: ttfrHumanAvg,
+    ttfr_bot_avg_seconds: ttfrBotAvg,
+    leads_idle_24h: leadsIdle24h,
   }
 }
 

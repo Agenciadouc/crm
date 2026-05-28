@@ -4,7 +4,7 @@ import { useAuth } from '../context/AuthContext'
 import { useAccount } from '../context/AccountContext'
 import { useSSE } from '../context/SSEContext'
 import { useTheme } from '../context/ThemeContext'
-import { apiFetch, fetchTaskCounts, fetchPendingTransferRequests } from '../lib/api'
+import { apiFetch, fetchTaskCounts, fetchPendingTransferRequests, fetchAlerts } from '../lib/api'
 import {
   LayoutDashboard, Kanban, Users, MessageCircle, UserCog, GitBranch,
   Plug, Settings, Building2, LogOut, UsersRound, Menu, X,
@@ -25,6 +25,7 @@ export default function Sidebar() {
   const [newLeadsCount, setNewLeadsCount] = useState(0)
   const [taskCount, setTaskCount] = useState(0)
   const [transferCount, setTransferCount] = useState(0)
+  const [alertsCount, setAlertsCount] = useState(0)
 
   const loadTaskCount = useCallback(() => {
     if (!accountId) return
@@ -41,6 +42,20 @@ export default function Sidebar() {
   useSSE('lead:transfer-requested', loadTransferCount)
   useSSE('lead:transfer-accepted', loadTransferCount)
   useSSE('lead:transfer-rejected', loadTransferCount)
+
+  // Alertas V2 — polling a cada 60s, só pra contas com flag ou super_admin.
+  const loadAlertsCount = useCallback(() => {
+    if (!accountId || !user) return
+    const acc = accounts.find(a => a.id === accountId)
+    const hasFlag = acc?.attendant_analytics_enabled === 1
+    if (!hasFlag && user.role !== 'super_admin') { setAlertsCount(0); return }
+    fetchAlerts(accountId, 'open').then(arr => setAlertsCount(arr.length)).catch(() => setAlertsCount(0))
+  }, [accountId, accounts, user])
+  useEffect(() => {
+    loadAlertsCount()
+    const id = setInterval(loadAlertsCount, 60000)
+    return () => clearInterval(id)
+  }, [loadAlertsCount])
   const [mobileOpen, setMobileOpen] = useState(false)
   if (!user) return null
 
@@ -138,6 +153,11 @@ export default function Sidebar() {
           {((isGerente && accounts.find(a => a.id === accountId)?.attendant_analytics_enabled === 1) || isAdmin) && (
             <NavLink to="/atendimentos" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`} onClick={closeMobile}>
               <BarChart3 size={16} /> Atendimentos
+              {alertsCount > 0 && (
+                <span style={{ marginLeft: 'auto', background: 'var(--negative)', color: 'white', fontSize: 10, padding: '1px 6px', borderRadius: 8, fontWeight: 700 }}>
+                  {alertsCount}
+                </span>
+              )}
             </NavLink>
           )}
           <NavLink to="/chat" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`} onClick={closeMobile}>

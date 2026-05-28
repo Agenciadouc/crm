@@ -7,6 +7,7 @@ import { processInactivityFollowUps } from './services/inactivityScanner.js'
 import { triggerCapiForStageChange } from './services/metaCapi.js'
 import { aggregateAllAccounts } from './services/attendantMetrics.js'
 import { analyzeAllAccounts } from './services/conversationAnalyzer.js'
+import { generateAllCoachings, isoMonday } from './services/coachingAnalyzer.js'
 
 // Roda a cada 1min — precisao do agendamento <= 60s. Custo desprezivel (1 SELECT/min).
 const INTERVAL_MS = 60 * 1000
@@ -385,6 +386,37 @@ function shouldRunNightly() {
   return (ranToday?.n || 0) === 0
 }
 
+// ─── Weekly Coaching — segunda 3h05-3h10 UTC, 1x por semana por user ────
+let weeklyRunning = false
+export async function runWeeklyCoaching() {
+  if (weeklyRunning) return
+  weeklyRunning = true
+  try {
+    // Semana terminada = última segunda anterior à atual (já completou 7 dias)
+    const lastMonday = new Date(Date.now() - 7 * 86400 * 1000)
+    const weekStart = isoMonday(lastMonday)
+    console.log(`[WeeklyCoaching] Iniciando week=${weekStart}...`)
+    const r = await generateAllCoachings(weekStart)
+    console.log(`[WeeklyCoaching] Done: ${JSON.stringify(r)}`)
+    db.prepare("UPDATE accounts SET last_weekly_coaching_at = datetime('now') WHERE is_active = 1 AND attendant_analytics_enabled = 1").run()
+  } catch (e) {
+    console.error('[WeeklyCoaching] erro:', e.message)
+  } finally {
+    weeklyRunning = false
+  }
+}
+
+function shouldRunWeeklyCoaching() {
+  const now = new Date()
+  // Janela: segunda-feira (getUTCDay() === 1) entre 3h05 e 3h10 UTC
+  if (now.getUTCDay() !== 1) return false
+  if (now.getUTCHours() !== 3 || now.getUTCMinutes() < 5 || now.getUTCMinutes() >= 10) return false
+  // Já rodou nessa segunda?
+  const todayStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0)).toISOString().slice(0, 19).replace('T', ' ')
+  const ranToday = db.prepare("SELECT COUNT(*) as n FROM accounts WHERE last_weekly_coaching_at >= ? AND is_active = 1 AND attendant_analytics_enabled = 1").get(todayStart)
+  return (ranToday?.n || 0) === 0
+}
+
 // ─── Main tick (every 5 min) ─────────────────────────────────────
 async function tick() {
   try {
@@ -400,6 +432,8 @@ async function tick() {
     await reRegisterWebhooks()
     // Nightly analysis (roda so 1x por dia na janela 3h UTC)
     if (shouldRunNightly()) runNightlyAnalysis().catch(e => console.error('[Nightly]', e.message))
+    // Weekly coaching (segunda 3h05-3h10 UTC)
+    if (shouldRunWeeklyCoaching()) runWeeklyCoaching().catch(e => console.error('[WeeklyCoaching]', e.message))
   } catch (err) {
     console.error('[Scheduler] Tick error:', err.message)
   }

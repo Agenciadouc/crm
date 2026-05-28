@@ -1,8 +1,9 @@
 import { Router } from 'express'
 import db from '../db.js'
 import { requireRole } from '../middleware/auth.js'
-import { analyzeConversationsBatch } from '../services/conversationAnalyzer.js'
+import { analyzeConversationsBatch, getAnalyzeEstimate } from '../services/conversationAnalyzer.js'
 import { aggregateAllAccounts } from '../services/attendantMetrics.js'
+import { generateCoachingForUser, isoMonday } from '../services/coachingAnalyzer.js'
 
 const router = Router()
 
@@ -377,6 +378,407 @@ router.put('/analysis-limit', requireRole('super_admin', 'gerente'), requireAnal
   const limit = Math.max(0, Math.min(10000000, parseInt(req.body.limit) || 0))
   db.prepare("UPDATE accounts SET analysis_token_limit = ?, updated_at = datetime('now') WHERE id = ?").run(limit, req.accountId)
   res.json({ ok: true, analysis_token_limit: limit })
+})
+
+// ─── Endpoints V2 (Conversation Intelligence) ───
+// Todos respeitam requireAnalyticsEnabled (super_admin sempre passa) e exigem gerente/super_admin.
+
+// Estimativa de custo pra modal de confirmação no "Analisar agora"
+router.get('/analyze-estimate', requireRole('super_admin', 'gerente'), (req, res) => {
+  if (!req.accountId) return res.status(400).json({ error: 'account_id required' })
+  const sinceHours = Math.max(1, Math.min(720, parseInt(req.query.days || '7') * 24))
+  const est = getAnalyzeEstimate(req.accountId, sinceHours)
+  const isSuperAdmin = req.user?.role === 'super_admin'
+  // Gerente sem flag: 403
+  if (!isSuperAdmin && !est.account_has_flag) {
+    return res.status(403).json({ error: 'analytics_disabled' })
+  }
+  res.json({
+    ...est,
+    is_super_admin_bypass: isSuperAdmin && !est.account_has_flag,
+  })
+})
+
+// Overview V2 — 10 cards
+router.get('/overview-v2', requireRole('super_admin', 'gerente'), requireAnalyticsEnabled, (req, res) => {
+  if (!req.accountId) return res.status(400).json({ error: 'account_id required' })
+  const days = Math.min(365, Math.max(1, parseInt(req.query.days || '30')))
+  const since = new Date(Date.now() - days * 86400 * 1000).toISOString().slice(0, 19).replace('T', ' ')
+
+  const conversasAnalisadas = db.prepare(`
+    SELECT COUNT(*) as n FROM conversation_insights
+    WHERE account_id = ? AND analyzed_at >= ? AND insights_version >= 2
+  `).get(req.accountId, since)?.n || 0
+
+  const scoreMedioRow = db.prepare(`
+    SELECT AVG(conversation_score) as avg FROM conversation_insights
+    WHERE account_id = ? AND analyzed_at >= ? AND insights_version >= 2 AND conversation_score IS NOT NULL
+  `).get(req.accountId, since)
+  const scoreMedio = scoreMedioRow?.avg ? Math.round(scoreMedioRow.avg) : null
+
+  // SLA <5min (humano) — usa attendant_metrics_daily agregado
+  const slaRow = db.prepare(`
+    SELECT SUM(leads_under_5min) as under5, SUM(leads_assigned) as total
+    FROM attendant_metrics_daily
+    WHERE account_id = ? AND date >= date(?)
+  `).get(req.accountId, since.slice(0, 10))
+  const slaPct = slaRow?.total ? Math.round(100 * (slaRow.under5 || 0) / slaRow.total) : null
+
+  const leadsQuentesEmRisco = db.prepare(`
+    SELECT COUNT(*) as n FROM conversation_insights ci
+    JOIN leads l ON l.id = ci.lead_id
+    WHERE ci.account_id = ? AND ci.analyzed_at >= ?
+      AND ci.temperatura_lead = 'quente'
+      AND l.is_active = 1 AND COALESCE(l.is_archived, 0) = 0
+      AND NOT EXISTS (
+        SELECT 1 FROM messages WHERE lead_id = l.id AND direction = 'outbound' AND ai_agent_id IS NULL
+          AND created_at >= datetime('now', '-1 day')
+      )
+  `).get(req.accountId, since)?.n || 0
+
+  const vendasPerdidas = db.prepare(`
+    SELECT COUNT(*) as n FROM conversation_insights
+    WHERE account_id = ? AND analyzed_at >= ? AND lost_sale_signals IS NOT NULL AND lost_sale_signals != ''
+  `).get(req.accountId, since)?.n || 0
+
+  // Receita estimada em risco
+  const receitaRiscoRow = db.prepare(`
+    SELECT COALESCE(SUM(l.value_estimated), 0) as total FROM conversation_insights ci
+    JOIN leads l ON l.id = ci.lead_id
+    WHERE ci.account_id = ? AND ci.analyzed_at >= ?
+      AND ci.temperatura_lead = 'quente'
+      AND l.value_estimated IS NOT NULL
+      AND NOT EXISTS (
+        SELECT 1 FROM messages WHERE lead_id = l.id AND direction = 'outbound' AND ai_agent_id IS NULL
+          AND created_at >= datetime('now', '-1 day')
+      )
+  `).get(req.accountId, since)
+  const receitaRisco = receitaRiscoRow?.total || 0
+
+  const errosCriticos = db.prepare(`
+    SELECT COUNT(*) as n FROM conversation_errors
+    WHERE account_id = ? AND created_at >= ? AND gravity = 'critica'
+  `).get(req.accountId, since)?.n || 0
+
+  const alertasOpen = db.prepare(`
+    SELECT COUNT(*) as n FROM analyst_alerts WHERE account_id = ? AND status = 'open'
+  `).get(req.accountId)?.n || 0
+
+  // Bot taxa de resolução: % de bot_analysis.respondeu_corretamente
+  const botRow = db.prepare(`
+    SELECT bot_analysis_json FROM conversation_insights
+    WHERE account_id = ? AND analyzed_at >= ? AND bot_analysis_json IS NOT NULL
+  `).all(req.accountId, since)
+  let botTotal = 0, botOk = 0
+  for (const r of botRow) {
+    try {
+      const b = JSON.parse(r.bot_analysis_json)
+      if (b) { botTotal++; if (b.respondeu_corretamente) botOk++ }
+    } catch {}
+  }
+  const botTaxa = botTotal ? Math.round(100 * botOk / botTotal) : null
+
+  // Follow-ups atrasados (leads em follow-up que ja passaram da data)
+  const followUpsAtrasados = db.prepare(`
+    SELECT COUNT(*) as n FROM lead_follow_ups lfu
+    JOIN follow_ups fu ON fu.id = lfu.follow_up_id
+    JOIN leads l ON l.id = lfu.lead_id
+    WHERE l.account_id = ? AND lfu.status = 'active' AND lfu.next_run_at < datetime('now')
+  `).get(req.accountId)?.n || 0
+
+  res.json({
+    cards: {
+      conversas_analisadas: conversasAnalisadas,
+      score_medio: scoreMedio,
+      sla_humano_pct: slaPct,
+      leads_quentes_em_risco: leadsQuentesEmRisco,
+      vendas_perdidas: vendasPerdidas,
+      receita_em_risco: receitaRisco,
+      erros_criticos_count: errosCriticos,
+      proximas_acoes_pendentes: alertasOpen,
+      bot_taxa_resolucao: botTaxa,
+      follow_ups_atrasados: followUpsAtrasados,
+    },
+    days,
+  })
+})
+
+// Ranking V2 — colunas estendidas
+router.get('/ranking-v2', requireRole('super_admin', 'gerente'), requireAnalyticsEnabled, (req, res) => {
+  if (!req.accountId) return res.status(400).json({ error: 'account_id required' })
+  const days = Math.min(365, Math.max(1, parseInt(req.query.days || '30')))
+  const since = new Date(Date.now() - days * 86400 * 1000).toISOString().slice(0, 19).replace('T', ' ')
+  const sinceDate = since.slice(0, 10)
+
+  const rows = db.prepare(`
+    SELECT
+      u.id as user_id, u.name as user_name, u.role,
+      COALESCE(SUM(amd.leads_assigned), 0) as leads_assigned,
+      COALESCE(SUM(amd.leads_responded), 0) as leads_responded,
+      COALESCE(SUM(amd.leads_converted), 0) as leads_converted,
+      AVG(amd.ttfr_human_avg_seconds) as ttfr_human,
+      AVG(amd.tmr_human_avg_seconds) as tmr_human,
+      COALESCE(SUM(amd.leads_under_5min), 0) as under5,
+      COALESCE(SUM(amd.leads_idle_24h), 0) as idle24,
+      AVG(ci.conversation_score) as score_v2,
+      COUNT(DISTINCT CASE WHEN ci.lost_sale_signals IS NOT NULL AND ci.lost_sale_signals != '' THEN ci.lead_id END) as lost_sales,
+      COUNT(DISTINCT CASE WHEN ci.temperatura_lead = 'quente' THEN ci.lead_id END) as quentes
+    FROM users u
+    LEFT JOIN attendant_metrics_daily amd ON amd.user_id = u.id AND amd.account_id = u.account_id AND amd.date >= ?
+    LEFT JOIN conversation_insights ci ON ci.attendant_user_id = u.id AND ci.account_id = u.account_id AND ci.analyzed_at >= ? AND ci.insights_version >= 2
+    WHERE u.account_id = ? AND u.role IN ('atendente', 'gerente') AND u.is_active = 1 AND COALESCE(u.is_bot, 0) = 0
+    GROUP BY u.id, u.name, u.role
+    ORDER BY score_v2 DESC NULLS LAST, leads_responded DESC
+  `).all(sinceDate, since, req.accountId)
+
+  // Pra cada user: principal_erro e principal_forte
+  const principalErrorStmt = db.prepare(`
+    SELECT code, COUNT(*) as n FROM conversation_errors
+    WHERE account_id = ? AND attendant_user_id = ? AND created_at >= ?
+    GROUP BY code ORDER BY n DESC LIMIT 1
+  `)
+  const principalStrengthStmt = db.prepare(`
+    SELECT code, COUNT(*) as n FROM conversation_strengths
+    WHERE account_id = ? AND attendant_user_id = ? AND created_at >= ?
+    GROUP BY code ORDER BY n DESC LIMIT 1
+  `)
+  const enriched = rows.map(r => ({
+    ...r,
+    score_v2: r.score_v2 ? Math.round(r.score_v2) : null,
+    ttfr_human: r.ttfr_human ? Math.round(r.ttfr_human) : null,
+    tmr_human: r.tmr_human ? Math.round(r.tmr_human) : null,
+    sla_5min_pct: r.leads_assigned ? Math.round(100 * r.under5 / r.leads_assigned) : null,
+    conversion_pct: r.leads_assigned ? Math.round(100 * r.leads_converted / r.leads_assigned) : null,
+    principal_erro: principalErrorStmt.get(req.accountId, r.user_id, since)?.code || null,
+    principal_forte: principalStrengthStmt.get(req.accountId, r.user_id, since)?.code || null,
+  }))
+
+  res.json({ days, attendants: enriched })
+})
+
+// Conversas críticas
+router.get('/critical-conversations', requireRole('super_admin', 'gerente'), requireAnalyticsEnabled, (req, res) => {
+  if (!req.accountId) return res.status(400).json({ error: 'account_id required' })
+  const days = Math.min(365, Math.max(1, parseInt(req.query.days || '30')))
+  const limit = Math.min(100, Math.max(1, parseInt(req.query.limit || '50')))
+  const since = new Date(Date.now() - days * 86400 * 1000).toISOString().slice(0, 19).replace('T', ' ')
+
+  const rows = db.prepare(`
+    SELECT ci.lead_id, l.name as lead_name, l.phone as lead_phone,
+           u.name as attendant_name, u.id as attendant_user_id,
+           ci.temperatura_lead, ci.conversation_score, ci.summary,
+           ci.prioridade_revisao, ci.mensagem_retomada, ci.suggested_next_step,
+           ci.chance_conversao, ci.lost_sale_signals,
+           (SELECT description FROM conversation_errors WHERE insight_id = ci.id AND gravity = 'critica' LIMIT 1) as erro_critico
+    FROM conversation_insights ci
+    JOIN leads l ON l.id = ci.lead_id
+    LEFT JOIN users u ON u.id = ci.attendant_user_id
+    WHERE ci.account_id = ? AND ci.analyzed_at >= ? AND ci.insights_version >= 2
+      AND (
+        ci.prioridade_revisao IN ('alta', 'critica')
+        OR ci.lost_sale_signals IS NOT NULL
+        OR (ci.temperatura_lead = 'quente' AND ci.conversation_score < 60)
+      )
+    ORDER BY
+      CASE ci.prioridade_revisao WHEN 'critica' THEN 0 WHEN 'alta' THEN 1 WHEN 'media' THEN 2 ELSE 3 END,
+      ci.chance_conversao DESC
+    LIMIT ?
+  `).all(req.accountId, since, limit)
+
+  res.json({ conversations: rows })
+})
+
+// Detalhe completo da conversa V2 (insight + errors + strengths + participants)
+router.get('/conversation-detail/:leadId', requireRole('super_admin', 'gerente'), requireAnalyticsEnabled, (req, res) => {
+  if (!req.accountId) return res.status(400).json({ error: 'account_id required' })
+  const leadId = parseInt(req.params.leadId)
+
+  const insight = db.prepare(`
+    SELECT ci.*, l.name as lead_name, l.phone as lead_phone, u.name as attendant_name
+    FROM conversation_insights ci
+    JOIN leads l ON l.id = ci.lead_id
+    LEFT JOIN users u ON u.id = ci.attendant_user_id
+    WHERE ci.lead_id = ? AND ci.account_id = ?
+  `).get(leadId, req.accountId)
+
+  if (!insight) return res.json({ insight: null })
+
+  // Parse JSON fields
+  try { insight.objecoes_detectadas = JSON.parse(insight.objecoes_detectadas || '[]') } catch { insight.objecoes_detectadas = [] }
+  try { insight.motivos_perda = JSON.parse(insight.motivos_perda || '[]') } catch { insight.motivos_perda = [] }
+  try { insight.riscos_detectados = JSON.parse(insight.riscos_detectados || '[]') } catch { insight.riscos_detectados = [] }
+  try { insight.attendant_errors = JSON.parse(insight.attendant_errors || '[]') } catch { insight.attendant_errors = [] }
+  try { insight.bot_analysis = insight.bot_analysis_json ? JSON.parse(insight.bot_analysis_json) : null } catch { insight.bot_analysis = null }
+  try { insight.handoff_analysis = insight.handoff_analysis_json ? JSON.parse(insight.handoff_analysis_json) : null } catch { insight.handoff_analysis = null }
+
+  const errors = db.prepare(`
+    SELECT id, actor_type, code, category, gravity, description, impact, how_to_fix, evidence_message_ids
+    FROM conversation_errors WHERE insight_id = ?
+  `).all(insight.id).map(e => {
+    try { e.evidence_message_ids = JSON.parse(e.evidence_message_ids || '[]') } catch { e.evidence_message_ids = [] }
+    return e
+  })
+
+  const strengths = db.prepare(`
+    SELECT id, actor_type, code, description, impact, evidence_message_ids
+    FROM conversation_strengths WHERE insight_id = ?
+  `).all(insight.id).map(s => {
+    try { s.evidence_message_ids = JSON.parse(s.evidence_message_ids || '[]') } catch { s.evidence_message_ids = [] }
+    return s
+  })
+
+  const participants = db.prepare(`
+    SELECT actor_type, actor_user_id, actor_ai_agent_id, actor_name, score,
+           acertos_summary, erros_summary, recomendacao
+    FROM conversation_participant_analysis WHERE insight_id = ?
+  `).all(insight.id)
+
+  res.json({ insight, errors, strengths, participants })
+})
+
+// Lista de alertas (open por default)
+router.get('/alerts', requireRole('super_admin', 'gerente'), requireAnalyticsEnabled, (req, res) => {
+  if (!req.accountId) return res.status(400).json({ error: 'account_id required' })
+  const status = req.query.status || 'open'
+  const rows = db.prepare(`
+    SELECT a.*, l.name as lead_name, l.phone as lead_phone, u.name as assigned_to_name
+    FROM analyst_alerts a
+    LEFT JOIN leads l ON l.id = a.lead_id
+    LEFT JOIN users u ON u.id = a.assigned_to_user_id
+    WHERE a.account_id = ? AND a.status = ?
+    ORDER BY
+      CASE a.severity WHEN 'critica' THEN 0 WHEN 'alta' THEN 1 WHEN 'media' THEN 2 ELSE 3 END,
+      a.created_at DESC
+    LIMIT 100
+  `).all(req.accountId, status)
+  res.json({ alerts: rows })
+})
+
+// Marca alerta como resolvido/dispensado
+router.post('/alerts/:id/resolve', requireRole('super_admin', 'gerente'), requireAnalyticsEnabled, (req, res) => {
+  if (!req.accountId) return res.status(400).json({ error: 'account_id required' })
+  const id = parseInt(req.params.id)
+  const newStatus = req.body.status === 'dismissed' ? 'dismissed' : 'resolved'
+  const r = db.prepare(`
+    UPDATE analyst_alerts SET status = ?, resolved_at = datetime('now')
+    WHERE id = ? AND account_id = ?
+  `).run(newStatus, id, req.accountId)
+  res.json({ ok: r.changes > 0, status: newStatus })
+})
+
+// Atribui alerta a um user
+router.post('/alerts/:id/assign', requireRole('super_admin', 'gerente'), requireAnalyticsEnabled, (req, res) => {
+  if (!req.accountId) return res.status(400).json({ error: 'account_id required' })
+  const id = parseInt(req.params.id)
+  const userId = parseInt(req.body.user_id) || null
+  const r = db.prepare(`
+    UPDATE analyst_alerts SET assigned_to_user_id = ? WHERE id = ? AND account_id = ?
+  `).run(userId, id, req.accountId)
+  res.json({ ok: r.changes > 0 })
+})
+
+// Coaching weekly por user
+router.get('/coaching/:userId', requireRole('super_admin', 'gerente'), requireAnalyticsEnabled, (req, res) => {
+  if (!req.accountId) return res.status(400).json({ error: 'account_id required' })
+  const userId = parseInt(req.params.userId)
+  const weeks = Math.min(12, Math.max(1, parseInt(req.query.weeks || '4')))
+  const rows = db.prepare(`
+    SELECT * FROM attendant_coaching_weekly
+    WHERE account_id = ? AND user_id = ?
+    ORDER BY week_start DESC LIMIT ?
+  `).all(req.accountId, userId, weeks).map(w => {
+    try { w.strengths = JSON.parse(w.strengths || '[]') } catch { w.strengths = [] }
+    try { w.improvements = JSON.parse(w.improvements || '[]') } catch { w.improvements = [] }
+    try { w.conversations_to_review = JSON.parse(w.conversations_to_review || '[]') } catch { w.conversations_to_review = [] }
+    return w
+  })
+  res.json({ weekly: rows })
+})
+
+// Gera coaching on-demand (rate limit: 1x/dia por user)
+router.post('/coaching/:userId/generate', requireRole('super_admin', 'gerente'), requireAnalyticsEnabled, async (req, res) => {
+  if (!req.accountId) return res.status(400).json({ error: 'account_id required' })
+  const userId = parseInt(req.params.userId)
+  const lastMonday = new Date(Date.now() - 7 * 86400 * 1000)
+  const weekStart = isoMonday(lastMonday)
+
+  // Rate limit
+  const existing = db.prepare(`
+    SELECT created_at FROM attendant_coaching_weekly
+    WHERE account_id = ? AND user_id = ? AND week_start = ?
+  `).get(req.accountId, userId, weekStart)
+  if (existing) {
+    const ageMin = (Date.now() - new Date(existing.created_at).getTime()) / 60000
+    if (ageMin < 60 * 24) {
+      return res.status(429).json({ error: 'Coaching ja gerado hoje. Tente novamente em 24h.', existing })
+    }
+  }
+
+  setImmediate(() => {
+    generateCoachingForUser(req.accountId, userId, weekStart).catch(e =>
+      console.error(`[Coaching on-demand]`, e.message)
+    )
+  })
+  res.json({ ok: true, message: 'Coaching sendo gerado em background.', week_start: weekStart })
+})
+
+// Inteligência de mercado — agrega objeções/motivos_perda/riscos do período
+router.get('/market-intelligence', requireRole('super_admin', 'gerente'), requireAnalyticsEnabled, (req, res) => {
+  if (!req.accountId) return res.status(400).json({ error: 'account_id required' })
+  const days = Math.min(365, Math.max(1, parseInt(req.query.days || '30')))
+  const since = new Date(Date.now() - days * 86400 * 1000).toISOString().slice(0, 19).replace('T', ' ')
+
+  const rows = db.prepare(`
+    SELECT objecoes_detectadas, motivos_perda, riscos_detectados
+    FROM conversation_insights
+    WHERE account_id = ? AND analyzed_at >= ? AND insights_version >= 2
+  `).all(req.accountId, since)
+
+  function countArr(field) {
+    const counts = new Map()
+    for (const r of rows) {
+      try {
+        const arr = JSON.parse(r[field] || '[]')
+        for (const item of arr) {
+          if (!item) continue
+          const k = String(item).toLowerCase().trim()
+          counts.set(k, (counts.get(k) || 0) + 1)
+        }
+      } catch {}
+    }
+    return [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 10).map(([label, count]) => ({ label, count }))
+  }
+
+  res.json({
+    objecoes_top: countArr('objecoes_detectadas'),
+    motivos_perda_top: countArr('motivos_perda'),
+    riscos_top: countArr('riscos_detectados'),
+    days,
+    sample_size: rows.length,
+  })
+})
+
+// Marca lead como tendo proposta enviada
+router.post('/leads/:leadId/mark-proposal-sent', requireRole('super_admin', 'gerente', 'atendente'), (req, res) => {
+  if (!req.accountId) return res.status(400).json({ error: 'account_id required' })
+  const leadId = parseInt(req.params.leadId)
+  const r = db.prepare(`
+    UPDATE leads SET proposal_sent_at = datetime('now'), updated_at = datetime('now')
+    WHERE id = ? AND account_id = ?
+  `).run(leadId, req.accountId)
+  res.json({ ok: r.changes > 0 })
+})
+
+// Atualiza value_estimated do lead
+router.put('/leads/:leadId/value', requireRole('super_admin', 'gerente', 'atendente'), (req, res) => {
+  if (!req.accountId) return res.status(400).json({ error: 'account_id required' })
+  const leadId = parseInt(req.params.leadId)
+  const value = Math.max(0, parseFloat(req.body.value_estimated) || 0)
+  const r = db.prepare(`
+    UPDATE leads SET value_estimated = ?, updated_at = datetime('now')
+    WHERE id = ? AND account_id = ?
+  `).run(value, leadId, req.accountId)
+  res.json({ ok: r.changes > 0, value_estimated: value })
 })
 
 export default router

@@ -135,11 +135,12 @@ router.post('/:leadId', async (req, res) => {
 
     const delivered = !!sendData?.key?.id
 
-    // Store message with delivery status + instance used
+    // Store message with delivery status + instance used.
+    // sent_by_user_id: V2 analytics — atribui mensagem ao humano que digitou (atendente/gerente).
     const result = db.prepare(`
-      INSERT INTO messages (lead_id, account_id, direction, content, sender_name, wa_msg_id, instance_id)
-      VALUES (?, ?, 'outbound', ?, ?, ?, ?)
-    `).run(lead.id, lead.account_id, content, req.user.name, sendData?.key?.id || null, instance.id)
+      INSERT INTO messages (lead_id, account_id, direction, content, sender_name, wa_msg_id, instance_id, sent_by_user_id)
+      VALUES (?, ?, 'outbound', ?, ?, ?, ?, ?)
+    `).run(lead.id, lead.account_id, content, req.user.name, sendData?.key?.id || null, instance.id, req.user.id)
 
     // Update lead's last_instance_id (so future messages remember which number to use)
     if (delivered) {
@@ -248,10 +249,11 @@ router.post('/:leadId/media', jsonBodyParser({ limit: '150mb' }), async (req, re
     }
 
     const content = caption || file_name || `[${mediaType}]`
+    // sent_by_user_id: V2 analytics — atribui mídia ao humano específico.
     const result = db.prepare(`
-      INSERT INTO messages (lead_id, account_id, direction, content, sender_name, wa_msg_id, media_type, instance_id)
-      VALUES (?, ?, 'outbound', ?, ?, ?, ?, ?)
-    `).run(lead.id, lead.account_id, content, req.user.name, sendData?.key?.id || null, mediaType, instance.id)
+      INSERT INTO messages (lead_id, account_id, direction, content, sender_name, wa_msg_id, media_type, instance_id, sent_by_user_id)
+      VALUES (?, ?, 'outbound', ?, ?, ?, ?, ?, ?)
+    `).run(lead.id, lead.account_id, content, req.user.name, sendData?.key?.id || null, mediaType, instance.id, req.user.id)
 
     if (delivered) {
       db.prepare("UPDATE leads SET last_instance_id = ?, updated_at = datetime('now') WHERE id = ?").run(instance.id, lead.id)

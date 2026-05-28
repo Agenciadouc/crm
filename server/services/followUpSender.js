@@ -132,11 +132,11 @@ export async function sendFollowUpMessage(leadFollowUpId) {
       return
     }
 
-    // Salva em messages (igual broadcasts)
+    // Salva em messages (igual broadcasts). follow_up_id: V2 analytics — sinaliza msg automática de cadência.
     db.prepare(`
-      INSERT INTO messages (lead_id, account_id, direction, content, media_type, sender_name, wa_msg_id, wa_timestamp, instance_id)
-      VALUES (?, ?, 'outbound', ?, 'text', 'Follow-up auto', ?, datetime('now'), ?)
-    `).run(lead.id, lead.account_id, text, wamsgId, instance.id)
+      INSERT INTO messages (lead_id, account_id, direction, content, media_type, sender_name, wa_msg_id, wa_timestamp, instance_id, follow_up_id)
+      VALUES (?, ?, 'outbound', ?, 'text', 'Follow-up auto', ?, datetime('now'), ?, ?)
+    `).run(lead.id, lead.account_id, text, wamsgId, instance.id, followUp.id)
 
     // Inactivity-rotation (legacy): one-shot, NAO avanca pra proximo step (cada execucao = uma variacao independente)
     // Inactivity-sequence (novo): comporta como sequence — avanca pra step 2, 3...

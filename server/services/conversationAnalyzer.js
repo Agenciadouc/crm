@@ -1,74 +1,226 @@
-// Analisador de conversa via Haiku — extrai insights qualitativos de atendimento.
-// Tool use forçada pra garantir retorno estruturado.
+// Conversation Intelligence V2 — analisador via Claude Haiku.
+// Salva insights estruturados + erros + acertos + análise por participante + alertas operacionais.
+// Tool use forçada pra garantir retorno em JSON validável.
 // Idempotente: UPSERT em conversation_insights por lead_id.
-// Protegido por limite mensal de tokens por conta (accounts.analysis_token_limit).
+// Insights V1 antigos (insights_version=1) ficam intactos; após re-análise viram version=2.
 
 import db from '../db.js'
 import { callHaiku } from './anthropicClient.js'
 
-const SYSTEM_PROMPT = `Voce e um analista de qualidade de atendimento comercial via WhatsApp.
+// ─── System prompt V2 (cacheável — Anthropic cache_control ephemeral em anthropicClient) ───
+const SYSTEM_PROMPT_V2 = `Voce e um analista de qualidade de atendimento comercial via WhatsApp.
 
-Vou te passar uma conversa entre vendedor e lead. Sua tarefa: ler a conversa e extrair insights estruturados.
+Vou te passar uma conversa entre lead, atendente humano, gerente e/ou bot. Analise SEMANTICAMENTE a qualidade comercial dessa conversa. NAO calcule metricas matematicas (tempo, contagem etc — ja vem pre-computado em precomputed_metrics).
 
-Avalie criterios objetivos:
+ESCOPO: identificar erros, acertos, riscos, oportunidades de venda e proxima acao recomendada — com evidencia direta (message_id).
 
-LEAD_INTENT (intencao de compra):
-- hot: pediu preco, quer comprar, tem urgencia, faz perguntas concretas sobre produto/prazo
-- warm: demonstra interesse mas ainda explorando, faz perguntas gerais
-- cold: pouco engajado, respostas curtas, nao demonstra real interesse
-- not_qualified: nao e o perfil (curioso, errado, fora do nicho)
+═══ SCORE ═══
 
-LOST_SALE_SIGNALS (sinais de venda perdida): preencher SO se houver clara oportunidade nao convertida.
-Exemplos: "lead disse 'ta caro' e vendedor nao tratou objecao", "lead pediu desconto e vendedor recusou sem alternativa", "lead pediu pra ligar amanha mas nao houve follow-up", "lead demonstrou compra iminente mas conversa parou".
-Se nao houver sinal claro, retorne null.
+Atribua nota 0-100 (conversation_score) e tambem sub-scores:
+- velocidade_sla (0-15): SLA de resposta foi respeitado?
+- abertura (0-10): primeira mensagem cordial, personalizada, identificacao clara?
+- diagnostico (0-20): fez boas perguntas pra entender necessidade, dor, contexto, decisor?
+- qualificacao (0-15): identificou se e ICP, urgencia, orcamento, autoridade?
+- conducao_comercial (0-15): explicou valor, conectou produto com dor, manteve dominio?
+- objecoes (0-10): tratou objecoes (preco/duvida/prazo) com tecnica?
+- proximo_passo (0-10): toda mensagem encaminhou pra acao concreta?
+- organizacao_crm (0-5): mudou stage, registrou info?
 
-ATTENDANT_ERRORS (erros do atendente): array de strings com erros ESPECIFICOS observados.
-Exemplos: "nao respondeu pergunta direta sobre prazo", "demorou >2h pra responder sem justificativa", "tom rude/impaciente", "informacao incorreta sobre produto", "nao seguiu protocolo de qualificacao".
-Se nao houver erros, array vazio [].
+Soma dos sub-scores DEVE ser conversation_score (0-100). Confira a aritmetica.
 
-ATTENDANT_SCORE (1-10): nota geral do atendimento do vendedor nesta conversa.
-- 9-10: rapido, cordial, vendeu ou avancou qualificacao significativamente
-- 7-8: bom, sem erros graves, conversa fluindo
-- 5-6: mediano, alguns problemas (lentidao, erros pequenos)
-- 3-4: ruim, varios erros visiveis
-- 1-2: pessimo, perdeu venda obvia ou foi grosseiro
+Faixas:
+- 80-100: excelente, fechou ou avancou muito a venda
+- 60-79: bom, conversa fluindo, sem erros graves
+- 40-59: mediano, varios pontos de melhora
+- 20-39: ruim, perdeu oportunidades obvias
+- 0-19: pessimo, perdeu venda ou foi grosseiro
 
-SCORE_REASONING: 1-2 frases explicando o score.
+═══ TEMPERATURA E POTENCIAL ═══
 
-SUGGESTED_NEXT_STEP: 1 frase com o que o vendedor deveria fazer agora pra avancar essa conversa.
+- temperatura_lead: 'frio' | 'morno' | 'quente'
+  - quente: pediu preco, prazo, urgencia, quer comprar
+  - morno: interesse, explorando, faz perguntas
+  - frio: pouco engajado, respostas curtas, nao demonstra interesse real
 
-LAST_MESSAGE_QUALITY: avaliacao da ULTIMA mensagem do vendedor (excellent/good/mediocre/poor).
+- fit_icp: 0-100 (quanto este lead se parece com cliente ideal — empresa, setor, porte, sinais)
+- chance_conversao: 0-100 (probabilidade subjetiva de virar venda)
 
-SUMMARY: 1-2 frases resumindo o estado atual da conversa.
+═══ ACERTOS E ERROS ═══
 
-Use a tool save_insights pra retornar os dados. NAO retorne texto livre.`
+Cada erro/acerto DEVE ter evidence_message_ids — array com 1-3 message.id de evidencia. SEM EVIDENCIA, NAO REGISTRE.
 
-const TOOL_SAVE_INSIGHTS = {
-  name: 'save_insights',
-  description: 'Salva os insights extraidos da analise da conversa.',
+Cada erro tem:
+- actor_type: 'bot' | 'atendente' | 'gerente' | 'processo'
+- code: tente usar codigos do catalogo padrao:
+  - velocidade.demorou_resposta_inicial, velocidade.abandonou_meio_conversa, velocidade.demorou_apos_interesse
+  - diagnostico.nao_perguntou_necessidade, diagnostico.pulou_para_preco, diagnostico.nao_identificou_decisor
+  - conducao.nao_pediu_proximo_passo, conducao.mensagem_robotica, conducao.nao_explicou_valor, conducao.nao_ofereceu_proposta
+  - objecao.ignorou_objecao_preco, objecao.aceitou_vou_pensar, objecao.defensivo
+  - crm.nao_mudou_etapa, crm.nao_registrou_motivo_perda
+  - bot.nao_transferiu, bot.entendeu_errado, handoff.sem_contexto
+  - Se nao houver code adequado, deixe null e descreva no campo description.
+- gravity: 'baixa' | 'media' | 'alta' | 'critica'
+- description, impact, how_to_fix (concretos)
+
+Regra de atribuicao: quem estava responsavel pela conversa no momento do erro recebe o erro. Bot errou antes do handoff = erro do bot. Atendente recebeu lead e nao continuou = erro do atendente. Handoff sem contexto = erro 'processo'.
+
+═══ ANALISE POR PARTICIPANTE ═══
+
+participants_analysis: array com 1 entrada por ator que aparece na conversa (bot, atendente principal, gerente se interveio). Para cada um:
+- actor_type, actor_id (se houver — sent_by_user_id ou ai_agent_id), actor_name
+- score 0-100
+- acertos_summary, erros_summary (1-2 frases cada)
+- recomendacao (1 frase)
+
+═══ ANALISE DO BOT ═══
+
+bot_analysis: SO se houve bot na conversa. Avalie:
+- score 0-100
+- respondeu_corretamente (bool)
+- coletou_dados (bool — coletou nome, intencao, etc)
+- deveria_transferir (bool — tinha sinal claro de quente que pedia humano)
+- erro_entendimento (bool)
+- summary (1 frase)
+Se nao houve bot, retorne null.
+
+═══ ANALISE DE HANDOFF ═══
+
+handoff_analysis: SO se houve transferencia bot→humano OU atendente→outro atendente. Avalie:
+- houve_handoff (bool)
+- com_contexto (bool — quem recebeu tinha info suficiente?)
+- info_perdida (bool)
+- responsavel_no_momento_critico
+- summary (1 frase)
+Se nao houve handoff, retorne null.
+
+═══ OUTROS CAMPOS ═══
+
+- resumo: 1-2 frases sobre estado atual.
+- status_recomendado: 'follow_up_urgente' | 'agendar_reuniao' | 'enviar_proposta' | 'manter_morno' | 'arquivar' | 'esperar_lead'
+- proxima_melhor_acao: frase de acao concreta
+- mensagem_retomada: DRAFT de mensagem pra reabordar o lead. Texto pronto pra atendente copiar/colar. Mantenha tom da conversa. SE nao precisar retomada, string vazia.
+- objecoes: array de strings (objecoes que o lead levantou — 'preco', 'prazo', 'confianca'...)
+- motivos_perda: array de strings (SO se chance_conversao baixa: 'preco muito alto', 'fora do ICP', 'concorrente fechou'...)
+- riscos: array de strings ('lead esfriando', 'gerente precisa intervir', 'bot loop')
+- coaching_recomendado: 1-2 frases pro vendedor melhorar — generico mas acionavel
+- prioridade_revisao: 'baixa' | 'media' | 'alta' | 'critica' — urgencia pro gerente revisar
+- confidence_score: 0..1 — sua confianca na analise. Baixe se conversa for muito curta, ambigua ou sem contexto.
+
+Use a tool save_insights_v2. NAO retorne texto livre.`
+
+const TOOL_SAVE_INSIGHTS_V2 = {
+  name: 'save_insights_v2',
+  description: 'Salva analise estruturada V2 da conversa (score, erros com evidencia, participantes, bot, handoff).',
   input_schema: {
     type: 'object',
     properties: {
-      summary: { type: 'string', description: 'Resumo de 1-2 frases do estado da conversa.' },
-      lead_intent: { type: 'string', enum: ['hot', 'warm', 'cold', 'not_qualified'] },
-      lost_sale_signals: { type: ['string', 'null'], description: 'Descricao do sinal de venda perdida ou null se nao houver.' },
-      attendant_errors: { type: 'array', items: { type: 'string' }, description: 'Lista de erros especificos do atendente. [] se nenhum.' },
-      attendant_score: { type: 'integer', minimum: 1, maximum: 10 },
-      score_reasoning: { type: 'string' },
-      suggested_next_step: { type: 'string' },
-      last_message_quality: { type: 'string', enum: ['excellent', 'good', 'mediocre', 'poor'] },
+      conversation_score: { type: 'integer', minimum: 0, maximum: 100 },
+      scores: {
+        type: 'object',
+        properties: {
+          velocidade_sla: { type: 'integer', minimum: 0, maximum: 15 },
+          abertura: { type: 'integer', minimum: 0, maximum: 10 },
+          diagnostico: { type: 'integer', minimum: 0, maximum: 20 },
+          qualificacao: { type: 'integer', minimum: 0, maximum: 15 },
+          conducao_comercial: { type: 'integer', minimum: 0, maximum: 15 },
+          objecoes: { type: 'integer', minimum: 0, maximum: 10 },
+          proximo_passo: { type: 'integer', minimum: 0, maximum: 10 },
+          organizacao_crm: { type: 'integer', minimum: 0, maximum: 5 },
+        },
+        required: ['velocidade_sla', 'abertura', 'diagnostico', 'qualificacao', 'conducao_comercial', 'objecoes', 'proximo_passo', 'organizacao_crm'],
+      },
+      resumo: { type: 'string' },
+      temperatura_lead: { type: 'string', enum: ['frio', 'morno', 'quente'] },
+      fit_icp: { type: 'integer', minimum: 0, maximum: 100 },
+      chance_conversao: { type: 'integer', minimum: 0, maximum: 100 },
+      status_recomendado: { type: 'string', enum: ['follow_up_urgente', 'agendar_reuniao', 'enviar_proposta', 'manter_morno', 'arquivar', 'esperar_lead'] },
+      proxima_melhor_acao: { type: 'string' },
+      mensagem_retomada: { type: 'string' },
+      acertos: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            actor_type: { type: 'string', enum: ['bot', 'atendente', 'gerente', 'processo'] },
+            code: { type: ['string', 'null'] },
+            description: { type: 'string' },
+            impact: { type: 'string' },
+            evidence_message_ids: { type: 'array', items: { type: 'integer' } },
+          },
+          required: ['actor_type', 'description', 'evidence_message_ids'],
+        },
+      },
+      erros: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            actor_type: { type: 'string', enum: ['bot', 'atendente', 'gerente', 'processo'] },
+            code: { type: ['string', 'null'] },
+            category: { type: 'string' },
+            gravity: { type: 'string', enum: ['baixa', 'media', 'alta', 'critica'] },
+            description: { type: 'string' },
+            impact: { type: 'string' },
+            how_to_fix: { type: 'string' },
+            evidence_message_ids: { type: 'array', items: { type: 'integer' } },
+          },
+          required: ['actor_type', 'gravity', 'description', 'evidence_message_ids'],
+        },
+      },
+      objecoes: { type: 'array', items: { type: 'string' } },
+      motivos_perda: { type: 'array', items: { type: 'string' } },
+      riscos: { type: 'array', items: { type: 'string' } },
+      participants_analysis: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            actor_type: { type: 'string', enum: ['bot', 'atendente', 'gerente'] },
+            actor_id: { type: ['integer', 'null'] },
+            actor_name: { type: 'string' },
+            score: { type: 'integer', minimum: 0, maximum: 100 },
+            acertos_summary: { type: 'string' },
+            erros_summary: { type: 'string' },
+            recomendacao: { type: 'string' },
+          },
+          required: ['actor_type', 'actor_name', 'score'],
+        },
+      },
+      bot_analysis: {
+        type: ['object', 'null'],
+        properties: {
+          score: { type: 'integer', minimum: 0, maximum: 100 },
+          respondeu_corretamente: { type: 'boolean' },
+          coletou_dados: { type: 'boolean' },
+          deveria_transferir: { type: 'boolean' },
+          erro_entendimento: { type: 'boolean' },
+          summary: { type: 'string' },
+        },
+      },
+      handoff_analysis: {
+        type: ['object', 'null'],
+        properties: {
+          houve_handoff: { type: 'boolean' },
+          com_contexto: { type: 'boolean' },
+          info_perdida: { type: 'boolean' },
+          responsavel_no_momento_critico: { type: 'string' },
+          summary: { type: 'string' },
+        },
+      },
+      coaching_recomendado: { type: 'string' },
+      prioridade_revisao: { type: 'string', enum: ['baixa', 'media', 'alta', 'critica'] },
+      confidence_score: { type: 'number', minimum: 0, maximum: 1 },
     },
-    required: ['summary', 'lead_intent', 'attendant_errors', 'attendant_score', 'score_reasoning', 'suggested_next_step', 'last_message_quality'],
+    required: ['conversation_score', 'scores', 'resumo', 'temperatura_lead', 'fit_icp', 'chance_conversao', 'status_recomendado', 'proxima_melhor_acao', 'erros', 'acertos', 'prioridade_revisao', 'confidence_score'],
   },
 }
 
 const MAX_MSGS_IN_CONTEXT = 30
 const MAX_CONTENT_LEN_PER_MSG = 500
 
-/**
- * Verifica se a conta atingiu limite mensal de tokens de analise.
- * Retorna true se ainda pode rodar.
- */
+// Map temperatura PT (V2) → lead_intent EN (V1 compat)
+const TEMP_TO_INTENT = { quente: 'hot', morno: 'warm', frio: 'cold' }
+
 function canAnalyze(accountId) {
   const account = db.prepare('SELECT analysis_token_limit FROM accounts WHERE id = ?').get(accountId)
   const limit = account?.analysis_token_limit || 200000
@@ -76,30 +228,45 @@ function canAnalyze(accountId) {
   const used = db.prepare(`
     SELECT COALESCE(SUM(input_tokens + output_tokens), 0) as n
     FROM ai_agent_token_log
-    WHERE account_id = ? AND source = 'conversation_analysis' AND created_at >= ?
+    WHERE account_id = ? AND source IN ('conversation_analysis', 'coaching_analysis') AND created_at >= ?
   `).get(accountId, monthStart)?.n || 0
   return { ok: used < limit, used, limit }
 }
 
+// Classifica actor de cada msg pra payload estruturado
+function classifyActor(m, userRoleById) {
+  if (m.direction === 'inbound') return 'lead'
+  if (m.ai_agent_id != null) return 'bot'
+  if (m.sent_by_user_id != null) {
+    const role = userRoleById.get(m.sent_by_user_id)
+    if (role === 'gerente') return 'gerente'
+    return 'atendente'
+  }
+  return 'atendente' // fallback
+}
+
 /**
- * Analisa UMA conversa via Haiku. Salva em conversation_insights.
- * Retorna { ok, costUsd, tokens, reason? }
+ * Analisa UMA conversa via Haiku V2.
+ * Persistência em transação: insights + errors + strengths + participants + alerts.
  */
 export async function analyzeConversation(leadId) {
   const lead = db.prepare(`
-    SELECT l.*, u.name as attendant_name, u.id as attendant_id
-    FROM leads l LEFT JOIN users u ON u.id = l.attendant_id
+    SELECT l.*, u.name as attendant_name, u.id as attendant_id_lookup, u.role as attendant_role,
+           fs.name as stage_name
+    FROM leads l
+    LEFT JOIN users u ON u.id = l.attendant_id
+    LEFT JOIN funnel_stages fs ON fs.id = l.stage_id
     WHERE l.id = ?
   `).get(leadId)
   if (!lead) return { ok: false, reason: 'lead_not_found' }
 
-  // Check de limite ANTES de chamar API
   const budget = canAnalyze(lead.account_id)
   if (!budget.ok) return { ok: false, reason: 'monthly_limit_reached', used: budget.used, limit: budget.limit }
 
-  // Carrega ultimas N msgs
+  // Carrega últimas N msgs (cronológicas)
   const msgs = db.prepare(`
-    SELECT direction, content, sender_name, created_at, id
+    SELECT id, direction, content, sender_name, sent_by_user_id, ai_agent_id, follow_up_id,
+           media_type, created_at
     FROM messages
     WHERE lead_id = ?
     ORDER BY id DESC LIMIT ?
@@ -109,99 +276,389 @@ export async function analyzeConversation(leadId) {
 
   const lastMsgId = msgs[msgs.length - 1].id
 
-  // Formata conversa pra Haiku
-  const conversationText = msgs.map(m => {
-    const role = m.direction === 'inbound' ? '[lead]' : '[atendente]'
-    const author = m.sender_name ? ` (${m.sender_name})` : ''
-    let content = String(m.content || '').slice(0, MAX_CONTENT_LEN_PER_MSG)
-    if (!content.trim()) content = '(midia ou conteudo vazio)'
-    return `${role}${author}: ${content}`
-  }).join('\n')
+  // Lookup users (id → role/name) pra classificar actors
+  const userIds = [...new Set(msgs.map(m => m.sent_by_user_id).filter(Boolean))]
+  const usersMap = new Map()
+  const userRoleById = new Map()
+  if (userIds.length) {
+    const placeholders = userIds.map(() => '?').join(',')
+    const rows = db.prepare(`SELECT id, name, role FROM users WHERE id IN (${placeholders})`).all(...userIds)
+    for (const r of rows) {
+      usersMap.set(r.id, r)
+      userRoleById.set(r.id, r.role)
+    }
+  }
+  // Lookup bots
+  const aiAgentIds = [...new Set(msgs.map(m => m.ai_agent_id).filter(Boolean))]
+  const aiAgentsMap = new Map()
+  if (aiAgentIds.length) {
+    const placeholders = aiAgentIds.map(() => '?').join(',')
+    const rows = db.prepare(`SELECT id, name FROM ai_agents WHERE id IN (${placeholders})`).all(...aiAgentIds)
+    for (const r of rows) aiAgentsMap.set(r.id, r)
+  }
 
+  // Stage history pra eventos comerciais
+  const stageEvents = db.prepare(`
+    SELECT sh.from_stage_id, sh.to_stage_id, sh.triggered_by, sh.created_at,
+           fs_from.name as from_name, fs_to.name as to_name,
+           u.name as triggered_by_name
+    FROM stage_history sh
+    LEFT JOIN funnel_stages fs_from ON fs_from.id = sh.from_stage_id
+    LEFT JOIN funnel_stages fs_to ON fs_to.id = sh.to_stage_id
+    LEFT JOIN users u ON u.id = sh.triggered_by
+    WHERE sh.lead_id = ?
+    ORDER BY sh.created_at ASC
+  `).all(leadId)
+
+  // Tags
   const tags = db.prepare(`
     SELECT t.name FROM tags t JOIN lead_tags lt ON lt.tag_id = t.id WHERE lt.lead_id = ?
-  `).all(leadId).map(r => r.name).join(', ') || '(sem tags)'
+  `).all(leadId).map(r => r.name)
 
-  const userPrompt = `Dados do lead:
-- Nome: ${lead.name || '(sem nome)'}
-- Telefone: ${lead.phone}
-- Cidade: ${lead.city || '(desconhecida)'}
-- Empresa: ${lead.empresa || '(desconhecida)'}
-- Fonte: ${lead.source || '(desconhecida)'}
-- Tags: ${tags}
-- Atendente atual: ${lead.attendant_name || '(nenhum)'}
+  // Pré-computação determinística (não pede pra IA)
+  const firstInbound = msgs.find(m => m.direction === 'inbound')
+  const firstHumanOutbound = msgs.find(m => m.direction === 'outbound' && m.ai_agent_id == null)
+  const firstBotOutbound = msgs.find(m => m.direction === 'outbound' && m.ai_agent_id != null)
+  const lastHumanOutbound = [...msgs].reverse().find(m => m.direction === 'outbound' && m.ai_agent_id == null)
+  const lastInboundMsg = [...msgs].reverse().find(m => m.direction === 'inbound')
 
-Conversa (cronologica, ${msgs.length} mensagens):
-${conversationText}
+  const leadCreatedMs = new Date(lead.created_at).getTime()
+  const nowMs = Date.now()
+  const ttfrHumanSec = firstHumanOutbound
+    ? Math.max(0, (new Date(firstHumanOutbound.created_at).getTime() - leadCreatedMs) / 1000)
+    : null
+  const ttfrBotSec = firstBotOutbound
+    ? Math.max(0, (new Date(firstBotOutbound.created_at).getTime() - leadCreatedMs) / 1000)
+    : null
+  const timeSinceLastHumanSec = lastHumanOutbound
+    ? Math.max(0, (nowMs - new Date(lastHumanOutbound.created_at).getTime()) / 1000)
+    : null
+  const timeSinceLastInboundSec = lastInboundMsg
+    ? Math.max(0, (nowMs - new Date(lastInboundMsg.created_at).getTime()) / 1000)
+    : null
 
-Analise essa conversa e use a tool save_insights pra retornar os resultados.`
+  // Tem mensagens inbound sem resposta?
+  let hasUnansweredInbound = false
+  for (let i = msgs.length - 1; i >= 0; i--) {
+    if (msgs[i].direction === 'inbound') { hasUnansweredInbound = true; break }
+    if (msgs[i].direction === 'outbound') break
+  }
 
+  // Monta payload estruturado em JSON
+  const payload = {
+    conversation: {
+      lead_id: lead.id,
+      lead_name: lead.name || null,
+      lead_phone: lead.phone || null,
+      empresa: lead.empresa || null,
+      cidade: lead.city || null,
+      fonte: lead.source || null,
+      tags: tags,
+      stage_atual: lead.stage_name || null,
+      valor_estimado: lead.value_estimated || null,
+      proposal_sent_at: lead.proposal_sent_at || null,
+      qualified_at: lead.qualified_at || null,
+      data_entrada: lead.created_at,
+      attendant_atual: lead.attendant_id_lookup
+        ? { user_id: lead.attendant_id_lookup, name: lead.attendant_name, role: lead.attendant_role }
+        : null,
+    },
+    messages: msgs.map(m => {
+      const actor = classifyActor(m, userRoleById)
+      const senderInfo = m.sent_by_user_id ? usersMap.get(m.sent_by_user_id) : null
+      const botInfo = m.ai_agent_id ? aiAgentsMap.get(m.ai_agent_id) : null
+      let text = String(m.content || '').slice(0, MAX_CONTENT_LEN_PER_MSG)
+      if (!text.trim()) text = `(${m.media_type || 'midia'})`
+      return {
+        message_id: m.id,
+        timestamp: m.created_at,
+        sender_type: actor,
+        sender_id: m.sent_by_user_id || m.ai_agent_id || null,
+        sender_name: senderInfo?.name || botInfo?.name || m.sender_name || null,
+        role: senderInfo?.role || (botInfo ? 'bot' : null),
+        direction: m.direction,
+        text,
+        is_automated: m.ai_agent_id != null || m.follow_up_id != null,
+        cadence_step_id: m.follow_up_id || null,
+        message_type: m.media_type || 'text',
+      }
+    }),
+    events: stageEvents.map(s => ({
+      type: 'stage_changed',
+      from: s.from_name,
+      to: s.to_name,
+      by: s.triggered_by_name,
+      timestamp: s.created_at,
+    })),
+    precomputed_metrics: {
+      ttfr_seconds_human: ttfrHumanSec,
+      ttfr_seconds_bot: ttfrBotSec,
+      time_since_last_human_msg_seconds: timeSinceLastHumanSec,
+      time_since_last_inbound_seconds: timeSinceLastInboundSec,
+      total_messages: msgs.length,
+      has_unanswered_inbound: hasUnansweredInbound,
+    },
+  }
+
+  // Chamada Haiku — system prompt cacheado, output ~1.5k tokens
   let result
   try {
     result = await callHaiku({
-      systemPrompt: SYSTEM_PROMPT,
-      messages: [{ role: 'user', content: userPrompt }],
-      tools: [TOOL_SAVE_INSIGHTS],
-      maxTokens: 800,
-      toolChoice: { type: 'tool', name: 'save_insights' },
+      systemPrompt: SYSTEM_PROMPT_V2,
+      messages: [
+        {
+          role: 'user',
+          content: `Conversa para analisar (JSON estruturado):\n\n${JSON.stringify(payload, null, 2)}\n\nUse a tool save_insights_v2.`,
+        },
+      ],
+      tools: [TOOL_SAVE_INSIGHTS_V2],
+      maxTokens: 2000,
+      toolChoice: { type: 'tool', name: 'save_insights_v2' },
     })
   } catch (e) {
-    console.error(`[Analyzer] Haiku err lead=${leadId}:`, e.message)
+    console.error(`[Analyzer V2] Haiku err lead=${leadId}:`, e.message)
     return { ok: false, reason: 'haiku_error', error: e.message }
   }
 
   const toolUse = result.toolUses?.[0]
-  if (!toolUse || toolUse.name !== 'save_insights' || !toolUse.input) {
-    console.warn(`[Analyzer] Haiku nao retornou tool_use lead=${leadId}`)
+  if (!toolUse || toolUse.name !== 'save_insights_v2' || !toolUse.input) {
+    console.warn(`[Analyzer V2] sem tool_use lead=${leadId}`)
     return { ok: false, reason: 'no_tool_use' }
   }
 
   const ins = toolUse.input
-  const errorsJson = JSON.stringify(Array.isArray(ins.attendant_errors) ? ins.attendant_errors : [])
+  const scores = ins.scores || {}
 
-  // UPSERT
-  db.prepare(`
-    INSERT INTO conversation_insights (
-      lead_id, account_id, analyzed_at, last_message_id,
-      summary, lead_intent, lost_sale_signals, attendant_errors,
-      attendant_score, score_reasoning, suggested_next_step, last_message_quality,
-      attendant_user_id, tokens_used, cost_usd
-    ) VALUES (?, ?, datetime('now'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(lead_id) DO UPDATE SET
-      analyzed_at = datetime('now'),
-      last_message_id = excluded.last_message_id,
-      summary = excluded.summary,
-      lead_intent = excluded.lead_intent,
-      lost_sale_signals = excluded.lost_sale_signals,
-      attendant_errors = excluded.attendant_errors,
-      attendant_score = excluded.attendant_score,
-      score_reasoning = excluded.score_reasoning,
-      suggested_next_step = excluded.suggested_next_step,
-      last_message_quality = excluded.last_message_quality,
-      attendant_user_id = excluded.attendant_user_id,
-      tokens_used = excluded.tokens_used,
-      cost_usd = excluded.cost_usd
-  `).run(
-    lead.id, lead.account_id, lastMsgId,
-    ins.summary || '', ins.lead_intent || 'cold', ins.lost_sale_signals || null, errorsJson,
-    parseInt(ins.attendant_score) || null,
-    ins.score_reasoning || '', ins.suggested_next_step || '', ins.last_message_quality || 'mediocre',
-    lead.attendant_id, result.usage.total, result.costUsd
-  )
+  // Map V2 → V1 backcompat
+  const lead_intent_v1 = TEMP_TO_INTENT[ins.temperatura_lead] || 'cold'
+  const attendant_score_v1 = ins.conversation_score != null ? Math.max(1, Math.min(10, Math.round(ins.conversation_score / 10))) : null
+  const last_message_quality_v1 = (() => {
+    const cs = ins.conversation_score || 0
+    if (cs >= 80) return 'excellent'
+    if (cs >= 60) return 'good'
+    if (cs >= 40) return 'mediocre'
+    return 'poor'
+  })()
+  const errors_v1_summary = JSON.stringify((ins.erros || []).map(e => e.description).filter(Boolean))
 
-  // Loga custo no ai_agent_token_log
-  db.prepare(`
-    INSERT INTO ai_agent_token_log (
-      account_id, lead_id, input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
-      cost_usd, source
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, 'conversation_analysis')
-  `).run(
-    lead.account_id, lead.id,
-    result.usage.input, result.usage.output, result.usage.cacheRead, result.usage.cacheCreation,
-    result.costUsd
-  )
+  // Persistência em transação
+  const tx = db.transaction(() => {
+    // 1. UPSERT conversation_insights V2
+    db.prepare(`
+      INSERT INTO conversation_insights (
+        lead_id, account_id, analyzed_at, last_message_id,
+        summary, lead_intent, lost_sale_signals, attendant_errors,
+        attendant_score, score_reasoning, suggested_next_step, last_message_quality,
+        attendant_user_id, tokens_used, cost_usd,
+        insights_version, conversation_score,
+        score_velocidade_sla, score_abertura, score_diagnostico, score_qualificacao,
+        score_conducao, score_objecoes, score_proximo_passo, score_organizacao_crm,
+        temperatura_lead, fit_icp, chance_conversao,
+        status_recomendado, mensagem_retomada,
+        objecoes_detectadas, motivos_perda, riscos_detectados,
+        prioridade_revisao, confidence_score,
+        bot_analysis_json, handoff_analysis_json, coaching_recomendado
+      ) VALUES (?, ?, datetime('now'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                2, ?,
+                ?, ?, ?, ?, ?, ?, ?, ?,
+                ?, ?, ?,
+                ?, ?,
+                ?, ?, ?,
+                ?, ?,
+                ?, ?, ?)
+      ON CONFLICT(lead_id) DO UPDATE SET
+        analyzed_at = datetime('now'),
+        last_message_id = excluded.last_message_id,
+        summary = excluded.summary,
+        lead_intent = excluded.lead_intent,
+        lost_sale_signals = excluded.lost_sale_signals,
+        attendant_errors = excluded.attendant_errors,
+        attendant_score = excluded.attendant_score,
+        score_reasoning = excluded.score_reasoning,
+        suggested_next_step = excluded.suggested_next_step,
+        last_message_quality = excluded.last_message_quality,
+        attendant_user_id = excluded.attendant_user_id,
+        tokens_used = excluded.tokens_used,
+        cost_usd = excluded.cost_usd,
+        insights_version = 2,
+        conversation_score = excluded.conversation_score,
+        score_velocidade_sla = excluded.score_velocidade_sla,
+        score_abertura = excluded.score_abertura,
+        score_diagnostico = excluded.score_diagnostico,
+        score_qualificacao = excluded.score_qualificacao,
+        score_conducao = excluded.score_conducao,
+        score_objecoes = excluded.score_objecoes,
+        score_proximo_passo = excluded.score_proximo_passo,
+        score_organizacao_crm = excluded.score_organizacao_crm,
+        temperatura_lead = excluded.temperatura_lead,
+        fit_icp = excluded.fit_icp,
+        chance_conversao = excluded.chance_conversao,
+        status_recomendado = excluded.status_recomendado,
+        mensagem_retomada = excluded.mensagem_retomada,
+        objecoes_detectadas = excluded.objecoes_detectadas,
+        motivos_perda = excluded.motivos_perda,
+        riscos_detectados = excluded.riscos_detectados,
+        prioridade_revisao = excluded.prioridade_revisao,
+        confidence_score = excluded.confidence_score,
+        bot_analysis_json = excluded.bot_analysis_json,
+        handoff_analysis_json = excluded.handoff_analysis_json,
+        coaching_recomendado = excluded.coaching_recomendado
+    `).run(
+      lead.id, lead.account_id, lastMsgId,
+      ins.resumo || '', lead_intent_v1, /* lost_sale_signals derivado de motivos_perda */
+      (ins.motivos_perda && ins.motivos_perda.length) ? ins.motivos_perda.join('; ') : null,
+      errors_v1_summary,
+      attendant_score_v1, /* score_reasoning derivado */
+      (ins.scores ? `Vel:${scores.velocidade_sla} Diag:${scores.diagnostico} Cond:${scores.conducao_comercial} Obj:${scores.objecoes} Prox:${scores.proximo_passo}` : ''),
+      ins.proxima_melhor_acao || '', last_message_quality_v1,
+      lead.attendant_id_lookup || null, result.usage.total, result.costUsd,
+      ins.conversation_score ?? null,
+      scores.velocidade_sla ?? null, scores.abertura ?? null, scores.diagnostico ?? null, scores.qualificacao ?? null,
+      scores.conducao_comercial ?? null, scores.objecoes ?? null, scores.proximo_passo ?? null, scores.organizacao_crm ?? null,
+      ins.temperatura_lead || null, ins.fit_icp ?? null, ins.chance_conversao ?? null,
+      ins.status_recomendado || null, ins.mensagem_retomada || null,
+      JSON.stringify(ins.objecoes || []), JSON.stringify(ins.motivos_perda || []), JSON.stringify(ins.riscos || []),
+      ins.prioridade_revisao || 'media', ins.confidence_score ?? null,
+      ins.bot_analysis ? JSON.stringify(ins.bot_analysis) : null,
+      ins.handoff_analysis ? JSON.stringify(ins.handoff_analysis) : null,
+      ins.coaching_recomendado || null
+    )
 
-  return { ok: true, costUsd: result.costUsd, tokens: result.usage.total, score: ins.attendant_score }
+    // Pega o insight_id pra FK
+    const insightId = db.prepare('SELECT id FROM conversation_insights WHERE lead_id = ?').get(lead.id).id
+
+    // 2. Limpa errors/strengths/participants antigos pra esse insight
+    db.prepare('DELETE FROM conversation_errors WHERE insight_id = ?').run(insightId)
+    db.prepare('DELETE FROM conversation_strengths WHERE insight_id = ?').run(insightId)
+    db.prepare('DELETE FROM conversation_participant_analysis WHERE insight_id = ?').run(insightId)
+
+    // 3. Insere erros
+    const insertErr = db.prepare(`
+      INSERT INTO conversation_errors (
+        insight_id, lead_id, account_id, attendant_user_id, actor_type,
+        code, category, gravity, description, impact, how_to_fix, evidence_message_ids
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `)
+    for (const e of (ins.erros || [])) {
+      insertErr.run(
+        insightId, lead.id, lead.account_id,
+        e.actor_type === 'atendente' || e.actor_type === 'gerente' ? lead.attendant_id_lookup : null,
+        e.actor_type || 'atendente',
+        e.code || null, e.category || null, e.gravity || 'media',
+        e.description || '', e.impact || null, e.how_to_fix || null,
+        JSON.stringify(e.evidence_message_ids || [])
+      )
+    }
+
+    // 4. Insere acertos
+    const insertStr = db.prepare(`
+      INSERT INTO conversation_strengths (
+        insight_id, lead_id, account_id, attendant_user_id, actor_type,
+        code, description, impact, evidence_message_ids
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `)
+    for (const a of (ins.acertos || [])) {
+      insertStr.run(
+        insightId, lead.id, lead.account_id,
+        a.actor_type === 'atendente' || a.actor_type === 'gerente' ? lead.attendant_id_lookup : null,
+        a.actor_type || 'atendente',
+        a.code || null, a.description || '', a.impact || null,
+        JSON.stringify(a.evidence_message_ids || [])
+      )
+    }
+
+    // 5. Análise por participante
+    const insertPart = db.prepare(`
+      INSERT INTO conversation_participant_analysis (
+        insight_id, lead_id, account_id,
+        actor_type, actor_user_id, actor_ai_agent_id, actor_name,
+        score, acertos_summary, erros_summary, recomendacao
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `)
+    for (const p of (ins.participants_analysis || [])) {
+      const userId = (p.actor_type === 'atendente' || p.actor_type === 'gerente') ? (p.actor_id || null) : null
+      const agentId = p.actor_type === 'bot' ? (p.actor_id || null) : null
+      insertPart.run(
+        insightId, lead.id, lead.account_id,
+        p.actor_type, userId, agentId, p.actor_name || '',
+        p.score ?? null, p.acertos_summary || null, p.erros_summary || null, p.recomendacao || null
+      )
+    }
+
+    // 6. Alertas operacionais (dedup por lead_id + type + status='open')
+    const alertCheck = db.prepare(`
+      SELECT id FROM analyst_alerts WHERE lead_id = ? AND type = ? AND status = 'open'
+    `)
+    const insertAlert = db.prepare(`
+      INSERT INTO analyst_alerts (
+        account_id, lead_id, insight_id, type, severity, title, description, suggested_action
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `)
+    function maybeAlert(type, severity, title, description, suggested) {
+      if (alertCheck.get(lead.id, type)) return
+      insertAlert.run(lead.account_id, lead.id, insightId, type, severity, title, description, suggested)
+    }
+
+    // 6a. Lead quente abandonado
+    if (ins.temperatura_lead === 'quente' && timeSinceLastHumanSec != null && timeSinceLastHumanSec > 86400) {
+      maybeAlert(
+        'lead_quente_abandonado', 'alta',
+        `Lead quente sem resposta humana há ${Math.floor(timeSinceLastHumanSec / 3600)}h`,
+        ins.resumo || '',
+        ins.mensagem_retomada || ins.proxima_melhor_acao || null
+      )
+    }
+    // 6b. Proposta enviada sem retorno >72h
+    if (lead.proposal_sent_at && timeSinceLastInboundSec != null && timeSinceLastInboundSec > 72 * 3600) {
+      maybeAlert(
+        'proposta_sem_retorno', 'alta',
+        `Proposta enviada sem retorno há ${Math.floor(timeSinceLastInboundSec / 3600)}h`,
+        ins.resumo || '',
+        ins.mensagem_retomada || null
+      )
+    }
+    // 6c. Erro crítico OU prioridade_revisao crítica
+    const hasCriticalErr = (ins.erros || []).some(e => e.gravity === 'critica')
+    if (hasCriticalErr || ins.prioridade_revisao === 'critica') {
+      maybeAlert(
+        'erro_critico', 'critica',
+        'Erro crítico detectado na conversa',
+        ins.coaching_recomendado || ins.resumo || '',
+        ins.proxima_melhor_acao || null
+      )
+    }
+    // 6d. Bot falhou (deveria transferir e não fez)
+    if (ins.bot_analysis && ins.bot_analysis.deveria_transferir && !ins.bot_analysis.respondeu_corretamente) {
+      maybeAlert(
+        'bot_falhou', 'media',
+        'Bot não transferiu lead que deveria ir para humano',
+        ins.bot_analysis.summary || '',
+        'Revisar configuração de handoff do bot'
+      )
+    }
+
+    // 7. Log custo
+    db.prepare(`
+      INSERT INTO ai_agent_token_log (
+        account_id, lead_id, input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
+        cost_usd, source
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, 'conversation_analysis')
+    `).run(
+      lead.account_id, lead.id,
+      result.usage.input, result.usage.output, result.usage.cacheRead, result.usage.cacheCreation,
+      result.costUsd
+    )
+  })
+  tx()
+
+  return {
+    ok: true,
+    costUsd: result.costUsd,
+    tokens: result.usage.total,
+    score: ins.conversation_score,
+    temperatura: ins.temperatura_lead,
+    confidence: ins.confidence_score,
+  }
 }
 
 /**
@@ -214,11 +671,10 @@ export async function analyzeConversationsBatch(accountId, opts = {}) {
 
   const budget = canAnalyze(accountId)
   if (!budget.ok) {
-    console.warn(`[Analyzer] account=${accountId} limite mensal atingido (used=${budget.used} limit=${budget.limit})`)
+    console.warn(`[Analyzer V2] account=${accountId} limite mensal (used=${budget.used} limit=${budget.limit})`)
     return { ok: false, reason: 'monthly_limit_reached' }
   }
 
-  // Seleciona leads com atividade recente que precisam de análise nova
   const candidates = db.prepare(`
     SELECT l.id
     FROM leads l
@@ -232,8 +688,9 @@ export async function analyzeConversationsBatch(accountId, opts = {}) {
         NOT EXISTS (SELECT 1 FROM conversation_insights ci WHERE ci.lead_id = l.id)
         OR EXISTS (
           SELECT 1 FROM conversation_insights ci
-          WHERE ci.lead_id = l.id AND ci.analyzed_at < (
-            SELECT MAX(created_at) FROM messages WHERE lead_id = l.id
+          WHERE ci.lead_id = l.id AND (
+            ci.insights_version < 2
+            OR ci.analyzed_at < (SELECT MAX(created_at) FROM messages WHERE lead_id = l.id)
           )
         )
       )
@@ -241,7 +698,7 @@ export async function analyzeConversationsBatch(accountId, opts = {}) {
     LIMIT ?
   `).all(accountId, sinceHours, maxLeads)
 
-  console.log(`[Analyzer] account=${accountId} candidates=${candidates.length} max=${maxLeads}`)
+  console.log(`[Analyzer V2] account=${accountId} candidates=${candidates.length} max=${maxLeads}`)
 
   let okCount = 0, skipCount = 0, errCount = 0, totalCost = 0
   for (const c of candidates) {
@@ -249,30 +706,28 @@ export async function analyzeConversationsBatch(accountId, opts = {}) {
       const r = await analyzeConversation(c.id)
       if (r.ok) { okCount++; totalCost += r.costUsd || 0 }
       else { skipCount++ }
-      // checagem de budget a cada 10 leads
       if ((okCount + skipCount + errCount) % 10 === 0) {
         const b = canAnalyze(accountId)
         if (!b.ok) {
-          console.warn(`[Analyzer] account=${accountId} budget atingido durante batch`)
+          console.warn(`[Analyzer V2] account=${accountId} budget atingido durante batch`)
           break
         }
       }
     } catch (e) {
       errCount++
-      console.error(`[Analyzer] err lead=${c.id}:`, e.message)
+      console.error(`[Analyzer V2] err lead=${c.id}:`, e.message)
     }
   }
 
-  console.log(`[Analyzer] account=${accountId} done ok=${okCount} skip=${skipCount} err=${errCount} cost=$${totalCost.toFixed(4)}`)
+  console.log(`[Analyzer V2] account=${accountId} done ok=${okCount} skip=${skipCount} err=${errCount} cost=$${totalCost.toFixed(4)}`)
   return { ok: true, okCount, skipCount, errCount, totalCost }
 }
 
 /**
- * Wrapper pra rodar em todas as contas com agentes habilitados.
- * Chamado pelo cron noturno.
+ * Wrapper pra rodar em todas as contas com analytics_enabled=1.
+ * Chamado pelo cron noturno. Contas sem flag são puladas.
  */
 export async function analyzeAllAccounts() {
-  // SO contas com feature flag ATIVADA. Economiza custo Haiku pra contas que nao usam.
   const accounts = db.prepare("SELECT id FROM accounts WHERE is_active = 1 AND attendant_analytics_enabled = 1").all()
   let totalOk = 0, totalSkip = 0, totalErr = 0
   for (const acc of accounts) {
@@ -280,9 +735,59 @@ export async function analyzeAllAccounts() {
       const r = await analyzeConversationsBatch(acc.id, { maxLeads: 50, sinceHours: 24 })
       if (r.ok) { totalOk += r.okCount; totalSkip += r.skipCount; totalErr += r.errCount }
     } catch (e) {
-      console.error(`[Analyzer] account=${acc.id} batch falhou:`, e.message)
+      console.error(`[Analyzer V2] account=${acc.id} batch falhou:`, e.message)
       totalErr++
     }
   }
   return { totalOk, totalSkip, totalErr }
+}
+
+/**
+ * Estimativa de custo pra modal de confirmação no "Analisar agora".
+ * Retorna: { leads_to_analyze, estimated_cost_usd, month_spent_usd, month_limit_usd, account_has_flag }
+ */
+export function getAnalyzeEstimate(accountId, sinceHours = 24 * 7) {
+  const account = db.prepare(`
+    SELECT attendant_analytics_enabled, analysis_token_limit FROM accounts WHERE id = ?
+  `).get(accountId)
+  const monthStart = new Date().toISOString().slice(0, 7) + '-01 00:00:00'
+  const spent = db.prepare(`
+    SELECT COALESCE(SUM(cost_usd), 0) as cost FROM ai_agent_token_log
+    WHERE account_id = ? AND source IN ('conversation_analysis', 'coaching_analysis')
+      AND created_at >= ?
+  `).get(accountId, monthStart)?.cost || 0
+
+  const countRow = db.prepare(`
+    SELECT COUNT(*) as n FROM leads l
+    WHERE l.account_id = ?
+      AND l.is_active = 1 AND COALESCE(l.is_archived, 0) = 0 AND COALESCE(l.is_blocked, 0) = 0
+      AND EXISTS (
+        SELECT 1 FROM messages m
+        WHERE m.lead_id = l.id AND m.created_at >= datetime('now', '-' || ? || ' hours')
+      )
+      AND (
+        NOT EXISTS (SELECT 1 FROM conversation_insights ci WHERE ci.lead_id = l.id)
+        OR EXISTS (
+          SELECT 1 FROM conversation_insights ci
+          WHERE ci.lead_id = l.id AND (
+            ci.insights_version < 2
+            OR ci.analyzed_at < (SELECT MAX(created_at) FROM messages WHERE lead_id = l.id)
+          )
+        )
+      )
+  `).get(accountId, sinceHours)
+
+  const leadsToAnalyze = Math.min(50, countRow?.n || 0)
+  const estimatedCost = leadsToAnalyze * 0.012 // estimativa otimista com cache
+
+  // Aprox 200k tokens ≈ $3 USD (mix input+output médio)
+  const monthLimitUsd = (account?.analysis_token_limit || 200000) * 3 / 200000
+
+  return {
+    leads_to_analyze: leadsToAnalyze,
+    estimated_cost_usd: Number(estimatedCost.toFixed(4)),
+    month_spent_usd: Number(spent.toFixed(4)),
+    month_limit_usd: Number(monthLimitUsd.toFixed(2)),
+    account_has_flag: account?.attendant_analytics_enabled === 1,
+  }
 }
