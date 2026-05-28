@@ -859,6 +859,46 @@ router.post('/sheets/:accountSlug', (req, res) => {
       console.log(`[Sheets] ${tagIdsToApply.length} tag(s) aplicada(s) lead=${lead.id} ids=[${tagIdsToApply.join(',')}]`)
     }
 
+    // Lookup de regra de roteamento por tag (tag_instance_mapping) — SOBRESCREVE attendant
+    // mesmo se ja tinha vindo da roleta (porque a regra de tag tem prioridade).
+    // So se aplica em lead NOVO (isNew) — evita re-rotear lead existente que volta pela planilha.
+    if (isNew && tagIdsToApply.length > 0) {
+      for (const tagId of tagIdsToApply) {
+        const mapping = db.prepare('SELECT instance_id, attendant_id FROM tag_instance_mapping WHERE account_id = ? AND tag_id = ?').get(account.id, tagId)
+        if (mapping) {
+          const updates = []
+          const updateParams = []
+          if (mapping.instance_id) {
+            updates.push('instance_id = ?', 'last_instance_id = ?')
+            updateParams.push(mapping.instance_id, mapping.instance_id)
+          }
+          if (mapping.attendant_id) {
+            updates.push('attendant_id = ?')
+            updateParams.push(mapping.attendant_id)
+          }
+          if (updates.length > 0) {
+            updates.push("updated_at = datetime('now')")
+            updateParams.push(lead.id)
+            db.prepare(`UPDATE leads SET ${updates.join(', ')} WHERE id = ?`).run(...updateParams)
+            // Atualiza o objeto em memoria pra logs/respostas subsequentes
+            if (mapping.instance_id) { lead.instance_id = mapping.instance_id; lead.last_instance_id = mapping.instance_id }
+            if (mapping.attendant_id) lead.attendant_id = mapping.attendant_id
+            db.prepare('INSERT OR IGNORE INTO lead_instance_assignments (lead_id, instance_id, attendant_id) VALUES (?, ?, ?)').run(lead.id, mapping.instance_id, mapping.attendant_id || null)
+            console.log(`[Sheets] Roteamento por tag aplicado lead=${lead.id} tag=${tagId} inst=${mapping.instance_id} atend=${mapping.attendant_id}`)
+
+            // Re-dispara welcome do bot — primeira chamada (no getOrCreateLead) viu atendente errado
+            // e nao agiu. Agora com attendant correto (provavel user-bot), vai disparar.
+            // Idempotencia ja garantida via leads.ai_first_msg_sent_at.
+            setImmediate(() => {
+              sendBotWelcomeForSheetsLead(lead.id, mapping.instance_id)
+                .catch(e => console.error('[Bot Welcome re-trigger]', e.message))
+            })
+            break // primeira tag com mapping vence
+          }
+        }
+      }
+    }
+
     // Auto-detect: lead veio de anuncio? Marca trabalha_anuncio=1 se houver sinal claro
     // (fbclid, ad_id, campaign_id, gclid, ou source/utm indicam paid)
     const sourceStr = String(source || '').toLowerCase()
