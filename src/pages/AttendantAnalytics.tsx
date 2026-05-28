@@ -63,12 +63,14 @@ function AnalyzeNowConfirmModal({
   estimate: AnalyzeEstimate | null
   loading: boolean
   onCancel: () => void
-  onConfirm: () => void
+  onConfirm: (maxLeads: number) => void
 }) {
   if (!open) return null
+  const total = estimate?.leads_pending_total ?? 0
+  const hasMore = total > (estimate?.leads_to_analyze ?? 0)
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }} onClick={onCancel}>
-      <div style={{ background: 'var(--bg-card)', borderRadius: 8, padding: 24, width: 480, maxWidth: '90vw', boxShadow: '0 8px 32px rgba(0,0,0,0.3)' }} onClick={e => e.stopPropagation()}>
+      <div style={{ background: 'var(--bg-card)', borderRadius: 8, padding: 24, width: 520, maxWidth: '90vw', boxShadow: '0 8px 32px rgba(0,0,0,0.3)' }} onClick={e => e.stopPropagation()}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
           <h3 style={{ margin: 0, fontSize: 16 }}>⚠ Confirmar análise IA</h3>
           <button onClick={onCancel} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}><X size={18} /></button>
@@ -79,33 +81,73 @@ function AnalyzeNowConfirmModal({
           <>
             <div style={{ display: 'grid', gap: 8, marginBottom: 16 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid var(--border-subtle)' }}>
-                <span style={{ color: 'var(--text-muted)' }}>Vai analisar</span>
-                <strong>{estimate.leads_to_analyze} conversas</strong>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid var(--border-subtle)' }}>
-                <span style={{ color: 'var(--text-muted)' }}>Custo estimado</span>
-                <strong style={{ color: 'var(--accent)' }}>~${estimate.estimated_cost_usd.toFixed(2)} USD</strong>
+                <span style={{ color: 'var(--text-muted)' }}>Conversas pendentes</span>
+                <strong>{total} {total === 1 ? 'conversa' : 'conversas'}</strong>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid var(--border-subtle)' }}>
                 <span style={{ color: 'var(--text-muted)' }}>Gasto este mês</span>
                 <strong>${estimate.month_spent_usd.toFixed(2)} / ${estimate.month_limit_usd.toFixed(2)}</strong>
               </div>
             </div>
+
             {estimate.is_super_admin_bypass && (
-              <div style={{ padding: 10, background: 'var(--warning-bg, rgba(255,179,0,0.1))', borderLeft: '3px solid var(--warning)', fontSize: 12, color: 'var(--warning)', marginBottom: 16, borderRadius: 4 }}>
+              <div style={{ padding: 10, background: 'rgba(255,179,0,0.1)', borderLeft: '3px solid var(--warning)', fontSize: 12, color: 'var(--warning)', marginBottom: 16, borderRadius: 4 }}>
                 ⚠ Conta não tem análise automática ativada. Esta execução manual vai consumir tokens do limite mesmo assim.
               </div>
             )}
-            {estimate.leads_to_analyze === 0 && (
-              <div style={{ padding: 10, background: 'var(--info-bg, rgba(0,150,255,0.1))', borderLeft: '3px solid var(--info)', fontSize: 12, color: 'var(--info)', marginBottom: 16, borderRadius: 4 }}>
+
+            {total === 0 ? (
+              <div style={{ padding: 10, background: 'rgba(0,150,255,0.1)', borderLeft: '3px solid var(--info)', fontSize: 12, color: 'var(--info)', marginBottom: 16, borderRadius: 4 }}>
                 Nenhuma conversa nova pra analisar. Todas já estão atualizadas.
               </div>
+            ) : (
+              <div style={{ display: 'grid', gap: 10, marginBottom: 16 }}>
+                <button
+                  className="btn-analyze-option"
+                  onClick={() => onConfirm(Math.min(50, total))}
+                  style={{
+                    padding: 14, background: 'var(--bg-hover)', borderRadius: 6,
+                    border: '1px solid var(--border-subtle)', cursor: 'pointer', textAlign: 'left',
+                    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                    color: 'var(--text-primary)',
+                  }}>
+                  <div>
+                    <div style={{ fontWeight: 600, fontSize: 13 }}>Analisar {Math.min(50, total)} conversas{hasMore && ' (mais antigas/relevantes)'}</div>
+                    <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>Tempo estimado: ~{Math.ceil(Math.min(50, total) * 2 / 60) + 1}min</div>
+                  </div>
+                  <strong style={{ color: 'var(--accent)' }}>~${Math.min(estimate.estimated_cost_usd, estimate.estimated_cost_all_usd).toFixed(2)}</strong>
+                </button>
+
+                {hasMore && (
+                  <button
+                    className="btn-analyze-option"
+                    onClick={() => onConfirm(Math.min(500, total))}
+                    style={{
+                      padding: 14, background: 'var(--bg-hover)', borderRadius: 6,
+                      border: '1px solid var(--accent)', cursor: 'pointer', textAlign: 'left',
+                      display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                      color: 'var(--text-primary)',
+                    }}>
+                    <div>
+                      <div style={{ fontWeight: 600, fontSize: 13 }}>Analisar todas ({Math.min(500, total)})</div>
+                      <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
+                        Tempo estimado: ~{Math.ceil(Math.min(500, total) * 2 / 60) + 1}min · Custo mais alto
+                      </div>
+                    </div>
+                    <strong style={{ color: 'var(--accent)' }}>~${estimate.estimated_cost_all_usd.toFixed(2)}</strong>
+                  </button>
+                )}
+
+                {total > 500 && (
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', textAlign: 'center', padding: 6 }}>
+                    Limite por execução: 500. O restante roda no próximo clique ou no cron noturno.
+                  </div>
+                )}
+              </div>
             )}
+
             <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
               <button className="btn btn-secondary btn-sm" onClick={onCancel}>Cancelar</button>
-              <button className="btn btn-primary btn-sm" onClick={onConfirm} disabled={estimate.leads_to_analyze === 0}>
-                Confirmar e analisar
-              </button>
             </div>
           </>
         )}
@@ -271,11 +313,11 @@ export default function AttendantAnalytics() {
     }
   }
 
-  const handleConfirmAnalyze = async () => {
+  const handleConfirmAnalyze = async (maxLeads: number) => {
     if (!accountId || !estimate) return
     setAnalyzing(true)
     setShowConfirmModal(false)
-    const leadsCount = estimate.leads_to_analyze
+    const leadsCount = Math.min(maxLeads, estimate.leads_pending_total)
     setAnalyzeElapsedSec(0)
     setAnalyzeProgress({
       open: true,
@@ -284,7 +326,7 @@ export default function AttendantAnalytics() {
       message: '',
     })
     try {
-      const r = await triggerAnalysisNow(accountId)
+      const r = await triggerAnalysisNow(accountId, maxLeads)
       if (r.ok) {
         // Backend disparou fire-and-forget. Mantém modal aberto com cronômetro.
         setAnalyzeProgress(p => p ? { ...p, message: r.message || '' } : null)

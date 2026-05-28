@@ -290,8 +290,8 @@ export const fetchConversationInsights = (accountId: number, opts: { days?: numb
 export const fetchLeadInsight = (leadId: number, accountId: number) =>
   apiFetch<{ insight: ConversationInsight | null }>(`/api/dashboard/conversation-insights/lead/${leadId}?account_id=${accountId}`)
 // Custom fetch: 429 nao lanca exception, retorna body com retry_after_min pra UI tratar.
-export const triggerAnalysisNow = async (accountId: number): Promise<{ ok: boolean; message?: string; error?: string; retry_after_min?: number }> => {
-  const res = await fetch(`/api/dashboard/analyze-now?account_id=${accountId}`, {
+export const triggerAnalysisNow = async (accountId: number, maxLeads: number = 50): Promise<{ ok: boolean; message?: string; error?: string; retry_after_min?: number; max_leads?: number }> => {
+  const res = await fetch(`/api/dashboard/analyze-now?account_id=${accountId}&max=${maxLeads}`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${getToken()}`, 'Content-Type': 'application/json' },
   })
@@ -868,8 +868,10 @@ export interface MarketIntel {
 }
 
 export interface AnalyzeEstimate {
+  leads_pending_total: number
   leads_to_analyze: number
   estimated_cost_usd: number
+  estimated_cost_all_usd: number
   month_spent_usd: number
   month_limit_usd: number
   account_has_flag: boolean
@@ -896,8 +898,8 @@ export const generateCoachingNow = (userId: number, accountId: number) =>
   apiFetch<{ ok: boolean; week_start: string; message: string }>(`/api/dashboard/coaching/${userId}/generate?account_id=${accountId}`, { method: 'POST' })
 export const fetchMarketIntel = (accountId: number, days: number = 30) =>
   apiFetch<MarketIntel>(`/api/dashboard/market-intelligence?account_id=${accountId}&days=${days}`)
-export const fetchAnalyzeEstimate = (accountId: number, days: number = 7) =>
-  apiFetch<AnalyzeEstimate>(`/api/dashboard/analyze-estimate?account_id=${accountId}&days=${days}`)
+export const fetchAnalyzeEstimate = (accountId: number, days: number = 7, maxLeads: number = 50) =>
+  apiFetch<AnalyzeEstimate>(`/api/dashboard/analyze-estimate?account_id=${accountId}&days=${days}&max=${maxLeads}`)
 export const markProposalSent = (leadId: number, accountId: number) =>
   apiFetch(`/api/dashboard/leads/${leadId}/mark-proposal-sent?account_id=${accountId}`, { method: 'POST' })
 export const updateLeadValue = (leadId: number, accountId: number, value: number) =>

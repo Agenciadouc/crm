@@ -353,6 +353,8 @@ router.get('/conversation-insights/lead/:leadId', requireRole('super_admin', 'ge
 // Força análise on-demand (rate limited 1x/30min por conta)
 router.post('/analyze-now', requireRole('super_admin', 'gerente'), requireAnalyticsEnabled, (req, res) => {
   if (!req.accountId) return res.status(400).json({ error: 'account_id required' })
+  // ?max=N: quantos leads processar nesse clique (default 50, cap 500 pra evitar abuso)
+  const maxLeads = Math.max(1, Math.min(500, parseInt(req.query.max) || 50))
   const acc = db.prepare('SELECT last_analysis_at FROM accounts WHERE id = ?').get(req.accountId)
   if (acc?.last_analysis_at) {
     const sinceMs = Date.now() - new Date(acc.last_analysis_at.replace(' ', 'T') + 'Z').getTime()
@@ -363,13 +365,12 @@ router.post('/analyze-now', requireRole('super_admin', 'gerente'), requireAnalyt
   }
   db.prepare("UPDATE accounts SET last_analysis_at = datetime('now') WHERE id = ?").run(req.accountId)
   setImmediate(() => {
-    analyzeConversationsBatch(req.accountId, { maxLeads: 50, sinceHours: 168 }) // ultimo 7d on-demand
+    analyzeConversationsBatch(req.accountId, { maxLeads, sinceHours: 168 })
       .catch(e => console.error('[Analyze-now]', e.message))
-    // Tambem agrega metricas do dia atual on-demand
     const today = new Date().toISOString().slice(0, 10)
     try { aggregateAllAccounts(today) } catch (e) { console.error('[Aggregate-now]', e.message) }
   })
-  res.json({ ok: true, message: 'Analise iniciada em background. Aguarde ~2min e atualize a pagina.' })
+  res.json({ ok: true, message: `Analise de ate ${maxLeads} conversas iniciada em background.`, max_leads: maxLeads })
 })
 
 // Configura limite mensal de tokens de análise da conta
@@ -387,9 +388,9 @@ router.put('/analysis-limit', requireRole('super_admin', 'gerente'), requireAnal
 router.get('/analyze-estimate', requireRole('super_admin', 'gerente'), (req, res) => {
   if (!req.accountId) return res.status(400).json({ error: 'account_id required' })
   const sinceHours = Math.max(1, Math.min(720, parseInt(req.query.days || '7') * 24))
-  const est = getAnalyzeEstimate(req.accountId, sinceHours)
+  const maxLeads = Math.max(1, Math.min(500, parseInt(req.query.max) || 50))
+  const est = getAnalyzeEstimate(req.accountId, sinceHours, maxLeads)
   const isSuperAdmin = req.user?.role === 'super_admin'
-  // Gerente sem flag: 403
   if (!isSuperAdmin && !est.account_has_flag) {
     return res.status(403).json({ error: 'analytics_disabled' })
   }

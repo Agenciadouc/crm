@@ -752,9 +752,9 @@ export async function analyzeAllAccounts() {
 
 /**
  * Estimativa de custo pra modal de confirmação no "Analisar agora".
- * Retorna: { leads_to_analyze, estimated_cost_usd, month_spent_usd, month_limit_usd, account_has_flag }
+ * Retorna: leads_pending_total (sem cap), leads_to_analyze (capeado pelo maxLeads), custo estimado.
  */
-export function getAnalyzeEstimate(accountId, sinceHours = 24 * 7) {
+export function getAnalyzeEstimate(accountId, sinceHours = 24 * 7, maxLeads = 50) {
   const account = db.prepare(`
     SELECT attendant_analytics_enabled, analysis_token_limit FROM accounts WHERE id = ?
   `).get(accountId)
@@ -785,15 +785,19 @@ export function getAnalyzeEstimate(accountId, sinceHours = 24 * 7) {
       )
   `).get(accountId, sinceHours)
 
-  const leadsToAnalyze = Math.min(50, countRow?.n || 0)
-  const estimatedCost = leadsToAnalyze * 0.012 // estimativa otimista com cache
+  const leadsPendingTotal = countRow?.n || 0
+  const leadsToAnalyze = Math.min(maxLeads, leadsPendingTotal)
+  const estimatedCost = leadsToAnalyze * 0.012
+  const estimatedCostAll = leadsPendingTotal * 0.012
 
   // Aprox 200k tokens ≈ $3 USD (mix input+output médio)
   const monthLimitUsd = (account?.analysis_token_limit || 200000) * 3 / 200000
 
   return {
+    leads_pending_total: leadsPendingTotal,
     leads_to_analyze: leadsToAnalyze,
     estimated_cost_usd: Number(estimatedCost.toFixed(4)),
+    estimated_cost_all_usd: Number(estimatedCostAll.toFixed(4)),
     month_spent_usd: Number(spent.toFixed(4)),
     month_limit_usd: Number(monthLimitUsd.toFixed(2)),
     account_has_flag: account?.attendant_analytics_enabled === 1,
