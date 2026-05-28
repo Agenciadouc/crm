@@ -64,7 +64,8 @@ export default function Chat() {
     setSelectedLeadId(id)
     if (isMobile && id !== null) setMobileTab('chat')
     // Auto mark-as-read otimista: zera badge local + chama API em bg. Outras abas recebem via SSE 'lead:read'.
-    if (id !== null) {
+    // SUPER_ADMIN nao marca como lido — ele audita conversas sem afetar o atendimento do cliente.
+    if (id !== null && user?.role !== 'super_admin') {
       const target = leads.find(l => l.id === id)
       if (target && (target.unread_count || 0) > 0) {
         setLeads(prev => prev.map(l => l.id === id ? { ...l, unread_count: 0 } : l))
