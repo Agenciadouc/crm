@@ -195,8 +195,41 @@ export default function AgentEditorModal({ agentId, accountId, onClose, onSaved 
         instance_ids: instanceIds,
         handoff_rules: Object.values(handoffRules).filter(r => r),
       }
-      if (isNew) await createAgent(accountId, payload)
-      else await updateAgent(agentId as number, accountId, payload)
+      let savedAgentId: number
+      if (isNew) {
+        const created = await createAgent(accountId, payload)
+        savedAgentId = (created as any).id
+      } else {
+        await updateAgent(agentId as number, accountId, payload)
+        savedAgentId = agentId as number
+      }
+
+      // Salva tambem a config de follow-up de inatividade (so se agente ja existe ou acabou de ser criado)
+      if (savedAgentId && fuLoaded) {
+        try {
+          if (fuEnabled) {
+            if (!fuInstanceId) { alert('Aba Follow-up: escolha a instância antes de salvar.'); setSaving(false); return }
+            if (fuSteps.some(s => !s.message_template.trim())) { alert('Aba Follow-up: todos os steps precisam de mensagem.'); setSaving(false); return }
+            await saveAgentInactivityFollowUp(savedAgentId, accountId, {
+              enabled: true,
+              instance_id: fuInstanceId,
+              inactivity_minutes: fuInactivityMinutes,
+              stop_on_reply: fuStopOnReply,
+              on_reply_action: fuOnReplyAction,
+              on_reply_user_id: fuOnReplyUserId,
+              steps: fuSteps,
+            })
+          } else {
+            // Desativa se houver follow-up salvo
+            await saveAgentInactivityFollowUp(savedAgentId, accountId, { enabled: false, steps: [] }).catch(() => {})
+          }
+        } catch (e: any) {
+          alert('Agente salvo, mas Follow-up falhou: ' + (e?.message || ''))
+          setSaving(false)
+          return
+        }
+      }
+
       onSaved()
     } catch (e: any) { alert('Erro: ' + (e?.message || '')) }
     setSaving(false)
