@@ -918,12 +918,35 @@ router.post('/sheets/:accountSlug', (req, res) => {
             db.prepare('INSERT OR IGNORE INTO lead_instance_assignments (lead_id, instance_id, attendant_id) VALUES (?, ?, ?)').run(lead.id, mapping.instance_id, mapping.attendant_id || null)
             console.log(`[Sheets] Roteamento por tag aplicado lead=${lead.id} tag=${tagId} inst=${mapping.instance_id} atend=${mapping.attendant_id}`)
 
-            // Re-dispara welcome do bot — primeira chamada (no getOrCreateLead) viu atendente errado
-            // e nao agiu. Agora com attendant correto (provavel user-bot), vai disparar.
-            // Idempotencia ja garantida via leads.ai_first_msg_sent_at.
-            setImmediate(() => {
-              sendBotWelcomeForSheetsLead(lead.id, mapping.instance_id)
-                .catch(e => console.error('[Bot Welcome re-trigger]', e.message))
+            // Welcome: bot (se atendente eh user-bot c/ agente IA) OU greeting estatica da instancia (se humano).
+            // Tenta bot primeiro; se nao enviou (sem agente eleito), cai pra greeting estatica configurada
+            // em /instances -> "Saudacao". Idempotencia: bot via ai_first_msg_sent_at, greeting via auto_messages_log + cooldown.
+            setImmediate(async () => {
+              try {
+                await sendBotWelcomeForSheetsLead(lead.id, mapping.instance_id)
+              } catch (e) {
+                console.error('[Bot Welcome re-trigger]', e.message)
+              }
+              // Bot enviou? Pula greeting estatica
+              const updated = db.prepare('SELECT ai_first_msg_sent_at FROM leads WHERE id = ?').get(lead.id)
+              if (updated?.ai_first_msg_sent_at) return
+
+              // Bot nao enviou (sem agente IA OU flag off). Tenta greeting estatica da instancia.
+              const cfg = db.prepare('SELECT greeting_enabled, greeting_text, greeting_cooldown_hours FROM instance_auto_messages WHERE instance_id = ?').get(mapping.instance_id)
+              if (!cfg?.greeting_enabled || !cfg.greeting_text) {
+                console.log(`[Sheets Greeting] SKIP lead=${lead.id} inst=${mapping.instance_id} — greeting desabilitada ou sem texto`)
+                return
+              }
+              const cooldownH = cfg.greeting_cooldown_hours || 24
+              if (wasAutoMsgSentRecently(lead.id, 'greeting', cooldownH)) {
+                console.log(`[Sheets Greeting] SKIP lead=${lead.id} — cooldown ${cooldownH}h`)
+                return
+              }
+              const r = await sendAutoMessage({
+                leadId: lead.id, instanceId: mapping.instance_id,
+                type: 'greeting', text: cfg.greeting_text, accountId: account.id,
+              })
+              if (!r.ok) console.warn(`[Sheets Greeting] FALHA lead=${lead.id}: ${r.error}`)
             })
             break // primeira tag com mapping vence
           }
