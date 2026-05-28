@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useEffect, type ReactNode } from 'react'
 import { useAuth } from './AuthContext'
-import { fetchAccounts, type Account } from '../lib/api'
+import { fetchAccounts, apiFetch, type Account } from '../lib/api'
 
 interface AccountCtx {
   accountId: number | null
@@ -54,7 +54,13 @@ export function AccountProvider({ children }: { children: ReactNode }) {
         .catch(() => {})
         .finally(() => setLoading(false))
     } else {
+      // Gerente/atendente/cliente — carrega só a própria conta (pra Sidebar checar flags).
       setSelectedIdState(user.account_id)
+      if (user.account_id) {
+        apiFetch<{ account: Account }>(`/api/accounts/${user.account_id}`)
+          .then(d => { if (d?.account) setAccounts([d.account]) })
+          .catch(() => {})
+      }
     }
   }, [user])
 

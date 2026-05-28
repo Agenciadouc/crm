@@ -289,8 +289,18 @@ export const fetchConversationInsights = (accountId: number, opts: { days?: numb
 }
 export const fetchLeadInsight = (leadId: number, accountId: number) =>
   apiFetch<{ insight: ConversationInsight | null }>(`/api/dashboard/conversation-insights/lead/${leadId}?account_id=${accountId}`)
-export const triggerAnalysisNow = (accountId: number) =>
-  apiFetch<{ ok: boolean; message?: string; error?: string; retry_after_min?: number }>(`/api/dashboard/analyze-now?account_id=${accountId}`, { method: 'POST' })
+// Custom fetch: 429 nao lanca exception, retorna body com retry_after_min pra UI tratar.
+export const triggerAnalysisNow = async (accountId: number): Promise<{ ok: boolean; message?: string; error?: string; retry_after_min?: number }> => {
+  const res = await fetch(`/api/dashboard/analyze-now?account_id=${accountId}`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${getToken()}`, 'Content-Type': 'application/json' },
+  })
+  if (res.status === 401) { localStorage.removeItem('dros_crm_token'); window.location.href = `${BASE}/login`; throw new Error('Unauthorized') }
+  const body = await res.json().catch(() => ({}))
+  if (res.status === 429) return { ok: false, error: body.error, retry_after_min: body.retry_after_min }
+  if (!res.ok) return { ok: false, error: body.error || `Erro ${res.status}` }
+  return body
+}
 export const updateAnalysisLimit = (accountId: number, limit: number) =>
   apiFetch<{ ok: boolean; analysis_token_limit: number }>(`/api/dashboard/analysis-limit?account_id=${accountId}`, { method: 'PUT', body: JSON.stringify({ limit }) })
 
