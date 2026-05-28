@@ -31,6 +31,7 @@ export interface Lead {
   source: string | null; source_detail: string | null; notes: string | null
   wa_remote_jid: string | null; instance_id: number | null; last_instance_id?: number | null; profile_pic_url: string | null; is_active: number; created_at: string; updated_at: string
   is_archived?: number; archived_at?: string | null; has_new_after_archive?: number
+  unread_count?: number  // qtd de msgs inbound nao lidas — zerado ao abrir o chat
   empresa?: string | null; cpf_cnpj?: string | null; instagram?: string | null; trabalha_anuncio?: number; investimento_anuncios?: number | null
   opted_in_at?: string | null; opted_out_at?: string | null; last_broadcast_at?: string | null
   state?: string | null; zip?: string | null; birthdate?: string | null; gender?: string | null
@@ -40,8 +41,10 @@ export interface Lead {
   stage_name?: string; stage_color?: string; attendant_name?: string; instance_name?: string
   last_message?: string; message_count?: number; tags?: Tag[]
 }
-export interface Message { id: number; lead_id: number; direction: 'inbound' | 'outbound'; content: string | null; media_type: string; media_url: string | null; sender_name: string | null; wa_msg_id: string | null; instance_id?: number | null; created_at: string }
+export type MessageDeliveryStatus = 'sent' | 'delivered' | 'read'
+export interface Message { id: number; lead_id: number; direction: 'inbound' | 'outbound'; content: string | null; media_type: string; media_url: string | null; sender_name: string | null; wa_msg_id: string | null; instance_id?: number | null; created_at: string; delivery_status?: MessageDeliveryStatus; delivered_at?: string | null; read_at?: string | null }
 export const fetchMessageMedia = (leadId: number, msgId: number) => apiFetch<{ dataUrl: string; mime: string; type: string }>(`/api/messages/${leadId}/media/${msgId}`)
+export const markLeadAsRead = (leadId: number) => apiFetch<{ ok: boolean; lead_id: number; unread_count: number }>(`/api/leads/${leadId}/read`, { method: 'PATCH' })
 export interface StageHistoryEntry { id: number; lead_id: number; from_stage_name: string | null; to_stage_name: string; trigger_type: string; user_name: string | null; created_at: string }
 export interface LeadNote { id: number; lead_id: number; user_id: number; content: string; user_name: string; created_at: string }
 export interface PipelineMetric { stage_id: number; name: string; color: string; position: number; is_conversion: number; lead_count: number; avg_hours_in_stage: number | null; pct_of_total: number; conversion_from_prev: number | null }

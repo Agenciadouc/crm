@@ -193,6 +193,40 @@ router.post('/evolution/:accountSlug', (req, res) => {
     }
 
     const { event, data } = req.body
+
+    // ─── messages.update / MESSAGES_UPDATE — callback de status (delivered/read) ───
+    // WhatsApp status numerico/string: 1=SERVER_ACK(sent), 2=DELIVERY_ACK(delivered), 3=READ, 4=PLAYED.
+    // Idempotente: nunca regride status (read > delivered > sent).
+    if (event === 'messages.update' || event === 'MESSAGES_UPDATE') {
+      try {
+        const rawUpdates = data ? (Array.isArray(data) ? data : [data]) : []
+        const rank = { sent: 1, delivered: 2, read: 3 }
+        for (const upd of rawUpdates) {
+          const waMsgId = upd?.key?.id || upd?.keyId
+          if (!waMsgId) continue
+          const statusRaw = upd.status ?? upd.update?.status
+          let newStatus = null
+          let timestampCol = null
+          if (statusRaw === 'DELIVERY_ACK' || statusRaw === 2) { newStatus = 'delivered'; timestampCol = 'delivered_at' }
+          else if (statusRaw === 'READ' || statusRaw === 'PLAYED' || statusRaw === 3 || statusRaw === 4) { newStatus = 'read'; timestampCol = 'read_at' }
+          else if (statusRaw === 'SERVER_ACK' || statusRaw === 1) { newStatus = 'sent' }
+          if (!newStatus) continue
+          const msg = db.prepare('SELECT id, lead_id, account_id, delivery_status FROM messages WHERE wa_msg_id = ?').get(waMsgId)
+          if (!msg) continue
+          if ((rank[newStatus] || 0) <= (rank[msg.delivery_status] || 0)) continue
+          const sets = ['delivery_status = ?']
+          const params = [newStatus]
+          if (timestampCol) sets.push(`${timestampCol} = COALESCE(${timestampCol}, datetime('now'))`)
+          params.push(msg.id)
+          db.prepare(`UPDATE messages SET ${sets.join(', ')} WHERE id = ?`).run(...params)
+          try { broadcastSSE(msg.account_id, 'message:status', { message_id: msg.id, lead_id: msg.lead_id, status: newStatus }) } catch {}
+        }
+      } catch (e) {
+        console.error('[Webhook messages.update]', e.message)
+      }
+      return res.json({ ok: true })
+    }
+
     if (event !== 'messages.upsert' || !data) return res.json({ ok: true })
 
     const remoteJid = data.key?.remoteJid || ''
@@ -525,6 +559,10 @@ router.post('/evolution/:accountSlug', (req, res) => {
         INSERT INTO messages (lead_id, account_id, direction, content, media_type, media_url, sender_name, wa_msg_id, wa_timestamp, instance_id)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(lead.id, account.id, fromMe ? 'outbound' : 'inbound', content, mediaType, mediaUrl, fromMe ? '' : pushName, msgId || null, timestamp, waInstance?.id || null)
+      // Incrementa unread_count se msg eh inbound e lead nao arquivado (arquivados usam has_new_after_archive).
+      if (!fromMe && !lead.is_archived) {
+        db.prepare("UPDATE leads SET unread_count = unread_count + 1, updated_at = datetime('now') WHERE id = ?").run(lead.id)
+      }
       // Update lead's last_instance_id (next message from CRM will use this instance)
       if (waInstance?.id) {
         db.prepare("UPDATE leads SET last_instance_id = ?, updated_at = datetime('now') WHERE id = ?").run(waInstance.id, lead.id)

@@ -9,7 +9,7 @@ import {
   fetchLeadFollowUp, fetchFollowUps, assignFollowUp, pauseLeadFollowUp, resumeLeadFollowUp, cancelLeadFollowUp,
   archiveLead, blockLead, createStandaloneTask, fetchLeadTasks, completeStandaloneTask, deleteStandaloneTask, completeTask, skipTask, fetchLeadConversations, type LeadConversation,
   fetchReadyMessages, type ReadyMessage,
-  createLeadOrFindExisting,
+  createLeadOrFindExisting, markLeadAsRead,
   requestLeadTransfer, acceptTransferRequest, rejectTransferRequest, fetchPendingTransferRequests, grabLead, type TransferRequest,
   type WhatsAppInstance, type Lead, type Message, type StageHistoryEntry, type LeadNote,
   type Funnel, type User as UserType, type Tag, type LeadCadence, type Cadence, type LeadFollowUp, type FollowUp,
@@ -63,6 +63,14 @@ export default function Chat() {
   const selectLead = (id: number | null) => {
     setSelectedLeadId(id)
     if (isMobile && id !== null) setMobileTab('chat')
+    // Auto mark-as-read otimista: zera badge local + chama API em bg. Outras abas recebem via SSE 'lead:read'.
+    if (id !== null) {
+      const target = leads.find(l => l.id === id)
+      if (target && (target.unread_count || 0) > 0) {
+        setLeads(prev => prev.map(l => l.id === id ? { ...l, unread_count: 0 } : l))
+        markLeadAsRead(id).catch(() => {/* silencioso — re-tentava no proximo click */})
+      }
+    }
   }
   // Quando vai pra Info/Historico via bottom nav, sincroniza com a rightTab interna
   const switchMobileTab = (tab: 'conversas' | 'chat' | 'info' | 'history') => {
@@ -259,6 +267,16 @@ export default function Chat() {
   useSSE('lead:archived', useCallback((data: { id: number }) => {
     setLeads(prev => prev.filter(l => l.id !== data.id))
     if (selectedLeadId === data.id) setSelectedLeadId(null)
+  }, [selectedLeadId]))
+  // Novo: outro tab/atendente abriu o lead → badge some pra todos
+  useSSE('lead:read', useCallback((data: { lead_id: number; unread_count: number }) => {
+    setLeads(prev => prev.map(l => l.id === data.lead_id ? { ...l, unread_count: data.unread_count } : l))
+  }, []))
+  // Novo: status WhatsApp da msg outbound atualizou (delivered/read)
+  useSSE('message:status', useCallback((data: { message_id: number; lead_id: number; status: 'sent' | 'delivered' | 'read' }) => {
+    if (data.lead_id === selectedLeadId) {
+      setMessages(prev => prev.map(m => m.id === data.message_id ? { ...m, delivery_status: data.status } : m))
+    }
   }, [selectedLeadId]))
   useSSE('lead:unarchived', useCallback(() => loadLeadsList(), [loadLeadsList]))
 
@@ -500,8 +518,22 @@ export default function Chat() {
       const s = search.toLowerCase()
       result = result.filter(l => (l.name || '').toLowerCase().includes(s) || (l.phone || '').includes(s))
     }
-    return result
+    // Ordenacao estilo WhatsApp: leads com unread primeiro (badge no topo), depois por updated_at desc
+    return [...result].sort((a, b) => {
+      const aUnread = (a.unread_count || 0) > 0 ? 1 : 0
+      const bUnread = (b.unread_count || 0) > 0 ? 1 : 0
+      if (aUnread !== bUnread) return bUnread - aUnread
+      return (b.updated_at || '').localeCompare(a.updated_at || '')
+    })
   }, [leads, search, tagFilter, attendantFilter, stageFilter])
+
+  // Title da aba: soma total de unread → mostra "(N) Dros CRM"
+  useEffect(() => {
+    const total = leads.reduce((s, l) => s + (l.unread_count || 0), 0)
+    const base = 'Dros CRM'
+    document.title = total > 0 ? `(${total > 99 ? '99+' : total}) ${base}` : base
+    return () => { document.title = base }
+  }, [leads])
 
   const handleSendMsg = async () => {
     if (!msgText.trim() || !lead || !accountId) return
@@ -772,7 +804,7 @@ export default function Chat() {
               const active = l.id === selectedLeadId
               const stage = allStages.find(s => s.id === l.stage_id)
               return (
-                <div key={l.id} className={`chat-contact-item ${active ? 'active' : ''}`} onClick={() => selectLead(l.id)} style={{ position: 'relative' }}>
+                <div key={l.id} className={`chat-contact-item ${active ? 'active' : ''} ${(l.unread_count || 0) > 0 ? 'has-unread' : ''}`} onClick={() => selectLead(l.id)} style={{ position: 'relative' }}>
                   <div className="chat-contact-avatar" style={{ background: stage ? `${stage.color}25` : '#FFB30025', overflow: 'hidden' }}>
                     {l.profile_pic_url ? (
                       <img src={l.profile_pic_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={e => { (e.target as HTMLImageElement).style.display = 'none' }} />
@@ -782,14 +814,17 @@ export default function Chat() {
                   </div>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', gap: 6 }}>
-                      <span style={{ fontWeight: 600, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{l.name || l.phone || 'Sem nome'}</span>
-                      <span style={{ fontSize: 10, color: '#6B6580' }}>{timeAgo(l.updated_at)}</span>
+                      <span className="chat-contact-name" style={{ fontWeight: (l.unread_count || 0) > 0 ? 700 : 600, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: (l.unread_count || 0) > 0 ? 'var(--text-primary)' : undefined }}>{l.name || l.phone || 'Sem nome'}</span>
+                      <span style={{ fontSize: 10, color: (l.unread_count || 0) > 0 ? 'var(--positive)' : 'var(--text-muted)', fontWeight: (l.unread_count || 0) > 0 ? 700 : 400 }}>{timeAgo(l.updated_at)}</span>
                     </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 6, marginTop: 2 }}>
-                      <span style={{ fontSize: 11, color: '#9B96B0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 6, marginTop: 2, alignItems: 'center' }}>
+                      <span className="chat-contact-preview" style={{ fontSize: 11, color: (l.unread_count || 0) > 0 ? 'var(--text-secondary)' : 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
                         {l.last_message || (l.phone ? `📞 ${l.phone}` : 'Sem mensagens')}
                       </span>
-                      {stage && <span style={{ fontSize: 9, color: stage.color, background: `${stage.color}20`, padding: '1px 6px', borderRadius: 8, whiteSpace: 'nowrap' }}>{stage.name}</span>}
+                      {(l.unread_count || 0) > 0 && (
+                        <span className="chat-contact-unread">{(l.unread_count || 0) > 99 ? '99+' : l.unread_count}</span>
+                      )}
+                      {stage && (l.unread_count || 0) === 0 && <span style={{ fontSize: 9, color: stage.color, background: `${stage.color}20`, padding: '1px 6px', borderRadius: 8, whiteSpace: 'nowrap' }}>{stage.name}</span>}
                     </div>
                   </div>
                   <button
@@ -878,11 +913,14 @@ export default function Chat() {
                         const inst = instances.find(i => i.id === (m as any).instance_id)
                         return inst ? <span style={{ marginLeft: 4, padding: '0 5px', borderRadius: 3, background: 'rgba(255,179,0,0.12)', color: '#FFB300', fontSize: 9, fontWeight: 600 }}>via {inst.instance_name}</span> : null
                       })()}
-                      {m.direction === 'outbound' && (
-                        m.wa_msg_id
-                          ? <span style={{ color: '#53BDEB', marginLeft: 2 }}>✓✓</span>
-                          : <span style={{ color: '#FF6B6B', marginLeft: 2 }}>✗</span>
-                      )}
+                      {m.direction === 'outbound' && (() => {
+                        // Fallback pra msgs antigas sem delivery_status: wa_msg_id presente = entregue (cinza), ausente = falha
+                        const st = m.delivery_status || (m.wa_msg_id ? 'sent' : 'failed')
+                        if (st === 'failed') return <span className="msg-check msg-check-failed" title="Falha no envio">✗</span>
+                        if (st === 'read') return <span className="msg-check msg-check-read" title="Lida pelo lead">✓✓</span>
+                        if (st === 'delivered') return <span className="msg-check msg-check-delivered" title="Entregue ao aparelho">✓✓</span>
+                        return <span className="msg-check msg-check-sent" title="Enviada">✓</span>
+                      })()}
                     </div>
                   </div>
                 ))}

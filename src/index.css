@@ -334,6 +334,22 @@ th.right, td.right { text-align: right; }
 .chat-contact-item:hover .chat-contact-archive { display: flex !important; }
 .chat-contact-archive:hover { background: var(--bg-hover) !important; color: var(--text-primary) !important; }
 .chat-contact-avatar { width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+/* Badge de unread no contato (estilo WhatsApp) */
+.chat-contact-unread {
+  background: var(--positive); color: #fff; font-size: 10px; font-weight: 700;
+  padding: 1px 7px; border-radius: var(--radius-full); min-width: 18px;
+  text-align: center; line-height: 1.5; letter-spacing: -0.2px; flex-shrink: 0;
+  box-shadow: 0 0 0 2px rgba(52,199,89,0.15);
+  animation: unreadPop 0.32s cubic-bezier(0.4, 0, 0.2, 1);
+}
+@keyframes unreadPop { 0% { transform: scale(0.6); opacity: 0; } 60% { transform: scale(1.1); opacity: 1; } 100% { transform: scale(1); opacity: 1; } }
+
+/* Checks de status no bubble outbound (estilo WhatsApp) */
+.msg-check { font-size: 11px; letter-spacing: -1.5px; margin-left: 4px; display: inline-flex; align-items: center; line-height: 1; }
+.msg-check-sent { color: rgba(255,255,255,0.55); }
+.msg-check-delivered { color: rgba(255,255,255,0.65); }
+.msg-check-read { color: #53BDEB; } /* azul WhatsApp */
+.msg-check-failed { color: var(--negative); font-weight: 700; }
 .chat-conversation { display: flex; flex-direction: column; background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); overflow: hidden; min-height: 0; }
 .chat-conversation-header { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--border-subtle); background: var(--bg-secondary); }
 .chat-empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; color: var(--text-muted); }

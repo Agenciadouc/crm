@@ -509,6 +509,24 @@ router.put('/:id', (req, res) => {
   res.json({ lead: updated })
 })
 
+// Marca todas msgs inbound como lidas + zera unread_count. Chamado quando vendedor abre a conversa.
+// Idempotente: chamar 2x nao quebra (so seta unread_count=0 que ja era 0).
+router.patch('/:id/read', (req, res) => {
+  const leadId = parseInt(req.params.id)
+  if (!leadId) return res.status(400).json({ error: 'lead id invalido' })
+  const lead = db.prepare('SELECT id, account_id, unread_count FROM leads WHERE id = ?').get(leadId)
+  if (!lead) return res.status(404).json({ error: 'Lead nao encontrado' })
+  // Scope por conta: super_admin pode qualquer; outros so da propria
+  if (req.user.role !== 'super_admin' && lead.account_id !== req.accountId) {
+    return res.status(403).json({ error: 'Sem permissao' })
+  }
+  if (lead.unread_count > 0) {
+    db.prepare("UPDATE leads SET unread_count = 0, updated_at = datetime('now') WHERE id = ?").run(leadId)
+    try { broadcastSSE(lead.account_id, 'lead:read', { lead_id: leadId, unread_count: 0 }) } catch {}
+  }
+  res.json({ ok: true, lead_id: leadId, unread_count: 0 })
+})
+
 // Move lead stage
 router.put('/:id/stage', (req, res) => {
   const { stage_id } = req.body

@@ -579,6 +579,19 @@ addColumnIfNotExists('ai_agent_token_log', 'source', 'TEXT')
 addColumnIfNotExists('ai_agents', 'send_welcome_for_sheets_leads', 'INTEGER NOT NULL DEFAULT 0')
 addColumnIfNotExists('ai_agents', 'welcome_extra_instructions', 'TEXT')
 
+// Status WhatsApp por msg (estilo WhatsApp Web — sent/delivered/read).
+// `delivery_status` default 'sent' eh compativel com msgs antigas (que ja sao consideradas enviadas).
+addColumnIfNotExists('messages', 'delivery_status', "TEXT NOT NULL DEFAULT 'sent'")
+addColumnIfNotExists('messages', 'delivered_at', 'TEXT')
+addColumnIfNotExists('messages', 'read_at', 'TEXT')
+
+// Contador denormalizado de msgs inbound nao lidas por lead — zerado quando vendedor abre o chat.
+addColumnIfNotExists('leads', 'unread_count', 'INTEGER NOT NULL DEFAULT 0')
+
+// Indexes pra lookup de status (webhook update por wa_msg_id) e badge sidebar (filtro unread > 0).
+try { db.exec('CREATE INDEX IF NOT EXISTS idx_messages_wa_msg_id ON messages(wa_msg_id) WHERE wa_msg_id IS NOT NULL') } catch (e) { console.warn('[db] idx_messages_wa_msg_id:', e.message) }
+try { db.exec('CREATE INDEX IF NOT EXISTS idx_leads_unread ON leads(account_id, unread_count) WHERE unread_count > 0') } catch (e) { console.warn('[db] idx_leads_unread:', e.message) }
+
 // Follow-ups (cadencias automaticas — diferentes das cadencias manuais ja existentes)
 db.exec(`
   CREATE TABLE IF NOT EXISTS follow_ups (
