@@ -156,7 +156,8 @@ export function aggregateAttendantMetricsForDate(accountId, userId, dateStr) {
  * Chamado pelo scheduler noturno.
  */
 export function aggregateAllAccounts(dateStr) {
-  const accounts = db.prepare('SELECT id FROM accounts WHERE is_active = 1').all()
+  // SO contas com feature flag ATIVADA. Evita gerar metricas pra contas que nao usam.
+  const accounts = db.prepare('SELECT id FROM accounts WHERE is_active = 1 AND attendant_analytics_enabled = 1').all()
   let usersAggregated = 0, errors = 0
   for (const acc of accounts) {
     const users = db.prepare(`

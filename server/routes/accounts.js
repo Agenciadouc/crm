@@ -63,7 +63,7 @@ router.get('/:id', (req, res) => {
 
 // Update account
 router.put('/:id', requireRole('super_admin'), (req, res) => {
-  const { name, logo_url, is_active, evolution_api_url, evolution_api_key, cnpj, razao_social, segmento, website, instagram, whatsapp_comercial, valor_mensal, contrato_inicio, cidade, estado, observacoes, trabalha_anuncio, investimento_anuncios, meta_pixel_id, meta_capi_token, meta_capi_test_event_code, meta_capi_enabled, ai_agents_enabled } = req.body
+  const { name, logo_url, is_active, evolution_api_url, evolution_api_key, cnpj, razao_social, segmento, website, instagram, whatsapp_comercial, valor_mensal, contrato_inicio, cidade, estado, observacoes, trabalha_anuncio, investimento_anuncios, meta_pixel_id, meta_capi_token, meta_capi_test_event_code, meta_capi_enabled, ai_agents_enabled, attendant_analytics_enabled } = req.body
   const sets = []
   const params = []
   if (name !== undefined) { sets.push('name = ?'); params.push(name) }
@@ -89,6 +89,7 @@ router.put('/:id', requireRole('super_admin'), (req, res) => {
   if (meta_capi_test_event_code !== undefined) { sets.push('meta_capi_test_event_code = ?'); params.push(meta_capi_test_event_code || null) }
   if (meta_capi_enabled !== undefined) { sets.push('meta_capi_enabled = ?'); params.push(meta_capi_enabled ? 1 : 0) }
   if (ai_agents_enabled !== undefined) { sets.push('ai_agents_enabled = ?'); params.push(ai_agents_enabled ? 1 : 0) }
+  if (attendant_analytics_enabled !== undefined) { sets.push('attendant_analytics_enabled = ?'); params.push(attendant_analytics_enabled ? 1 : 0) }
   if (sets.length === 0) return res.status(400).json({ error: 'Nada pra atualizar' })
   sets.push("updated_at = datetime('now')")
   params.push(req.params.id)

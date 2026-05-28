@@ -185,9 +185,19 @@ router.get('/ai-usage', requireRole('super_admin'), (req, res) => {
 })
 
 // ─── Dashboard de Análise de Atendimentos (super_admin + gerente) ───
+// Helper: checa se conta tem feature ativada. Super_admin SEMPRE pode acessar (mesmo desativada — uso de auditoria).
+// Gerente bloqueado com 403 se conta não tem flag = 1.
+function requireAnalyticsEnabled(req, res, next) {
+  if (req.user.role === 'super_admin') return next()
+  const acc = db.prepare('SELECT attendant_analytics_enabled FROM accounts WHERE id = ?').get(req.accountId)
+  if (!acc?.attendant_analytics_enabled) {
+    return res.status(403).json({ error: 'Análise de atendimentos não está habilitada nesta conta' })
+  }
+  next()
+}
 
 // Lista atendentes da conta com métricas agregadas dos últimos N dias
-router.get('/attendants', requireRole('super_admin', 'gerente'), (req, res) => {
+router.get('/attendants', requireRole('super_admin', 'gerente'), requireAnalyticsEnabled, (req, res) => {
   if (!req.accountId) return res.status(400).json({ error: 'account_id required' })
   const days = Math.max(1, Math.min(365, parseInt(req.query.days) || 30))
   const sinceDate = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10)
@@ -235,7 +245,7 @@ router.get('/attendants', requireRole('super_admin', 'gerente'), (req, res) => {
 })
 
 // Detalhe de um atendente específico
-router.get('/attendants/:userId', requireRole('super_admin', 'gerente'), (req, res) => {
+router.get('/attendants/:userId', requireRole('super_admin', 'gerente'), requireAnalyticsEnabled, (req, res) => {
   if (!req.accountId) return res.status(400).json({ error: 'account_id required' })
   const userId = parseInt(req.params.userId)
   const days = Math.max(1, Math.min(365, parseInt(req.query.days) || 30))
@@ -288,7 +298,7 @@ router.get('/attendants/:userId', requireRole('super_admin', 'gerente'), (req, r
 })
 
 // Lista insights de conversas com filtros
-router.get('/conversation-insights', requireRole('super_admin', 'gerente'), (req, res) => {
+router.get('/conversation-insights', requireRole('super_admin', 'gerente'), requireAnalyticsEnabled, (req, res) => {
   if (!req.accountId) return res.status(400).json({ error: 'account_id required' })
   const days = Math.max(1, Math.min(365, parseInt(req.query.days) || 30))
   const sinceDate = new Date(Date.now() - days * 86400000).toISOString().slice(0, 19).replace('T', ' ')
@@ -340,7 +350,7 @@ router.get('/conversation-insights/lead/:leadId', requireRole('super_admin', 'ge
 })
 
 // Força análise on-demand (rate limited 1x/30min por conta)
-router.post('/analyze-now', requireRole('super_admin', 'gerente'), (req, res) => {
+router.post('/analyze-now', requireRole('super_admin', 'gerente'), requireAnalyticsEnabled, (req, res) => {
   if (!req.accountId) return res.status(400).json({ error: 'account_id required' })
   const acc = db.prepare('SELECT last_analysis_at FROM accounts WHERE id = ?').get(req.accountId)
   if (acc?.last_analysis_at) {
@@ -362,7 +372,7 @@ router.post('/analyze-now', requireRole('super_admin', 'gerente'), (req, res) =>
 })
 
 // Configura limite mensal de tokens de análise da conta
-router.put('/analysis-limit', requireRole('super_admin', 'gerente'), (req, res) => {
+router.put('/analysis-limit', requireRole('super_admin', 'gerente'), requireAnalyticsEnabled, (req, res) => {
   if (!req.accountId) return res.status(400).json({ error: 'account_id required' })
   const limit = Math.max(0, Math.min(10000000, parseInt(req.body.limit) || 0))
   db.prepare("UPDATE accounts SET analysis_token_limit = ?, updated_at = datetime('now') WHERE id = ?").run(limit, req.accountId)

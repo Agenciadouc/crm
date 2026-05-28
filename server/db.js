@@ -541,6 +541,9 @@ try { db.exec('CREATE INDEX IF NOT EXISTS idx_metrics_daily_lookup ON attendant_
 addColumnIfNotExists('accounts', 'last_analysis_at', 'TEXT')
 addColumnIfNotExists('accounts', 'last_nightly_at', 'TEXT')
 addColumnIfNotExists('accounts', 'analysis_token_limit', 'INTEGER NOT NULL DEFAULT 200000')
+// Feature flag — gerente da conta só vê /atendimentos se super_admin ativou.
+// Cron noturno + analyzeAllAccounts SO processam contas com flag = 1 (economiza custo).
+addColumnIfNotExists('accounts', 'attendant_analytics_enabled', 'INTEGER NOT NULL DEFAULT 0')
 
 // Agentes de IA (Claude Haiku 4.5) — F0+1 schema
 addColumnIfNotExists('accounts', 'ai_agents_enabled', 'INTEGER NOT NULL DEFAULT 0')

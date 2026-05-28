@@ -272,7 +272,8 @@ export async function analyzeConversationsBatch(accountId, opts = {}) {
  * Chamado pelo cron noturno.
  */
 export async function analyzeAllAccounts() {
-  const accounts = db.prepare("SELECT id FROM accounts WHERE is_active = 1").all()
+  // SO contas com feature flag ATIVADA. Economiza custo Haiku pra contas que nao usam.
+  const accounts = db.prepare("SELECT id FROM accounts WHERE is_active = 1 AND attendant_analytics_enabled = 1").all()
   let totalOk = 0, totalSkip = 0, totalErr = 0
   for (const acc of accounts) {
     try {

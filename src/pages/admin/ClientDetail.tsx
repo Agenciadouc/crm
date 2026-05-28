@@ -132,6 +132,21 @@ export default function ClientDetail() {
               Libera o módulo "Agentes de IA" no painel do gerente desta conta. Permite cobrar separado se quiser.
             </small>
           </div>
+
+          <div className="form-group" style={{ padding: 10, background: 'rgba(93,173,226,0.05)', border: '1px solid rgba(93,173,226,0.2)', borderRadius: 6, marginTop: 8 }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', marginBottom: 0 }}>
+              <input
+                type="checkbox"
+                checked={(account as any).attendant_analytics_enabled === 1}
+                onChange={e => setAccount({ ...account, attendant_analytics_enabled: e.target.checked ? 1 : 0 } as any)}
+              />
+              <span><strong>📊 Habilitar Análise de Atendimentos</strong></span>
+            </label>
+            <small style={{ color: 'var(--text-muted)', fontSize: 11, marginLeft: 24, display: 'block', marginTop: 2 }}>
+              Libera o módulo "Atendimentos" no painel do gerente (rankings, TTFR/TMR, vendas perdidas, score IA).
+              Quando ativo, a IA analisa as conversas todos os dias às 0h Brasília. Custo: ~$8-32/mês por conta dependendo do volume.
+            </small>
+          </div>
         </div>
       </section>
 

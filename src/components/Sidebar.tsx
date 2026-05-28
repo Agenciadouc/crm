@@ -134,7 +134,8 @@ export default function Sidebar() {
               <LayoutDashboard size={16} /> Dashboard
             </NavLink>
           )}
-          {(isGerente || isAdmin) && (
+          {/* "/atendimentos" só pra contas com feature flag ativada. Super_admin sempre vê (auditoria). */}
+          {((isGerente && accounts.find(a => a.id === accountId)?.attendant_analytics_enabled === 1) || isAdmin) && (
             <NavLink to="/atendimentos" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`} onClick={closeMobile}>
               <BarChart3 size={16} /> Atendimentos
             </NavLink>
