@@ -70,6 +70,9 @@ export default function AgentEditorModal({ agentId, accountId, onClose, onSaved 
   // Audio
   const [respondsToAudio, setRespondsToAudio] = useState(false)
   const [audioDeclineMessage, setAudioDeclineMessage] = useState('Oi! Por enquanto só leio mensagens de texto. Pode digitar pra mim?')
+  // Welcome msg pra leads de planilha (Haiku-gerada)
+  const [welcomeForSheets, setWelcomeForSheets] = useState(false)
+  const [welcomeExtraInstructions, setWelcomeExtraInstructions] = useState('')
   // Cost
   const [monthlyTokenLimit, setMonthlyTokenLimit] = useState(500000)
 
@@ -113,6 +116,8 @@ export default function AgentEditorModal({ agentId, accountId, onClose, onSaved 
         setHandoffKeywords(a.handoff_keywords)
         setRespondsToAudio(a.responds_to_audio === 1)
         setAudioDeclineMessage(a.audio_decline_message)
+        setWelcomeForSheets(a.send_welcome_for_sheets_leads === 1)
+        setWelcomeExtraInstructions(a.welcome_extra_instructions || '')
         setMonthlyTokenLimit(a.monthly_token_limit)
         const map: any = {}
         for (const r of a.handoff_rules || []) map[r.reason] = r
@@ -154,6 +159,8 @@ export default function AgentEditorModal({ agentId, accountId, onClose, onSaved 
         handoff_keywords: handoffKeywords,
         responds_to_audio: respondsToAudio,
         audio_decline_message: audioDeclineMessage,
+        send_welcome_for_sheets_leads: welcomeForSheets,
+        welcome_extra_instructions: welcomeExtraInstructions.trim() || undefined,
         monthly_token_limit: monthlyTokenLimit,
         stage_ids: stageIds,
         instance_ids: instanceIds,
@@ -325,6 +332,39 @@ export default function AgentEditorModal({ agentId, accountId, onClose, onSaved 
                 {tags.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
               </select>
               <small style={{ color: 'var(--text-muted)', fontSize: 11 }}>Se setado, agente só atua em leads que tenham essa tag.</small>
+            </div>
+
+            {/* ─── Welcome message pra leads de planilha ─── */}
+            <div className="form-group" style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid var(--border-subtle)' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', marginBottom: 4 }}>
+                <input
+                  type="checkbox"
+                  checked={welcomeForSheets}
+                  onChange={e => setWelcomeForSheets(e.target.checked)}
+                />
+                <span>Enviar primeira msg pra leads vindos da planilha</span>
+              </label>
+              <small style={{ color: 'var(--text-muted)', display: 'block', marginTop: 4, marginLeft: 24, fontSize: 11 }}>
+                Quando lead novo chega via Google Sheets, o bot dispara uma saudação automática
+                via Haiku usando dados do lead (nome, cidade, empresa, tags). Não dispara pra
+                leads do WhatsApp orgânico, site form ou Meta Lead Form. Custo: ~$0.0002 por saudação.
+              </small>
+              {welcomeForSheets && (
+                <div style={{ marginTop: 12, marginLeft: 24 }}>
+                  <label style={{ fontSize: 12 }}>Instruções extras pra saudação (opcional)</label>
+                  <textarea
+                    className="input"
+                    value={welcomeExtraInstructions}
+                    onChange={e => setWelcomeExtraInstructions(e.target.value)}
+                    rows={3}
+                    placeholder="Ex: Mencione a promoção de 10% pra primeira compra. Sempre pergunte sobre o tipo de produto que ele busca."
+                  />
+                  <small style={{ color: 'var(--text-muted)', display: 'block', marginTop: 4, fontSize: 11 }}>
+                    Esse texto vai no system prompt do Haiku junto com a persona. Use pra direcionar
+                    tom específico, oferta, ou perguntas chave.
+                  </small>
+                </div>
+              )}
             </div>
           </>
         )}

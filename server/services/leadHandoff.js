@@ -34,7 +34,7 @@ function renderTemplate(tpl, vars) {
     .replace(/\{\{funil\}\}/g, vars.funnel_name || '')
 }
 
-async function sendViaInstance(instance, phone, text) {
+export async function sendViaInstance(instance, phone, text) {
   const number = (phone || '').replace(/[^\d]/g, '').replace(/^(?!55)(\d{10,11})$/, '55$1')
   if (!number) return { ok: false, reason: 'phone vazio' }
   try {

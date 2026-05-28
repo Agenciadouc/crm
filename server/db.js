@@ -569,6 +569,13 @@ db.exec(`
 addColumnIfNotExists('ai_agent_token_log', 'stt_seconds', 'REAL DEFAULT 0')
 addColumnIfNotExists('ai_agent_token_log', 'stt_cost_usd', 'REAL DEFAULT 0')
 addColumnIfNotExists('ai_agent_token_log', 'stt_provider', 'TEXT')
+// 'source' identifica de onde veio a chamada (default null = msg reativa do lead; 'welcome_sheets' = sauda
+// cao auto pra lead novo de planilha). Permite filtrar custos por tipo no dashboard.
+addColumnIfNotExists('ai_agent_token_log', 'source', 'TEXT')
+
+// Welcome msg pra leads novos de planilha (Haiku-gerada) — opt-in por agente.
+addColumnIfNotExists('ai_agents', 'send_welcome_for_sheets_leads', 'INTEGER NOT NULL DEFAULT 0')
+addColumnIfNotExists('ai_agents', 'welcome_extra_instructions', 'TEXT')
 
 // Follow-ups (cadencias automaticas — diferentes das cadencias manuais ja existentes)
 db.exec(`
@@ -645,6 +652,8 @@ addColumnIfNotExists('contracts', 'hub_client_id', 'INTEGER')
 addColumnIfNotExists('whatsapp_instances', 'first_msg_template', 'TEXT')
 addColumnIfNotExists('users', 'notification_instance_id', 'INTEGER REFERENCES whatsapp_instances(id) ON DELETE SET NULL')
 addColumnIfNotExists('leads', 'first_msg_sent_at', 'TEXT')
+// Bot IA marca quando enviou a primeira saudacao (separado de first_msg_sent_at do template estatico).
+addColumnIfNotExists('leads', 'ai_first_msg_sent_at', 'TEXT')
 addColumnIfNotExists('funnels', 'first_msg_template', 'TEXT')
 
 // Tabela de configs globais (notifier instance configuravel via UI super_admin)

@@ -225,6 +225,8 @@ router.put('/:id', requireRole('super_admin', 'gerente'), (req, res) => {
         activation_mode: b.activation_mode && ['default_attendant', 'roulette', 'conditional', 'manual'].includes(b.activation_mode) ? b.activation_mode : undefined,
         required_tag_id: b.required_tag_id !== undefined ? (b.required_tag_id || null) : undefined,
         monthly_token_limit: b.monthly_token_limit !== undefined ? (parseInt(b.monthly_token_limit) || 500000) : undefined,
+        send_welcome_for_sheets_leads: b.send_welcome_for_sheets_leads !== undefined ? (b.send_welcome_for_sheets_leads ? 1 : 0) : undefined,
+        welcome_extra_instructions: b.welcome_extra_instructions !== undefined ? (b.welcome_extra_instructions || null) : undefined,
       }
       for (const [k, v] of Object.entries(fields)) {
         if (v !== undefined) { sets.push(`${k} = ?`); params.push(v) }

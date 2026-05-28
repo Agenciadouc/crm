@@ -494,6 +494,8 @@ export interface Agent {
   required_fields_arr?: string[]
   responds_to_audio: number
   audio_decline_message: string
+  send_welcome_for_sheets_leads: number
+  welcome_extra_instructions: string | null
   max_messages_before_handoff: number
   handoff_keywords: string
   activation_mode: AgentActivationMode
@@ -521,6 +523,8 @@ export interface AgentInput {
   required_fields?: string[]
   responds_to_audio?: boolean
   audio_decline_message?: string
+  send_welcome_for_sheets_leads?: boolean
+  welcome_extra_instructions?: string | null
   max_messages_before_handoff?: number
   handoff_keywords?: string
   activation_mode?: AgentActivationMode

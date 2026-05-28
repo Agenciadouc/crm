@@ -6,7 +6,7 @@ import db from '../db.js'
 import { callHaiku } from './anthropicClient.js'
 import { broadcastSSE } from '../sse.js'
 import { pickFromRoulette as rouletteUtil } from './roulette.js'
-import { notifyAndOpenLead } from './leadHandoff.js'
+import { notifyAndOpenLead, sendViaInstance } from './leadHandoff.js'
 import { transcribeAudio, fetchAudioBuffer } from './deepgramClient.js'
 
 // ─── Helpers ──────────────────────────────────────────────────────────
@@ -550,5 +550,141 @@ export async function processInboundMessage(lead, msgContent, mediaType, instanc
     console.log(`[AI Agent] Processed lead=${lead.id} agent=${agent.id} iters=${iterationsRun} tokens=${totalTokens} cost_usd=${totalCost.toFixed(6)} tools=${totalToolsExecuted} handoff=${handoffTriggered} text_len=${finalText.length}`)
   } catch (err) {
     console.error('[AI Agent] processInboundMessage erro:', err.message)
+  }
+}
+
+// ─── sendBotWelcomeForSheetsLead ──────────────────────────────────────
+// Saudacao automatica gerada pelo Haiku quando lead novo cair via planilha (source='sheets').
+// Opt-in por agente (ai_agents.send_welcome_for_sheets_leads). Idempotente via leads.ai_first_msg_sent_at.
+// Fire-and-forget: qualquer erro so loga, nao quebra o webhook que ja respondeu 200.
+
+export async function sendBotWelcomeForSheetsLead(leadId, instanceId) {
+  try {
+    const lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(leadId)
+    if (!lead) return
+
+    // FILTRO 1: so dispara pra origem 'sheets'
+    if (lead.source !== 'sheets') return
+
+    // FILTRO 2: idempotencia — so 1x por lead (protege Apps Script retry)
+    if (lead.ai_first_msg_sent_at) {
+      console.log(`[Bot Welcome] SKIP lead=${leadId} — ja enviado em ${lead.ai_first_msg_sent_at}`)
+      return
+    }
+
+    // FILTRO 3: precisa phone
+    if (!lead.phone) {
+      console.log(`[Bot Welcome] SKIP lead=${leadId} — sem phone`)
+      return
+    }
+
+    // FILTRO 4: agente elegivel (reusa toda logica de findAgentForLead)
+    const agent = findAgentForLead(lead, instanceId)
+    if (!agent) {
+      console.log(`[Bot Welcome] SKIP lead=${leadId} — sem agente elegivel`)
+      return
+    }
+
+    // FILTRO 5: agente tem opt-in pra welcome?
+    if (!agent.send_welcome_for_sheets_leads) {
+      console.log(`[Bot Welcome] SKIP lead=${leadId} agent=${agent.id} — flag off`)
+      return
+    }
+
+    // FILTRO 6: limite de tokens do agente?
+    resetMonthlyTokensIfNeeded(agent)
+    if (agent.monthly_token_limit && agent.tokens_used_this_month >= agent.monthly_token_limit) {
+      console.log(`[Bot Welcome] SKIP lead=${leadId} agent=${agent.id} — limite mensal atingido`)
+      return
+    }
+
+    // Resolve instancia: prefere lead.instance_id, fallback pro arg
+    const targetInstId = lead.instance_id || instanceId
+    if (!targetInstId) {
+      console.log(`[Bot Welcome] SKIP lead=${leadId} — sem instancia`)
+      return
+    }
+    const inst = db.prepare("SELECT * FROM whatsapp_instances WHERE id = ? AND status = 'connected'").get(targetInstId)
+    if (!inst) {
+      console.warn(`[Bot Welcome] inst offline/inexistente lead=${leadId} inst=${targetInstId}`)
+      return
+    }
+
+    // Tags do lead pra contextualizar
+    const tags = db.prepare(`
+      SELECT t.name FROM tags t
+      JOIN lead_tags lt ON lt.tag_id = t.id
+      WHERE lt.lead_id = ?
+    `).all(leadId).map(r => r.name)
+
+    // System prompt customizado pra geracao de saudacao (NAO usa buildSystemPrompt normal porque
+    // aquele assume conversa em andamento; este aqui e' o primeiro toque).
+    const systemPrompt = `Voce e ${agent.name}${agent.persona ? `, ${agent.persona}` : ', assistente'} atendendo leads via WhatsApp.
+
+CONTEXTO DESTE TURNO: um lead acabou de chegar via planilha (Google Sheets). Ele AINDA NAO mandou mensagem nenhuma. Sua tarefa e fazer o PRIMEIRO contato.
+
+Dados do lead:
+- Nome: ${lead.name || '(sem nome)'}
+- Telefone: ${lead.phone}
+- Cidade: ${lead.city || 'desconhecida'}
+- Empresa: ${lead.empresa || 'desconhecida'}
+- Tags: ${tags.join(', ') || 'nenhuma'}
+${agent.welcome_extra_instructions ? `\nINSTRUCOES EXTRAS DO GERENTE:\n${agent.welcome_extra_instructions}\n` : ''}
+REGRAS:
+1. Cumprimente o lead pelo PRIMEIRO nome (se tiver nome completo, use so o primeiro)
+2. Apresente-se brevemente (voce e o atendimento da empresa)
+3. Faca UMA pergunta aberta pra iniciar a conversa
+4. Mantenha tom natural da sua persona — nao pareca robo
+5. Texto curto: 2-4 linhas no maximo
+6. Portugues brasileiro coloquial
+7. SEM markdown, SEM listas, SEM emojis (excecao: 👋 opcional no inicio)
+8. Nao invente informacoes que nao tem`
+
+    const result = await callHaiku({
+      systemPrompt,
+      messages: [{ role: 'user', content: 'Gere AGORA a saudacao pra esse lead. Apenas o texto da mensagem, sem aspas, sem cabecalhos.' }],
+      maxTokens: 250,
+    })
+
+    const msgText = (result.content || '').trim()
+    if (!msgText) {
+      console.warn(`[Bot Welcome] Haiku retornou vazio lead=${leadId}`)
+      return
+    }
+
+    // Envia via Evolution
+    const sendResult = await sendViaInstance(inst, lead.phone, msgText)
+    if (!sendResult.ok) {
+      console.warn(`[Bot Welcome] envio falhou lead=${leadId}: ${sendResult.reason || 'unknown'}`)
+      return
+    }
+
+    // Salva msg no historico (sender_name = agente, ai_agent_id = agente)
+    db.prepare(`
+      INSERT INTO messages (lead_id, account_id, direction, content, media_type, sender_name, wa_msg_id, instance_id, ai_agent_id)
+      VALUES (?, ?, 'outbound', ?, 'text', ?, ?, ?, ?)
+    `).run(lead.id, lead.account_id, msgText, agent.name, sendResult.wamsgId, inst.id, agent.id)
+
+    // Atualiza last_instance_id + marca idempotencia
+    db.prepare("UPDATE leads SET ai_first_msg_sent_at = datetime('now'), last_instance_id = ?, updated_at = datetime('now') WHERE id = ?")
+      .run(inst.id, leadId)
+
+    // Loga custo (mesma tabela do fluxo reativo, source='welcome_sheets' pra filtrar dashboard)
+    db.prepare(`
+      INSERT INTO ai_agent_token_log (agent_id, lead_id, account_id, input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, cost_usd, source)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'welcome_sheets')
+    `).run(
+      agent.id, leadId, lead.account_id,
+      result.usage.input, result.usage.output, result.usage.cacheRead, result.usage.cacheCreation,
+      result.costUsd
+    )
+
+    // Atualiza contador mensal do agente
+    db.prepare("UPDATE ai_agents SET tokens_used_this_month = tokens_used_this_month + ? WHERE id = ?")
+      .run(result.usage.total, agent.id)
+
+    console.log(`[Bot Welcome] OK lead=${leadId} agent=${agent.id} cost=$${result.costUsd.toFixed(6)} txt="${msgText.slice(0, 70).replace(/\n/g, ' ')}..."`)
+  } catch (err) {
+    console.error(`[Bot Welcome] exception lead=${leadId}:`, err.message)
   }
 }

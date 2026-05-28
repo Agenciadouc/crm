@@ -4,7 +4,7 @@ import db from '../db.js'
 import { broadcastSSE } from '../sse.js'
 import { triggerCapiForStageChange } from '../services/metaCapi.js'
 import { getInstanceConfig, wasAutoMsgSentRecently, sendAutoMessage, shouldSendAway } from '../services/autoMessages.js'
-import { processInboundMessage } from '../services/aiAgent.js'
+import { processInboundMessage, sendBotWelcomeForSheetsLead } from '../services/aiAgent.js'
 import { pickFromRoulette } from '../services/roulette.js'
 import { notifyAndOpenLead } from '../services/leadHandoff.js'
 
@@ -129,6 +129,16 @@ function getOrCreateLead(accountId, phone, name, source, waJid, instanceId) {
     setImmediate(() => {
       notifyAndOpenLead(lead.id, attendantId, { source: 'webhook' })
         .catch(e => console.error('[Handoff webhook]', e.message))
+    })
+  }
+
+  // Bot welcome: se lead novo veio de planilha (source='sheets') e a conta tem agente
+  // com flag send_welcome_for_sheets_leads, dispara saudacao Haiku-gerada.
+  // Roda mesmo sem attendantId (agente nao precisa de attendantId pra disparar welcome).
+  if (source === 'sheets') {
+    setImmediate(() => {
+      sendBotWelcomeForSheetsLead(lead.id, instanceId)
+        .catch(e => console.error('[Bot Welcome webhook]', e.message))
     })
   }
 
