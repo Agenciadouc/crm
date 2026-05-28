@@ -563,8 +563,8 @@ export async function sendBotWelcomeForSheetsLead(leadId, instanceId) {
     const lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(leadId)
     if (!lead) return
 
-    // FILTRO 1: so dispara pra origem 'sheets'
-    if (lead.source !== 'sheets') return
+    // (Sem filtro de source — funcao so eh chamada do webhook /sheets/:slug que ja garante
+    // origem. Source string varia muito por integracao: 'sheets', 'google_sheets', 'LP_*', etc.)
 
     // FILTRO 2: idempotencia — so 1x por lead (protege Apps Script retry)
     if (lead.ai_first_msg_sent_at) {

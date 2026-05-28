@@ -132,15 +132,9 @@ function getOrCreateLead(accountId, phone, name, source, waJid, instanceId) {
     })
   }
 
-  // Bot welcome: se lead novo veio de planilha (source='sheets') e a conta tem agente
-  // com flag send_welcome_for_sheets_leads, dispara saudacao Haiku-gerada.
-  // Roda mesmo sem attendantId (agente nao precisa de attendantId pra disparar welcome).
-  if (source === 'sheets') {
-    setImmediate(() => {
-      sendBotWelcomeForSheetsLead(lead.id, instanceId)
-        .catch(e => console.error('[Bot Welcome webhook]', e.message))
-    })
-  }
+  // Bot welcome NAO eh disparado aqui — `source` no INSERT vem de body custom (LP_*, google_sheets, etc)
+  // e nunca eh literalmente 'sheets'. O trigger correto fica no webhook /sheets/:slug depois de
+  // aplicar tag automatica + regra de mapping (assim o atendente ja eh o bot na hora do welcome).
 
   return { lead, isNew: true }
 }
