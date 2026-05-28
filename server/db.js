@@ -854,8 +854,10 @@ addColumnIfNotExists('ai_agent_token_log', 'source', 'TEXT')
 try {
   const cols = db.prepare("PRAGMA table_info(ai_agent_token_log)").all()
   const agentIdCol = cols.find(c => c.name === 'agent_id')
-  if (agentIdCol && agentIdCol.notnull === 1) {
-    console.log('[DB] Migracao: ai_agent_token_log.agent_id NOT NULL -> NULL')
+  // notnull pode vir como Number 1 ou string "1" dependendo do driver — usa truthy check
+  if (agentIdCol && Number(agentIdCol.notnull) === 1) {
+    console.log('[DB] Migracao ai_agent_token_log.agent_id NOT NULL -> NULL iniciando...')
+    db.pragma('foreign_keys = OFF')
     db.exec(`
       CREATE TABLE ai_agent_token_log_new (
         id                    INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -885,10 +887,14 @@ try {
       CREATE INDEX IF NOT EXISTS idx_ai_token_log_month ON ai_agent_token_log(agent_id, created_at);
       CREATE INDEX IF NOT EXISTS idx_ai_token_log_source ON ai_agent_token_log(account_id, source, created_at);
     `)
-    console.log('[DB] Migracao concluida')
+    db.pragma('foreign_keys = ON')
+    console.log('[DB] Migracao ai_agent_token_log concluida')
+  } else {
+    console.log(`[DB] ai_agent_token_log.agent_id ja eh nullable (notnull=${agentIdCol?.notnull}) — migracao pulada`)
   }
 } catch (e) {
-  console.warn('[DB] Migracao ai_agent_token_log falhou:', e.message)
+  console.error('[DB] Migracao ai_agent_token_log FALHOU:', e.message, e.stack)
+  try { db.pragma('foreign_keys = ON') } catch {}
 }
 
 // Welcome msg pra leads novos de planilha (Haiku-gerada) — opt-in por agente.
