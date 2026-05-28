@@ -7,7 +7,7 @@ import {
   fetchEvolutionConfig, saveEvolutionConfig, setupWhatsAppWebhook, restartWhatsAppInstance, syncWhatsAppNow, setInstanceAttendant, setInstanceMode, fetchUsers, apiFetch,
   updateMetaCapi, testMetaCapi, updateInstanceFirstMsgTemplate,
   fetchTags, fetchTagInstanceMappings, upsertTagInstanceMapping, deleteTagInstanceMapping,
-  fetchDefaultFormInstance, setDefaultFormInstance, fetchSheetsStatus,
+  fetchDefaultFormInstance, setDefaultFormInstance, fetchSheetsStatus, setSheetsDefaultTag,
   type WhatsAppInstance, type User as UserType, type Account, type Tag, type TagInstanceMapping,
 } from '../lib/api'
 import { Plug, Plus, Wifi, WifiOff, Loader, Trash2, QrCode, Power, PowerOff, RefreshCw, Smartphone, Save, Check, Settings, FileSpreadsheet, Copy, Webhook, RotateCw, Download, User, Eye, EyeOff, Activity, AlertTriangle, MessageSquare, Link as LinkIcon, GitBranch } from 'lucide-react'
@@ -221,6 +221,8 @@ export default function Integrations() {
   const [restarting, setRestarting] = useState<number | null>(null)
   const [autoMsgInstance, setAutoMsgInstance] = useState<WhatsAppInstance | null>(null)
   const [sheetsLastAt, setSheetsLastAt] = useState<string | null>(null)
+  const [sheetsDefaultTagId, setSheetsDefaultTagId] = useState<number | null>(null)
+  const [sheetsTagSaving, setSheetsTagSaving] = useState(false)
 
   // Roteamento de leads de formulario (tag → instancia)
   const [routingMappings, setRoutingMappings] = useState<TagInstanceMapping[]>([])
@@ -245,8 +247,23 @@ export default function Integrations() {
 
   useEffect(() => {
     if (!accountId) return
-    fetchSheetsStatus(accountId).then(r => setSheetsLastAt(r.last_lead_at)).catch(() => {})
+    fetchSheetsStatus(accountId).then(r => {
+      setSheetsLastAt(r.last_lead_at)
+      setSheetsDefaultTagId(r.default_tag_id)
+    }).catch(() => {})
   }, [accountId])
+
+  const handleChangeSheetsDefaultTag = async (tagId: number | null) => {
+    if (!accountId) return
+    setSheetsTagSaving(true)
+    try {
+      await setSheetsDefaultTag(accountId, tagId)
+      setSheetsDefaultTagId(tagId)
+    } catch (e: any) {
+      alert('Erro: ' + (e.message || 'falha ao salvar tag default'))
+    }
+    setSheetsTagSaving(false)
+  }
 
   const handleChangeDefaultRouting = async (instanceId: number | null) => {
     if (!accountId) return
@@ -706,6 +723,36 @@ export default function Integrations() {
                 </>
               )}
             </div>
+
+            {/* Tag default — aplicada automaticamente em TODO lead vindo da planilha */}
+            <div style={{ background: 'var(--bg-hover)', padding: 12, borderRadius: 8, marginBottom: 12, border: '1px solid var(--border-subtle)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>Tag automática nos leads da planilha</span>
+                {sheetsTagSaving && <Loader size={11} className="spinning" style={{ color: 'var(--text-muted)' }} />}
+              </div>
+              <p style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 8 }}>
+                Todo lead novo que chegar via Google Sheets recebe automaticamente essa tag.
+                Útil pra separar leads da planilha (ex: "Lead DROS") e disparar regras de roteamento ou cadências.
+              </p>
+              <select
+                className="select"
+                value={sheetsDefaultTagId ?? ''}
+                onChange={e => handleChangeSheetsDefaultTag(e.target.value ? Number(e.target.value) : null)}
+                style={{ minWidth: 280, fontSize: 12 }}
+                disabled={sheetsTagSaving}
+              >
+                <option value="">— Sem tag automática —</option>
+                {routingTags.map(t => (
+                  <option key={t.id} value={t.id}>{t.name}</option>
+                ))}
+              </select>
+              {routingTags.length === 0 && (
+                <p style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 6 }}>
+                  Crie tags primeiro em <strong>Tags</strong> antes de configurar essa opção.
+                </p>
+              )}
+            </div>
+
             <p style={{ fontSize: 12, color: '#9B96B0', marginBottom: 12 }}>
               Conecte uma planilha do Google Sheets ao CRM. Leads adicionados na planilha sao criados automaticamente no sistema.
             </p>

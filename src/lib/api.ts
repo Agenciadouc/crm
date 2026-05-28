@@ -330,7 +330,12 @@ export const fetchDefaultFormInstance = (accountId: number) =>
 export const setDefaultFormInstance = (accountId: number, instanceId: number | null) =>
   apiFetch(`/api/tag-mapping/default-form-instance?account_id=${accountId}`, { method: 'PUT', body: JSON.stringify({ instance_id: instanceId }) })
 export const fetchSheetsStatus = (accountId: number) =>
-  apiFetch<{ last_lead_at: string | null }>(`/api/integrations/sheets-status?account_id=${accountId}`)
+  apiFetch<{ last_lead_at: string | null; default_tag_id: number | null }>(`/api/integrations/sheets-status?account_id=${accountId}`)
+export const setSheetsDefaultTag = (accountId: number, tagId: number | null) =>
+  apiFetch<{ ok: boolean; default_tag_id: number | null }>(
+    `/api/integrations/sheets-default-tag?account_id=${accountId}`,
+    { method: 'PUT', body: JSON.stringify({ tag_id: tagId }) }
+  )
 
 // Admin: check all WhatsApp instances across all accounts (super_admin only)
 export interface InstanceCheckResult {

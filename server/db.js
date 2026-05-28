@@ -349,6 +349,8 @@ addColumnIfNotExists('leads', 'instance_id', 'INTEGER REFERENCES whatsapp_instan
 // accounts: Evolution API credentials (shared across all instances)
 addColumnIfNotExists('accounts', 'evolution_api_url', 'TEXT')
 addColumnIfNotExists('accounts', 'evolution_api_key', 'TEXT')
+// Tag default pra todo lead novo vindo da planilha (webhook /sheets/:slug). NULL = sem tag automatica.
+addColumnIfNotExists('accounts', 'sheets_default_tag_id', 'INTEGER REFERENCES tags(id) ON DELETE SET NULL')
 
 // Defaults centralizados da Evolution API (ja preenche em todas contas)
 export const DEFAULT_EVOLUTION_API_URL = process.env.EVOLUTION_API_URL || 'http://127.0.0.1:8080'

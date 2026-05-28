@@ -828,6 +828,37 @@ router.post('/sheets/:accountSlug', (req, res) => {
     if (cpf_cnpj) db.prepare('UPDATE leads SET cpf_cnpj = COALESCE(cpf_cnpj, ?) WHERE id = ?').run(cpf_cnpj, lead.id)
     if (instagram) db.prepare('UPDATE leads SET instagram = COALESCE(instagram, ?) WHERE id = ?').run(instagram, lead.id)
 
+    // Tags — fonte 1: tag default configurada na conta (account.sheets_default_tag_id)
+    // Fonte 2: body.tag/tags vindo do Apps Script (string, CSV ou array)
+    // Aplica ambas (cumulativo). INSERT OR IGNORE garante idempotencia.
+    const tagIdsToApply = []
+    if (account.sheets_default_tag_id) tagIdsToApply.push(account.sheets_default_tag_id)
+    const rawTags = body.tags != null ? body.tags : body.tag
+    if (rawTags) {
+      const tagNames = Array.isArray(rawTags)
+        ? rawTags.map(s => String(s).trim()).filter(Boolean)
+        : String(rawTags).split(',').map(s => s.trim()).filter(Boolean)
+      for (const tagName of tagNames) {
+        try {
+          db.prepare("INSERT OR IGNORE INTO tags (account_id, name, color) VALUES (?, ?, '#FFB300')").run(account.id, tagName)
+          const tagRow = db.prepare('SELECT id FROM tags WHERE account_id = ? AND name = ?').get(account.id, tagName)
+          if (tagRow) tagIdsToApply.push(tagRow.id)
+        } catch (e) {
+          console.error(`[Sheets] Erro resolvendo tag "${tagName}" no lead ${lead.id}:`, e.message)
+        }
+      }
+    }
+    for (const tagId of tagIdsToApply) {
+      try {
+        db.prepare('INSERT OR IGNORE INTO lead_tags (lead_id, tag_id) VALUES (?, ?)').run(lead.id, tagId)
+      } catch (e) {
+        console.error(`[Sheets] Erro aplicando tag id=${tagId} lead=${lead.id}:`, e.message)
+      }
+    }
+    if (tagIdsToApply.length > 0) {
+      console.log(`[Sheets] ${tagIdsToApply.length} tag(s) aplicada(s) lead=${lead.id} ids=[${tagIdsToApply.join(',')}]`)
+    }
+
     // Auto-detect: lead veio de anuncio? Marca trabalha_anuncio=1 se houver sinal claro
     // (fbclid, ad_id, campaign_id, gclid, ou source/utm indicam paid)
     const sourceStr = String(source || '').toLowerCase()

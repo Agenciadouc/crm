@@ -443,8 +443,26 @@ router.put('/whatsapp/:id/auto-messages', requireRole('super_admin', 'gerente', 
 // Status da integracao Google Sheets — retorna timestamp do ultimo lead recebido
 router.get('/sheets-status', (req, res) => {
   if (!req.accountId) return res.status(400).json({ error: 'account_id required' })
-  const row = db.prepare('SELECT last_sheets_lead_at FROM accounts WHERE id = ?').get(req.accountId)
-  res.json({ last_lead_at: row?.last_sheets_lead_at || null })
+  const row = db.prepare('SELECT last_sheets_lead_at, sheets_default_tag_id FROM accounts WHERE id = ?').get(req.accountId)
+  res.json({
+    last_lead_at: row?.last_sheets_lead_at || null,
+    default_tag_id: row?.sheets_default_tag_id || null,
+  })
+})
+
+// Define qual tag aplicar automaticamente em todo lead novo vindo da planilha.
+// Body: { tag_id: number | null }. null = remove a tag default.
+router.put('/sheets-default-tag', requireRole('super_admin', 'gerente'), (req, res) => {
+  if (!req.accountId) return res.status(400).json({ error: 'account_id required' })
+  const { tag_id } = req.body || {}
+  const tagId = tag_id === null || tag_id === undefined || tag_id === '' ? null : parseInt(tag_id)
+  if (tagId !== null) {
+    // Valida que a tag pertence a esta conta
+    const tag = db.prepare('SELECT id FROM tags WHERE id = ? AND account_id = ?').get(tagId, req.accountId)
+    if (!tag) return res.status(400).json({ error: 'Tag nao encontrada nesta conta' })
+  }
+  db.prepare("UPDATE accounts SET sheets_default_tag_id = ?, updated_at = datetime('now') WHERE id = ?").run(tagId, req.accountId)
+  res.json({ ok: true, default_tag_id: tagId })
 })
 
 export default router
