@@ -140,6 +140,17 @@ export default function AttendantAnalytics() {
   const [detailLeadId, setDetailLeadId] = useState<number | null>(null)
   const [loading, setLoading] = useState(true)
 
+  // Modal de progresso "Analisando..."
+  const [analyzeProgress, setAnalyzeProgress] = useState<{
+    open: boolean
+    status: 'running' | 'done' | 'error' | 'rate_limited'
+    leadsCount: number
+    message: string
+    retryAfter?: number
+  } | null>(null)
+  const [analyzeElapsedSec, setAnalyzeElapsedSec] = useState(0)
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null)
+
   // Loaders por tab
   const loadOverview = () => {
     if (!accountId) return
@@ -207,6 +218,20 @@ export default function AttendantAnalytics() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [coachingUserId])
 
+  // Cronômetro do modal de análise
+  useEffect(() => {
+    if (!analyzeProgress || analyzeProgress.status !== 'running') return
+    const id = setInterval(() => setAnalyzeElapsedSec(s => s + 1), 1000)
+    return () => clearInterval(id)
+  }, [analyzeProgress])
+
+  // Auto-dismiss do toast
+  useEffect(() => {
+    if (!toast) return
+    const id = setTimeout(() => setToast(null), 4000)
+    return () => clearTimeout(id)
+  }, [toast])
+
   // Pra coaching tab, precisa do ranking V2 carregado pro seletor
   useEffect(() => {
     if (tab === 'coaching' && rankingV2.length === 0 && accountId) {
@@ -239,7 +264,7 @@ export default function AttendantAnalytics() {
       const est = await fetchAnalyzeEstimate(accountId, Math.min(7, days))
       setEstimate(est)
     } catch (e: any) {
-      alert(e?.message || 'Erro carregando estimativa')
+      setToast({ message: e?.message || 'Erro carregando estimativa', type: 'error' })
       setShowConfirmModal(false)
     } finally {
       setEstimateLoading(false)
@@ -247,25 +272,69 @@ export default function AttendantAnalytics() {
   }
 
   const handleConfirmAnalyze = async () => {
-    if (!accountId) return
+    if (!accountId || !estimate) return
     setAnalyzing(true)
     setShowConfirmModal(false)
+    const leadsCount = estimate.leads_to_analyze
+    setAnalyzeElapsedSec(0)
+    setAnalyzeProgress({
+      open: true,
+      status: 'running',
+      leadsCount,
+      message: '',
+    })
     try {
       const r = await triggerAnalysisNow(accountId)
-      if (r.ok) alert(r.message || 'Análise iniciada. Aguarde 2 minutos e atualize.')
-      else if (r.retry_after_min) alert(`Aguarde ${r.retry_after_min}min antes de re-analisar (rate limit).`)
-      else alert(r.error || 'Erro ao iniciar análise')
+      if (r.ok) {
+        // Backend disparou fire-and-forget. Mantém modal aberto com cronômetro.
+        setAnalyzeProgress(p => p ? { ...p, message: r.message || '' } : null)
+      } else if (r.retry_after_min) {
+        setAnalyzeProgress({
+          open: true,
+          status: 'rate_limited',
+          leadsCount,
+          message: r.error || `Rate limit ativo.`,
+          retryAfter: r.retry_after_min,
+        })
+      } else {
+        setAnalyzeProgress({
+          open: true,
+          status: 'error',
+          leadsCount,
+          message: r.error || 'Erro ao iniciar análise',
+        })
+      }
     } catch (e: any) {
-      alert('Erro: ' + (e?.message || ''))
+      setAnalyzeProgress({
+        open: true,
+        status: 'error',
+        leadsCount,
+        message: e?.message || 'Erro de rede',
+      })
     } finally {
       setAnalyzing(false)
     }
   }
 
+  const handleRefreshAndClose = () => {
+    setAnalyzeProgress(null)
+    // Re-carrega tab ativa
+    if (tab === 'overview') loadOverview()
+    else if (tab === 'ranking') loadRanking()
+    else if (tab === 'critical') loadCritical()
+    else if (tab === 'alerts') loadAlerts()
+    else if (tab === 'market') loadMarket()
+  }
+
   const handleResolveAlert = async (id: number, status: 'resolved' | 'dismissed') => {
     if (!accountId) return
-    await resolveAlert(id, accountId, status)
-    setAlerts(prev => prev.filter(a => a.id !== id))
+    try {
+      await resolveAlert(id, accountId, status)
+      setAlerts(prev => prev.filter(a => a.id !== id))
+      setToast({ message: status === 'resolved' ? 'Alerta resolvido' : 'Alerta dispensado', type: 'success' })
+    } catch (e: any) {
+      setToast({ message: e?.message || 'Erro', type: 'error' })
+    }
   }
 
   const handleGenerateCoaching = async (userId: number) => {
@@ -274,11 +343,11 @@ export default function AttendantAnalytics() {
     try {
       const r = await generateCoachingNow(userId, accountId)
       if (r.ok) {
-        alert('Coaching sendo gerado em background. Atualize em ~30s.')
+        setToast({ message: 'Coaching sendo gerado em background. Atualizando em 30s...', type: 'info' })
         setTimeout(() => loadCoaching(userId), 30000)
       }
     } catch (e: any) {
-      alert(e?.message || 'Erro')
+      setToast({ message: e?.message || 'Erro', type: 'error' })
     } finally {
       setGeneratingCoaching(false)
     }
@@ -608,9 +677,177 @@ export default function AttendantAnalytics() {
         onConfirm={handleConfirmAnalyze}
       />
 
+      {analyzeProgress?.open && (
+        <AnalyzeProgressModal
+          status={analyzeProgress.status}
+          leadsCount={analyzeProgress.leadsCount}
+          message={analyzeProgress.message}
+          retryAfter={analyzeProgress.retryAfter}
+          elapsedSec={analyzeElapsedSec}
+          onClose={() => setAnalyzeProgress(null)}
+          onRefresh={handleRefreshAndClose}
+        />
+      )}
+
+      {toast && (
+        <div style={{
+          position: 'fixed', bottom: 24, right: 24, zIndex: 1100,
+          background: 'var(--bg-card)',
+          borderLeft: `3px solid ${toast.type === 'success' ? 'var(--positive)' : toast.type === 'error' ? 'var(--negative)' : 'var(--info)'}`,
+          borderRadius: 6, padding: '12px 16px',
+          boxShadow: '0 4px 16px rgba(0,0,0,0.2)',
+          fontSize: 13, maxWidth: 360,
+          color: 'var(--text-primary)',
+          display: 'flex', alignItems: 'center', gap: 8,
+        }}>
+          {toast.message}
+          <button onClick={() => setToast(null)} style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}><X size={14} /></button>
+        </div>
+      )}
+
       {detailLeadId != null && accountId && (
         <ConversationDetailModal leadId={detailLeadId} accountId={accountId} onClose={() => setDetailLeadId(null)} />
       )}
+    </div>
+  )
+}
+
+// ─── Modal "Analisando conversas..." ───
+function AnalyzeProgressModal({
+  status, leadsCount, message, retryAfter, elapsedSec, onClose, onRefresh,
+}: {
+  status: 'running' | 'done' | 'error' | 'rate_limited'
+  leadsCount: number
+  message: string
+  retryAfter?: number
+  elapsedSec: number
+  onClose: () => void
+  onRefresh: () => void
+}) {
+  // Estimativa ~2s por conversa + overhead
+  const estimatedTotalSec = Math.max(60, leadsCount * 2 + 30)
+  const progressPct = Math.min(95, Math.round((elapsedSec / estimatedTotalSec) * 100))
+  const minutesElapsed = Math.floor(elapsedSec / 60)
+  const secsElapsed = elapsedSec % 60
+  const elapsedLabel = `${minutesElapsed}m ${secsElapsed.toString().padStart(2, '0')}s`
+  const readyToRefresh = elapsedSec >= Math.min(120, estimatedTotalSec)
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+      <div style={{
+        background: 'var(--bg-card)',
+        borderRadius: 8,
+        padding: 28,
+        width: 480,
+        maxWidth: '92vw',
+        boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
+      }}>
+        {status === 'running' && (
+          <>
+            <div style={{ textAlign: 'center', marginBottom: 20 }}>
+              <div style={{
+                width: 56, height: 56,
+                margin: '0 auto 12px',
+                border: '3px solid var(--border-subtle)',
+                borderTopColor: 'var(--accent)',
+                borderRadius: '50%',
+                animation: 'spin 1s linear infinite',
+              }} />
+              <h3 style={{ margin: 0, fontSize: 16, color: 'var(--text-primary)' }}>Analisando conversas</h3>
+              <p style={{ margin: '6px 0 0', fontSize: 13, color: 'var(--text-muted)' }}>
+                {leadsCount} {leadsCount === 1 ? 'conversa em análise' : 'conversas em análise'} via Claude Haiku
+              </p>
+            </div>
+
+            {/* Barra de progresso estimado */}
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>
+                <span>Tempo decorrido</span>
+                <strong style={{ color: 'var(--text-primary)' }}>{elapsedLabel}</strong>
+              </div>
+              <div style={{ height: 8, background: 'var(--bg-hover)', borderRadius: 4, overflow: 'hidden' }}>
+                <div style={{
+                  width: `${progressPct}%`, height: '100%',
+                  background: 'linear-gradient(90deg, var(--accent), var(--positive))',
+                  transition: 'width 0.4s ease',
+                }} />
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 6, textAlign: 'center' }}>
+                Estimativa: ~{Math.ceil(estimatedTotalSec / 60)} min total · IA processando em background
+              </div>
+            </div>
+
+            {/* Status steps */}
+            <div style={{ background: 'var(--bg-hover)', borderRadius: 6, padding: 12, fontSize: 12, color: 'var(--text-secondary)', marginBottom: 16 }}>
+              <Step done label="Estimativa de custo calculada" />
+              <Step done label="Lote de conversas selecionado" />
+              <Step active={!readyToRefresh} done={readyToRefresh} label="Analisando conversas (Haiku)" />
+              <Step active={readyToRefresh} label="Persistindo insights + alertas" muted={!readyToRefresh} />
+            </div>
+
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <button className="btn btn-secondary btn-sm" onClick={onClose}>
+                Fechar e continuar em segundo plano
+              </button>
+              <button className="btn btn-primary btn-sm" onClick={onRefresh} disabled={!readyToRefresh}>
+                {readyToRefresh ? 'Atualizar dashboard' : `Aguardando (${Math.max(0, Math.min(120, estimatedTotalSec) - elapsedSec)}s)`}
+              </button>
+            </div>
+          </>
+        )}
+
+        {status === 'rate_limited' && (
+          <>
+            <div style={{ textAlign: 'center', marginBottom: 16 }}>
+              <div style={{ fontSize: 40, marginBottom: 8 }}>⏱️</div>
+              <h3 style={{ margin: 0, fontSize: 16 }}>Rate limit ativo</h3>
+              <p style={{ margin: '8px 0 0', fontSize: 13, color: 'var(--text-muted)' }}>
+                Aguarde <strong>{retryAfter} min</strong> antes da próxima análise manual.
+              </p>
+              <p style={{ margin: '8px 0 0', fontSize: 12, color: 'var(--text-muted)' }}>
+                Limite: 1 análise on-demand a cada 30 min por conta.
+              </p>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'center' }}>
+              <button className="btn btn-primary btn-sm" onClick={onClose}>Entendi</button>
+            </div>
+          </>
+        )}
+
+        {status === 'error' && (
+          <>
+            <div style={{ textAlign: 'center', marginBottom: 16 }}>
+              <div style={{ fontSize: 40, marginBottom: 8, color: 'var(--negative)' }}>⚠</div>
+              <h3 style={{ margin: 0, fontSize: 16 }}>Erro ao iniciar análise</h3>
+              <p style={{ margin: '8px 0 0', fontSize: 13, color: 'var(--text-muted)' }}>{message}</p>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'center' }}>
+              <button className="btn btn-primary btn-sm" onClick={onClose}>Fechar</button>
+            </div>
+          </>
+        )}
+      </div>
+      <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
+    </div>
+  )
+}
+
+function Step({ done, active, muted, label }: { done?: boolean; active?: boolean; muted?: boolean; label: string }) {
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: 8, padding: '4px 0',
+      opacity: muted ? 0.4 : 1,
+    }}>
+      <span style={{
+        width: 16, height: 16, borderRadius: '50%',
+        background: done ? 'var(--positive)' : active ? 'var(--accent)' : 'var(--bg-card)',
+        border: '1px solid var(--border-subtle)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        color: 'white', fontSize: 10, fontWeight: 700,
+      }}>
+        {done ? '✓' : active ? '·' : ''}
+      </span>
+      <span>{label}</span>
     </div>
   )
 }
