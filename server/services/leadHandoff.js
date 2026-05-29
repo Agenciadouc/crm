@@ -93,11 +93,15 @@ export async function notifyAndOpenLead(leadId, attendantUserId, opts = {}) {
     }
 
     // ETAPA 1: Primeira msg pro lead via primary_instance do vendedor
-    // Skip se: opts.skipFirstMsg (manual sem checkbox), vendedor sem primary, mesma inst do lead, ja foi enviada
+    // Skip se: opts.skipFirstMsg (manual sem checkbox), vendedor sem primary, ja foi enviada,
+    // OU se mesma instancia E lead ja interagiu (caso Oxi: lead mandou inbound antes).
+    // Box Paper: mesma instancia MAS sem inbound (lead novo via planilha) → continua.
+    const hasInbound = db.prepare("SELECT 1 FROM messages WHERE lead_id = ? AND direction = 'inbound' LIMIT 1").get(lead.id)
+    const sameInstActiveLead = user.primary_instance_id === lead.instance_id && !!hasInbound
     const shouldSendFirstMsg = (
       !opts.skipFirstMsg &&
       user.primary_instance_id &&
-      user.primary_instance_id !== lead.instance_id &&  // skip se mesma inst (caso Oxi)
+      !sameInstActiveLead &&
       (!lead.first_msg_sent_at || opts.forceFirstMsg)
     )
 
@@ -127,8 +131,8 @@ export async function notifyAndOpenLead(leadId, attendantUserId, opts = {}) {
           }
         }
       }
-    } else if (user.primary_instance_id === lead.instance_id) {
-      console.log(`[Handoff] 1a msg SKIP lead=${lead.id} — mesma inst do vendedor (${user.name}) source=${opts.source || '?'}`)
+    } else if (sameInstActiveLead) {
+      console.log(`[Handoff] 1a msg SKIP lead=${lead.id} — mesma inst com inbound previo (caso Oxi) source=${opts.source || '?'}`)
     }
 
     // ETAPA 2: Notificacao pro vendedor (INDEPENDENTE da primeira msg)
