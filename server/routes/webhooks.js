@@ -47,7 +47,7 @@ function phoneCompareKey(p) {
   return d.length === 10 ? d : d.slice(-10) // fallback: ultimos 10 se formato desconhecido
 }
 
-function getOrCreateLead(accountId, phone, name, source, waJid, instanceId) {
+function getOrCreateLead(accountId, phone, name, source, waJid, instanceId, opts = {}) {
   phone = normalizePhone(phone)
 
   // ─── GATE: phone bloqueado nesta conta? Ignora silenciosamente. ───
@@ -124,17 +124,14 @@ function getOrCreateLead(accountId, phone, name, source, waJid, instanceId) {
 
   lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(result.lastInsertRowid)
 
-  // Lead handoff: se atribuiu via roleta/default, dispara 1a msg + notif (fire-and-forget)
-  if (attendantId) {
+  // Lead handoff: se atribuiu via roleta/default, dispara 1a msg + notif (fire-and-forget).
+  // Skipa se opts.noAutoHandoff (caller faz manualmente apos aplicar tags/mapping — caso /sheets).
+  if (attendantId && !opts.noAutoHandoff) {
     setImmediate(() => {
       notifyAndOpenLead(lead.id, attendantId, { source: 'webhook' })
         .catch(e => console.error('[Handoff webhook]', e.message))
     })
   }
-
-  // Bot welcome NAO eh disparado aqui — `source` no INSERT vem de body custom (LP_*, google_sheets, etc)
-  // e nunca eh literalmente 'sheets'. O trigger correto fica no webhook /sheets/:slug depois de
-  // aplicar tag automatica + regra de mapping (assim o atendente ja eh o bot na hora do welcome).
 
   return { lead, isNew: true }
 }
@@ -838,7 +835,9 @@ router.post('/sheets/:accountSlug', (req, res) => {
 
     if (!name && !phone) return res.status(400).json({ error: 'name ou phone obrigatorio' })
 
-    const { lead, isNew, blocked } = getOrCreateLead(account.id, phone, name, source, null)
+    // noAutoHandoff: webhook /sheets aplica tags+mapping DEPOIS de criar lead, entao centraliza
+    // o handoff no final (evita race entre setImmediate do getOrCreateLead e o do mapping).
+    const { lead, isNew, blocked } = getOrCreateLead(account.id, phone, name, source, null, null, { noAutoHandoff: true })
     if (blocked) { console.log(`[Webhook Sheets] phone ${phone} bloqueado, ignorando`); return res.json({ ok: true, blocked: true }) }
     if (!lead) return res.status(400).json({ error: 'Falha ao criar lead (sem funil configurado?)' })
 
@@ -894,6 +893,7 @@ router.post('/sheets/:accountSlug', (req, res) => {
     // Lookup de regra de roteamento por tag (tag_instance_mapping) — SOBRESCREVE attendant
     // mesmo se ja tinha vindo da roleta (porque a regra de tag tem prioridade).
     // So se aplica em lead NOVO (isNew) — evita re-rotear lead existente que volta pela planilha.
+    let mappingHandoffDispatched = false
     if (isNew && tagIdsToApply.length > 0) {
       for (const tagId of tagIdsToApply) {
         const mapping = db.prepare('SELECT instance_id, attendant_id FROM tag_instance_mapping WHERE account_id = ? AND tag_id = ?').get(account.id, tagId)
@@ -936,10 +936,27 @@ router.post('/sheets/:accountSlug', (req, res) => {
                   .catch(e => console.error('[Handoff sheets mapping]', e.message))
               }
             })
+            mappingHandoffDispatched = true
             break // primeira tag com mapping vence
           }
         }
       }
+    }
+
+    // Fallback: nenhum mapping de tag aplicado, mas lead novo com atendente da roleta.
+    // Dispara handoff (bot welcome + first_msg) na inst do attendant default.
+    if (isNew && !mappingHandoffDispatched && lead.attendant_id) {
+      setImmediate(async () => {
+        try {
+          await sendBotWelcomeForSheetsLead(lead.id, lead.instance_id || null)
+        } catch (e) {
+          console.error('[Bot Welcome sheets fallback]', e.message)
+        }
+        const updated = db.prepare('SELECT ai_first_msg_sent_at, first_msg_sent_at FROM leads WHERE id = ?').get(lead.id)
+        if (updated?.ai_first_msg_sent_at || updated?.first_msg_sent_at) return
+        notifyAndOpenLead(lead.id, lead.attendant_id, { source: 'sheets_default' })
+          .catch(e => console.error('[Handoff sheets default]', e.message))
+      })
     }
 
     // Auto-detect: lead veio de anuncio? Marca trabalha_anuncio=1 se houver sinal claro
