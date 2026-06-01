@@ -34,9 +34,171 @@ function renderTemplate(tpl, vars) {
     .replace(/\{\{funil\}\}/g, vars.funnel_name || '')
 }
 
-export async function sendViaInstance(instance, phone, text) {
-  const number = (phone || '').replace(/[^\d]/g, '').replace(/^(?!55)(\d{10,11})$/, '55$1')
+// ─── Pre-flight: valida se numero existe no WhatsApp via Evolution ─────────
+// Cache em memoria (5min TTL) pra evitar revalidar mesmo numero em rajada.
+// Map<string, { exists: true|false|null, expires: timestamp }>
+const _waNumberCache = new Map()
+const _CACHE_TTL_MS = 5 * 60 * 1000
+const _CACHE_MAX = 2000
+
+function _cachePut(key, exists) {
+  if (_waNumberCache.size > _CACHE_MAX) {
+    // LRU simples: limpa metade mais antiga
+    const half = Math.floor(_CACHE_MAX / 2)
+    const keys = Array.from(_waNumberCache.keys()).slice(0, half)
+    for (const k of keys) _waNumberCache.delete(k)
+  }
+  _waNumberCache.set(key, { exists, expires: Date.now() + _CACHE_TTL_MS })
+}
+function _cacheGet(key) {
+  const v = _waNumberCache.get(key)
+  if (!v) return undefined
+  if (Date.now() > v.expires) { _waNumberCache.delete(key); return undefined }
+  return v.exists
+}
+
+function _normalizePhone(phone) {
+  return (phone || '').replace(/[^\d]/g, '').replace(/^(?!55)(\d{10,11})$/, '55$1')
+}
+
+/**
+ * Valida 1 numero via Evolution. Cache 5min.
+ * Retorna: true (existe), false (nao existe), null (timeout/erro — assume valido pra nao bloquear envio).
+ */
+export async function checkWhatsAppNumber(instance, phone) {
+  const number = _normalizePhone(phone)
+  if (!number) return false
+  const cacheKey = `${instance.id}:${number}`
+  const cached = _cacheGet(cacheKey)
+  if (cached !== undefined) return cached
+
+  try {
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), 3000) // 3s timeout
+    const res = await fetch(`${instance.api_url}/chat/whatsappNumbers/${instance.instance_name}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'apikey': instance.api_key },
+      body: JSON.stringify({ numbers: [number] }),
+      signal: controller.signal,
+    })
+    clearTimeout(timer)
+    if (!res.ok) {
+      // 400/500 da Evolution = nao consegui validar; cacheia null curto pra evitar spam
+      _cachePut(cacheKey, null)
+      return null
+    }
+    const data = await res.json().catch(() => null)
+    // Evolution retorna array: [{ exists: bool, jid, number }]
+    if (Array.isArray(data) && data.length > 0) {
+      const exists = !!data[0].exists
+      _cachePut(cacheKey, exists)
+      return exists
+    }
+    _cachePut(cacheKey, null)
+    return null
+  } catch (e) {
+    // Timeout/network — assume valido (null) pra nao bloquear envio
+    return null
+  }
+}
+
+/**
+ * Valida lista de numeros de uma vez. Pra broadcasts.
+ * Retorna Map<phone_original, true|false|null>.
+ */
+export async function checkWhatsAppNumbersBulk(instance, phones) {
+  const result = new Map()
+  if (!phones || phones.length === 0) return result
+
+  // Dedup + normaliza
+  const normalizedToOriginal = new Map()
+  for (const p of phones) {
+    const n = _normalizePhone(p)
+    if (n && !normalizedToOriginal.has(n)) normalizedToOriginal.set(n, p)
+  }
+  const allNormalized = [...normalizedToOriginal.keys()]
+
+  // Pega o que ja ta em cache; consulta o resto
+  const toQuery = []
+  for (const n of allNormalized) {
+    const cached = _cacheGet(`${instance.id}:${n}`)
+    if (cached !== undefined) {
+      result.set(normalizedToOriginal.get(n), cached)
+    } else {
+      toQuery.push(n)
+    }
+  }
+
+  if (toQuery.length === 0) return result
+
+  try {
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), 15000) // 15s pra lista grande
+    const res = await fetch(`${instance.api_url}/chat/whatsappNumbers/${instance.instance_name}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'apikey': instance.api_key },
+      body: JSON.stringify({ numbers: toQuery }),
+      signal: controller.signal,
+    })
+    clearTimeout(timer)
+    if (!res.ok) {
+      // Nao consegui validar nenhum — marca todos como null
+      for (const n of toQuery) {
+        _cachePut(`${instance.id}:${n}`, null)
+        result.set(normalizedToOriginal.get(n), null)
+      }
+      return result
+    }
+    const data = await res.json().catch(() => null)
+    if (Array.isArray(data)) {
+      // Cria index por number normalizado
+      const byNumber = new Map()
+      for (const item of data) {
+        const num = String(item.number || '').replace(/[^\d]/g, '')
+        if (num) byNumber.set(num, !!item.exists)
+      }
+      for (const n of toQuery) {
+        const exists = byNumber.has(n) ? byNumber.get(n) : null
+        _cachePut(`${instance.id}:${n}`, exists)
+        result.set(normalizedToOriginal.get(n), exists)
+      }
+    } else {
+      for (const n of toQuery) {
+        _cachePut(`${instance.id}:${n}`, null)
+        result.set(normalizedToOriginal.get(n), null)
+      }
+    }
+    return result
+  } catch (e) {
+    for (const n of toQuery) result.set(normalizedToOriginal.get(n), null)
+    return result
+  }
+}
+
+/**
+ * Envia msg via Evolution com pre-flight de validacao de numero.
+ *
+ * @param {Object} instance
+ * @param {string} phone
+ * @param {string} text
+ * @param {Object} [opts]
+ * @param {boolean} [opts.skipValidation=false] - pula pre-flight (use quando ja validou antes)
+ * @returns {Promise<{ok: boolean, wamsgId: string|null, reason?: string, validationFailed?: boolean, raw?: object}>}
+ */
+export async function sendViaInstance(instance, phone, text, opts = {}) {
+  const number = _normalizePhone(phone)
   if (!number) return { ok: false, reason: 'phone vazio' }
+
+  // Pre-flight: valida numero (a menos que caller diga pra pular)
+  if (!opts.skipValidation) {
+    const exists = await checkWhatsAppNumber(instance, phone)
+    if (exists === false) {
+      console.log(`[Pre-flight] phone=${number} inst=${instance.instance_name} exists=false — bloqueando envio`)
+      return { ok: false, reason: 'number_not_on_whatsapp', validationFailed: true }
+    }
+    // exists === null (timeout/erro de validacao): segue mesmo assim
+  }
+
   try {
     const res = await fetch(`${instance.api_url}/message/sendText/${instance.instance_name}`, {
       method: 'POST',
@@ -44,7 +206,14 @@ export async function sendViaInstance(instance, phone, text) {
       body: JSON.stringify({ number, text, delay: 2000 }),
     })
     const data = await res.json().catch(() => ({}))
-    return { ok: !!data.key?.id, wamsgId: data.key?.id || null, raw: data }
+    if (!data.key?.id) {
+      // Evolution recusou — capta motivo se vier
+      const reason = data?.response?.message?.[0]?.exists === false
+        ? 'number_not_on_whatsapp'
+        : (data?.error || data?.message || `http_${res.status}`)
+      return { ok: false, reason: String(reason).substring(0, 200), raw: data }
+    }
+    return { ok: true, wamsgId: data.key.id, raw: data }
   } catch (e) {
     return { ok: false, reason: e.message }
   }

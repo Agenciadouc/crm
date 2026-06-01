@@ -417,6 +417,60 @@ function shouldRunWeeklyCoaching() {
   return (ranToday?.n || 0) === 0
 }
 
+// ─── Mark stale outbound messages as 'failed' ─────────────────────
+// Msg outbound marcada 'sent' que nao recebeu confirmacao delivered/read em 10min
+// vira 'failed' automaticamente. Cobre o caso "Evolution aceitou mas Whats nao entregou".
+// Tambem cobre broadcast_recipients pra dispari mostrarem ✗ corretamente.
+const STALE_MINUTES = 10
+function markStaleMessagesAsFailed() {
+  try {
+    // 1. messages outbound 'sent' antigas sem delivered_at -> failed
+    const msgUpdate = db.prepare(`
+      UPDATE messages
+      SET delivery_status = 'failed'
+      WHERE direction = 'outbound'
+        AND delivery_status = 'sent'
+        AND delivered_at IS NULL
+        AND read_at IS NULL
+        AND created_at < datetime('now', '-${STALE_MINUTES} minutes')
+    `).run()
+    // 2. broadcast_recipients 'sent' antigos sem confirmacao da msg correspondente -> failed
+    const brUpdate = db.prepare(`
+      UPDATE broadcast_recipients
+      SET status = 'failed',
+          error = COALESCE(error, '') || ' [stale_no_delivery_' || ? || 'min]'
+      WHERE status = 'sent'
+        AND sent_at < datetime('now', '-${STALE_MINUTES} minutes')
+        AND NOT EXISTS (
+          SELECT 1 FROM messages m
+          WHERE m.wa_msg_id = broadcast_recipients.wa_msg_id
+            AND (m.delivery_status = 'delivered' OR m.delivery_status = 'read')
+        )
+    `).run(STALE_MINUTES)
+    if (msgUpdate.changes > 0 || brUpdate.changes > 0) {
+      console.log(`[MarkStale] msgs=${msgUpdate.changes} broadcast_recipients=${brUpdate.changes} marcados failed (>${STALE_MINUTES}min sem delivered_at)`)
+      // Re-sincroniza failed_count e sent_count dos broadcasts afetados
+      if (brUpdate.changes > 0) {
+        db.prepare(`
+          UPDATE broadcasts SET
+            sent_count = (SELECT COUNT(*) FROM broadcast_recipients WHERE broadcast_id = broadcasts.id AND status = 'sent'),
+            failed_count = (SELECT COUNT(*) FROM broadcast_recipients WHERE broadcast_id = broadcasts.id AND status = 'failed')
+          WHERE id IN (SELECT DISTINCT broadcast_id FROM broadcast_recipients WHERE sent_at < datetime('now', '-${STALE_MINUTES} minutes'))
+        `).run()
+      }
+      // SSE broadcast pra UI atualizar
+      try {
+        const affectedAccounts = db.prepare("SELECT DISTINCT account_id FROM messages WHERE delivery_status = 'failed' AND created_at >= datetime('now', '-1 hour')").all()
+        for (const a of affectedAccounts) {
+          broadcastSSE(a.account_id, 'message:status', { batch_marked_failed: true })
+        }
+      } catch {}
+    }
+  } catch (e) {
+    console.error('[MarkStale] erro:', e.message)
+  }
+}
+
 // ─── Main tick (every 5 min) ─────────────────────────────────────
 async function tick() {
   try {
@@ -430,6 +484,8 @@ async function tick() {
     cleanupStaleQRCodes()
     // Re-register webhooks every tick to prevent stale webhooks
     await reRegisterWebhooks()
+    // Mark stale outbound msgs (sent ha > 10min sem delivered_at) -> failed
+    markStaleMessagesAsFailed()
     // Nightly analysis (roda so 1x por dia na janela 3h UTC)
     if (shouldRunNightly()) runNightlyAnalysis().catch(e => console.error('[Nightly]', e.message))
     // Weekly coaching (segunda 3h05-3h10 UTC)

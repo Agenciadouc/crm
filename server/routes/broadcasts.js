@@ -3,6 +3,7 @@ import fetch from 'node-fetch'
 import db from '../db.js'
 import { requireRole } from '../middleware/auth.js'
 import { broadcastSSE } from '../sse.js'
+import { sendViaInstance, checkWhatsAppNumbersBulk } from '../services/leadHandoff.js'
 
 const router = Router()
 
@@ -191,6 +192,35 @@ async function runBroadcastLoopInner(broadcastId) {
   // Usa offset baseado em sent_count + failed_count pra continuar de onde parou
   let processedCount = (broadcast.sent_count || 0) + (broadcast.failed_count || 0)
 
+  // ─── Pre-flight bulk: valida TODOS os recipients pendentes de uma vez no inicio.
+  // Numeros que nao tem WhatsApp viram 'failed' direto sem nem tentar sendText.
+  // Funciona SO se for o primeiro start do broadcast (sem retomada parcial). Em retomada
+  // o cache do checkWhatsAppNumbersBulk evita revalidar (TTL 5min).
+  try {
+    const pendingPhones = db.prepare("SELECT id, phone FROM broadcast_recipients WHERE broadcast_id = ? AND status = 'pending'").all(broadcastId)
+    if (pendingPhones.length > 0) {
+      const phoneList = pendingPhones.map(p => p.phone)
+      console.log(`[Broadcast Pre-flight] broadcast=${broadcastId} validando ${phoneList.length} numeros...`)
+      const validationMap = await checkWhatsAppNumbersBulk(instance, phoneList)
+      let preflightFailed = 0
+      for (const recipient of pendingPhones) {
+        const exists = validationMap.get(recipient.phone)
+        if (exists === false) {
+          db.prepare("UPDATE broadcast_recipients SET status = 'failed', error = ? WHERE id = ?").run('number_not_on_whatsapp', recipient.id)
+          db.prepare('UPDATE broadcasts SET failed_count = failed_count + 1 WHERE id = ?').run(broadcastId)
+          preflightFailed++
+        }
+      }
+      if (preflightFailed > 0) {
+        console.log(`[Broadcast Pre-flight] broadcast=${broadcastId} marcados ${preflightFailed} como failed (number_not_on_whatsapp)`)
+        broadcastSSE(broadcast.account_id, 'broadcast:progress', { id: broadcastId })
+      }
+    }
+  } catch (e) {
+    console.error(`[Broadcast Pre-flight] broadcast=${broadcastId} erro:`, e.message)
+    // Nao bloqueia o envio se validacao falhar — segue pro while normal
+  }
+
   while (true) {
     // Re-checa pausa manual a cada iteracao (user clicou pausar pelo UI)
     const liveBroadcast = db.prepare("SELECT status, paused_at, paused_reason FROM broadcasts WHERE id = ?").get(broadcastId)
@@ -226,21 +256,17 @@ async function runBroadcastLoopInner(broadcastId) {
         .replace(/\{\{cidade\}\}/g, lead?.city || '')
         .replace(/\{\{phone\}\}/g, lead?.phone || '')
         .replace(/\{\{telefone\}\}/g, lead?.phone || '')
-      const number = (r.phone || '').replace(/[^\d]/g, '').replace(/^(?!55)(\d{10,11})$/, '55$1')
+      // skipValidation=true porque o pre-flight bulk ja rodou antes do while.
+      // sendViaInstance trata normalizacao do numero, fetch e parse do retorno.
+      const sendRes = await sendViaInstance(liveInstance, r.phone, text, { skipValidation: true })
 
-      const sendRes = await fetch(`${liveInstance.api_url}/message/sendText/${liveInstance.instance_name}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'apikey': liveInstance.api_key },
-        body: JSON.stringify({ number, text }),
-      })
-      const data = await sendRes.json()
-
-      if (data.key?.id) {
-        db.prepare("UPDATE broadcast_recipients SET status = 'sent', wa_msg_id = ?, sent_at = datetime('now') WHERE id = ?").run(data.key.id, r.id)
+      if (sendRes.ok && sendRes.wamsgId) {
+        db.prepare("UPDATE broadcast_recipients SET status = 'sent', wa_msg_id = ?, sent_at = datetime('now') WHERE id = ?").run(sendRes.wamsgId, r.id)
         db.prepare("UPDATE leads SET last_broadcast_at = datetime('now') WHERE id = ?").run(r.lead_id)
         db.prepare('UPDATE broadcasts SET sent_count = sent_count + 1 WHERE id = ?').run(broadcastId)
       } else {
-        db.prepare("UPDATE broadcast_recipients SET status = 'failed', error = ? WHERE id = ?").run(JSON.stringify(data).substring(0, 500), r.id)
+        const errMsg = sendRes.reason || JSON.stringify(sendRes.raw || {}).substring(0, 500)
+        db.prepare("UPDATE broadcast_recipients SET status = 'failed', error = ? WHERE id = ?").run(errMsg, r.id)
         db.prepare('UPDATE broadcasts SET failed_count = failed_count + 1 WHERE id = ?').run(broadcastId)
       }
       processedCount++
