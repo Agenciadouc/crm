@@ -423,8 +423,8 @@ function shouldRunWeeklyCoaching() {
 // Detectamos pelo OUTCOME: se ultimas N msgs ficaram 'sent' sem 'delivered_at'
 // por mais de X min, considera fantasma e forca restart da instancia.
 const GHOST_MIN_MSGS = 3        // pelo menos N envios recentes pra avaliar
-const GHOST_MIN_AGE_MIN = 5     // envios com >5min sem delivered_at
-const GHOST_WINDOW_MIN = 30     // janela de analise: ultimas 30 min
+const GHOST_MIN_AGE_MIN = 2     // envios com >2min sem delivered_at (igual STALE)
+const GHOST_WINDOW_MIN = 15     // janela de analise: ultimas 15 min
 const _ghostRestartCooldown = new Map() // instance_id -> timestamp ultimo restart (cooldown 15min)
 
 async function detectGhostInstancesAndRestart() {
@@ -486,10 +486,13 @@ async function detectGhostInstancesAndRestart() {
 }
 
 // ─── Mark stale outbound messages as 'failed' ─────────────────────
-// Msg outbound marcada 'sent' que nao recebeu confirmacao delivered/read em 10min
+// Msg outbound marcada 'sent' que nao recebeu confirmacao delivered/read em STALE_MINUTES
 // vira 'failed' automaticamente. Cobre o caso "Evolution aceitou mas Whats nao entregou".
-// Tambem cobre broadcast_recipients pra dispari mostrarem ✗ corretamente.
-const STALE_MINUTES = 10
+//
+// 2min eh tempo seguro: WhatsApp confirma 'delivered' em segundos pra msgs reais.
+// Se destinatario estiver offline e voltar depois, webhook 'delivered' PROMOVE a msg
+// de volta pra 'delivered' automaticamente (rank em webhooks.js).
+const STALE_MINUTES = 2
 function markStaleMessagesAsFailed() {
   try {
     // 1. messages outbound 'sent' antigas sem delivered_at -> failed
@@ -582,6 +585,11 @@ async function pollTick() {
   } catch (err) {
     console.error('[Polling] Error:', err.message)
   }
+  // Roda a cada 30s (junto com pollMissedMessages): marca msgs stale como failed.
+  // STALE_MINUTES=2 entao feedback chega rapido. Cron de 1min do tick principal cobre extras.
+  try { markStaleMessagesAsFailed() } catch (e) { console.error('[MarkStale poll]', e.message) }
+  // Detector de instancia fantasma: tambem roda no poll de 30s pra detectar rapido.
+  try { await detectGhostInstancesAndRestart() } catch (e) { console.error('[GhostDetect poll]', e.message) }
 }
 
 export { pollTick as runPollNow }
