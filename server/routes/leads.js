@@ -5,6 +5,7 @@ import { requireRole } from '../middleware/auth.js'
 import { broadcastSSE } from '../sse.js'
 import { triggerCapiForStageChange } from '../services/metaCapi.js'
 import { notifyAndOpenLead } from '../services/leadHandoff.js'
+import { sendBotWelcomeForSheetsLead } from '../services/aiAgent.js'
 
 const router = Router()
 
@@ -618,13 +619,25 @@ router.put('/:id/assign', requireRole('super_admin', 'gerente'), (req, res) => {
   const updated = db.prepare('SELECT * FROM leads WHERE id = ?').get(lead.id)
   try { broadcastSSE(lead.account_id, 'lead:updated', updated) } catch {}
 
-  // Handoff: sempre dispara pra humanos (notif sempre, 1a msg opcional via checkbox)
-  if (attendant_id && !isBot) {
+  // Atribuicao: dispara saudacao do atendente conforme tipo (humano ou bot).
+  // checkbox "notify_attendant" controla envio da msg inicial em ambos os casos.
+  if (attendant_id) {
     setImmediate(() => {
-      notifyAndOpenLead(lead.id, attendant_id, {
-        source: 'manual_assign',
-        skipFirstMsg: !notify_attendant,  // checkbox controla SO a 1a msg; notif sempre vai
-      }).catch(e => console.error('[Handoff manual]', e.message))
+      if (isBot) {
+        // Bot atribuido + checkbox marcado -> dispara welcome Haiku (mesma funcao da planilha).
+        // Idempotencia via ai_first_msg_sent_at dentro de sendBotWelcomeForSheetsLead.
+        if (notify_attendant) {
+          sendBotWelcomeForSheetsLead(lead.id, updated.instance_id || lead.instance_id || null)
+            .catch(e => console.error('[Bot Welcome manual_assign]', e.message))
+        }
+        // Checkbox desmarcado: so atribui, bot fica esperando lead falar (sem msg disparada).
+      } else {
+        // Humano: fluxo existente intocado — first_msg_template da instancia do vendedor.
+        notifyAndOpenLead(lead.id, attendant_id, {
+          source: 'manual_assign',
+          skipFirstMsg: !notify_attendant,
+        }).catch(e => console.error('[Handoff manual]', e.message))
+      }
     })
   }
 

@@ -1764,9 +1764,14 @@ export default function Chat() {
                   style={{ marginTop: 3 }}
                 />
                 <span style={{ fontSize: 13 }}>
-                  <strong>Enviar mensagem inicial automática do novo atendente</strong>
+                  <strong>Disparar saudação automática do novo atendente</strong>
                   <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4, lineHeight: 1.5 }}>
-                    Se marcado: o sistema envia a msg de boas-vindas da instância do vendedor pro lead.
+                    Se marcado:
+                    <ul style={{ margin: '4px 0', paddingLeft: 16 }}>
+                      <li>Atendente <strong>humano</strong>: envia a "Mensagem inicial" configurada na instância dele</li>
+                      <li>Atendente <strong>bot</strong>: bot se apresenta gerando saudação via IA (Haiku)</li>
+                    </ul>
+                    Se este lead já recebeu saudação do bot antes, o sistema pula silenciosamente.
                     <br /><strong>A notificação ao vendedor é enviada de qualquer jeito</strong> (mesmo desmarcado).
                   </div>
                 </span>
