@@ -397,8 +397,12 @@ export default function Messages() {
                 </div>
 
                 <div className="form-group"><label>Nome do disparo</label><input className="input" value={newName} onChange={e => setNewName(e.target.value)} placeholder="Ex: Promo Marco 2026" /></div>
-                <div className="form-group"><label>Mensagem principal (use {'{{name}}'} pra nome do lead)</label>
-                  <textarea className="input" rows={3} value={newTemplate} onChange={e => setNewTemplate(e.target.value)} placeholder="Ola {{name}}, temos uma oferta especial..." />
+                <div className="form-group">
+                  <label>Mensagem principal</label>
+                  <textarea className="input" rows={3} value={newTemplate} onChange={e => setNewTemplate(e.target.value)} placeholder="Ola {{nome}}, temos uma oferta especial..." />
+                  <div style={{ fontSize: 11, color: '#9B96B0', marginTop: 4 }}>
+                    Variaveis disponiveis: <code style={{ color: '#FFB300' }}>{'{{nome}}'}</code> <code style={{ color: '#FFB300' }}>{'{{primeiro_nome}}'}</code> <code style={{ color: '#FFB300' }}>{'{{empresa}}'}</code> <code style={{ color: '#FFB300' }}>{'{{cidade}}'}</code> <code style={{ color: '#FFB300' }}>{'{{telefone}}'}</code>
+                  </div>
                 </div>
 
                 {/* Variacoes — minimo MIN_VARIATIONS - 1 = 2 */}

@@ -451,6 +451,54 @@ addColumnIfNotExists('broadcasts', 'paused_at', 'TEXT')
 addColumnIfNotExists('broadcasts', 'paused_reason', 'TEXT')
 addColumnIfNotExists('broadcasts', 'started_at', 'TEXT')
 
+// Migracao: broadcasts.status CHECK precisa incluir 'cancelled' (botao Parar no UI).
+// SQLite nao permite ALTER CHECK — recria tabela. Idempotente: so roda se 'cancelled' nao for aceito.
+try {
+  const testCancel = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='broadcasts'").get()
+  if (testCancel && !testCancel.sql.includes("'cancelled'")) {
+    console.log("[DB] Migracao: broadcasts.status CHECK + 'cancelled'")
+    db.pragma('foreign_keys = OFF')
+    db.exec(`
+      CREATE TABLE broadcasts_new (
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        account_id      INTEGER NOT NULL,
+        name            TEXT NOT NULL,
+        message_template TEXT NOT NULL,
+        media_url       TEXT,
+        status          TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'scheduled', 'sending', 'completed', 'failed', 'cancelled')),
+        scheduled_at    TEXT,
+        sent_count      INTEGER NOT NULL DEFAULT 0,
+        failed_count    INTEGER NOT NULL DEFAULT 0,
+        total_count     INTEGER NOT NULL DEFAULT 0,
+        created_by      INTEGER,
+        created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+        completed_at    TEXT,
+        message_variations TEXT,
+        delay_seconds   INTEGER NOT NULL DEFAULT 3,
+        instance_id     INTEGER,
+        paused_at       TEXT,
+        paused_reason   TEXT,
+        started_at      TEXT,
+        FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE,
+        FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL,
+        FOREIGN KEY (instance_id) REFERENCES whatsapp_instances(id) ON DELETE SET NULL
+      );
+      INSERT INTO broadcasts_new
+        (id, account_id, name, message_template, media_url, status, scheduled_at, sent_count, failed_count, total_count, created_by, created_at, completed_at, message_variations, delay_seconds, instance_id, paused_at, paused_reason, started_at)
+      SELECT id, account_id, name, message_template, media_url, status, scheduled_at, sent_count, failed_count, total_count, created_by, created_at, completed_at, message_variations, COALESCE(delay_seconds, 3), instance_id, paused_at, paused_reason, started_at
+      FROM broadcasts;
+      DROP TABLE broadcasts;
+      ALTER TABLE broadcasts_new RENAME TO broadcasts;
+      CREATE INDEX IF NOT EXISTS idx_broadcasts_scheduled ON broadcasts(status, scheduled_at);
+    `)
+    db.pragma('foreign_keys = ON')
+    console.log("[DB] Migracao broadcasts concluida")
+  }
+} catch (e) {
+  console.error("[DB] Migracao broadcasts FALHOU:", e.message)
+  try { db.pragma('foreign_keys = ON') } catch {}
+}
+
 // ─── Multi-instance routing (decide which WhatsApp number to use when sending)
 // leads.last_instance_id: ultima instancia que conversou com este lead (origem ou recepcao)
 addColumnIfNotExists('leads', 'last_instance_id', 'INTEGER REFERENCES whatsapp_instances(id) ON DELETE SET NULL')
