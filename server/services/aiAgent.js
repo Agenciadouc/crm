@@ -688,3 +688,63 @@ REGRAS:
     console.error(`[Bot Welcome] exception lead=${leadId}:`, err.message)
   }
 }
+
+// ─── replayLastMessagesForAgent ──────────────────────────────────────────
+// Apos reativar agente, processa a ULTIMA msg inbound pendente de cada lead
+// que ficou sem resposta durante a pausa. Fire-and-forget com setTimeout
+// espacado 500ms entre cada chamada (evita burst de Haiku/Evolution).
+//
+// Lead considerado pendente:
+//  - attendant_id aponta pro user-bot do agente
+//  - ativo, nao arquivado, nao bloqueado
+//  - ai_handed_off_at IS NULL (bot ainda eh responsavel)
+//  - tem msg inbound depois de pausedAt
+//  - nao houve outbound depois da ultima inbound
+//
+// Limite: 30 leads por reativacao (protege budget Haiku contra avalanche).
+export async function replayLastMessagesForAgent(agentId, pausedAt) {
+  const agent = db.prepare('SELECT id, account_id, user_id FROM ai_agents WHERE id = ?').get(agentId)
+  if (!agent || !agent.user_id) return { ok: false, reason: 'no_agent_user' }
+  if (!pausedAt) return { ok: false, reason: 'no_paused_at' }
+
+  const pendingLeads = db.prepare(`
+    SELECT l.id as lead_id, l.instance_id,
+      (SELECT content FROM messages WHERE lead_id = l.id AND direction = 'inbound' ORDER BY id DESC LIMIT 1) as last_content,
+      (SELECT media_type FROM messages WHERE lead_id = l.id AND direction = 'inbound' ORDER BY id DESC LIMIT 1) as last_media_type
+    FROM leads l
+    WHERE l.account_id = ?
+      AND l.attendant_id = ?
+      AND l.is_active = 1
+      AND COALESCE(l.is_archived, 0) = 0
+      AND COALESCE(l.is_blocked, 0) = 0
+      AND l.ai_handed_off_at IS NULL
+      AND EXISTS (
+        SELECT 1 FROM messages m
+        WHERE m.lead_id = l.id AND m.direction = 'inbound'
+          AND m.created_at >= ?
+          AND m.id > COALESCE(
+            (SELECT MAX(id) FROM messages WHERE lead_id = l.id AND direction = 'outbound'),
+            0
+          )
+      )
+    ORDER BY (SELECT MAX(created_at) FROM messages WHERE lead_id = l.id) DESC
+    LIMIT 30
+  `).all(agent.account_id, agent.user_id, pausedAt)
+
+  console.log(`[Bot Replay] agent=${agentId} leadsPendentes=${pendingLeads.length}`)
+
+  let dispatched = 0
+  for (const row of pendingLeads) {
+    if (!row.last_content && row.last_media_type !== 'audio') continue
+    const freshLead = db.prepare('SELECT * FROM leads WHERE id = ?').get(row.lead_id)
+    if (!freshLead) continue
+    const delayMs = dispatched * 500
+    setTimeout(() => {
+      processInboundMessage(freshLead, row.last_content || '', row.last_media_type, row.instance_id)
+        .catch(e => console.error(`[Bot Replay] err lead=${row.lead_id}:`, e.message))
+    }, delayMs)
+    dispatched++
+  }
+
+  return { ok: true, dispatched, total: pendingLeads.length }
+}

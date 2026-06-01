@@ -1,10 +1,10 @@
 import { useState, useEffect } from 'react'
 import { useAccount } from '../context/AccountContext'
 import {
-  fetchAgents, deleteAgent,
+  fetchAgents, deleteAgent, toggleAgentActive,
   type Agent,
 } from '../lib/api'
-import { Bot, Plus, Edit3, Trash2, Activity, AlertCircle } from 'lucide-react'
+import { Bot, Plus, Edit3, Trash2, Activity, AlertCircle, Power, PowerOff, X } from 'lucide-react'
 import AgentEditorModal from '../components/AgentEditorModal'
 
 export default function Agents() {
@@ -13,6 +13,15 @@ export default function Agents() {
   const [featureEnabled, setFeatureEnabled] = useState(false)
   const [loading, setLoading] = useState(true)
   const [editingId, setEditingId] = useState<'new' | number | null>(null)
+  const [togglingId, setTogglingId] = useState<number | null>(null)
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'info' } | null>(null)
+
+  // Auto-dismiss do toast
+  useEffect(() => {
+    if (!toast) return
+    const t = setTimeout(() => setToast(null), 6000)
+    return () => clearTimeout(t)
+  }, [toast])
 
   const load = () => {
     if (!accountId) return
@@ -28,6 +37,33 @@ export default function Agents() {
     if (!confirm(`Apagar agente "${a.name}"? Os leads atendidos por ele ficam com o histórico, mas o bot não responde mais.`)) return
     try { await deleteAgent(a.id, accountId); load() }
     catch (e: any) { alert('Erro: ' + (e?.message || '')) }
+  }
+
+  const handleToggle = async (a: Agent) => {
+    if (!accountId || togglingId === a.id) return
+    if (a.is_active) {
+      if (!confirm(`Pausar "${a.name}"?\n\nO bot vai parar de responder mensagens. Quando você reativar, ele responde a última msg de cada lead que ficou pendente.`)) return
+    }
+    setTogglingId(a.id)
+    try {
+      const r = await toggleAgentActive(a.id, accountId)
+      setAgents(prev => prev.map(x => x.id === a.id ? { ...x, is_active: r.is_active } : x))
+      if (r.is_active === 1) {
+        if (r.replay && r.replay.total > 0) {
+          const skipped = r.replay.total - r.replay.will_replay
+          const skipMsg = skipped > 0 ? ` ${skipped} ultrapassaram o limite (30/clique) e ficarão pro atendente.` : ''
+          setToast({ type: 'info', message: `${a.name} reativado. Bot vai responder a última msg de ${r.replay.will_replay} leads pendentes em background.${skipMsg}` })
+        } else {
+          setToast({ type: 'success', message: `${a.name} reativado` })
+        }
+      } else {
+        setToast({ type: 'success', message: `${a.name} pausado` })
+      }
+    } catch (e: any) {
+      alert('Erro: ' + (e?.message || ''))
+    } finally {
+      setTogglingId(null)
+    }
   }
 
   if (!accountId) return <div className="loading-container"><span>Selecione uma conta</span></div>
@@ -77,7 +113,13 @@ export default function Agents() {
                         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                           <Bot size={16} style={{ color: '#FFB300' }} />
                           <strong style={{ fontSize: 14 }}>{a.name}</strong>
-                          {!a.is_active && <span style={{ fontSize: 10, color: '#FF6B6B' }}>(inativo)</span>}
+                          {!a.is_active && (
+                            <span style={{
+                              fontSize: 10, padding: '2px 6px', borderRadius: 3,
+                              background: 'rgba(255,107,107,0.15)', color: '#FF6B6B',
+                              fontWeight: 700, letterSpacing: 0.4,
+                            }}>⏸ PAUSADO</span>
+                          )}
                         </div>
                         <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 2 }}>
                           <Activity size={9} style={{ verticalAlign: -1 }} /> {a.activation_mode}
@@ -85,6 +127,23 @@ export default function Agents() {
                         </div>
                       </div>
                       <div style={{ display: 'flex', gap: 4 }}>
+                        <button
+                          className="btn btn-sm btn-icon"
+                          style={{
+                            background: a.is_active ? 'rgba(52,199,89,0.15)' : 'rgba(255,107,107,0.15)',
+                            border: `1px solid ${a.is_active ? 'rgba(52,199,89,0.4)' : 'rgba(255,107,107,0.4)'}`,
+                            color: a.is_active ? '#34C759' : '#FF6B6B',
+                            cursor: togglingId === a.id ? 'wait' : 'pointer',
+                            opacity: togglingId === a.id ? 0.6 : 1,
+                          }}
+                          title={a.is_active
+                            ? 'Pausar bot (vai parar de responder)'
+                            : 'Reativar bot (responde a última msg dos leads que mandaram durante a pausa)'}
+                          onClick={() => handleToggle(a)}
+                          disabled={togglingId === a.id}
+                        >
+                          {a.is_active ? <Power size={11} /> : <PowerOff size={11} />}
+                        </button>
                         <button className="btn btn-secondary btn-sm btn-icon" onClick={() => setEditingId(a.id)} title="Editar"><Edit3 size={11} /></button>
                         <button className="btn btn-danger btn-sm btn-icon" onClick={() => handleDelete(a)} title="Apagar"><Trash2 size={11} /></button>
                       </div>
@@ -121,6 +180,24 @@ export default function Agents() {
           onClose={() => setEditingId(null)}
           onSaved={() => { setEditingId(null); load() }}
         />
+      )}
+
+      {toast && (
+        <div style={{
+          position: 'fixed', bottom: 24, right: 24, zIndex: 1100,
+          background: 'var(--bg-card)',
+          borderLeft: `3px solid ${toast.type === 'success' ? '#34C759' : 'var(--info, #2196F3)'}`,
+          borderRadius: 6, padding: '12px 16px',
+          boxShadow: '0 4px 16px rgba(0,0,0,0.2)',
+          fontSize: 13, maxWidth: 400,
+          color: 'var(--text-primary)',
+          display: 'flex', alignItems: 'flex-start', gap: 8,
+        }}>
+          <span style={{ flex: 1, lineHeight: 1.45 }}>{toast.message}</span>
+          <button onClick={() => setToast(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', flexShrink: 0 }}>
+            <X size={14} />
+          </button>
+        </div>
       )}
     </div>
   )

@@ -900,6 +900,8 @@ try {
 // Welcome msg pra leads novos de planilha (Haiku-gerada) — opt-in por agente.
 addColumnIfNotExists('ai_agents', 'send_welcome_for_sheets_leads', 'INTEGER NOT NULL DEFAULT 0')
 addColumnIfNotExists('ai_agents', 'welcome_extra_instructions', 'TEXT')
+// Timestamp da pausa (toggle do bot). NULL = ativo. Usado pra replay da ultima msg quando reativa.
+addColumnIfNotExists('ai_agents', 'paused_at', 'TEXT')
 
 // Status WhatsApp por msg (estilo WhatsApp Web — sent/delivered/read).
 // `delivery_status` default 'sent' eh compativel com msgs antigas (que ja sao consideradas enviadas).

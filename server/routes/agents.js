@@ -3,6 +3,7 @@ import bcrypt from 'bcryptjs'
 import db from '../db.js'
 import { requireRole } from '../middleware/auth.js'
 import { callHaiku } from '../services/anthropicClient.js'
+import { replayLastMessagesForAgent } from '../services/aiAgent.js'
 
 const router = Router()
 
@@ -270,6 +271,67 @@ router.put('/:id', requireRole('super_admin', 'gerente'), (req, res) => {
     console.error('[PUT /agents/:id] error:', e.message)
     res.status(500).json({ error: 'Erro ao editar agente: ' + e.message })
   }
+})
+
+// Toggle pausar/reativar bot — atalho rapido sem precisar carregar/enviar o agente inteiro.
+// Pausar: marca paused_at + desativa user-bot (nao recebe leads novos).
+// Reativar: limpa paused_at + reativa user-bot + dispara replay da ultima msg pendente de cada lead.
+router.patch('/:id/toggle-active', requireRole('super_admin', 'gerente'), (req, res) => {
+  const agent = db.prepare('SELECT id, account_id, user_id, is_active, paused_at FROM ai_agents WHERE id = ?').get(req.params.id)
+  if (!agent) return res.status(404).json({ error: 'Agente nao encontrado' })
+
+  // Multi-tenant: gerente so pode togglar agentes da propria conta. super_admin pode tudo.
+  if (req.user.role === 'gerente' && agent.account_id !== req.user.account_id) {
+    return res.status(403).json({ error: 'Sem permissao' })
+  }
+
+  if (agent.is_active) {
+    // Pausando
+    db.prepare("UPDATE ai_agents SET is_active = 0, paused_at = datetime('now'), updated_at = datetime('now') WHERE id = ?").run(agent.id)
+    if (agent.user_id) {
+      db.prepare("UPDATE users SET is_active = 0 WHERE id = ?").run(agent.user_id)
+    }
+    console.log(`[Bot Toggle] PAUSED agent=${agent.id} by user=${req.user.id}`)
+    return res.json({ ok: true, is_active: 0 })
+  }
+
+  // Reativando — guarda paused_at antes de zerar pro replay usar
+  const pausedAt = agent.paused_at
+  db.prepare("UPDATE ai_agents SET is_active = 1, paused_at = NULL, updated_at = datetime('now') WHERE id = ?").run(agent.id)
+  if (agent.user_id) {
+    db.prepare("UPDATE users SET is_active = 1 WHERE id = ?").run(agent.user_id)
+  }
+  console.log(`[Bot Toggle] REACTIVATED agent=${agent.id} by user=${req.user.id} pausedAt=${pausedAt}`)
+
+  let replayInfo = { total: 0, will_replay: 0 }
+  if (pausedAt && agent.user_id) {
+    // Conta leads pendentes pra response imediato (UI mostra no toast)
+    const countRow = db.prepare(`
+      SELECT COUNT(DISTINCT l.id) as n FROM leads l
+      WHERE l.account_id = ? AND l.attendant_id = ?
+        AND l.is_active = 1 AND COALESCE(l.is_archived, 0) = 0 AND COALESCE(l.is_blocked, 0) = 0
+        AND l.ai_handed_off_at IS NULL
+        AND EXISTS (
+          SELECT 1 FROM messages m WHERE m.lead_id = l.id AND m.direction = 'inbound'
+            AND m.created_at >= ?
+            AND m.id > COALESCE((SELECT MAX(id) FROM messages WHERE lead_id = l.id AND direction = 'outbound'), 0)
+        )
+    `).get(agent.account_id, agent.user_id, pausedAt)
+    replayInfo.total = countRow?.n || 0
+    replayInfo.will_replay = Math.min(30, replayInfo.total)
+
+    // Replay em background pra nao bloquear o response
+    setImmediate(async () => {
+      try {
+        const r = await replayLastMessagesForAgent(agent.id, pausedAt)
+        console.log(`[Bot Reactivated] agent=${agent.id} replay:`, r)
+      } catch (e) {
+        console.error('[Bot Reactivated] replay erro:', e.message)
+      }
+    })
+  }
+
+  res.json({ ok: true, is_active: 1, replay: replayInfo })
 })
 
 // Soft delete (is_active=0). Mantem historico em ai_agent_token_log.
