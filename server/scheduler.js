@@ -489,13 +489,17 @@ async function detectGhostInstancesAndRestart() {
 // Msg outbound marcada 'sent' que nao recebeu confirmacao delivered/read em STALE_MINUTES
 // vira 'failed' automaticamente. Cobre o caso "Evolution aceitou mas Whats nao entregou".
 //
-// 2min eh tempo seguro: WhatsApp confirma 'delivered' em segundos pra msgs reais.
+// 15min eh tolerante: alguns webhooks de status do Evolution atrasam em VPS sob carga.
+// Threshold menor (2min) gerava falsos positivos — msgs entregues marcadas X.
+// Guard adicional: se o lead respondeu APOS a msg outbound, ela claramente foi recebida
+// (cliente nao responde fantasma), entao NUNCA marca como failed.
 // Se destinatario estiver offline e voltar depois, webhook 'delivered' PROMOVE a msg
 // de volta pra 'delivered' automaticamente (rank em webhooks.js).
-const STALE_MINUTES = 2
+const STALE_MINUTES = 15
 function markStaleMessagesAsFailed() {
   try {
     // 1. messages outbound 'sent' antigas sem delivered_at -> failed
+    //    SKIP se houve inbound do MESMO lead APOS a msg (prova de entrega: cliente respondeu)
     const msgUpdate = db.prepare(`
       UPDATE messages
       SET delivery_status = 'failed'
@@ -504,8 +508,15 @@ function markStaleMessagesAsFailed() {
         AND delivered_at IS NULL
         AND read_at IS NULL
         AND created_at < datetime('now', '-${STALE_MINUTES} minutes')
+        AND NOT EXISTS (
+          SELECT 1 FROM messages m_in
+          WHERE m_in.lead_id = messages.lead_id
+            AND m_in.direction = 'inbound'
+            AND m_in.created_at > messages.created_at
+        )
     `).run()
     // 2. broadcast_recipients 'sent' antigos sem confirmacao da msg correspondente -> failed
+    //    Mesmo guard: skip se o lead respondeu apos receber.
     const brUpdate = db.prepare(`
       UPDATE broadcast_recipients
       SET status = 'failed',
@@ -516,6 +527,12 @@ function markStaleMessagesAsFailed() {
           SELECT 1 FROM messages m
           WHERE m.wa_msg_id = broadcast_recipients.wa_msg_id
             AND (m.delivery_status = 'delivered' OR m.delivery_status = 'read')
+        )
+        AND NOT EXISTS (
+          SELECT 1 FROM messages m_in
+          WHERE m_in.lead_id = broadcast_recipients.lead_id
+            AND m_in.direction = 'inbound'
+            AND m_in.created_at > broadcast_recipients.sent_at
         )
     `).run(STALE_MINUTES)
     if (msgUpdate.changes > 0 || brUpdate.changes > 0) {
@@ -679,8 +696,63 @@ function scheduleDailyHealthCheck() {
   }, msUntilNext)
 }
 
+// Revert falsos positivos do cron antigo (STALE_MINUTES=2): msgs marcadas 'failed'
+// que tem inbound posterior do mesmo lead (= prova que foram entregues).
+// Roda 1x na inicializacao pra limpar o estrago do threshold de 2min.
+function revertFalseFailures() {
+  try {
+    const r1 = db.prepare(`
+      UPDATE messages
+      SET delivery_status = 'delivered',
+          delivered_at = COALESCE(delivered_at, datetime('now'))
+      WHERE direction = 'outbound'
+        AND delivery_status = 'failed'
+        AND wa_msg_id IS NOT NULL
+        AND EXISTS (
+          SELECT 1 FROM messages m_in
+          WHERE m_in.lead_id = messages.lead_id
+            AND m_in.direction = 'inbound'
+            AND m_in.created_at > messages.created_at
+        )
+    `).run()
+    const r2 = db.prepare(`
+      UPDATE broadcast_recipients
+      SET status = 'sent',
+          error = NULL
+      WHERE status = 'failed'
+        AND wa_msg_id IS NOT NULL
+        AND error LIKE '%stale_no_delivery%'
+        AND EXISTS (
+          SELECT 1 FROM messages m_in
+          WHERE m_in.lead_id = broadcast_recipients.lead_id
+            AND m_in.direction = 'inbound'
+            AND m_in.created_at > broadcast_recipients.sent_at
+        )
+    `).run()
+    if (r1.changes > 0 || r2.changes > 0) {
+      console.log(`[RevertFalseFailures] revertidas msgs=${r1.changes} broadcast_recipients=${r2.changes} (lead respondeu apos envio)`)
+      // Re-sincroniza contadores de broadcasts afetados
+      if (r2.changes > 0) {
+        db.prepare(`
+          UPDATE broadcasts SET
+            sent_count = (SELECT COUNT(*) FROM broadcast_recipients WHERE broadcast_id = broadcasts.id AND status = 'sent'),
+            failed_count = (SELECT COUNT(*) FROM broadcast_recipients WHERE broadcast_id = broadcasts.id AND status = 'failed')
+        `).run()
+        // Se broadcast tinha sido marcado 'failed' por 100% recipients, volta pra 'completed'
+        db.prepare(`
+          UPDATE broadcasts SET status = 'completed'
+          WHERE status = 'failed' AND sent_count > 0
+        `).run()
+      }
+    }
+  } catch (e) {
+    console.error('[RevertFalseFailures] erro:', e.message)
+  }
+}
+
 export function startScheduler() {
   console.log('[Scheduler] Started — main every 5 min, polling every 30s, daily health 05h BRT')
+  try { revertFalseFailures() } catch (e) { console.error('[RevertFalseFailures]', e.message) }
   tick()
   setInterval(tick, INTERVAL_MS)
   // Polling runs aggressively (30s) so missed messages surface quickly when webhook misbehaves
