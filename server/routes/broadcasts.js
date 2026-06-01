@@ -192,6 +192,14 @@ async function runBroadcastLoopInner(broadcastId) {
   let processedCount = (broadcast.sent_count || 0) + (broadcast.failed_count || 0)
 
   while (true) {
+    // Re-checa pausa manual a cada iteracao (user clicou pausar pelo UI)
+    const liveBroadcast = db.prepare("SELECT status, paused_at, paused_reason FROM broadcasts WHERE id = ?").get(broadcastId)
+    if (!liveBroadcast || liveBroadcast.status !== 'sending') return // canceladado/completed
+    if (liveBroadcast.paused_at) {
+      broadcastSSE(broadcast.account_id, 'broadcast:paused', { id: broadcastId, reason: liveBroadcast.paused_reason })
+      return
+    }
+
     // Re-checa instancia conectada antes de cada envio
     const liveInstance = db.prepare('SELECT * FROM whatsapp_instances WHERE id = ?').get(broadcast.instance_id)
     if (!liveInstance || liveInstance.status !== 'connected') {
@@ -206,9 +214,18 @@ async function runBroadcastLoopInner(broadcastId) {
     if (!r) break // todos processados
 
     try {
-      const lead = db.prepare('SELECT name FROM leads WHERE id = ?').get(r.lead_id)
+      const lead = db.prepare('SELECT name, phone, empresa, city FROM leads WHERE id = ?').get(r.lead_id)
       const template = allTemplates[processedCount % allTemplates.length]
-      const text = template.replace(/\{\{name\}\}/g, lead?.name || 'Cliente')
+      const firstName = (lead?.name || '').split(' ')[0] || ''
+      const text = String(template)
+        .replace(/\{\{name\}\}/g, lead?.name || 'Cliente')
+        .replace(/\{\{nome\}\}/g, lead?.name || 'Cliente')
+        .replace(/\{\{primeiro_nome\}\}/g, firstName || 'Cliente')
+        .replace(/\{\{first_name\}\}/g, firstName || 'Cliente')
+        .replace(/\{\{empresa\}\}/g, lead?.empresa || '')
+        .replace(/\{\{cidade\}\}/g, lead?.city || '')
+        .replace(/\{\{phone\}\}/g, lead?.phone || '')
+        .replace(/\{\{telefone\}\}/g, lead?.phone || '')
       const number = (r.phone || '').replace(/[^\d]/g, '').replace(/^(?!55)(\d{10,11})$/, '55$1')
 
       const sendRes = await fetch(`${liveInstance.api_url}/message/sendText/${liveInstance.instance_name}`, {
@@ -287,6 +304,31 @@ export function recoverPendingBroadcasts() {
     runBroadcastLoop(b.id).catch(err => console.error('[Broadcast] Boot recovery error:', err))
   }
 }
+
+// Cancelar disparo em andamento (ou pausado) — para definitivamente, marca como 'cancelled'.
+// Recipients pending continuam pendentes na tabela (auditoria) mas nao sao mais processados.
+router.post('/:id/cancel', requireRole('super_admin', 'gerente'), (req, res) => {
+  const broadcast = db.prepare('SELECT * FROM broadcasts WHERE id = ? AND account_id = ?').get(req.params.id, req.accountId)
+  if (!broadcast) return res.status(404).json({ error: 'Disparo nao encontrado' })
+  if (!['sending', 'paused'].includes(broadcast.status) && !(broadcast.status === 'sending' && broadcast.paused_at)) {
+    if (broadcast.status !== 'sending') return res.status(400).json({ error: 'Disparo nao esta em andamento nem pausado (status: ' + broadcast.status + ')' })
+  }
+  db.prepare("UPDATE broadcasts SET status = 'cancelled', paused_at = NULL, paused_reason = NULL, completed_at = datetime('now') WHERE id = ?").run(broadcast.id)
+  const updated = db.prepare('SELECT * FROM broadcasts WHERE id = ?').get(broadcast.id)
+  broadcastSSE(broadcast.account_id, 'broadcast:cancelled', { id: broadcast.id })
+  res.json({ broadcast: updated })
+})
+
+// Endpoint manual de pausar (user clicou pra pausar no UI)
+router.post('/:id/pause', requireRole('super_admin', 'gerente'), (req, res) => {
+  const broadcast = db.prepare('SELECT * FROM broadcasts WHERE id = ? AND account_id = ?').get(req.params.id, req.accountId)
+  if (!broadcast) return res.status(404).json({ error: 'Disparo nao encontrado' })
+  if (broadcast.status !== 'sending') return res.status(400).json({ error: 'Disparo nao esta em andamento (status: ' + broadcast.status + ')' })
+  if (broadcast.paused_at) return res.status(400).json({ error: 'Disparo ja esta pausado' })
+  db.prepare("UPDATE broadcasts SET paused_at = datetime('now'), paused_reason = ? WHERE id = ?").run('manual_user', broadcast.id)
+  const updated = db.prepare('SELECT * FROM broadcasts WHERE id = ?').get(broadcast.id)
+  res.json({ broadcast: updated })
+})
 
 // Endpoint manual de retomar (caso queira forcar)
 router.post('/:id/resume', requireRole('super_admin', 'gerente'), async (req, res) => {

@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAccount } from '../context/AccountContext'
-import { fetchBroadcasts, fetchLeads, createBroadcast, sendBroadcast, cancelScheduledBroadcast, fetchTags, fetchFunnels, fetchWhatsAppInstances, fetchBroadcastCloneData, fetchUsers, type Broadcast, type Lead, type Tag, type Funnel, type WhatsAppInstance, type User } from '../lib/api'
-import { MessageCircle, Plus, Send, CheckCircle, Clock, Trash2, Filter, Tag as TagIcon, GitBranch, Smartphone, AlertTriangle, Eye, PauseCircle, Copy, UserCog } from 'lucide-react'
+import { fetchBroadcasts, fetchLeads, createBroadcast, sendBroadcast, cancelScheduledBroadcast, pauseBroadcast, resumeBroadcast, cancelBroadcast, fetchTags, fetchFunnels, fetchWhatsAppInstances, fetchBroadcastCloneData, fetchUsers, type Broadcast, type Lead, type Tag, type Funnel, type WhatsAppInstance, type User } from '../lib/api'
+import { MessageCircle, Plus, Send, CheckCircle, Clock, Trash2, Filter, Tag as TagIcon, GitBranch, Smartphone, AlertTriangle, Eye, PauseCircle, Copy, UserCog, Pause, Play, XCircle, Square } from 'lucide-react'
 import { parseSqlDate } from '../lib/dates'
 
 const STATUS_MAP: Record<string, { label: string; color: string }> = {
@@ -12,6 +12,7 @@ const STATUS_MAP: Record<string, { label: string; color: string }> = {
   paused: { label: 'Pausado', color: '#FBBC04' },
   completed: { label: 'Concluido', color: '#34C759' },
   failed: { label: 'Falhou', color: '#FF6B6B' },
+  cancelled: { label: 'Cancelado', color: '#FF6B6B' },
 }
 
 const MIN_VARIATIONS = 3 // total messages (principal + 2 variations)
@@ -204,6 +205,26 @@ export default function Messages() {
     catch (e: any) { alert('Erro: ' + e.message) }
   }
 
+  const handlePause = async (b: Broadcast) => {
+    if (!accountId) return
+    if (!confirm(`Pausar "${b.name}"?\n\nO disparo para imediatamente. Voce pode retomar depois clicando no botao Play.`)) return
+    try { await pauseBroadcast(b.id, accountId); load() }
+    catch (e: any) { alert('Erro: ' + e.message) }
+  }
+
+  const handleResume = async (b: Broadcast) => {
+    if (!accountId) return
+    try { await resumeBroadcast(b.id, accountId); load() }
+    catch (e: any) { alert('Erro: ' + e.message) }
+  }
+
+  const handleCancel = async (b: Broadcast) => {
+    if (!accountId) return
+    if (!confirm(`Cancelar "${b.name}"?\n\nO disparo para definitivamente. Os ${b.sent_count} contatos ja enviados nao sao afetados, mas os ${b.total_count - b.sent_count - b.failed_count} restantes NAO recebem a msg. O disparo fica marcado como Cancelado.`)) return
+    try { await cancelBroadcast(b.id, accountId); load() }
+    catch (e: any) { alert('Erro: ' + e.message) }
+  }
+
   const handleDuplicate = async (id: number) => {
     if (!accountId) return
     setDuplicating(true)
@@ -285,8 +306,37 @@ export default function Messages() {
                         {b.status === 'draft' && <button className="btn btn-primary btn-sm" onClick={() => handleSend(b.id)} style={{ fontSize: 11 }}><Send size={11} /> Enviar</button>}
                         {b.status === 'scheduled' && <button className="btn btn-secondary btn-sm" onClick={() => handleCancelSchedule(b)} style={{ fontSize: 11 }} title="Cancelar agendamento (volta pra rascunho)">Cancelar</button>}
                         {b.status === 'completed' && <CheckCircle size={14} style={{ color: '#34C759' }} />}
-                        {b.status === 'sending' && !isPaused && <Clock size={14} style={{ color: '#5DADE2' }} className="spinning" />}
-                        {isPaused && <PauseCircle size={14} style={{ color: '#FBBC04' }} />}
+                        {b.status === 'cancelled' && <XCircle size={14} style={{ color: '#FF6B6B' }} title="Cancelado" />}
+                        {b.status === 'sending' && !isPaused && (
+                          <>
+                            <Clock size={14} style={{ color: '#5DADE2' }} className="spinning" />
+                            <button className="btn btn-sm btn-icon" onClick={() => handlePause(b)}
+                              style={{ background: 'rgba(251,188,4,0.15)', border: '1px solid rgba(251,188,4,0.4)', color: '#FBBC04' }}
+                              title="Pausar disparo">
+                              <Pause size={12} />
+                            </button>
+                            <button className="btn btn-sm btn-icon" onClick={() => handleCancel(b)}
+                              style={{ background: 'rgba(255,107,107,0.15)', border: '1px solid rgba(255,107,107,0.4)', color: '#FF6B6B' }}
+                              title="Parar disparo (cancela definitivamente)">
+                              <Square size={12} />
+                            </button>
+                          </>
+                        )}
+                        {b.status === 'sending' && isPaused && (
+                          <>
+                            <PauseCircle size={14} style={{ color: '#FBBC04' }} />
+                            <button className="btn btn-sm btn-icon" onClick={() => handleResume(b)}
+                              style={{ background: 'rgba(52,199,89,0.15)', border: '1px solid rgba(52,199,89,0.4)', color: '#34C759' }}
+                              title="Retomar disparo">
+                              <Play size={12} />
+                            </button>
+                            <button className="btn btn-sm btn-icon" onClick={() => handleCancel(b)}
+                              style={{ background: 'rgba(255,107,107,0.15)', border: '1px solid rgba(255,107,107,0.4)', color: '#FF6B6B' }}
+                              title="Parar disparo (cancela definitivamente)">
+                              <Square size={12} />
+                            </button>
+                          </>
+                        )}
                       </div>
                     </td>
                   </tr>
