@@ -317,18 +317,7 @@ async function executeTool(toolUse, agent, lead, instanceId, availableTags, avai
   return { handoff: false }
 }
 
-// ─── sendEvolutionText ────────────────────────────────────────────────
-
-async function sendEvolutionText(instance, phone, text) {
-  const number = (phone || '').replace(/[^\d]/g, '').replace(/^(?!55)(\d{10,11})$/, '55$1')
-  const res = await fetch(`${instance.api_url}/message/sendText/${instance.instance_name}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'apikey': instance.api_key },
-    body: JSON.stringify({ number, text, delay: 10000 }),
-  })
-  const data = await res.json()
-  return { ok: !!data.key?.id, wamsgId: data.key?.id || null, raw: data }
-}
+// (sendEvolutionText removido — agora usa sendViaInstance do leadHandoff.js, que tem pre-flight + cache)
 
 // ─── processInboundMessage ────────────────────────────────────────────
 
@@ -360,13 +349,15 @@ export async function processInboundMessage(lead, msgContent, mediaType, instanc
         const inst = db.prepare('SELECT * FROM whatsapp_instances WHERE id = ?').get(instanceId)
         if (inst && inst.status === 'connected') {
           const declineMsg = agent.audio_decline_message || 'Oi! Por enquanto so leio mensagens de texto. Pode digitar pra mim?'
-          const sendRes = await sendEvolutionText(inst, lead.phone, declineMsg)
+          const sendRes = await sendViaInstance(inst, lead.phone, declineMsg)
           if (sendRes.ok) {
             db.prepare(`
-              INSERT INTO messages (lead_id, account_id, direction, content, media_type, sender_name, wa_msg_id, wa_timestamp, instance_id, ai_agent_id)
-              VALUES (?, ?, 'outbound', ?, 'text', 'AI', ?, datetime('now'), ?, ?)
+              INSERT INTO messages (lead_id, account_id, direction, content, media_type, sender_name, wa_msg_id, wa_timestamp, instance_id, ai_agent_id, delivery_status)
+              VALUES (?, ?, 'outbound', ?, 'text', 'AI', ?, datetime('now'), ?, ?, 'sent')
             `).run(lead.id, lead.account_id, declineMsg, sendRes.wamsgId, instanceId, agent.id)
             try { broadcastSSE(lead.account_id, 'lead:message', { lead_id: lead.id }) } catch {}
+          } else {
+            console.warn(`[AI Agent] declineMsg falhou agent=${agent.id} lead=${lead.id}: ${sendRes.reason}`)
           }
         }
         executeHandoff(agent, lead, reason, instanceId)
@@ -534,15 +525,15 @@ export async function processInboundMessage(lead, msgContent, mediaType, instanc
     if (finalText && finalText.trim()) {
       const inst = db.prepare('SELECT * FROM whatsapp_instances WHERE id = ?').get(instanceId)
       if (inst && inst.status === 'connected') {
-        const sendRes = await sendEvolutionText(inst, lead.phone, finalText.trim())
+        const sendRes = await sendViaInstance(inst, lead.phone, finalText.trim())
         if (sendRes.ok) {
           db.prepare(`
-            INSERT INTO messages (lead_id, account_id, direction, content, media_type, sender_name, wa_msg_id, wa_timestamp, instance_id, ai_agent_id)
-            VALUES (?, ?, 'outbound', ?, 'text', 'AI', ?, datetime('now'), ?, ?)
+            INSERT INTO messages (lead_id, account_id, direction, content, media_type, sender_name, wa_msg_id, wa_timestamp, instance_id, ai_agent_id, delivery_status)
+            VALUES (?, ?, 'outbound', ?, 'text', 'AI', ?, datetime('now'), ?, ?, 'sent')
           `).run(lead.id, lead.account_id, finalText.trim(), sendRes.wamsgId, instanceId, agent.id)
           try { broadcastSSE(lead.account_id, 'lead:message', { lead_id: lead.id }) } catch {}
         } else {
-          console.error(`[AI Agent] Falha envio agent=${agent.id} lead=${lead.id}:`, JSON.stringify(sendRes.raw).substring(0, 200))
+          console.error(`[AI Agent] Falha envio agent=${agent.id} lead=${lead.id}: ${sendRes.reason}`)
         }
       }
     }
@@ -659,10 +650,12 @@ REGRAS:
       return
     }
 
-    // Salva msg no historico (sender_name = agente, ai_agent_id = agente)
+    // Salva msg no historico (sender_name = agente, ai_agent_id = agente).
+    // delivery_status='sent' — webhook messages.update do Evolution vai promover pra 'delivered'/'read' depois.
+    // Se ficar 'sent' por >10min sem confirmacao, cron marca como 'failed' (fidelidade).
     db.prepare(`
-      INSERT INTO messages (lead_id, account_id, direction, content, media_type, sender_name, wa_msg_id, instance_id, ai_agent_id)
-      VALUES (?, ?, 'outbound', ?, 'text', ?, ?, ?, ?)
+      INSERT INTO messages (lead_id, account_id, direction, content, media_type, sender_name, wa_msg_id, instance_id, ai_agent_id, delivery_status)
+      VALUES (?, ?, 'outbound', ?, 'text', ?, ?, ?, ?, 'sent')
     `).run(lead.id, lead.account_id, msgText, agent.name, sendResult.wamsgId, inst.id, agent.id)
 
     // Atualiza last_instance_id + marca idempotencia

@@ -1,5 +1,6 @@
 import fetch from 'node-fetch'
 import db from '../db.js'
+import { sendViaInstance } from './leadHandoff.js'
 
 // Aplica variaveis no texto da auto-mensagem
 function firstName(s) {
@@ -80,26 +81,31 @@ export async function sendAutoMessage({ leadId, instanceId, type, text, accountI
   if (!targetPhone) return { ok: false, error: 'no_phone' }
 
   try {
-    const url = `${instance.api_url}/message/sendText/${instance.instance_name}`
-    const r = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', apikey: instance.api_key },
-      body: JSON.stringify({ number: targetPhone, text: finalText }),
-      timeout: 10000,
-    })
-    const respData = await r.json().catch(() => ({}))
-    if (!r.ok) {
-      console.error(`[AutoMsg ${type}] lead=${leadId} falha HTTP ${r.status}:`, JSON.stringify(respData).substring(0, 200))
-      return { ok: false, error: `HTTP ${r.status}` }
+    // Envia via sendViaInstance (pre-flight de numero + cache).
+    const sendRes = await sendViaInstance(instance, targetPhone, finalText)
+
+    if (!sendRes.ok) {
+      const errLabel = sendRes.validationFailed ? 'number_not_on_whatsapp' : (sendRes.reason || 'send_failed')
+      console.error(`[AutoMsg ${type}] lead=${leadId} falha: ${errLabel}`)
+      // Registra a tentativa como 'failed' pra UI mostrar X vermelho no historico.
+      const msgResult = db.prepare(`
+        INSERT INTO messages (lead_id, account_id, direction, content, media_type, sender_name, wa_msg_id, instance_id, delivery_status)
+        VALUES (?, ?, 'outbound', ?, 'text', 'Auto-Sistema', NULL, ?, 'failed')
+      `).run(lead.id, accountId || lead.account_id, finalText, instanceId)
+      const messageId = msgResult.lastInsertRowid
+      db.prepare(`
+        INSERT INTO auto_messages_log (lead_id, instance_id, account_id, type, message_id)
+        VALUES (?, ?, ?, ?, ?)
+      `).run(lead.id, instanceId, accountId || lead.account_id, type, messageId)
+      return { ok: false, error: errLabel, messageId }
     }
 
-    const waMsgId = respData?.key?.id || respData?.messageId || null
-
-    // Salva na tabela messages com marcação especial
+    // Salva na tabela messages com delivery_status='sent'.
+    // Webhook do Evolution promove pra delivered/read. Cron de 10min marca failed se Whats nao confirmar.
     const msgResult = db.prepare(`
-      INSERT INTO messages (lead_id, account_id, direction, content, media_type, sender_name, wa_msg_id, instance_id)
-      VALUES (?, ?, 'outbound', ?, 'text', 'Auto-Sistema', ?, ?)
-    `).run(lead.id, accountId || lead.account_id, finalText, waMsgId, instanceId)
+      INSERT INTO messages (lead_id, account_id, direction, content, media_type, sender_name, wa_msg_id, instance_id, delivery_status)
+      VALUES (?, ?, 'outbound', ?, 'text', 'Auto-Sistema', ?, ?, 'sent')
+    `).run(lead.id, accountId || lead.account_id, finalText, sendRes.wamsgId, instanceId)
 
     const messageId = msgResult.lastInsertRowid
 

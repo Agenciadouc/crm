@@ -5,6 +5,7 @@
 import fetch from 'node-fetch'
 import db from '../db.js'
 import { broadcastSSE } from '../sse.js'
+import { sendViaInstance } from './leadHandoff.js'
 
 // Substitui variaveis no template: {{nome}}, {{primeiro_nome}}
 function renderTemplate(template, lead) {
@@ -107,35 +108,28 @@ export async function sendFollowUpMessage(leadFollowUpId) {
 
     // Renderiza msg (escolhe variação aleatoria se step.variations existe, senao usa message_template)
     const text = renderTemplate(pickVariationText(step), lead)
-    const number = (lead.phone || '').replace(/[^\d]/g, '').replace(/^(?!55)(\d{10,11})$/, '55$1')
 
-    // Envia
-    let wamsgId = null
-    try {
-      const sendRes = await fetch(`${instance.api_url}/message/sendText/${instance.instance_name}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'apikey': instance.api_key },
-        body: JSON.stringify({ number, text }),
-      })
-      const data = await sendRes.json()
-      if (data.key?.id) {
-        wamsgId = data.key.id
-      } else {
-        // Evolution recusou — pausa pra atendente investigar
-        console.error(`[FollowUp] Envio recusado lead=${lead.id} step=${step.id}:`, JSON.stringify(data).substring(0, 200))
-        pauseLeadFollowUp(leadFollowUpId, 'send_failed')
-        return
-      }
-    } catch (err) {
-      console.error(`[FollowUp] Erro envio lead=${lead.id}:`, err.message)
-      pauseLeadFollowUp(leadFollowUpId, 'send_error')
+    // Envia via sendViaInstance (pre-flight de numero + cache + tratamento consistente)
+    const sendRes = await sendViaInstance(instance, lead.phone, text)
+    if (!sendRes.ok) {
+      // Numero invalido OU Evolution recusou — pausa pra atendente investigar.
+      // Registra a tentativa como 'failed' pra UI mostrar X vermelho no historico.
+      const errLabel = sendRes.validationFailed ? 'number_not_on_whatsapp' : (sendRes.reason || 'send_failed')
+      console.error(`[FollowUp] Envio recusado lead=${lead.id} step=${step.id}: ${errLabel}`)
+      db.prepare(`
+        INSERT INTO messages (lead_id, account_id, direction, content, media_type, sender_name, wa_msg_id, wa_timestamp, instance_id, follow_up_id, delivery_status)
+        VALUES (?, ?, 'outbound', ?, 'text', 'Follow-up auto', NULL, datetime('now'), ?, ?, 'failed')
+      `).run(lead.id, lead.account_id, text, instance.id, followUp.id)
+      pauseLeadFollowUp(leadFollowUpId, sendRes.validationFailed ? 'number_not_on_whatsapp' : 'send_failed')
       return
     }
+    const wamsgId = sendRes.wamsgId
 
     // Salva em messages (igual broadcasts). follow_up_id: V2 analytics — sinaliza msg automática de cadência.
+    // delivery_status='sent' → webhook promove pra delivered/read OU cron de 10min marca failed se Whats nao confirmar.
     db.prepare(`
-      INSERT INTO messages (lead_id, account_id, direction, content, media_type, sender_name, wa_msg_id, wa_timestamp, instance_id, follow_up_id)
-      VALUES (?, ?, 'outbound', ?, 'text', 'Follow-up auto', ?, datetime('now'), ?, ?)
+      INSERT INTO messages (lead_id, account_id, direction, content, media_type, sender_name, wa_msg_id, wa_timestamp, instance_id, follow_up_id, delivery_status)
+      VALUES (?, ?, 'outbound', ?, 'text', 'Follow-up auto', ?, datetime('now'), ?, ?, 'sent')
     `).run(lead.id, lead.account_id, text, wamsgId, instance.id, followUp.id)
 
     // Inactivity-rotation (legacy): one-shot, NAO avanca pra proximo step (cada execucao = uma variacao independente)

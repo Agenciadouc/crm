@@ -1,6 +1,7 @@
 import { Router, json as jsonBodyParser } from 'express'
 import fetch from 'node-fetch'
 import db from '../db.js'
+import { sendViaInstance, checkWhatsAppNumber } from '../services/leadHandoff.js'
 
 const router = Router()
 
@@ -103,44 +104,32 @@ router.post('/:leadId', async (req, res) => {
     else if (!number.startsWith('55') && number.length === 11) number = '55' + number
     else if (!number.startsWith('55') && number.length === 10) number = '55' + number.slice(0, 2) + '9' + number.slice(2)
 
-    // Send via Evolution API (with 1 retry on failure)
-    const sendPayload = { number, text: content }
-    let sendData = null
+    // Envia via sendViaInstance (com pre-flight + helper centralizado).
+    // 2 tentativas se primeira falha por timeout/erro (mas nao retenta se foi 'number_not_on_whatsapp').
+    let sendRes = null
     for (let attempt = 0; attempt < 2; attempt++) {
-      try {
-        const sendRes = await fetch(`${instance.api_url}/message/sendText/${encodeURIComponent(instance.instance_name)}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'apikey': instance.api_key },
-          body: JSON.stringify(sendPayload),
-        })
-        sendData = await sendRes.json()
-        if (sendData.key?.id) break // success
-        if (attempt === 0 && (sendData.error || sendData.status === 500)) {
-          console.log(`[Messages] Send attempt 1 failed for ${instance.instance_name}, retrying in 2s...`)
-          await new Promise(r => setTimeout(r, 2000))
-        }
-      } catch (fetchErr) {
-        if (attempt === 0) {
-          console.log(`[Messages] Send fetch failed: ${fetchErr.message}, retrying in 2s...`)
-          await new Promise(r => setTimeout(r, 2000))
-        } else {
-          throw fetchErr
-        }
+      sendRes = await sendViaInstance(instance, number, content)
+      if (sendRes.ok) break // success
+      if (sendRes.validationFailed) break // numero invalido, nao adianta retentar
+      if (attempt === 0) {
+        console.log(`[Messages] Send attempt 1 failed (${sendRes.reason}) for ${instance.instance_name}, retrying in 2s...`)
+        await new Promise(r => setTimeout(r, 2000))
       }
     }
 
-    if (!sendData?.key?.id) {
-      console.error(`[Messages] Failed to send to ${jid} via ${instance.instance_name}:`, JSON.stringify(sendData)?.substring(0, 200))
+    if (!sendRes.ok) {
+      console.error(`[Messages] Failed to send to ${jid} via ${instance.instance_name}: ${sendRes.reason}`)
     }
 
-    const delivered = !!sendData?.key?.id
+    const delivered = !!sendRes.ok
+    const deliveryStatus = delivered ? 'sent' : 'failed'
 
-    // Store message with delivery status + instance used.
+    // Store message — delivery_status reflete o resultado real do envio.
     // sent_by_user_id: V2 analytics — atribui mensagem ao humano que digitou (atendente/gerente).
     const result = db.prepare(`
-      INSERT INTO messages (lead_id, account_id, direction, content, sender_name, wa_msg_id, instance_id, sent_by_user_id)
-      VALUES (?, ?, 'outbound', ?, ?, ?, ?, ?)
-    `).run(lead.id, lead.account_id, content, req.user.name, sendData?.key?.id || null, instance.id, req.user.id)
+      INSERT INTO messages (lead_id, account_id, direction, content, sender_name, wa_msg_id, instance_id, sent_by_user_id, delivery_status)
+      VALUES (?, ?, 'outbound', ?, ?, ?, ?, ?, ?)
+    `).run(lead.id, lead.account_id, content, req.user.name, sendRes.wamsgId || null, instance.id, req.user.id, deliveryStatus)
 
     // Update lead's last_instance_id (so future messages remember which number to use)
     if (delivered) {
@@ -153,7 +142,10 @@ router.post('/:leadId', async (req, res) => {
     }
 
     const message = db.prepare('SELECT * FROM messages WHERE id = ?').get(result.lastInsertRowid)
-    res.json({ message, delivered, instance: { id: instance.id, name: instance.instance_name }, error: delivered ? undefined : 'Falha ao enviar pelo WhatsApp. Verifique a conexao.' })
+    const errorMsg = delivered ? undefined : (sendRes.reason === 'number_not_on_whatsapp'
+      ? 'Numero nao tem WhatsApp. Mensagem nao foi enviada.'
+      : 'Falha ao enviar pelo WhatsApp. Verifique a conexao.')
+    res.json({ message, delivered, instance: { id: instance.id, name: instance.instance_name }, error: errorMsg })
   } catch (err) {
     res.status(500).json({ error: err.message })
   }
@@ -220,6 +212,19 @@ router.post('/:leadId/media', jsonBodyParser({ limit: '150mb' }), async (req, re
     else if (!number.startsWith('55') && number.length === 11) number = '55' + number
     else if (!number.startsWith('55') && number.length === 10) number = '55' + number.slice(0, 2) + '9' + number.slice(2)
 
+    // Pre-flight: valida numero antes de upload da midia (evita transferir base64 inutil)
+    const exists = await checkWhatsAppNumber(instance, number)
+    if (exists === false) {
+      console.log(`[Messages/Media] phone=${number} inst=${instance.instance_name} exists=false — bloqueando envio`)
+      const content = caption || file_name || `[${mediaType}]`
+      const result = db.prepare(`
+        INSERT INTO messages (lead_id, account_id, direction, content, sender_name, wa_msg_id, media_type, instance_id, sent_by_user_id, delivery_status)
+        VALUES (?, ?, 'outbound', ?, ?, NULL, ?, ?, ?, 'failed')
+      `).run(lead.id, lead.account_id, content, req.user.name, mediaType, instance.id, req.user.id)
+      const message = db.prepare('SELECT * FROM messages WHERE id = ?').get(result.lastInsertRowid)
+      return res.status(200).json({ message, delivered: false, instance: { id: instance.id, name: instance.instance_name }, error: 'Numero nao tem WhatsApp. Midia nao foi enviada.' })
+    }
+
     let endpoint, payload
     if (mediaType === 'audio') {
       endpoint = `${instance.api_url}/message/sendWhatsAppAudio/${encodeURIComponent(instance.instance_name)}`
@@ -249,11 +254,12 @@ router.post('/:leadId/media', jsonBodyParser({ limit: '150mb' }), async (req, re
     }
 
     const content = caption || file_name || `[${mediaType}]`
+    const deliveryStatus = delivered ? 'sent' : 'failed'
     // sent_by_user_id: V2 analytics — atribui mídia ao humano específico.
     const result = db.prepare(`
-      INSERT INTO messages (lead_id, account_id, direction, content, sender_name, wa_msg_id, media_type, instance_id, sent_by_user_id)
-      VALUES (?, ?, 'outbound', ?, ?, ?, ?, ?, ?)
-    `).run(lead.id, lead.account_id, content, req.user.name, sendData?.key?.id || null, mediaType, instance.id, req.user.id)
+      INSERT INTO messages (lead_id, account_id, direction, content, sender_name, wa_msg_id, media_type, instance_id, sent_by_user_id, delivery_status)
+      VALUES (?, ?, 'outbound', ?, ?, ?, ?, ?, ?, ?)
+    `).run(lead.id, lead.account_id, content, req.user.name, sendData?.key?.id || null, mediaType, instance.id, req.user.id, deliveryStatus)
 
     if (delivered) {
       db.prepare("UPDATE leads SET last_instance_id = ?, updated_at = datetime('now') WHERE id = ?").run(instance.id, lead.id)
