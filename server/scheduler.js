@@ -417,6 +417,74 @@ function shouldRunWeeklyCoaching() {
   return (ranToday?.n || 0) === 0
 }
 
+// ─── Detector de instancia fantasma silenciosa ────────────────────
+// Evolution as vezes reporta state='open' mas a sessao Baileys ta zumbi:
+// aceita sendText (retorna key.id) mas nada chega no WhatsApp real.
+// Detectamos pelo OUTCOME: se ultimas N msgs ficaram 'sent' sem 'delivered_at'
+// por mais de X min, considera fantasma e forca restart da instancia.
+const GHOST_MIN_MSGS = 3        // pelo menos N envios recentes pra avaliar
+const GHOST_MIN_AGE_MIN = 5     // envios com >5min sem delivered_at
+const GHOST_WINDOW_MIN = 30     // janela de analise: ultimas 30 min
+const _ghostRestartCooldown = new Map() // instance_id -> timestamp ultimo restart (cooldown 15min)
+
+async function detectGhostInstancesAndRestart() {
+  try {
+    const instances = db.prepare("SELECT id, instance_name, api_url, api_key FROM whatsapp_instances WHERE status = 'connected'").all()
+    for (const inst of instances) {
+      // Cooldown — nao tenta restart de novo se ja tentou nos ultimos 15min
+      const lastRestart = _ghostRestartCooldown.get(inst.id) || 0
+      if (Date.now() - lastRestart < 15 * 60 * 1000) continue
+
+      // Pega outcome das ultimas msgs dessa instancia na janela
+      const recent = db.prepare(`
+        SELECT delivery_status, delivered_at, read_at, created_at,
+               (strftime('%s','now') - strftime('%s', created_at))/60 as age_min
+        FROM messages
+        WHERE instance_id = ?
+          AND direction = 'outbound'
+          AND created_at >= datetime('now', '-${GHOST_WINDOW_MIN} minutes')
+        ORDER BY id DESC LIMIT 20
+      `).all(inst.id)
+
+      if (recent.length < GHOST_MIN_MSGS) continue // insuficiente pra avaliar
+
+      // Conta quantas estao 'sent' velhas sem delivered_at
+      const staleNoDelivery = recent.filter(m =>
+        m.delivery_status === 'sent' &&
+        !m.delivered_at && !m.read_at &&
+        m.age_min >= GHOST_MIN_AGE_MIN
+      ).length
+
+      // Conta entregas confirmadas no periodo (qualquer uma)
+      const anyDelivered = recent.some(m => m.delivered_at || m.read_at)
+
+      // Considera fantasma se: tem >=3 envios stale E nenhuma entrega confirmada na janela
+      if (staleNoDelivery >= GHOST_MIN_MSGS && !anyDelivered) {
+        console.warn(`[GhostDetect] instancia=${inst.instance_name} suspeita: ${staleNoDelivery} msgs stale sem entrega. Forcando restart...`)
+        _ghostRestartCooldown.set(inst.id, Date.now())
+        try {
+          // /instance/restart eh mais agressivo que /connect — refaz a sessao Baileys
+          const encoded = encodeURIComponent(inst.instance_name)
+          const r = await fetch(`${inst.api_url}/instance/restart/${encoded}`, {
+            method: 'POST',
+            headers: { apikey: inst.api_key },
+          })
+          const data = await r.json().catch(() => ({}))
+          console.warn(`[GhostDetect] restart ${inst.instance_name} response:`, JSON.stringify(data).substring(0, 200))
+          // Marca como connecting + pausa broadcasts ativos dessa instancia
+          db.prepare("UPDATE whatsapp_instances SET status = 'connecting', updated_at = datetime('now') WHERE id = ?").run(inst.id)
+          db.prepare("UPDATE broadcasts SET paused_at = datetime('now'), paused_reason = 'instancia_fantasma_detectada' WHERE status = 'sending' AND instance_id = ? AND paused_at IS NULL").run(inst.id)
+          try { broadcastSSE(null, 'instance:ghost_restart', { instance_id: inst.id, instance_name: inst.instance_name }) } catch {}
+        } catch (e) {
+          console.error(`[GhostDetect] restart ${inst.instance_name} erro:`, e.message)
+        }
+      }
+    }
+  } catch (e) {
+    console.error('[GhostDetect] erro geral:', e.message)
+  }
+}
+
 // ─── Mark stale outbound messages as 'failed' ─────────────────────
 // Msg outbound marcada 'sent' que nao recebeu confirmacao delivered/read em 10min
 // vira 'failed' automaticamente. Cobre o caso "Evolution aceitou mas Whats nao entregou".
@@ -457,6 +525,14 @@ function markStaleMessagesAsFailed() {
             failed_count = (SELECT COUNT(*) FROM broadcast_recipients WHERE broadcast_id = broadcasts.id AND status = 'failed')
           WHERE id IN (SELECT DISTINCT broadcast_id FROM broadcast_recipients WHERE sent_at < datetime('now', '-${STALE_MINUTES} minutes'))
         `).run()
+        // Marca broadcast inteiro como 'failed' se 100% dos recipients falharam (visualmente claro pro user)
+        db.prepare(`
+          UPDATE broadcasts SET status = 'failed'
+          WHERE status = 'completed'
+            AND total_count > 0
+            AND failed_count = total_count
+            AND sent_count = 0
+        `).run()
       }
       // SSE broadcast pra UI atualizar
       try {
@@ -486,6 +562,9 @@ async function tick() {
     await reRegisterWebhooks()
     // Mark stale outbound msgs (sent ha > 10min sem delivered_at) -> failed
     markStaleMessagesAsFailed()
+    // Detecta instancias fantasma silenciosas (Evolution state=open mas msgs nao entregam)
+    // e forca restart. Cooldown 15min entre tentativas.
+    detectGhostInstancesAndRestart().catch(e => console.error('[GhostDetect]', e.message))
     // Nightly analysis (roda so 1x por dia na janela 3h UTC)
     if (shouldRunNightly()) runNightlyAnalysis().catch(e => console.error('[Nightly]', e.message))
     // Weekly coaching (segunda 3h05-3h10 UTC)
