@@ -57,17 +57,24 @@ function formatBRL(v: number | null | undefined): string {
 
 // Modal de confirmação de custo
 function AnalyzeNowConfirmModal({
-  open, estimate, loading, onCancel, onConfirm,
+  open, estimate, loading, onCancel, onConfirm, onResetAll, isSuperAdmin,
 }: {
   open: boolean
   estimate: AnalyzeEstimate | null
   loading: boolean
   onCancel: () => void
   onConfirm: (maxLeads: number) => void
+  onResetAll?: () => void
+  isSuperAdmin?: boolean
 }) {
   if (!open) return null
   const total = estimate?.leads_pending_total ?? 0
   const hasMore = total > (estimate?.leads_to_analyze ?? 0)
+  const skipped = estimate?.leads_skipped ?? 0
+  const incr = estimate?.leads_incremental ?? 0
+  const full = estimate?.leads_full ?? 0
+  const incrCost = estimate?.estimated_cost_incremental_usd ?? 0
+  const fullCost = estimate?.estimated_cost_full_usd ?? 0
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }} onClick={onCancel}>
       <div style={{ background: 'var(--bg-card)', borderRadius: 8, padding: 24, width: 520, maxWidth: '90vw', boxShadow: '0 8px 32px rgba(0,0,0,0.3)' }} onClick={e => e.stopPropagation()}>
@@ -84,6 +91,28 @@ function AnalyzeNowConfirmModal({
                 <span style={{ color: 'var(--text-muted)' }}>Conversas pendentes</span>
                 <strong>{total} {total === 1 ? 'conversa' : 'conversas'}</strong>
               </div>
+              {(incr > 0 || full > 0 || skipped > 0) && (
+                <div style={{ display: 'grid', gap: 4, padding: '8px 0', borderBottom: '1px solid var(--border-subtle)', fontSize: 12 }}>
+                  {full > 0 && (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-muted)' }}>
+                      <span>• {full} análise{full > 1 ? 's' : ''} completa{full > 1 ? 's' : ''} <span style={{ opacity: 0.6 }}>(novas / re-baseline)</span></span>
+                      <span>~${fullCost.toFixed(2)}</span>
+                    </div>
+                  )}
+                  {incr > 0 && (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-muted)' }}>
+                      <span>• {incr} atualizaç{incr > 1 ? 'ões' : 'ão'} incremental{incr > 1 ? 'is' : ''} <span style={{ opacity: 0.6 }}>(só msgs novas)</span></span>
+                      <span>~${incrCost.toFixed(2)}</span>
+                    </div>
+                  )}
+                  {skipped > 0 && (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-muted)', opacity: 0.7 }}>
+                      <span>• {skipped} já em dia (pulada{skipped > 1 ? 's' : ''})</span>
+                      <span>$0.00</span>
+                    </div>
+                  )}
+                </div>
+              )}
               <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid var(--border-subtle)' }}>
                 <span style={{ color: 'var(--text-muted)' }}>Gasto este mês</span>
                 <strong>${estimate.month_spent_usd.toFixed(2)} / ${estimate.month_limit_usd.toFixed(2)}</strong>
@@ -146,7 +175,21 @@ function AnalyzeNowConfirmModal({
               </div>
             )}
 
-            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'space-between', alignItems: 'center' }}>
+              {isSuperAdmin && onResetAll ? (
+                <button
+                  className="btn btn-sm"
+                  style={{ background: 'transparent', color: 'var(--danger, #f87171)', border: '1px solid var(--danger, #f87171)', fontSize: 11 }}
+                  onClick={() => {
+                    if (!confirm('Re-analisar TUDO do zero?\n\nIsso vai zerar os checkpoints incrementais da conta e reanalisar cada conversa como FULL no proximo batch — custo alto.')) return
+                    if (!confirm('Confirma de novo? Operacao irreversivel.')) return
+                    onResetAll()
+                  }}
+                  title="Super admin: zera last_message_id de toda a conta. Proximo batch trata tudo como FULL."
+                >
+                  ↻ Re-analisar tudo do zero
+                </button>
+              ) : <span />}
               <button className="btn btn-secondary btn-sm" onClick={onCancel}>Cancelar</button>
             </div>
           </>
@@ -313,20 +356,23 @@ export default function AttendantAnalytics() {
     }
   }
 
-  const handleConfirmAnalyze = async (maxLeads: number) => {
+  const handleConfirmAnalyze = async (maxLeads: number, opts: { resetAll?: boolean } = {}) => {
     if (!accountId || !estimate) return
     setAnalyzing(true)
     setShowConfirmModal(false)
-    const leadsCount = Math.min(maxLeads, estimate.leads_pending_total)
+    // Em reset_all, contagem real e desconhecida ate o batch rodar — mostra teto razoavel
+    const leadsCount = opts.resetAll
+      ? Math.min(maxLeads, (estimate.leads_skipped ?? 0) + estimate.leads_pending_total)
+      : Math.min(maxLeads, estimate.leads_pending_total)
     setAnalyzeElapsedSec(0)
     setAnalyzeProgress({
       open: true,
       status: 'running',
       leadsCount,
-      message: '',
+      message: opts.resetAll ? 'Reset disparado — analisando tudo do zero...' : '',
     })
     try {
-      const r = await triggerAnalysisNow(accountId, maxLeads)
+      const r = await triggerAnalysisNow(accountId, maxLeads, opts)
       if (r.ok) {
         // Backend disparou fire-and-forget. Mantém modal aberto com cronômetro.
         setAnalyzeProgress(p => p ? { ...p, message: r.message || '' } : null)
@@ -717,6 +763,11 @@ export default function AttendantAnalytics() {
         loading={estimateLoading}
         onCancel={() => { setShowConfirmModal(false); setEstimate(null) }}
         onConfirm={handleConfirmAnalyze}
+        isSuperAdmin={user?.role === 'super_admin'}
+        onResetAll={() => {
+          // Reset-all: dispara analise com flag resetAll=true (zera checkpoints e trata tudo como FULL)
+          handleConfirmAnalyze(500, { resetAll: true })
+        }}
       />
 
       {analyzeProgress?.open && (

@@ -355,6 +355,14 @@ router.post('/analyze-now', requireRole('super_admin', 'gerente'), requireAnalyt
   if (!req.accountId) return res.status(400).json({ error: 'account_id required' })
   // ?max=N: quantos leads processar nesse clique (default 50, cap 500 pra evitar abuso)
   const maxLeads = Math.max(1, Math.min(500, parseInt(req.query.max) || 50))
+  // ?reset_all=true (super_admin only): zera checkpoint incremental da conta inteira -> proximo batch trata tudo como FULL
+  // ?reset_lead=<id> (gerente+): mesma coisa pra 1 lead (debug cirurgico)
+  const resetAll = String(req.query.reset_all || '').toLowerCase() === 'true'
+  const resetLeadId = req.query.reset_lead ? Math.max(1, parseInt(req.query.reset_lead)) : null
+  if (resetAll && req.user?.role !== 'super_admin') {
+    return res.status(403).json({ error: 'reset_all requer super_admin' })
+  }
+
   const acc = db.prepare('SELECT last_analysis_at FROM accounts WHERE id = ?').get(req.accountId)
   if (acc?.last_analysis_at) {
     const sinceMs = Date.now() - new Date(acc.last_analysis_at.replace(' ', 'T') + 'Z').getTime()
@@ -364,13 +372,39 @@ router.post('/analyze-now', requireRole('super_admin', 'gerente'), requireAnalyt
     }
   }
   db.prepare("UPDATE accounts SET last_analysis_at = datetime('now') WHERE id = ?").run(req.accountId)
+
+  // Aplica reset ANTES de disparar o batch (sincrono — barato, 1 UPDATE)
+  if (resetAll) {
+    const r = db.prepare(`
+      UPDATE conversation_insights
+         SET last_message_id = 0, incremental_count = 0,
+             last_full_analysis_at = NULL, last_full_message_id = 0
+       WHERE account_id = ?
+    `).run(req.accountId)
+    console.log(`[Analyze-now] account=${req.accountId} reset_all by user=${req.user?.id || '?'} reset_rows=${r.changes}`)
+  } else if (resetLeadId) {
+    const r = db.prepare(`
+      UPDATE conversation_insights
+         SET last_message_id = 0, incremental_count = 0,
+             last_full_analysis_at = NULL, last_full_message_id = 0
+       WHERE account_id = ? AND lead_id = ?
+    `).run(req.accountId, resetLeadId)
+    console.log(`[Analyze-now] account=${req.accountId} reset_lead=${resetLeadId} by user=${req.user?.id || '?'} reset_rows=${r.changes}`)
+  }
+
   setImmediate(() => {
     analyzeConversationsBatch(req.accountId, { maxLeads, sinceHours: 168 })
       .catch(e => console.error('[Analyze-now]', e.message))
     const today = new Date().toISOString().slice(0, 10)
     try { aggregateAllAccounts(today) } catch (e) { console.error('[Aggregate-now]', e.message) }
   })
-  res.json({ ok: true, message: `Analise de ate ${maxLeads} conversas iniciada em background.`, max_leads: maxLeads })
+  res.json({
+    ok: true,
+    message: `Analise de ate ${maxLeads} conversas iniciada em background.`,
+    max_leads: maxLeads,
+    reset_all: resetAll || undefined,
+    reset_lead: resetLeadId || undefined,
+  })
 })
 
 // Configura limite mensal de tokens de análise da conta
