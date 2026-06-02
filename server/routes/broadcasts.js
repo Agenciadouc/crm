@@ -277,8 +277,11 @@ async function runBroadcastLoopInner(broadcastId) {
       processedCount++
     }
 
-    // Delay aleatorio dentro de +/- 30% pra parecer humano
-    const jitter = baseDelay * (0.7 + Math.random() * 0.6)
+    // Anti-ban: jitter mais agressivo. Base randomizada (5-18s) + multiplier ±40%.
+    // Min ~3s, max ~25s. Media ~12s. Padrao MUITO menos previsivel que o anterior.
+    const baseMs = 5000 + Math.random() * 13000
+    const jitterMult = 0.6 + Math.random() * 0.8
+    const jitter = Math.round(baseMs * jitterMult)
     await new Promise(resolve => setTimeout(resolve, jitter))
   }
 

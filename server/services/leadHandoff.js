@@ -61,6 +61,88 @@ function _normalizePhone(phone) {
   return (phone || '').replace(/[^\d]/g, '').replace(/^(?!55)(\d{10,11})$/, '55$1')
 }
 
+// ─── Anti-ban: quota por instancia + warm-up gradual ────────────────────
+// Defaults conservadores. Override por instancia via hourly_send_limit/daily_send_limit.
+// Warm-up: instancia nova (created_at < 3 dias) usa multiplicador menor.
+const QUOTA_DEFAULT_PER_HOUR = 100
+const QUOTA_DEFAULT_PER_DAY = 800
+const WARMUP_DAYS = 3
+// Dia 1 = 5% do quota, dia 2 = 20%, dia 3 = 50%. Dia 4+ = 100%.
+const WARMUP_MULTIPLIERS = [0.05, 0.20, 0.50]
+
+function checkSendQuota(instance) {
+  const hourlyLimit = instance.hourly_send_limit || QUOTA_DEFAULT_PER_HOUR
+  const dailyLimit = instance.daily_send_limit || QUOTA_DEFAULT_PER_DAY
+
+  let effectiveHourly = hourlyLimit
+  let effectiveDaily = dailyLimit
+
+  // Aplica warm-up se ainda esta na janela
+  if (instance.warmup_until) {
+    const warmupEndMs = new Date(instance.warmup_until.replace(' ', 'T') + 'Z').getTime()
+    if (warmupEndMs > Date.now()) {
+      const refDate = instance.created_at || instance.warmup_until
+      const createdMs = new Date(String(refDate).replace(' ', 'T') + 'Z').getTime()
+      const daysIn = Math.max(0, Math.floor((Date.now() - createdMs) / 86400000))
+      const mult = WARMUP_MULTIPLIERS[Math.min(daysIn, WARMUP_MULTIPLIERS.length - 1)]
+      effectiveHourly = Math.max(1, Math.floor(hourlyLimit * mult))
+      effectiveDaily = Math.max(1, Math.floor(dailyLimit * mult))
+    }
+  }
+
+  // Conta envios reais (sent/delivered/read) na ultima hora
+  const hourCount = db.prepare(`
+    SELECT COUNT(*) as n FROM messages
+    WHERE instance_id = ? AND direction = 'outbound'
+      AND created_at >= datetime('now', '-1 hour')
+      AND delivery_status IN ('sent', 'delivered', 'read')
+  `).get(instance.id)?.n || 0
+  if (hourCount >= effectiveHourly) {
+    return { ok: false, reason: `quota_hourly_${effectiveHourly}`, hourCount, limit: effectiveHourly }
+  }
+
+  const dayCount = db.prepare(`
+    SELECT COUNT(*) as n FROM messages
+    WHERE instance_id = ? AND direction = 'outbound'
+      AND created_at >= datetime('now', '-1 day')
+      AND delivery_status IN ('sent', 'delivered', 'read')
+  `).get(instance.id)?.n || 0
+  if (dayCount >= effectiveDaily) {
+    return { ok: false, reason: `quota_daily_${effectiveDaily}`, dayCount, limit: effectiveDaily }
+  }
+
+  return { ok: true, effectiveHourly, effectiveDaily, hourCount, dayCount }
+}
+
+// ─── Anti-ban: typing simulation ─────────────────────────────────────────
+// Antes de enviar, manda presence=composing pro Evolution e aguarda tempo
+// proporcional ao tamanho do texto. Caps min 1.2s, max 5s. Jitter ±25%.
+const TYPING_MIN_MS = 1200
+const TYPING_MAX_MS = 5000
+
+async function simulateTyping(instance, phone, text) {
+  const number = _normalizePhone(phone)
+  if (!number) return
+  // ~40 chars/sec digitando humano + base 800ms.
+  const baseRaw = 800 + (text || '').length * 25
+  const base = Math.max(TYPING_MIN_MS, Math.min(TYPING_MAX_MS, baseRaw))
+  const jitter = 0.75 + Math.random() * 0.5  // 0.75x a 1.25x
+  const ms = Math.round(base * jitter)
+  // Sinaliza "digitando" no WhatsApp (best-effort — se Evolution recusar, segue pro send)
+  try {
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), 3000)
+    await fetch(`${instance.api_url}/chat/sendPresence/${instance.instance_name}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', apikey: instance.api_key },
+      body: JSON.stringify({ number, presence: 'composing', delay: ms }),
+      signal: controller.signal,
+    }).catch(() => {})
+    clearTimeout(timer)
+  } catch {}
+  await new Promise(r => setTimeout(r, ms))
+}
+
 /**
  * Valida 1 numero via Evolution. Cache 5min.
  * Retorna: true (existe), false (nao existe), null (timeout/erro — assume valido pra nao bloquear envio).
@@ -199,11 +281,24 @@ export async function sendViaInstance(instance, phone, text, opts = {}) {
     // exists === null (timeout/erro de validacao): segue mesmo assim
   }
 
+  // Quota check (skip pra chat manual humano)
+  if (!opts.skipQuota) {
+    const q = checkSendQuota(instance)
+    if (!q.ok) {
+      console.warn(`[Quota] inst=${instance.instance_name} bloqueado: ${q.reason} (count=${q.hourCount ?? q.dayCount}/${q.limit})`)
+      return { ok: false, reason: q.reason }
+    }
+  }
+
+  // Anti-ban: typing simulation antes do envio (skip pra chat manual humano)
+  if (!opts.skipTyping) await simulateTyping(instance, phone, text)
+
   try {
     const res = await fetch(`${instance.api_url}/message/sendText/${instance.instance_name}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'apikey': instance.api_key },
-      body: JSON.stringify({ number, text, delay: 2000 }),
+      // delay:2000 removido — typing simulation ja cobre o tempo de "digitacao"
+      body: JSON.stringify({ number, text }),
     })
     const data = await res.json().catch(() => ({}))
     if (!data.key?.id) {

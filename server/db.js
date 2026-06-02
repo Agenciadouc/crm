@@ -344,6 +344,21 @@ function addColumnIfNotExists(table, column, type) {
 addColumnIfNotExists('whatsapp_instances', 'qr_code', 'TEXT')
 // whatsapp_instances: default attendant for new inbound leads (overrides round-robin when set)
 addColumnIfNotExists('whatsapp_instances', 'default_attendant_id', 'INTEGER REFERENCES users(id) ON DELETE SET NULL')
+// Anti-ban: quota por instancia + warm-up gradual
+addColumnIfNotExists('whatsapp_instances', 'hourly_send_limit', 'INTEGER')  // null = default global 100
+addColumnIfNotExists('whatsapp_instances', 'daily_send_limit', 'INTEGER')   // null = default global 800
+addColumnIfNotExists('whatsapp_instances', 'warmup_until', 'TEXT')          // datetime fim do warm-up; null = sem warm-up
+// Backfill warm-up retroativo APENAS pra instancias recentes (created_at < 3 dias atras).
+// Instancias antigas nao sao afetadas — ja "esquentaram" naturalmente em prod.
+try {
+  const r = db.prepare(`
+    UPDATE whatsapp_instances
+       SET warmup_until = datetime(created_at, '+3 days')
+     WHERE warmup_until IS NULL
+       AND datetime(created_at, '+3 days') > datetime('now')
+  `).run()
+  if (r.changes > 0) console.log(`[db] migration: warmup_until set for ${r.changes} recent instances`)
+} catch (e) { console.warn('[db] warmup backfill:', e.message) }
 // leads: instance_id to track which WhatsApp number received this lead
 addColumnIfNotExists('leads', 'instance_id', 'INTEGER REFERENCES whatsapp_instances(id) ON DELETE SET NULL')
 // accounts: Evolution API credentials (shared across all instances)

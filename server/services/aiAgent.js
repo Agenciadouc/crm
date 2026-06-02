@@ -607,6 +607,22 @@ export async function processInboundMessage(lead, msgContent, mediaType, instanc
 
     // 13. Envia resposta texto (se houver)
     if (finalText && finalText.trim()) {
+      // Anti-ban: espaca msg do bot se houve outbound recente (<10s) pro mesmo lead.
+      // Evita rajada quando lead manda varias inbounds seguidas que disparam respostas em sequencia.
+      const lastBotMsg = db.prepare(`
+        SELECT created_at FROM messages
+        WHERE lead_id = ? AND direction = 'outbound' AND ai_agent_id = ?
+        ORDER BY id DESC LIMIT 1
+      `).get(lead.id, agent.id)
+      if (lastBotMsg?.created_at) {
+        const lastMs = new Date(String(lastBotMsg.created_at).replace(' ', 'T') + 'Z').getTime()
+        const secondsSince = (Date.now() - lastMs) / 1000
+        if (secondsSince < 10) {
+          const wait = 2000 + Math.random() * 2000  // 2-4s
+          console.log(`[AI Agent] espacando msg do bot lead=${lead.id} wait=${Math.round(wait)}ms (last=${secondsSince.toFixed(1)}s)`)
+          await new Promise(r => setTimeout(r, wait))
+        }
+      }
       const inst = db.prepare('SELECT * FROM whatsapp_instances WHERE id = ?').get(instanceId)
       if (inst && inst.status === 'connected') {
         const sendRes = await sendViaInstance(inst, lead.phone, finalText.trim())

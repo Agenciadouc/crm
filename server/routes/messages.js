@@ -105,10 +105,11 @@ router.post('/:leadId', async (req, res) => {
     else if (!number.startsWith('55') && number.length === 10) number = '55' + number.slice(0, 2) + '9' + number.slice(2)
 
     // Envia via sendViaInstance (com pre-flight + helper centralizado).
+    // Chat manual humano: skipTyping e skipQuota (atendente controla volume real; digita de verdade).
     // 2 tentativas se primeira falha por timeout/erro (mas nao retenta se foi 'number_not_on_whatsapp').
     let sendRes = null
     for (let attempt = 0; attempt < 2; attempt++) {
-      sendRes = await sendViaInstance(instance, number, content)
+      sendRes = await sendViaInstance(instance, number, content, { skipTyping: true, skipQuota: true })
       if (sendRes.ok) break // success
       if (sendRes.validationFailed) break // numero invalido, nao adianta retentar
       if (attempt === 0) {

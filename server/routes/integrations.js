@@ -108,9 +108,9 @@ router.post('/whatsapp', requireRole('super_admin', 'gerente', 'atendente'), asy
     console.error('[Evolution Create Instance]', err.message)
   }
 
-  // Save to DB
+  // Save to DB. Anti-ban: nova instancia entra em warm-up de 3 dias (volume gradual).
   const result = db.prepare(
-    'INSERT INTO whatsapp_instances (account_id, instance_name, api_url, api_key, status, qr_code, lead_intake_mode) VALUES (?, ?, ?, ?, ?, ?, ?)'
+    "INSERT INTO whatsapp_instances (account_id, instance_name, api_url, api_key, status, qr_code, lead_intake_mode, warmup_until) VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now', '+3 days'))"
   ).run(req.accountId, instance_name, baseUrl, api_key, qrCode ? 'connecting' : 'disconnected', qrCode, lead_intake_mode)
   const instance = db.prepare('SELECT * FROM whatsapp_instances WHERE id = ?').get(result.lastInsertRowid)
 
