@@ -829,12 +829,29 @@ router.post('/:id/force-ai-respond', requireRole('super_admin'), async (req, res
   if (!instanceId) return res.status(400).json({ error: 'Nenhuma instancia disponivel pra essa conta' })
 
   console.log(`[ForceAI] super_admin=${req.user?.id} disparou IA pra lead=${lead.id} instance=${instanceId}`)
-  // Fire and forget — UI nao precisa esperar Haiku
-  setImmediate(() => {
-    processInboundMessage(lead, lastInbound.content || '', lastInbound.media_type || 'text', instanceId, { force: true })
-      .catch(e => console.error('[ForceAI]', e.message))
-  })
-  res.json({ ok: true, message: 'IA disparada — resposta deve chegar em alguns segundos.' })
+  // Respeita filtros normais (etapa, tag, instancia). Botao eh pra destravar casos onde tudo bate
+  // mas o bot nao iniciou (timing/race). Se nada match, retorna erro descritivo.
+  try {
+    const result = await processInboundMessage(
+      lead,
+      lastInbound.content || '',
+      lastInbound.media_type || 'text',
+      instanceId,
+      { force: false }
+    )
+    if (result && result.ok === false) {
+      const reason = result.reason || 'unknown'
+      let msg = 'Nenhum agente compativel com este lead.'
+      if (reason === 'no_matching_agent') {
+        msg = 'Nenhum agente bate com os filtros do lead (etapa, tag obrigatoria, instancia). Verifique a config do agente.'
+      }
+      return res.status(400).json({ error: msg, reason })
+    }
+    res.json({ ok: true, message: 'IA disparada — resposta deve chegar em alguns segundos.' })
+  } catch (e) {
+    console.error('[ForceAI]', e.message)
+    res.status(500).json({ error: 'Erro disparando IA', detail: e.message })
+  }
 })
 
 // Bulk opt-in
