@@ -23,7 +23,7 @@ import {
 } from 'lucide-react'
 import MessageMedia from '../components/MessageMedia'
 import { applyMessageVars } from '../lib/messageVars'
-import { parseSqlDate, formatTime } from '../lib/dates'
+import { parseSqlDate, formatTime, formatDayLabel, localDayKey } from '../lib/dates'
 import { useIsMobile } from '../hooks/useIsMobile'
 
 function timeAgo(dateStr: string) {
@@ -920,31 +920,46 @@ export default function Chat() {
 
               <div className="chat-messages">
                 {visibleMessages.length === 0 && <div style={{ textAlign: 'center', color: '#6B6580', padding: 40, fontSize: 13 }}>Nenhuma mensagem nesta conversa</div>}
-                {visibleMessages.map(m => (
-                  <div key={m.id} className={`chat-msg-row ${m.direction}`}>
-                    <div className={`chat-bubble ${m.direction}`} style={m.direction === 'outbound' && !m.wa_msg_id ? { border: '1px solid #FF6B6B', opacity: 0.8 } : undefined}>
-                      {m.media_type && m.media_type !== 'text'
-                        ? <MessageMedia message={m} leadId={lead.id} />
-                        : (m.content || <em style={{ opacity: 0.5 }}>Sem conteudo</em>)}
-                    </div>
-                    <div className="chat-bubble-time">
-                      {m.sender_name && <span>{m.sender_name} · </span>}
-                      <span>{formatTime(m.created_at)}</span>
-                      {(m as any).instance_id && (() => {
-                        const inst = instances.find(i => i.id === (m as any).instance_id)
-                        return inst ? <span style={{ marginLeft: 4, padding: '0 5px', borderRadius: 3, background: 'rgba(255,179,0,0.12)', color: '#FFB300', fontSize: 9, fontWeight: 600 }}>via {inst.instance_name}</span> : null
-                      })()}
-                      {m.direction === 'outbound' && (() => {
-                        // Fallback pra msgs antigas sem delivery_status: wa_msg_id presente = entregue (cinza), ausente = falha
-                        const st = m.delivery_status || (m.wa_msg_id ? 'sent' : 'failed')
-                        if (st === 'failed') return <span className="msg-check msg-check-failed" title="Falha no envio">✗</span>
-                        if (st === 'read') return <span className="msg-check msg-check-read" title="Lida pelo lead">✓✓</span>
-                        if (st === 'delivered') return <span className="msg-check msg-check-delivered" title="Entregue ao aparelho">✓✓</span>
-                        return <span className="msg-check msg-check-sent" title="Enviada">✓</span>
-                      })()}
-                    </div>
-                  </div>
-                ))}
+                {(() => {
+                  let lastDayKey = ''
+                  const elements: React.ReactNode[] = []
+                  for (const m of visibleMessages) {
+                    const dayKey = localDayKey(m.created_at)
+                    if (dayKey && dayKey !== lastDayKey) {
+                      elements.push(
+                        <div key={`sep-${dayKey}`} className="chat-day-separator">
+                          <span>{formatDayLabel(m.created_at)}</span>
+                        </div>
+                      )
+                      lastDayKey = dayKey
+                    }
+                    elements.push(
+                      <div key={m.id} className={`chat-msg-row ${m.direction}`}>
+                        <div className={`chat-bubble ${m.direction}`} style={m.direction === 'outbound' && !m.wa_msg_id ? { border: '1px solid #FF6B6B', opacity: 0.8 } : undefined}>
+                          {m.media_type && m.media_type !== 'text'
+                            ? <MessageMedia message={m} leadId={lead.id} />
+                            : (m.content || <em style={{ opacity: 0.5 }}>Sem conteudo</em>)}
+                        </div>
+                        <div className="chat-bubble-time">
+                          {m.sender_name && <span>{m.sender_name} · </span>}
+                          <span>{formatTime(m.created_at)}</span>
+                          {(m as any).instance_id && (() => {
+                            const inst = instances.find(i => i.id === (m as any).instance_id)
+                            return inst ? <span style={{ marginLeft: 4, padding: '0 5px', borderRadius: 3, background: 'rgba(255,179,0,0.12)', color: '#FFB300', fontSize: 9, fontWeight: 600 }}>via {inst.instance_name}</span> : null
+                          })()}
+                          {m.direction === 'outbound' && (() => {
+                            const st = m.delivery_status || (m.wa_msg_id ? 'sent' : 'failed')
+                            if (st === 'failed') return <span className="msg-check msg-check-failed" title="Falha no envio">✗</span>
+                            if (st === 'read') return <span className="msg-check msg-check-read" title="Lida pelo lead">✓✓</span>
+                            if (st === 'delivered') return <span className="msg-check msg-check-delivered" title="Entregue ao aparelho">✓✓</span>
+                            return <span className="msg-check msg-check-sent" title="Enviada">✓</span>
+                          })()}
+                        </div>
+                      </div>
+                    )
+                  }
+                  return elements
+                })()}
                 <div ref={chatEndRef} />
               </div>
               {/* Dropdown 'Enviar via' — sempre visivel quando ha instancias conectadas */}
