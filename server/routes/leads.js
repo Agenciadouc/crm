@@ -5,7 +5,7 @@ import { requireRole } from '../middleware/auth.js'
 import { broadcastSSE } from '../sse.js'
 import { triggerCapiForStageChange } from '../services/metaCapi.js'
 import { notifyAndOpenLead } from '../services/leadHandoff.js'
-import { sendBotWelcomeForSheetsLead } from '../services/aiAgent.js'
+import { sendBotWelcomeForSheetsLead, processInboundMessage } from '../services/aiAgent.js'
 
 const router = Router()
 
@@ -792,6 +792,42 @@ router.post('/:id/opt-out', (req, res) => {
   if (!lead) return res.status(404).json({ error: 'Lead nao encontrado' })
   db.prepare("UPDATE leads SET opted_out_at = datetime('now') WHERE id = ?").run(lead.id)
   res.json({ ok: true })
+})
+
+// Forca IA a responder a ultima msg inbound do lead, ignorando filtros normais
+// (etapa, tag, handoff previo, atendente humano). Super admin only — usado pra desbloquear
+// casos onde o lead caiu fora dos filtros (ex: lead em "Perdido" mas agente so atende "Em Atendimento").
+router.post('/:id/force-ai-respond', requireRole('super_admin'), async (req, res) => {
+  const lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(req.params.id)
+  if (!lead) return res.status(404).json({ error: 'Lead nao encontrado' })
+  if (req.accountId && lead.account_id !== req.accountId) {
+    return res.status(403).json({ error: 'Lead pertence a outra conta' })
+  }
+
+  // Pega a ultima msg inbound do lead pra simular trigger
+  const lastInbound = db.prepare(`
+    SELECT content, media_type, instance_id
+    FROM messages
+    WHERE lead_id = ? AND direction = 'inbound'
+    ORDER BY id DESC LIMIT 1
+  `).get(lead.id)
+  if (!lastInbound) return res.status(400).json({ error: 'Lead nao tem mensagem inbound pra responder' })
+
+  // instancia: usa a da ultima msg, ou a do lead, ou primeira conectada da conta
+  let instanceId = lastInbound.instance_id || lead.last_instance_id || null
+  if (!instanceId) {
+    const inst = db.prepare("SELECT id FROM whatsapp_instances WHERE account_id = ? AND status = 'connected' ORDER BY id LIMIT 1").get(lead.account_id)
+    instanceId = inst?.id || null
+  }
+  if (!instanceId) return res.status(400).json({ error: 'Nenhuma instancia disponivel pra essa conta' })
+
+  console.log(`[ForceAI] super_admin=${req.user?.id} disparou IA pra lead=${lead.id} instance=${instanceId}`)
+  // Fire and forget — UI nao precisa esperar Haiku
+  setImmediate(() => {
+    processInboundMessage(lead, lastInbound.content || '', lastInbound.media_type || 'text', instanceId, { force: true })
+      .catch(e => console.error('[ForceAI]', e.message))
+  })
+  res.json({ ok: true, message: 'IA disparada — resposta deve chegar em alguns segundos.' })
 })
 
 // Bulk opt-in

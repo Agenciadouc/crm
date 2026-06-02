@@ -7,7 +7,7 @@ import {
   sendMessage, sendMessageMedia, updateLead, moveLeadStage, assignLead, addLeadNote, addLeadTag, removeLeadTag,
   fetchLeadCadence, advanceLeadCadence, removeLeadCadence, fetchCadences, assignLeadCadence, createTag,
   fetchLeadFollowUp, fetchFollowUps, assignFollowUp, pauseLeadFollowUp, resumeLeadFollowUp, cancelLeadFollowUp,
-  archiveLead, blockLead, createStandaloneTask, fetchLeadTasks, completeStandaloneTask, deleteStandaloneTask, completeTask, skipTask, fetchLeadConversations, type LeadConversation,
+  archiveLead, blockLead, createStandaloneTask, fetchLeadTasks, completeStandaloneTask, deleteStandaloneTask, completeTask, skipTask, fetchLeadConversations, forceAiRespond, type LeadConversation,
   fetchReadyMessages, type ReadyMessage,
   createLeadOrFindExisting, markLeadAsRead,
   requestLeadTransfer, acceptTransferRequest, rejectTransferRequest, fetchPendingTransferRequests, grabLead, type TransferRequest,
@@ -18,7 +18,7 @@ import EditTaskModal from '../components/EditTaskModal'
 import FilterDropdown, { type FilterValue } from '../components/FilterDropdown'
 import {
   MessageCircle, Search, Send, Phone, User, Edit3, Save, X, Plus,
-  StickyNote, Tag as TagIcon, GitBranch, Smartphone, ListOrdered, ChevronRight, Check, Clock, Archive, Ban, ListTodo, ChevronDown, ChevronUp, Trash2, Paperclip, FileText, MessageSquarePlus, Copy, Zap, Pause, Play,
+  StickyNote, Tag as TagIcon, GitBranch, Smartphone, ListOrdered, ChevronRight, Check, Clock, Archive, Ban, ListTodo, ChevronDown, ChevronUp, Trash2, Paperclip, FileText, MessageSquarePlus, Copy, Zap, Pause, Play, Bot,
   Menu as MenuIcon, MessagesSquare, Info as InfoIcon, History as HistoryIcon, ChevronLeft,
 } from 'lucide-react'
 import MessageMedia from '../components/MessageMedia'
@@ -407,6 +407,21 @@ export default function Chat() {
       setNotice({ kind: 'success', title: 'Conversa copiada', message: `${visibleMessages.length} mensagem${visibleMessages.length !== 1 ? 's' : ''} copiada${visibleMessages.length !== 1 ? 's' : ''}. Cole no ChatGPT/Claude pra analise.` })
     } catch (e: any) {
       setNotice({ kind: 'error', title: 'Erro ao copiar', message: e?.message || 'Browser bloqueou acesso ao clipboard (precisa HTTPS)' })
+    }
+  }
+
+  const handleForceAi = async () => {
+    if (!lead) return
+    if (!confirm('Forçar IA responder esse lead?\n\nIgnora filtros de etapa, tag e handoff anterior. Usa o ultimo agente compativel com a instancia do lead.')) return
+    try {
+      const r = await forceAiRespond(lead.id)
+      if (r.ok) {
+        setNotice({ kind: 'success', title: 'IA disparada', message: r.message || 'Resposta deve chegar em segundos.' })
+      } else {
+        setNotice({ kind: 'error', title: 'Falhou', message: r.error || 'Nao foi possivel disparar' })
+      }
+    } catch (e: any) {
+      setNotice({ kind: 'error', title: 'Erro', message: e?.message || 'Erro de rede' })
     }
   }
 
@@ -870,6 +885,11 @@ export default function Chat() {
                 {user?.role === 'super_admin' && (
                   <button className="btn btn-secondary btn-sm" title="Copiar conversa (pra analise por LLM)" onClick={handleCopyConversation} style={{ padding: '4px 8px' }}>
                     <Copy size={12} />
+                  </button>
+                )}
+                {user?.role === 'super_admin' && (
+                  <button className="btn btn-secondary btn-sm" title="Forçar IA responder (ignora filtros de etapa/tag/handoff)" onClick={handleForceAi} style={{ padding: '4px 8px' }}>
+                    <Bot size={12} />
                   </button>
                 )}
                 <button className="btn btn-secondary btn-sm" title="Arquivar" onClick={() => handleArchiveLead(lead.id)} style={{ padding: '4px 8px' }}>

@@ -39,39 +39,48 @@ function resetMonthlyTokensIfNeeded(agent) {
 
 // ─── findAgentForLead ─────────────────────────────────────────────────
 
-export function findAgentForLead(lead, instanceId) {
+export function findAgentForLead(lead, instanceId, opts = {}) {
   if (!lead) return null
+  const force = opts.force === true  // super_admin override: ignora filtros de etapa/tag/handoff/atendente
 
   // 0. Account tem feature gate?
   const account = getAccount(lead.account_id)
   if (!account || !account.ai_agents_enabled) return null
 
-  // 1. Lead pode receber bot?
+  // 1. Lead pode receber bot? (gates de seguranca — preserva mesmo em force)
   if (lead.is_blocked || lead.is_archived || !lead.is_active) return null
 
-  // 2. Lead ja foi handoff'ed por bot? Nao volta a atender.
-  if (lead.ai_handed_off_at) return null
+  if (!force) {
+    // 2. Lead ja foi handoff'ed por bot? Nao volta a atender.
+    if (lead.ai_handed_off_at) return null
 
-  // 3. Lead ja tem atendente HUMANO definido? Bot nao interfere.
-  if (lead.attendant_id) {
-    const att = getUser(lead.attendant_id)
-    if (att && !att.is_bot) return null
+    // 3. Lead ja tem atendente HUMANO definido? Bot nao interfere.
+    if (lead.attendant_id) {
+      const att = getUser(lead.attendant_id)
+      if (att && !att.is_bot) return null
+    }
   }
 
   // 4. Busca agentes ativos
   const agents = db.prepare("SELECT * FROM ai_agents WHERE account_id = ? AND is_active = 1 ORDER BY id ASC").all(lead.account_id)
 
   for (const agent of agents) {
-    // Filtro etapa
-    const hasStage = db.prepare('SELECT 1 FROM ai_agent_stages WHERE agent_id = ? AND stage_id = ?').get(agent.id, lead.stage_id)
-    if (!hasStage) continue
-    // Filtro instancia (se instanceId presente)
+    if (!force) {
+      // Filtro etapa
+      const hasStage = db.prepare('SELECT 1 FROM ai_agent_stages WHERE agent_id = ? AND stage_id = ?').get(agent.id, lead.stage_id)
+      if (!hasStage) continue
+    }
+    // Filtro instancia (mesmo em force — se instanceId presente, agente precisa cobrir essa instancia)
     if (instanceId) {
       const hasInstance = db.prepare('SELECT 1 FROM ai_agent_instances WHERE agent_id = ? AND instance_id = ?').get(agent.id, instanceId)
       if (!hasInstance) continue
     }
-    // Filtro tag obrigatoria
-    if (agent.required_tag_id && !leadHasTag(lead.id, agent.required_tag_id)) continue
+    if (!force) {
+      // Filtro tag obrigatoria
+      if (agent.required_tag_id && !leadHasTag(lead.id, agent.required_tag_id)) continue
+    }
+
+    if (force) return agent  // primeiro agente que match instancia ja serve
 
     // Modo de ativacao
     switch (agent.activation_mode) {
@@ -321,12 +330,16 @@ async function executeTool(toolUse, agent, lead, instanceId, availableTags, avai
 
 // ─── processInboundMessage ────────────────────────────────────────────
 
-export async function processInboundMessage(lead, msgContent, mediaType, instanceId) {
+export async function processInboundMessage(lead, msgContent, mediaType, instanceId, opts = {}) {
   try {
-    console.log(`[AI Agent DEBUG] processInboundMessage chamado lead=${lead?.id} instance=${instanceId} mediaType=${mediaType} content="${(msgContent||'').substring(0,30)}"`)
-    // 1. Encontra agente
-    const agent = findAgentForLead(lead, instanceId)
-    if (!agent) return
+    const force = opts.force === true
+    console.log(`[AI Agent DEBUG] processInboundMessage chamado lead=${lead?.id} instance=${instanceId} mediaType=${mediaType} force=${force} content="${(msgContent||'').substring(0,30)}"`)
+    // 1. Encontra agente (force ignora filtros de etapa/tag/handoff)
+    const agent = findAgentForLead(lead, instanceId, { force })
+    if (!agent) {
+      if (force) console.warn(`[AI Agent] force=true mas nenhum agente match lead=${lead?.id} instance=${instanceId}`)
+      return { ok: false, reason: 'no_matching_agent' }
+    }
     console.log(`[AI Agent DEBUG] agente encontrado: id=${agent.id} name=${agent.name}`)
 
     // 2. Reset mensal de tokens se mes virou
