@@ -537,7 +537,10 @@ router.put('/:id/stage', (req, res) => {
   if (!lead) return res.status(404).json({ error: 'Lead nao encontrado' })
 
   const oldStageId = lead.stage_id
-  db.prepare("UPDATE leads SET stage_id = ?, updated_at = datetime('now') WHERE id = ?").run(stage_id, lead.id)
+  // Mudanca de etapa MANUAL (via UI) trava bot pra esse lead — gerente/atendente assumiu controle.
+  // Se quiser reativar bot, atribuir bot como atendente OU usar botao "Forcar IA" (super_admin).
+  // Bot interno (aiAgent) muda stage via SQL direto, NAO passa por essa rota — entao nao afeta o fluxo natural do bot.
+  db.prepare("UPDATE leads SET stage_id = ?, ai_handed_off_at = COALESCE(ai_handed_off_at, datetime('now')), updated_at = datetime('now') WHERE id = ?").run(stage_id, lead.id)
   const histRes = db.prepare('INSERT INTO stage_history (lead_id, from_stage_id, to_stage_id, trigger_type, triggered_by) VALUES (?, ?, ?, ?, ?)').run(
     lead.id, oldStageId, stage_id, 'manual', req.user.id
   )
@@ -611,9 +614,13 @@ router.put('/:id/assign', requireRole('super_admin', 'gerente'), (req, res) => {
   }
 
   if (clearHandoff) {
+    // Atribuiu bot: bot pode voltar a atender
     db.prepare("UPDATE leads SET attendant_id = ?, ai_handed_off_at = NULL, updated_at = datetime('now') WHERE id = ?").run(attendant_id, lead.id)
   } else {
-    db.prepare("UPDATE leads SET attendant_id = ?, updated_at = datetime('now') WHERE id = ?").run(attendant_id || null, lead.id)
+    // Atribuiu humano OU removeu atendente (NULL = "Sem atendente"): trava bot pra esse lead
+    // ai_handed_off_at impede que o agente conditional volte a pegar o lead automaticamente.
+    // Pra reativar, atribuir bot de novo OU usar botao "Forcar IA" (super_admin).
+    db.prepare("UPDATE leads SET attendant_id = ?, ai_handed_off_at = COALESCE(ai_handed_off_at, datetime('now')), updated_at = datetime('now') WHERE id = ?").run(attendant_id || null, lead.id)
   }
 
   const updated = db.prepare('SELECT * FROM leads WHERE id = ?').get(lead.id)
@@ -848,7 +855,16 @@ router.post('/bulk/opt-in', (req, res) => {
 router.post('/bulk/assign', requireRole('super_admin', 'gerente'), (req, res) => {
   const { lead_ids, attendant_id } = req.body
   if (!lead_ids || !Array.isArray(lead_ids)) return res.status(400).json({ error: 'lead_ids required' })
-  const stmt = db.prepare("UPDATE leads SET attendant_id = ?, updated_at = datetime('now') WHERE id = ?")
+  // Detecta se o novo atendente eh bot pra decidir se limpa ai_handed_off_at
+  let isBotBulk = false
+  if (attendant_id) {
+    const u = db.prepare('SELECT is_bot FROM users WHERE id = ?').get(attendant_id)
+    if (u?.is_bot === 1) isBotBulk = true
+  }
+  const sql = isBotBulk
+    ? "UPDATE leads SET attendant_id = ?, ai_handed_off_at = NULL, updated_at = datetime('now') WHERE id = ?"
+    : "UPDATE leads SET attendant_id = ?, ai_handed_off_at = COALESCE(ai_handed_off_at, datetime('now')), updated_at = datetime('now') WHERE id = ?"
+  const stmt = db.prepare(sql)
   const transaction = db.transaction(() => { for (const id of lead_ids) stmt.run(attendant_id || null, id) })
   transaction()
   res.json({ ok: true, count: lead_ids.length })
