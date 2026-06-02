@@ -638,8 +638,13 @@ async function tick() {
     cleanupStaleQRCodes()
     // Re-register webhooks every tick to prevent stale webhooks
     await reRegisterWebhooks()
-    // Safety net: o loop dedicado de 10s eh o principal; aqui so cobre se tiver crash do interval
-    markStaleMessagesAsFailed()
+    // markStaleMessagesAsFailed DESATIVADO: gerava falsos positivos (msg entregue
+    // marcada ✗ porque webhook DELIVERY_ACK atrasou ou se perdeu).
+    // Falhas reais sao detectadas por: pre-flight de numero, erros do sendText
+    // (instantaneos no envio), e ghost detector (instancia inteira morta).
+    // Funcao continua no arquivo pra reativar facil se necessario.
+    // Reverte ✗ historicos: msgs failed com inbound posterior do mesmo lead = entregue
+    revertFalseFailures()
     // Detecta instancias fantasma silenciosas (Evolution state=open mas msgs nao entregam)
     // e forca restart. Cooldown 15min entre tentativas.
     detectGhostInstancesAndRestart().catch(e => console.error('[GhostDetect]', e.message))
@@ -752,9 +757,11 @@ function scheduleDailyHealthCheck() {
   }, msUntilNext)
 }
 
-// Revert falsos positivos historicos: msgs marcadas 'failed' que tem inbound posterior
-// do mesmo lead (= prova que foram entregues). Roda 1x na inicializacao pra desfazer
-// danos de threshold curto antigo. Idempotente.
+// Revert continuo: msgs outbound 'failed' que tem inbound posterior do mesmo lead
+// (= prova absoluta de entrega) voltam pra 'delivered'. Roda em todo tick de 10s no
+// scheduler + 1x na startup pra cobrir backlog. Idempotente.
+// Sem filtros restritivos (qualquer wa_msg_id, qualquer motivo de failed) — inbound
+// posterior do mesmo lead basta como prova.
 function revertFalseFailures() {
   try {
     const r1 = db.prepare(`
@@ -763,7 +770,6 @@ function revertFalseFailures() {
           delivered_at = COALESCE(delivered_at, datetime('now'))
       WHERE direction = 'outbound'
         AND delivery_status = 'failed'
-        AND wa_msg_id IS NOT NULL
         AND EXISTS (
           SELECT 1 FROM messages m_in
           WHERE m_in.lead_id = messages.lead_id
@@ -776,8 +782,6 @@ function revertFalseFailures() {
       SET status = 'sent',
           error = NULL
       WHERE status = 'failed'
-        AND wa_msg_id IS NOT NULL
-        AND error LIKE '%stale_no_delivery%'
         AND EXISTS (
           SELECT 1 FROM messages m_in
           WHERE m_in.lead_id = broadcast_recipients.lead_id
@@ -786,7 +790,18 @@ function revertFalseFailures() {
         )
     `).run()
     if (r1.changes > 0 || r2.changes > 0) {
-      console.log(`[RevertFalseFailures] revertidas msgs=${r1.changes} broadcast_recipients=${r2.changes} (lead respondeu apos envio)`)
+      console.log(`[RevertFalseFailures] msgs=${r1.changes} broadcast_recipients=${r2.changes} revertidas (lead respondeu apos envio)`)
+      // SSE pra UI atualizar ✗ vermelho -> ✓✓ verde em segundos, sem reload
+      try {
+        const affected = db.prepare(`
+          SELECT DISTINCT account_id FROM messages
+          WHERE direction = 'outbound' AND delivery_status = 'delivered'
+            AND delivered_at >= datetime('now', '-30 seconds')
+        `).all()
+        for (const a of affected) {
+          broadcastSSE(a.account_id, 'message:status', { batch_reverted_to_delivered: true })
+        }
+      } catch (e) { console.error('[RevertFalseFailures SSE]', e.message) }
       // Re-sincroniza contadores de broadcasts afetados
       if (r2.changes > 0) {
         db.prepare(`
@@ -807,17 +822,18 @@ function revertFalseFailures() {
 }
 
 export function startScheduler() {
-  console.log('[Scheduler] Started — main every 5 min, polling every 30s, stale-check every 10s, daily health 05h BRT')
-  try { revertFalseFailures() } catch (e) { console.error('[RevertFalseFailures]', e.message) }
+  console.log('[Scheduler] Started — main every 5 min, polling every 30s, revert-false every 10s, daily health 05h BRT')
+  try { revertFalseFailures() } catch (e) { console.error('[RevertFalseFailures startup]', e.message) }
   tick()
   setInterval(tick, INTERVAL_MS)
   // Polling runs aggressively (30s) so missed messages surface quickly when webhook misbehaves
   setTimeout(() => pollTick(), 10000) // first poll after 10s
   setInterval(pollTick, 30 * 1000)
-  // Loop dedicado pra stale messages: 10s pra feedback quase instantaneo no UI
-  // (instancia saudavel + 60s threshold => msg vira ✗ vermelho em ate 70s do envio)
+  // Loop continuo de revert: detecta ✗ historicos onde lead respondeu apos (= entregue)
+  // e volta pra ✓✓ verde. Cron de markStaleMessagesAsFailed foi DESATIVADO por gerar
+  // falsos positivos. Falhas reais: pre-flight + sendText erro + ghost detector.
   setInterval(() => {
-    try { markStaleMessagesAsFailed() } catch (e) { console.error('[MarkStale tick]', e.message) }
+    try { revertFalseFailures() } catch (e) { console.error('[RevertFalse tick]', e.message) }
   }, 10 * 1000)
   // Daily instance health check (auto-reconecta disconnected)
   scheduleDailyHealthCheck()
