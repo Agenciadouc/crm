@@ -94,8 +94,8 @@ export function findAgentForLead(lead, instanceId, _opts = {}) {
 }
 
 // ─── diagnoseForceAi ─────────────────────────────────────────────────
-// Diagnostica POR QUE o bot nao atuaria nesse lead. Retorna lista de bloqueios
-// em pt-BR pra mostrar pro super_admin. Vazio = bot atuaria normalmente.
+// Diagnostica POR QUE o bot nao atuaria (ou faria handoff silencioso) nesse lead.
+// Retorna lista de bloqueios em pt-BR. Vazio = bot atuaria normalmente.
 export function diagnoseForceAi(lead, instanceId) {
   const blockers = []
   if (!lead) return { blockers: ['Lead nao encontrado'] }
@@ -122,34 +122,52 @@ export function diagnoseForceAi(lead, instanceId) {
     return { blockers }
   }
 
-  // Verifica se ALGUM agente bate todos os filtros de config
-  let anyAgentMatchesConfig = false
-  const configIssues = []
+  // Verifica se ALGUM agente bate todos os filtros de config E pode responder
+  // (sem cair em handoff silencioso por max_messages ou token limit)
+  let anyAgentViable = false
+  const issuesPerAgent = []
   for (const agent of agents) {
     const stageOk = !!db.prepare('SELECT 1 FROM ai_agent_stages WHERE agent_id = ? AND stage_id = ?').get(agent.id, lead.stage_id)
     const instanceOk = !instanceId || !!db.prepare('SELECT 1 FROM ai_agent_instances WHERE agent_id = ? AND instance_id = ?').get(agent.id, instanceId)
     const tagOk = !agent.required_tag_id || leadHasTag(lead.id, agent.required_tag_id)
-    if (stageOk && instanceOk && tagOk) {
-      anyAgentMatchesConfig = true
-      break
+    if (!stageOk || !instanceOk || !tagOk) {
+      const why = []
+      if (!stageOk) {
+        const stageName = db.prepare('SELECT name FROM funnel_stages WHERE id = ?').get(lead.stage_id)?.name || `id=${lead.stage_id}`
+        why.push(`etapa "${stageName}" nao configurada`)
+      }
+      if (!instanceOk) {
+        const instName = db.prepare('SELECT instance_name FROM whatsapp_instances WHERE id = ?').get(instanceId)?.instance_name || `id=${instanceId}`
+        why.push(`instancia "${instName}" nao configurada`)
+      }
+      if (!tagOk) {
+        const tagName = db.prepare('SELECT name FROM tags WHERE id = ?').get(agent.required_tag_id)?.name || `id=${agent.required_tag_id}`
+        why.push(`tag "${tagName}" ausente`)
+      }
+      issuesPerAgent.push(`"${agent.name}": ${why.join(', ')}`)
+      continue
     }
-    const why = []
-    if (!stageOk) {
-      const stageName = db.prepare('SELECT name FROM funnel_stages WHERE id = ?').get(lead.stage_id)?.name || `id=${lead.stage_id}`
-      why.push(`etapa "${stageName}" nao esta configurada`)
+
+    // Config bate. Agora checa se nao vai cair em handoff silencioso:
+    // 1. Limite mensal de tokens estourado -> handoff sem msg
+    if ((agent.tokens_used_this_month || 0) >= (agent.monthly_token_limit || 0)) {
+      issuesPerAgent.push(`"${agent.name}": limite mensal de tokens estourado (${agent.tokens_used_this_month}/${agent.monthly_token_limit}). Bot faria handoff sem responder`)
+      continue
     }
-    if (!instanceOk) {
-      const instName = db.prepare('SELECT instance_name FROM whatsapp_instances WHERE id = ?').get(instanceId)?.instance_name || `id=${instanceId}`
-      why.push(`instancia "${instName}" nao esta configurada`)
+    // 2. Max messages atingido -> handoff sem msg
+    const botMsgCount = countBotMessagesInThread(agent, lead.id)
+    if (botMsgCount >= (agent.max_messages_before_handoff || 999)) {
+      issuesPerAgent.push(`"${agent.name}": ja mandou ${botMsgCount} msgs nesse lead (limite ${agent.max_messages_before_handoff}). Bot faria handoff sem responder. Pra liberar, criar follow-up novo ou aumentar o limite no agente.`)
+      continue
     }
-    if (!tagOk) {
-      const tagName = db.prepare('SELECT name FROM tags WHERE id = ?').get(agent.required_tag_id)?.name || `id=${agent.required_tag_id}`
-      why.push(`tag obrigatoria "${tagName}" nao presente no lead`)
-    }
-    configIssues.push(`Agente "${agent.name}": ${why.join(', ')}`)
+
+    // Esse agente esta viavel — pode atender sem cair em handoff
+    anyAgentViable = true
+    break
   }
-  if (!anyAgentMatchesConfig) {
-    blockers.push('Nenhum agente bate com a configuracao do lead. Detalhes: ' + configIssues.join(' | '))
+
+  if (!anyAgentViable && issuesPerAgent.length > 0) {
+    blockers.push('Nenhum agente pode atuar: ' + issuesPerAgent.join(' | '))
   }
 
   return { blockers }

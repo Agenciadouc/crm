@@ -844,18 +844,50 @@ router.post('/:id/force-ai-respond', requireRole('super_admin'), async (req, res
     })
   }
 
-  // Passou no diagnostico — dispara normal (force=false). processInboundMessage
-  // faz o mesmo fluxo de uma msg inbound chegando agora.
+  // Passou no diagnostico — dispara normal. processInboundMessage faz o mesmo
+  // fluxo de uma msg inbound chegando agora.
+  // Snapshot ANTES: msg.id max + attendant_id atual. Se DEPOIS o bot nao gerou
+  // msg outbound (max_id nao subiu) mas o atendente mudou ou ai_handed_off_at
+  // foi setado, eh handoff silencioso — reporta como erro.
+  const beforeMaxMsgId = db.prepare("SELECT COALESCE(MAX(id), 0) as m FROM messages WHERE lead_id = ?").get(lead.id)?.m || 0
+  const beforeAttendantId = lead.attendant_id
+  const beforeHandoffAt = lead.ai_handed_off_at
+
   try {
     const result = await processInboundMessage(
       lead,
       lastInbound.content || '',
       lastInbound.media_type || 'text',
-      instanceId,
-      { force: false }
+      instanceId
     )
     if (result && result.ok === false) {
       return res.status(400).json({ error: 'Bot nao pode atuar', reason: result.reason || 'unknown' })
+    }
+
+    // Verifica se houve realmente envio de msg pelo bot
+    const after = db.prepare("SELECT COALESCE(MAX(m.id), 0) as max_id FROM messages m WHERE m.lead_id = ?").get(lead.id)
+    const newLeadState = db.prepare("SELECT attendant_id, ai_handed_off_at FROM leads WHERE id = ?").get(lead.id)
+    const wasMsgSent = (after?.max_id || 0) > beforeMaxMsgId
+    const wasHandoff = (newLeadState?.ai_handed_off_at && newLeadState.ai_handed_off_at !== beforeHandoffAt)
+                     || (newLeadState?.attendant_id !== beforeAttendantId && newLeadState?.attendant_id)
+
+    if (!wasMsgSent && wasHandoff) {
+      // Bot fez handoff silencioso (max_messages, token limit, etc) — atribuiu humano sem responder
+      const newAtt = newLeadState?.attendant_id
+        ? db.prepare('SELECT name FROM users WHERE id = ?').get(newLeadState.attendant_id)?.name || 'humano'
+        : null
+      const msg = newAtt
+        ? `Bot fez handoff silencioso pra ${newAtt} sem responder. Provavel limite atingido (max_messages ou tokens).`
+        : 'Bot fez handoff silencioso sem responder. Provavel limite atingido.'
+      return res.status(400).json({
+        error: msg,
+        blockers: [msg],
+        message: msg,
+      })
+    }
+    if (!wasMsgSent) {
+      const m = 'Bot processou mas nao enviou mensagem. Verifique logs do servidor (PM2).'
+      return res.status(400).json({ error: m, blockers: [m], message: m })
     }
     res.json({ ok: true, message: 'IA disparada — resposta deve chegar em alguns segundos.' })
   } catch (e) {
