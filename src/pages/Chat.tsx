@@ -898,7 +898,7 @@ export default function Chat() {
                   </button>
                 )}
                 {user?.role === 'super_admin' && (
-                  <button className="btn btn-secondary btn-sm" title="Forçar IA responder (ignora filtros de etapa/tag/handoff)" onClick={handleForceAi} style={{ padding: '4px 8px' }}>
+                  <button className="btn btn-secondary btn-sm" title="Forçar IA responder (respeita filtros do agente)" onClick={handleForceAi} style={{ padding: '4px 8px' }}>
                     <Bot size={12} />
                   </button>
                 )}
