@@ -216,40 +216,65 @@ export default function Chat() {
   }, [accountId, instanceFilter, tagFilter, stageFilter, attendantFilter, showArchived])
   useEffect(() => { loadLeadsList() }, [loadLeadsList])
 
+  // Race token: cada chamada de loadLead recebe um id incremental.
+  // Resposta de fetch so eh aplicada se ainda for a chamada "atual" — descarta
+  // respostas obsoletas quando user troca de lead rapido.
+  const loadLeadTokenRef = useRef(0)
+  // Loading flag: true enquanto o lead esta sendo carregado (UI mostra "..." no atendente)
+  const [leadLoading, setLeadLoading] = useState(false)
+
   // Load selected lead detail
   const loadLead = useCallback(async () => {
-    if (!selectedLeadId || !accountId) { setLead(null); setMessages([]); setLeadTasks([]); setConversations([]); setActiveConvInstance(null); return }
-    const data = await fetchLead(selectedLeadId, accountId)
-    setLead(data.lead)
-    setMessages(data.messages)
-    setHistory(data.stageHistory)
-    setNotes(data.notes || [])
-    fetchLeadTasks(selectedLeadId, accountId).then(setLeadTasks).catch(() => setLeadTasks([]))
-    fetchLeadConversations(selectedLeadId, accountId).then(convs => {
-      setConversations(convs)
-      // Default: ultima instancia conversada (ou primeira que o user tem acesso)
-      if (convs.length > 0) {
-        const last = data.lead.last_instance_id && convs.find(c => c.instance_id === data.lead.last_instance_id)
-        setActiveConvInstance(last ? last.instance_id : convs[0].instance_id)
-      } else setActiveConvInstance(null)
-    }).catch(() => { setConversations([]); setActiveConvInstance(null) })
-    setEditData({ name: data.lead.name || '', phone: data.lead.phone || '', email: data.lead.email || '', city: data.lead.city || '', empresa: data.lead.empresa || '', cpf_cnpj: data.lead.cpf_cnpj || '', instagram: data.lead.instagram || '', trabalha_anuncio: data.lead.trabalha_anuncio || 0, investimento_anuncios: data.lead.investimento_anuncios || '' })
+    if (!selectedLeadId || !accountId) {
+      setLead(null); setMessages([]); setLeadTasks([]); setConversations([])
+      setActiveConvInstance(null); setLeadLoading(false)
+      return
+    }
+    // 1. Limpa estado do lead anterior IMEDIATAMENTE pra UI nao mostrar dados stale
+    setLead(null); setMessages([]); setLeadCadence(null); setLeadFollowUp(null); setLeadTasks([]); setConversations([])
+    setLeadLoading(true)
+    // 2. Race token pra descartar respostas obsoletas se user trocar de lead rapido
+    const myToken = ++loadLeadTokenRef.current
+    const reqLeadId = selectedLeadId
     try {
-      const lc = await fetchLeadCadence(selectedLeadId, accountId)
-      setLeadCadence(lc)
-      if (lc?.attempt_message) {
-        setCadenceMsgText(applyMessageVars(lc.attempt_message, {
-          leadName: data.lead.name,
-          leadEmpresa: data.lead.empresa,
-          leadCity: data.lead.city,
-          attendantName: user?.name,
-        }))
-      } else setCadenceMsgText('')
-    } catch { setLeadCadence(null); setCadenceMsgText('') }
-    try {
-      const lfu = await fetchLeadFollowUp(selectedLeadId, accountId)
-      setLeadFollowUp(lfu)
-    } catch { setLeadFollowUp(null) }
+      const data = await fetchLead(reqLeadId, accountId)
+      if (myToken !== loadLeadTokenRef.current) return  // outra chamada mais recente — descarta
+      setLead(data.lead)
+      setMessages(data.messages)
+      setHistory(data.stageHistory)
+      setNotes(data.notes || [])
+      fetchLeadTasks(reqLeadId, accountId).then(r => { if (myToken === loadLeadTokenRef.current) setLeadTasks(r) }).catch(() => {})
+      fetchLeadConversations(reqLeadId, accountId).then(convs => {
+        if (myToken !== loadLeadTokenRef.current) return
+        setConversations(convs)
+        if (convs.length > 0) {
+          const last = data.lead.last_instance_id && convs.find(c => c.instance_id === data.lead.last_instance_id)
+          setActiveConvInstance(last ? last.instance_id : convs[0].instance_id)
+        } else setActiveConvInstance(null)
+      }).catch(() => {
+        if (myToken === loadLeadTokenRef.current) { setConversations([]); setActiveConvInstance(null) }
+      })
+      setEditData({ name: data.lead.name || '', phone: data.lead.phone || '', email: data.lead.email || '', city: data.lead.city || '', empresa: data.lead.empresa || '', cpf_cnpj: data.lead.cpf_cnpj || '', instagram: data.lead.instagram || '', trabalha_anuncio: data.lead.trabalha_anuncio || 0, investimento_anuncios: data.lead.investimento_anuncios || '' })
+      try {
+        const lc = await fetchLeadCadence(reqLeadId, accountId)
+        if (myToken !== loadLeadTokenRef.current) return
+        setLeadCadence(lc)
+        if (lc?.attempt_message) {
+          setCadenceMsgText(applyMessageVars(lc.attempt_message, {
+            leadName: data.lead.name,
+            leadEmpresa: data.lead.empresa,
+            leadCity: data.lead.city,
+            attendantName: user?.name,
+          }))
+        } else setCadenceMsgText('')
+      } catch { if (myToken === loadLeadTokenRef.current) { setLeadCadence(null); setCadenceMsgText('') } }
+      try {
+        const lfu = await fetchLeadFollowUp(reqLeadId, accountId)
+        if (myToken === loadLeadTokenRef.current) setLeadFollowUp(lfu)
+      } catch { if (myToken === loadLeadTokenRef.current) setLeadFollowUp(null) }
+    } finally {
+      if (myToken === loadLeadTokenRef.current) setLeadLoading(false)
+    }
   }, [selectedLeadId, accountId])
   useEffect(() => { loadLead() }, [loadLead])
 
@@ -905,7 +930,13 @@ export default function Chat() {
                   </button>
                 )}
                 {user?.role === 'super_admin' && (
-                  <button className="btn btn-secondary btn-sm" title="Disparar IA (mesmas regras de uma msg normal)" onClick={handleForceAi} style={{ padding: '4px 8px' }}>
+                  <button
+                    className="btn btn-secondary btn-sm"
+                    title={leadLoading ? 'Carregando dados do lead...' : 'Disparar IA (mesmas regras de uma msg normal)'}
+                    onClick={handleForceAi}
+                    disabled={leadLoading}
+                    style={{ padding: '4px 8px', opacity: leadLoading ? 0.5 : 1 }}
+                  >
                     <Bot size={12} />
                   </button>
                 )}
