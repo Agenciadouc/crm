@@ -39,37 +39,31 @@ function resetMonthlyTokensIfNeeded(agent) {
 
 // ─── findAgentForLead ─────────────────────────────────────────────────
 
-export function findAgentForLead(lead, instanceId, opts = {}) {
+export function findAgentForLead(lead, instanceId, _opts = {}) {
   if (!lead) return null
-  // Force (botao "Forcar IA"): ignora STATE do lead (ai_handed_off_at, atendente humano,
-  // activation_mode) — sao bloqueios "vivos" que o super_admin quer destravar.
-  // Mas SEMPRE respeita CONFIG do agente (etapa, tag, instancia) — gerente configurou esses
-  // filtros pra um motivo. Se o lead nao bate config, botao retorna erro descritivo.
-  const force = opts.force === true
+  // Removido modo force — botao "Forcar IA" agora roda o fluxo NORMAL.
+  // Bloqueios sao reportados pelo diagnoseForceAi() na rota /force-ai-respond.
 
   // 0. Account tem feature gate?
   const account = getAccount(lead.account_id)
   if (!account || !account.ai_agents_enabled) return null
 
-  // 1. Lead pode receber bot? (gates de seguranca — preserva mesmo em force)
+  // 1. Lead pode receber bot?
   if (lead.is_blocked || lead.is_archived || !lead.is_active) return null
 
-  if (!force) {
-    // 2. Lead ja foi handoff'ed por bot? Nao volta a atender. (force ignora)
-    if (lead.ai_handed_off_at) return null
+  // 2. Lead ja foi handoff'ed por bot? Nao volta a atender.
+  if (lead.ai_handed_off_at) return null
 
-    // 3. Lead ja tem atendente HUMANO definido? Bot nao interfere. (force ignora)
-    if (lead.attendant_id) {
-      const att = getUser(lead.attendant_id)
-      if (att && !att.is_bot) return null
-    }
+  // 3. Lead ja tem atendente HUMANO definido? Bot nao interfere.
+  if (lead.attendant_id) {
+    const att = getUser(lead.attendant_id)
+    if (att && !att.is_bot) return null
   }
 
   // 4. Busca agentes ativos
   const agents = db.prepare("SELECT * FROM ai_agents WHERE account_id = ? AND is_active = 1 ORDER BY id ASC").all(lead.account_id)
 
   for (const agent of agents) {
-    // SEMPRE checa CONFIG do agente (etapa, tag, instancia) — mesmo em force.
     // Filtro etapa
     const hasStage = db.prepare('SELECT 1 FROM ai_agent_stages WHERE agent_id = ? AND stage_id = ?').get(agent.id, lead.stage_id)
     if (!hasStage) continue
@@ -81,10 +75,7 @@ export function findAgentForLead(lead, instanceId, opts = {}) {
     // Filtro tag obrigatoria
     if (agent.required_tag_id && !leadHasTag(lead.id, agent.required_tag_id)) continue
 
-    // Em force: primeiro agente que bate config ja serve (ignora activation_mode)
-    if (force) return agent
-
-    // Modo de ativacao (so em fluxo normal)
+    // Modo de ativacao
     switch (agent.activation_mode) {
       case 'default_attendant':
         if (lead.attendant_id === agent.user_id || !lead.attendant_id) return agent
@@ -100,6 +91,68 @@ export function findAgentForLead(lead, instanceId, opts = {}) {
     }
   }
   return null
+}
+
+// ─── diagnoseForceAi ─────────────────────────────────────────────────
+// Diagnostica POR QUE o bot nao atuaria nesse lead. Retorna lista de bloqueios
+// em pt-BR pra mostrar pro super_admin. Vazio = bot atuaria normalmente.
+export function diagnoseForceAi(lead, instanceId) {
+  const blockers = []
+  if (!lead) return { blockers: ['Lead nao encontrado'] }
+
+  const account = getAccount(lead.account_id)
+  if (!account) return { blockers: ['Conta nao encontrada'] }
+  if (!account.ai_agents_enabled) blockers.push('IA dos agentes esta desativada na conta')
+
+  if (lead.is_blocked) blockers.push('Lead esta bloqueado')
+  if (lead.is_archived) blockers.push('Lead esta arquivado')
+  if (!lead.is_active) blockers.push('Lead esta inativo')
+
+  if (lead.ai_handed_off_at) blockers.push('Lead ja teve handoff anterior (bot transferiu pra humano em ' + lead.ai_handed_off_at + ')')
+
+  if (lead.attendant_id) {
+    const att = getUser(lead.attendant_id)
+    if (att && !att.is_bot) blockers.push(`Lead tem atendente humano atribuido: ${att.name}`)
+  }
+
+  // Verifica agentes
+  const agents = db.prepare("SELECT * FROM ai_agents WHERE account_id = ? AND is_active = 1 ORDER BY id ASC").all(lead.account_id)
+  if (agents.length === 0) {
+    blockers.push('Nenhum agente IA ativo nessa conta')
+    return { blockers }
+  }
+
+  // Verifica se ALGUM agente bate todos os filtros de config
+  let anyAgentMatchesConfig = false
+  const configIssues = []
+  for (const agent of agents) {
+    const stageOk = !!db.prepare('SELECT 1 FROM ai_agent_stages WHERE agent_id = ? AND stage_id = ?').get(agent.id, lead.stage_id)
+    const instanceOk = !instanceId || !!db.prepare('SELECT 1 FROM ai_agent_instances WHERE agent_id = ? AND instance_id = ?').get(agent.id, instanceId)
+    const tagOk = !agent.required_tag_id || leadHasTag(lead.id, agent.required_tag_id)
+    if (stageOk && instanceOk && tagOk) {
+      anyAgentMatchesConfig = true
+      break
+    }
+    const why = []
+    if (!stageOk) {
+      const stageName = db.prepare('SELECT name FROM funnel_stages WHERE id = ?').get(lead.stage_id)?.name || `id=${lead.stage_id}`
+      why.push(`etapa "${stageName}" nao esta configurada`)
+    }
+    if (!instanceOk) {
+      const instName = db.prepare('SELECT instance_name FROM whatsapp_instances WHERE id = ?').get(instanceId)?.instance_name || `id=${instanceId}`
+      why.push(`instancia "${instName}" nao esta configurada`)
+    }
+    if (!tagOk) {
+      const tagName = db.prepare('SELECT name FROM tags WHERE id = ?').get(agent.required_tag_id)?.name || `id=${agent.required_tag_id}`
+      why.push(`tag obrigatoria "${tagName}" nao presente no lead`)
+    }
+    configIssues.push(`Agente "${agent.name}": ${why.join(', ')}`)
+  }
+  if (!anyAgentMatchesConfig) {
+    blockers.push('Nenhum agente bate com a configuracao do lead. Detalhes: ' + configIssues.join(' | '))
+  }
+
+  return { blockers }
 }
 
 // ─── buildSystemPrompt ────────────────────────────────────────────────
@@ -332,14 +385,12 @@ async function executeTool(toolUse, agent, lead, instanceId, availableTags, avai
 
 // ─── processInboundMessage ────────────────────────────────────────────
 
-export async function processInboundMessage(lead, msgContent, mediaType, instanceId, opts = {}) {
+export async function processInboundMessage(lead, msgContent, mediaType, instanceId, _opts = {}) {
   try {
-    const force = opts.force === true
-    console.log(`[AI Agent DEBUG] processInboundMessage chamado lead=${lead?.id} instance=${instanceId} mediaType=${mediaType} force=${force} content="${(msgContent||'').substring(0,30)}"`)
-    // 1. Encontra agente (force ignora filtros de etapa/tag/handoff)
-    const agent = findAgentForLead(lead, instanceId, { force })
+    console.log(`[AI Agent DEBUG] processInboundMessage chamado lead=${lead?.id} instance=${instanceId} mediaType=${mediaType} content="${(msgContent||'').substring(0,30)}"`)
+    // 1. Encontra agente (respeita todos os filtros — bloqueios sao reportados pelo diagnoseForceAi na rota)
+    const agent = findAgentForLead(lead, instanceId)
     if (!agent) {
-      if (force) console.warn(`[AI Agent] force=true mas nenhum agente match lead=${lead?.id} instance=${instanceId}`)
       return { ok: false, reason: 'no_matching_agent' }
     }
     console.log(`[AI Agent DEBUG] agente encontrado: id=${agent.id} name=${agent.name}`)

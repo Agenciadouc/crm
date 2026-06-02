@@ -417,6 +417,13 @@ export default function Chat() {
         const r = await forceAiRespond(lead.id)
         if (r.ok) {
           setNotice({ kind: 'success', title: 'IA disparada', message: r.message || 'Resposta deve chegar em segundos.' })
+        } else if (r.blockers && r.blockers.length > 0) {
+          // Backend retornou lista de bloqueios — formata como bullets
+          setNotice({
+            kind: 'error',
+            title: 'Bot nao pode atuar nesse lead',
+            message: '• ' + r.blockers.join('\n• '),
+          })
         } else {
           setNotice({ kind: 'error', title: 'Falhou', message: r.error || 'Nao foi possivel disparar' })
         }
@@ -426,11 +433,11 @@ export default function Chat() {
     }
     setNotice({
       kind: 'info',
-      title: 'Forçar IA responder?',
-      message: 'Dispara a IA pra responder a última mensagem do lead. Ignora handoff anterior e atendente humano. Respeita config do agente (etapa, tag, instância) — se nada bate, avisa.',
+      title: 'Disparar IA?',
+      message: 'Roda o bot pra responder a última mensagem do lead. Mesmas regras de uma recepção normal: respeita atendente, handoff anterior, etapa, tag e instância. Se algo bloqueia, eu te aviso o quê.',
       actions: [
         { label: 'Cancelar', onClick: () => setNotice(null) },
-        { label: 'Forçar IA', primary: true, onClick: () => { setNotice(null); runForceAi() } },
+        { label: 'Disparar', primary: true, onClick: () => { setNotice(null); runForceAi() } },
       ],
     })
   }
@@ -898,7 +905,7 @@ export default function Chat() {
                   </button>
                 )}
                 {user?.role === 'super_admin' && (
-                  <button className="btn btn-secondary btn-sm" title="Forçar IA responder (ignora handoff/atendente, mantém config do agente)" onClick={handleForceAi} style={{ padding: '4px 8px' }}>
+                  <button className="btn btn-secondary btn-sm" title="Disparar IA (mesmas regras de uma msg normal)" onClick={handleForceAi} style={{ padding: '4px 8px' }}>
                     <Bot size={12} />
                   </button>
                 )}
@@ -1661,7 +1668,7 @@ export default function Chat() {
               {notice.kind === 'error' ? <X size={18} style={{ color: '#FF6B6B' }} /> : notice.kind === 'success' ? <Check size={18} style={{ color: '#34C759' }} /> : <MessageCircle size={18} style={{ color: '#FFB300' }} />}
               {notice.title}
             </h2>
-            <p style={{ fontSize: 13, color: '#C8C2D8', marginTop: 8, lineHeight: 1.5 }}>{notice.message}</p>
+            <p style={{ fontSize: 13, color: '#C8C2D8', marginTop: 8, lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>{notice.message}</p>
             <div className="modal-actions">
               {notice.actions && notice.actions.length > 0 ? (
                 <>

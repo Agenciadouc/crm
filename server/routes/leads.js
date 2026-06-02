@@ -5,7 +5,7 @@ import { requireRole } from '../middleware/auth.js'
 import { broadcastSSE } from '../sse.js'
 import { triggerCapiForStageChange } from '../services/metaCapi.js'
 import { notifyAndOpenLead } from '../services/leadHandoff.js'
-import { sendBotWelcomeForSheetsLead, processInboundMessage } from '../services/aiAgent.js'
+import { sendBotWelcomeForSheetsLead, processInboundMessage, diagnoseForceAi } from '../services/aiAgent.js'
 
 const router = Router()
 
@@ -828,25 +828,34 @@ router.post('/:id/force-ai-respond', requireRole('super_admin'), async (req, res
   }
   if (!instanceId) return res.status(400).json({ error: 'Nenhuma instancia disponivel pra essa conta' })
 
-  console.log(`[ForceAI] super_admin=${req.user?.id} disparou IA pra lead=${lead.id} instance=${instanceId}`)
-  // force=true: ignora state do lead (handoff anterior, atendente humano, activation_mode)
-  // mas SEMPRE respeita config do agente (etapa, tag, instancia). Se nada match nesses
-  // criterios de config, retorna erro descritivo.
+  console.log(`[ForceAI] super_admin=${req.user?.id} tentou disparar IA pra lead=${lead.id} instance=${instanceId}`)
+
+  // Diagnostica bloqueios ANTES de tentar disparar. Botao roda o fluxo NORMAL —
+  // se algo bloqueia (atendente humano, handoff anterior, etapa/tag/instancia
+  // nao bate, lead bloqueado, etc), retorna mensagem especifica. Nao dispara
+  // bot em lead onde ele nao deveria atuar.
+  const diag = diagnoseForceAi(lead, instanceId)
+  if (diag.blockers.length > 0) {
+    console.log(`[ForceAI] bloqueios lead=${lead.id}: ${diag.blockers.join(' | ')}`)
+    return res.status(400).json({
+      error: 'Bot nao pode atuar nesse lead.',
+      blockers: diag.blockers,
+      message: diag.blockers.join('\n'),
+    })
+  }
+
+  // Passou no diagnostico — dispara normal (force=false). processInboundMessage
+  // faz o mesmo fluxo de uma msg inbound chegando agora.
   try {
     const result = await processInboundMessage(
       lead,
       lastInbound.content || '',
       lastInbound.media_type || 'text',
       instanceId,
-      { force: true }
+      { force: false }
     )
     if (result && result.ok === false) {
-      const reason = result.reason || 'unknown'
-      let msg = 'Nenhum agente compativel com este lead.'
-      if (reason === 'no_matching_agent') {
-        msg = 'Nenhum agente bate com a configuracao do lead (etapa, tag obrigatoria, instancia). Verifique a config do agente.'
-      }
-      return res.status(400).json({ error: msg, reason })
+      return res.status(400).json({ error: 'Bot nao pode atuar', reason: result.reason || 'unknown' })
     }
     res.json({ ok: true, message: 'IA disparada — resposta deve chegar em alguns segundos.' })
   } catch (e) {
