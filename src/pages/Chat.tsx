@@ -410,19 +410,29 @@ export default function Chat() {
     }
   }
 
-  const handleForceAi = async () => {
+  const handleForceAi = () => {
     if (!lead) return
-    if (!confirm('Forçar IA responder esse lead?\n\nIgnora filtros de etapa, tag e handoff anterior. Usa o ultimo agente compativel com a instancia do lead.')) return
-    try {
-      const r = await forceAiRespond(lead.id)
-      if (r.ok) {
-        setNotice({ kind: 'success', title: 'IA disparada', message: r.message || 'Resposta deve chegar em segundos.' })
-      } else {
-        setNotice({ kind: 'error', title: 'Falhou', message: r.error || 'Nao foi possivel disparar' })
+    const runForceAi = async () => {
+      try {
+        const r = await forceAiRespond(lead.id)
+        if (r.ok) {
+          setNotice({ kind: 'success', title: 'IA disparada', message: r.message || 'Resposta deve chegar em segundos.' })
+        } else {
+          setNotice({ kind: 'error', title: 'Falhou', message: r.error || 'Nao foi possivel disparar' })
+        }
+      } catch (e: any) {
+        setNotice({ kind: 'error', title: 'Erro', message: e?.message || 'Erro de rede' })
       }
-    } catch (e: any) {
-      setNotice({ kind: 'error', title: 'Erro', message: e?.message || 'Erro de rede' })
     }
+    setNotice({
+      kind: 'info',
+      title: 'Forçar IA responder?',
+      message: 'Dispara a IA pra responder a última mensagem do lead. Respeita os filtros normais do agente (etapa, tag, instância). Use quando tudo bate mas o bot não iniciou sozinho.',
+      actions: [
+        { label: 'Cancelar', onClick: () => setNotice(null) },
+        { label: 'Forçar IA', primary: true, onClick: () => { setNotice(null); runForceAi() } },
+      ],
+    })
   }
 
   const connectedInstances = useMemo(() => instances.filter(i => i.status === 'connected'), [instances])
