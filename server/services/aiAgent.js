@@ -41,7 +41,11 @@ function resetMonthlyTokensIfNeeded(agent) {
 
 export function findAgentForLead(lead, instanceId, opts = {}) {
   if (!lead) return null
-  const force = opts.force === true  // super_admin override: ignora filtros de etapa/tag/handoff/atendente
+  // Force (botao "Forcar IA"): ignora STATE do lead (ai_handed_off_at, atendente humano,
+  // activation_mode) — sao bloqueios "vivos" que o super_admin quer destravar.
+  // Mas SEMPRE respeita CONFIG do agente (etapa, tag, instancia) — gerente configurou esses
+  // filtros pra um motivo. Se o lead nao bate config, botao retorna erro descritivo.
+  const force = opts.force === true
 
   // 0. Account tem feature gate?
   const account = getAccount(lead.account_id)
@@ -51,10 +55,10 @@ export function findAgentForLead(lead, instanceId, opts = {}) {
   if (lead.is_blocked || lead.is_archived || !lead.is_active) return null
 
   if (!force) {
-    // 2. Lead ja foi handoff'ed por bot? Nao volta a atender.
+    // 2. Lead ja foi handoff'ed por bot? Nao volta a atender. (force ignora)
     if (lead.ai_handed_off_at) return null
 
-    // 3. Lead ja tem atendente HUMANO definido? Bot nao interfere.
+    // 3. Lead ja tem atendente HUMANO definido? Bot nao interfere. (force ignora)
     if (lead.attendant_id) {
       const att = getUser(lead.attendant_id)
       if (att && !att.is_bot) return null
@@ -65,24 +69,22 @@ export function findAgentForLead(lead, instanceId, opts = {}) {
   const agents = db.prepare("SELECT * FROM ai_agents WHERE account_id = ? AND is_active = 1 ORDER BY id ASC").all(lead.account_id)
 
   for (const agent of agents) {
-    if (!force) {
-      // Filtro etapa
-      const hasStage = db.prepare('SELECT 1 FROM ai_agent_stages WHERE agent_id = ? AND stage_id = ?').get(agent.id, lead.stage_id)
-      if (!hasStage) continue
-    }
-    // Filtro instancia (mesmo em force — se instanceId presente, agente precisa cobrir essa instancia)
+    // SEMPRE checa CONFIG do agente (etapa, tag, instancia) — mesmo em force.
+    // Filtro etapa
+    const hasStage = db.prepare('SELECT 1 FROM ai_agent_stages WHERE agent_id = ? AND stage_id = ?').get(agent.id, lead.stage_id)
+    if (!hasStage) continue
+    // Filtro instancia
     if (instanceId) {
       const hasInstance = db.prepare('SELECT 1 FROM ai_agent_instances WHERE agent_id = ? AND instance_id = ?').get(agent.id, instanceId)
       if (!hasInstance) continue
     }
-    if (!force) {
-      // Filtro tag obrigatoria
-      if (agent.required_tag_id && !leadHasTag(lead.id, agent.required_tag_id)) continue
-    }
+    // Filtro tag obrigatoria
+    if (agent.required_tag_id && !leadHasTag(lead.id, agent.required_tag_id)) continue
 
-    if (force) return agent  // primeiro agente que match instancia ja serve
+    // Em force: primeiro agente que bate config ja serve (ignora activation_mode)
+    if (force) return agent
 
-    // Modo de ativacao
+    // Modo de ativacao (so em fluxo normal)
     switch (agent.activation_mode) {
       case 'default_attendant':
         if (lead.attendant_id === agent.user_id || !lead.attendant_id) return agent

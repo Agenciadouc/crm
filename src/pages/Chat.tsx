@@ -427,7 +427,7 @@ export default function Chat() {
     setNotice({
       kind: 'info',
       title: 'Forçar IA responder?',
-      message: 'Dispara a IA pra responder a última mensagem do lead. Respeita os filtros normais do agente (etapa, tag, instância). Use quando tudo bate mas o bot não iniciou sozinho.',
+      message: 'Dispara a IA pra responder a última mensagem do lead. Ignora handoff anterior e atendente humano. Respeita config do agente (etapa, tag, instância) — se nada bate, avisa.',
       actions: [
         { label: 'Cancelar', onClick: () => setNotice(null) },
         { label: 'Forçar IA', primary: true, onClick: () => { setNotice(null); runForceAi() } },
@@ -898,7 +898,7 @@ export default function Chat() {
                   </button>
                 )}
                 {user?.role === 'super_admin' && (
-                  <button className="btn btn-secondary btn-sm" title="Forçar IA responder (respeita filtros do agente)" onClick={handleForceAi} style={{ padding: '4px 8px' }}>
+                  <button className="btn btn-secondary btn-sm" title="Forçar IA responder (ignora handoff/atendente, mantém config do agente)" onClick={handleForceAi} style={{ padding: '4px 8px' }}>
                     <Bot size={12} />
                   </button>
                 )}
