@@ -94,10 +94,15 @@ function checkLeadCap(instance, leadId) {
   return { ok: true, count, cap }
 }
 
-// ─── Anti-ban: saude da instancia + auto-pausa por delivered_rate ───────
-// Janela default 2h. Minimo 10 msgs pra avaliar (evita amostra ruim).
-// Se taxa <60% -> auto-pausa setando paused_at + paused_reason.
-// Auto-resume eh tarefa do scheduler (autoResumePausedInstances).
+// ─── Anti-ban: saude da instancia + auto-pausa por taxa de falha ────────
+// Janela default 2h. Minimo 20 msgs pra avaliar (evita amostra ruim).
+//
+// Metrica: NAO_FAILED rate = (total - failed) / total. Esse calculo eh robusto:
+// - Funciona mesmo se webhook messages.update da Evolution nao atualizar
+//   sent->delivered (caso comum em algumas instalacoes).
+// - Detecta REJEICAO real (Evolution recusou, numero invalido, sessao morta).
+//
+// Threshold: <70% nao-failed -> auto-pausa. Auto-resume eh tarefa do scheduler.
 function checkInstanceHealth(instance) {
   if (instance.paused_at && instance.paused_reason === 'manual') {
     return { ok: false, reason: 'manually_paused' }
@@ -106,20 +111,21 @@ function checkInstanceHealth(instance) {
   const stats = db.prepare(`
     SELECT
       COUNT(*) as total,
-      SUM(CASE WHEN delivery_status IN ('delivered','read') THEN 1 ELSE 0 END) as delivered
+      SUM(CASE WHEN delivery_status = 'failed' THEN 1 ELSE 0 END) as failed
     FROM messages
     WHERE instance_id = ? AND direction = 'outbound'
       AND created_at >= datetime('now', '-${windowMin} minutes')
       AND delivery_status IN ('sent','delivered','read','failed')
   `).get(instance.id)
-  if ((stats?.total || 0) < 10) return { ok: true, total: stats?.total || 0 }
-  const rate = (stats.delivered || 0) / stats.total
-  if (rate < 0.60) {
+  if ((stats?.total || 0) < 20) return { ok: true, total: stats?.total || 0 }
+  const failedRate = (stats.failed || 0) / stats.total
+  const okRate = 1 - failedRate
+  if (okRate < 0.70) {
     db.prepare("UPDATE whatsapp_instances SET paused_at = datetime('now'), paused_reason = 'delivered_rate_low' WHERE id = ?").run(instance.id)
-    console.warn(`[Health] inst=${instance.instance_name} AUTO-PAUSED delivered_rate=${(rate * 100).toFixed(0)}% (${stats.delivered}/${stats.total})`)
-    return { ok: false, reason: 'auto_paused_low_delivery', rate, total: stats.total }
+    console.warn(`[Health] inst=${instance.instance_name} AUTO-PAUSED ok_rate=${(okRate * 100).toFixed(0)}% (failed=${stats.failed}/${stats.total})`)
+    return { ok: false, reason: 'auto_paused_low_delivery', rate: okRate, failed: stats.failed, total: stats.total }
   }
-  return { ok: true, rate, total: stats.total }
+  return { ok: true, rate: okRate, total: stats.total }
 }
 
 // ─── Anti-ban: marca a ultima inbound do lead como lida ─────────────────

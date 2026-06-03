@@ -263,21 +263,25 @@ router.get('/whatsapp/:id/health', requireRole('super_admin', 'gerente'), (req, 
       WHERE instance_id = ? AND direction='outbound'
         AND created_at >= datetime('now', '-${w.minutes} minutes')
     `).get(instance.id)
-    const totalKnown = (s.delivered || 0) + (s.read || 0) + (s.failed || 0)
-    const delivered_rate = totalKnown > 0 ? ((s.delivered + s.read) / totalKnown) : null
-    const read_rate = (s.delivered + s.read) > 0 ? (s.read / (s.delivered + s.read)) : null
-    return { window: w.label, ...s, delivered_rate, read_rate }
+    // ok_rate = 1 - failed/total. Robusto mesmo se webhook nao promove sent->delivered.
+    const total = s.total || 0
+    const ok_rate = total > 0 ? (1 - (s.failed || 0) / total) : null
+    // delivered_rate so eh calculavel se webhook estiver funcionando (delivered+read > 0)
+    const delivered_known = (s.delivered || 0) + (s.read || 0)
+    const delivered_rate = delivered_known > 0 ? (delivered_known / total) : null
+    const read_rate = delivered_known > 0 ? (s.read / delivered_known) : null
+    return { window: w.label, ...s, ok_rate, delivered_rate, read_rate }
   })
 
-  // Risk score 0-100: 0 = saudavel, 100 = critico (provavel shadow-ban)
+  // Risk score 0-100 baseado em ok_rate (% nao-failed). Mais robusto que delivered_rate.
   const riskScore = (() => {
     const w6h = stats.find(s => s.window === '6h') || stats[0]
-    if (!w6h.total || w6h.total < 5) return 0  // amostra pequena demais
-    const dr = w6h.delivered_rate
-    if (dr === null) return 0
-    if (dr >= 0.85) return 10
-    if (dr >= 0.70) return 30
-    if (dr >= 0.50) return 60
+    if (!w6h.total || w6h.total < 10) return 0  // amostra pequena demais
+    const r = w6h.ok_rate
+    if (r === null) return 0
+    if (r >= 0.95) return 10
+    if (r >= 0.85) return 30
+    if (r >= 0.70) return 60
     return 90
   })()
 
