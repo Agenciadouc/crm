@@ -81,8 +81,12 @@ export async function sendAutoMessage({ leadId, instanceId, type, text, accountI
   if (!targetPhone) return { ok: false, error: 'no_phone' }
 
   try {
-    // Envia via sendViaInstance (pre-flight de numero + cache).
-    const sendRes = await sendViaInstance(instance, targetPhone, finalText)
+    // Envia via sendViaInstance. Auto-msgs de ausencia precisam passar fora do horario comercial
+    // (justamente quando enviam "estamos fechados"). Tambem ignoram cap por lead (sao sinalizacao).
+    const sendRes = await sendViaInstance(instance, targetPhone, finalText, {
+      leadId,
+      skipBusinessHours: true, skipLeadCap: true,
+    })
 
     if (!sendRes.ok) {
       const errLabel = sendRes.validationFailed ? 'number_not_on_whatsapp' : (sendRes.reason || 'send_failed')

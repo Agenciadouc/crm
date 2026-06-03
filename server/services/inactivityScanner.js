@@ -72,6 +72,12 @@ export async function processInactivityFollowUps() {
                 l.created_at
               )
           )
+          -- Anti-ban: cooldown 24h apos qualquer inbound do lead (relacao ativa, nao martelar)
+          AND NOT EXISTS (
+            SELECT 1 FROM messages m_cool
+            WHERE m_cool.lead_id = l.id AND m_cool.direction = 'inbound'
+              AND m_cool.created_at >= datetime('now', '-24 hours')
+          )
         LIMIT 200
       `).all(fu.account_id, agent.user_id, minutes, fu.agent_id, fu.id)
     } else {
@@ -95,6 +101,12 @@ export async function processInactivityFollowUps() {
                 (SELECT MAX(created_at) FROM stage_history WHERE lead_id = l.id AND to_stage_id = l.stage_id),
                 l.created_at
               )
+          )
+          -- Anti-ban: cooldown 24h apos qualquer inbound do lead
+          AND NOT EXISTS (
+            SELECT 1 FROM messages m_cool
+            WHERE m_cool.lead_id = l.id AND m_cool.direction = 'inbound'
+              AND m_cool.created_at >= datetime('now', '-24 hours')
           )
         LIMIT 200
       `).all(fu.account_id, fu.inactivity_stage_id, minutes, fu.id)

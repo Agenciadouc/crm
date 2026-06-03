@@ -645,6 +645,9 @@ async function tick() {
     // Funcao continua no arquivo pra reativar facil se necessario.
     // Reverte ✗ historicos: msgs failed com inbound posterior do mesmo lead = entregue
     revertFalseFailures()
+    // Anti-ban: retoma instancias auto-pausadas por delivered_rate baixo apos 4h.
+    // Manual pause nunca eh tocado aqui (preserva paused_reason='manual').
+    autoResumePausedInstances()
     // Detecta instancias fantasma silenciosas (Evolution state=open mas msgs nao entregam)
     // e forca restart. Cooldown 15min entre tentativas.
     detectGhostInstancesAndRestart().catch(e => console.error('[GhostDetect]', e.message))
@@ -762,6 +765,21 @@ function scheduleDailyHealthCheck() {
 // scheduler + 1x na startup pra cobrir backlog. Idempotente.
 // Sem filtros restritivos (qualquer wa_msg_id, qualquer motivo de failed) — inbound
 // posterior do mesmo lead basta como prova.
+// Anti-ban: retoma instancias auto-pausadas por delivered_rate baixo apos 4h.
+// Pausas manuais (paused_reason='manual') nao sao tocadas — requerem UPDATE explicito.
+function autoResumePausedInstances() {
+  try {
+    const r = db.prepare(`
+      UPDATE whatsapp_instances
+         SET paused_at = NULL, paused_reason = NULL
+       WHERE paused_at IS NOT NULL
+         AND paused_reason = 'delivered_rate_low'
+         AND paused_at < datetime('now', '-4 hours')
+    `).run()
+    if (r.changes > 0) console.log(`[Health] ${r.changes} instancia(s) auto-resumida(s) apos 4h de pausa`)
+  } catch (e) { console.error('[Health autoResume]', e.message) }
+}
+
 function revertFalseFailures() {
   try {
     const r1 = db.prepare(`

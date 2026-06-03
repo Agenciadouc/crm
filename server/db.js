@@ -348,6 +348,12 @@ addColumnIfNotExists('whatsapp_instances', 'default_attendant_id', 'INTEGER REFE
 addColumnIfNotExists('whatsapp_instances', 'hourly_send_limit', 'INTEGER')  // null = default global 100
 addColumnIfNotExists('whatsapp_instances', 'daily_send_limit', 'INTEGER')   // null = default global 800
 addColumnIfNotExists('whatsapp_instances', 'warmup_until', 'TEXT')          // datetime fim do warm-up; null = sem warm-up
+// Anti-ban Tier 1+2: horario comercial, cap por lead, auto-pause por delivered_rate
+addColumnIfNotExists('whatsapp_instances', 'business_hours_json', 'TEXT')                    // {mon:[{start,end}],...}; null = 24/7
+addColumnIfNotExists('whatsapp_instances', 'lead_daily_msg_cap', 'INTEGER DEFAULT 5')        // max msgs automaticas pro mesmo lead em 24h
+addColumnIfNotExists('whatsapp_instances', 'paused_at', 'TEXT')                              // datetime pausa (auto ou manual); null = ativa
+addColumnIfNotExists('whatsapp_instances', 'paused_reason', 'TEXT')                          // 'delivered_rate_low' | 'manual' | 'ghost_detected'
+addColumnIfNotExists('whatsapp_instances', 'health_check_window_min', 'INTEGER DEFAULT 120') // janela pra delivered_rate (default 2h)
 // Backfill warm-up retroativo APENAS pra instancias recentes (created_at < 3 dias atras).
 // Instancias antigas nao sao afetadas — ja "esquentaram" naturalmente em prod.
 try {

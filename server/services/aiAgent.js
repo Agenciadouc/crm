@@ -6,7 +6,7 @@ import db from '../db.js'
 import { callHaiku } from './anthropicClient.js'
 import { broadcastSSE } from '../sse.js'
 import { pickFromRoulette as rouletteUtil } from './roulette.js'
-import { notifyAndOpenLead, sendViaInstance } from './leadHandoff.js'
+import { notifyAndOpenLead, sendViaInstance, markMessageAsRead } from './leadHandoff.js'
 import { transcribeAudio, fetchAudioBuffer } from './deepgramClient.js'
 
 // ─── Helpers ──────────────────────────────────────────────────────────
@@ -229,6 +229,17 @@ function buildSystemPrompt(agent, lead, availableTags, availableStages) {
     parts.push('TAGS DISPONIVEIS: ' + availableTags.map(t => `"${t.name}"`).join(', '))
   }
 
+  // Anti-ban: variacao humana pra parecer menos previsivel
+  parts.push('')
+  parts.push('VARIACAO HUMANA (importante pra parecer natural, nao robotico):')
+  parts.push('- Varie saudacoes: "Oi!", "Opa!", "E ai!", "Ola"... ou comece DIRETO sem saudacao se ja deu bom dia antes na conversa')
+  parts.push('- Nem sempre comece com o nome do lead — humano nao faz isso toda msg')
+  parts.push('- Varie comprimento: as vezes 1 frase curta, as vezes 2 frases')
+  parts.push('- Use coloquialismos leves quando o tom permitir: "ta", "pra", "ne", "blz", "tmj"')
+  parts.push('- Pontuacao natural OK: pode terminar sem ponto final, usar "..." pra pausa')
+  parts.push('- NAO use emoji em toda msg — so quando faz sentido (alegria, confirmacao etc)')
+  parts.push('- Pode escrever em minuscula ocasionalmente, como humano apressado')
+
   return parts.filter(Boolean).join('\n')
 }
 
@@ -433,7 +444,7 @@ export async function processInboundMessage(lead, msgContent, mediaType, instanc
         const inst = db.prepare('SELECT * FROM whatsapp_instances WHERE id = ?').get(instanceId)
         if (inst && inst.status === 'connected') {
           const declineMsg = agent.audio_decline_message || 'Oi! Por enquanto so leio mensagens de texto. Pode digitar pra mim?'
-          const sendRes = await sendViaInstance(inst, lead.phone, declineMsg)
+          const sendRes = await sendViaInstance(inst, lead.phone, declineMsg, { leadId: lead.id })
           if (sendRes.ok) {
             db.prepare(`
               INSERT INTO messages (lead_id, account_id, direction, content, media_type, sender_name, wa_msg_id, wa_timestamp, instance_id, ai_agent_id, delivery_status)
@@ -625,7 +636,9 @@ export async function processInboundMessage(lead, msgContent, mediaType, instanc
       }
       const inst = db.prepare('SELECT * FROM whatsapp_instances WHERE id = ?').get(instanceId)
       if (inst && inst.status === 'connected') {
-        const sendRes = await sendViaInstance(inst, lead.phone, finalText.trim())
+        // Anti-ban: marca msg como lida ANTES de responder (humano abre conversa antes)
+        try { await markMessageAsRead(inst, lead) } catch {}
+        const sendRes = await sendViaInstance(inst, lead.phone, finalText.trim(), { leadId: lead.id })
         if (sendRes.ok) {
           db.prepare(`
             INSERT INTO messages (lead_id, account_id, direction, content, media_type, sender_name, wa_msg_id, wa_timestamp, instance_id, ai_agent_id, delivery_status)
@@ -744,7 +757,7 @@ REGRAS:
     }
 
     // Envia via Evolution
-    const sendResult = await sendViaInstance(inst, lead.phone, msgText)
+    const sendResult = await sendViaInstance(inst, lead.phone, msgText, { leadId: lead.id })
     if (!sendResult.ok) {
       console.warn(`[Bot Welcome] envio falhou lead=${leadId}: ${sendResult.reason || 'unknown'}`)
       return

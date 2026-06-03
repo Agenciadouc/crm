@@ -257,8 +257,8 @@ async function runBroadcastLoopInner(broadcastId) {
         .replace(/\{\{phone\}\}/g, lead?.phone || '')
         .replace(/\{\{telefone\}\}/g, lead?.phone || '')
       // skipValidation=true porque o pre-flight bulk ja rodou antes do while.
-      // sendViaInstance trata normalizacao do numero, fetch e parse do retorno.
-      const sendRes = await sendViaInstance(liveInstance, r.phone, text, { skipValidation: true })
+      // leadId pra cap por lead/dia.
+      const sendRes = await sendViaInstance(liveInstance, r.phone, text, { skipValidation: true, leadId: r.lead_id })
 
       if (sendRes.ok && sendRes.wamsgId) {
         db.prepare("UPDATE broadcast_recipients SET status = 'sent', wa_msg_id = ?, sent_at = datetime('now') WHERE id = ?").run(sendRes.wamsgId, r.id)

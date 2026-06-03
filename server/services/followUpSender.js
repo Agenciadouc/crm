@@ -110,7 +110,7 @@ export async function sendFollowUpMessage(leadFollowUpId) {
     const text = renderTemplate(pickVariationText(step), lead)
 
     // Envia via sendViaInstance (pre-flight de numero + cache + tratamento consistente)
-    const sendRes = await sendViaInstance(instance, lead.phone, text)
+    const sendRes = await sendViaInstance(instance, lead.phone, text, { leadId: lead.id })
     if (!sendRes.ok) {
       // Numero invalido OU Evolution recusou — pausa pra atendente investigar.
       // Registra a tentativa como 'failed' pra UI mostrar X vermelho no historico.

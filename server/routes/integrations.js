@@ -239,6 +239,66 @@ router.get('/whatsapp/:id/status', async (req, res) => {
   }
 })
 
+// ─── Anti-ban: health da instancia (delivered_rate, read_rate, risk_score) ──────
+// GET /api/integrations/whatsapp/:id/health
+// Retorna 3 janelas (1h, 6h, 24h) + risk_score 0-100 baseado em delivered_rate.
+router.get('/whatsapp/:id/health', requireRole('super_admin', 'gerente'), (req, res) => {
+  const instance = getOwnedInstance(req, res)
+  if (!instance) return
+
+  const windows = [
+    { label: '1h', minutes: 60 },
+    { label: '6h', minutes: 360 },
+    { label: '24h', minutes: 1440 },
+  ]
+  const stats = windows.map(w => {
+    const s = db.prepare(`
+      SELECT
+        COUNT(*) as total,
+        SUM(CASE WHEN delivery_status='sent' THEN 1 ELSE 0 END) as sent,
+        SUM(CASE WHEN delivery_status='delivered' THEN 1 ELSE 0 END) as delivered,
+        SUM(CASE WHEN delivery_status='read' THEN 1 ELSE 0 END) as read,
+        SUM(CASE WHEN delivery_status='failed' THEN 1 ELSE 0 END) as failed
+      FROM messages
+      WHERE instance_id = ? AND direction='outbound'
+        AND created_at >= datetime('now', '-${w.minutes} minutes')
+    `).get(instance.id)
+    const totalKnown = (s.delivered || 0) + (s.read || 0) + (s.failed || 0)
+    const delivered_rate = totalKnown > 0 ? ((s.delivered + s.read) / totalKnown) : null
+    const read_rate = (s.delivered + s.read) > 0 ? (s.read / (s.delivered + s.read)) : null
+    return { window: w.label, ...s, delivered_rate, read_rate }
+  })
+
+  // Risk score 0-100: 0 = saudavel, 100 = critico (provavel shadow-ban)
+  const riskScore = (() => {
+    const w6h = stats.find(s => s.window === '6h') || stats[0]
+    if (!w6h.total || w6h.total < 5) return 0  // amostra pequena demais
+    const dr = w6h.delivered_rate
+    if (dr === null) return 0
+    if (dr >= 0.85) return 10
+    if (dr >= 0.70) return 30
+    if (dr >= 0.50) return 60
+    return 90
+  })()
+
+  res.json({
+    instance: {
+      id: instance.id,
+      name: instance.instance_name,
+      status: instance.status,
+      paused_at: instance.paused_at,
+      paused_reason: instance.paused_reason,
+      warmup_until: instance.warmup_until,
+      business_hours_json: instance.business_hours_json,
+      lead_daily_msg_cap: instance.lead_daily_msg_cap,
+      hourly_send_limit: instance.hourly_send_limit,
+      daily_send_limit: instance.daily_send_limit,
+    },
+    windows: stats,
+    risk_score: riskScore,
+  })
+})
+
 // ─── Refresh QR code ─────────────────────────────────────────────
 router.post('/whatsapp/:id/qrcode', allowInstanceOwner, async (req, res) => {
   const instance = getOwnedInstance(req, res)
