@@ -109,11 +109,11 @@ function AppRoutes() {
             <Route path="/ready-messages" element={<ReadyMessages />} />
             <Route path="/qualifications" element={<Qualifications />} />
             <Route path="/launches" element={<Launches />} />
-            <Route path="/tags" element={<Tags />} />
           </>}
 
           {/* All authenticated users */}
           <Route path="/integrations" element={<Integrations />} />
+          <Route path="/tags" element={<Tags />} />
           <Route path="/pipeline" element={<Pipeline />} />
           <Route path="/chat" element={<Chat />} />
           <Route path="/tasks" element={<Tasks />} />
