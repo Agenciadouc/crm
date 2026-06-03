@@ -18,7 +18,8 @@ export default function Tags() {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
-  const canEdit = user?.role === 'super_admin' || user?.role === 'gerente'
+  // Atendente tambem pode criar/editar tags (decisao do user em 03/06/2026)
+  const canEdit = user?.role === 'super_admin' || user?.role === 'gerente' || user?.role === 'atendente'
 
   const load = useCallback(async () => {
     if (!accountId) return

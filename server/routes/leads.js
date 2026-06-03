@@ -745,7 +745,7 @@ router.get('/tags/list', (req, res) => {
   res.json({ tags })
 })
 
-router.post('/tags/create', requireRole('super_admin', 'gerente'), (req, res) => {
+router.post('/tags/create', requireRole('super_admin', 'gerente', 'atendente'), (req, res) => {
   if (!req.accountId) return res.status(400).json({ error: 'account_id required' })
   const { name, color } = req.body
   if (!name) return res.status(400).json({ error: 'name required' })
@@ -756,7 +756,7 @@ router.post('/tags/create', requireRole('super_admin', 'gerente'), (req, res) =>
   } catch { res.status(400).json({ error: 'Tag ja existe' }) }
 })
 
-router.put('/tags/:tagId', requireRole('super_admin', 'gerente'), (req, res) => {
+router.put('/tags/:tagId', requireRole('super_admin', 'gerente', 'atendente'), (req, res) => {
   if (!req.accountId) return res.status(400).json({ error: 'account_id required' })
   const tag = db.prepare('SELECT * FROM tags WHERE id = ? AND account_id = ?').get(req.params.tagId, req.accountId)
   if (!tag) return res.status(404).json({ error: 'Tag nao encontrada' })
@@ -774,7 +774,7 @@ router.put('/tags/:tagId', requireRole('super_admin', 'gerente'), (req, res) => 
   } catch { res.status(400).json({ error: 'Nome ja existe' }) }
 })
 
-router.delete('/tags/:tagId', requireRole('super_admin', 'gerente'), (req, res) => {
+router.delete('/tags/:tagId', requireRole('super_admin', 'gerente', 'atendente'), (req, res) => {
   db.prepare('DELETE FROM lead_tags WHERE tag_id = ?').run(req.params.tagId)
   db.prepare('DELETE FROM tags WHERE id = ?').run(req.params.tagId)
   res.json({ ok: true })

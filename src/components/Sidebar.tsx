@@ -184,6 +184,11 @@ export default function Sidebar() {
             <NavLink to="/integrations" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`} onClick={closeMobile}><Plug size={16} /> Integracoes</NavLink>
           )}
 
+          {/* Tags: visivel pra atendente tb (pagina restringe edicao se necessario) */}
+          {!isGerente && !isAdmin && (
+            <NavLink to="/tags" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`} onClick={closeMobile}><TagIcon size={16} /> Tags</NavLink>
+          )}
+
           {(isGerente || isAdmin) && (
             <>
               <div className="nav-section">Configuracoes</div>

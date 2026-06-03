@@ -776,10 +776,14 @@ export default function Chat() {
 
   const handleCreateTag = async () => {
     if (!accountId || !newTagName.trim() || !lead) return
-    const tag = await createTag(accountId, newTagName.trim(), newTagColor)
-    setTags(prev => [...prev, tag])
-    await addLeadTag(lead.id, tag.id)
-    setNewTagName(''); loadLead()
+    try {
+      const tag = await createTag(accountId, newTagName.trim(), newTagColor)
+      setTags(prev => [...prev, tag])
+      await addLeadTag(lead.id, tag.id)
+      setNewTagName(''); loadLead()
+    } catch (e: any) {
+      setNotice({ kind: 'error', title: 'Erro ao criar tag', message: e?.message || 'Falha desconhecida' })
+    }
   }
 
   const allStages = funnels.flatMap(f => f.stages || [])
