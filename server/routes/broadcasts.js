@@ -277,10 +277,10 @@ async function runBroadcastLoopInner(broadcastId) {
       processedCount++
     }
 
-    // Anti-ban: jitter ±40% sobre o baseDelay configurado pelo user.
-    // Respeita a config (ex: 100s configurado → 60s a 140s real).
-    // Padrao menos previsivel que o anterior (±30%) sem violar o tempo que o user pediu.
-    const jitterMult = 0.6 + Math.random() * 0.8  // 0.6x a 1.4x
+    // Anti-ban: jitter +30% sobre o baseDelay configurado (nunca pra menos).
+    // baseDelay configurado eh o MINIMO. Real fica entre 1.0x e 1.3x.
+    // Ex: user configura 100s → real fica entre 100s e 130s.
+    const jitterMult = 1.0 + Math.random() * 0.3  // 1.0x a 1.3x (sempre >= baseDelay)
     const jitter = Math.round(baseDelay * jitterMult)
     await new Promise(resolve => setTimeout(resolve, jitter))
   }
