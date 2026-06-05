@@ -134,7 +134,7 @@ export const optInLead = (id: number) => apiFetch(`/api/leads/${id}/opt-in`, { m
 export const optOutLead = (id: number) => apiFetch(`/api/leads/${id}/opt-out`, { method: 'POST' })
 // Custom fetch: 400 NAO lanca exception, retorna body com blockers pra UI listar motivos.
 export const forceAiRespond = async (id: number): Promise<{ ok: boolean; message?: string; error?: string; blockers?: string[] }> => {
-  const res = await fetch(`/api/leads/${id}/force-ai-respond`, {
+  const res = await fetch(`${BASE}/api/leads/${id}/force-ai-respond`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${getToken()}`, 'Content-Type': 'application/json' },
   })
