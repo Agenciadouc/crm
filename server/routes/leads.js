@@ -820,10 +820,27 @@ router.post('/:id/force-ai-respond', requireRole('super_admin'), async (req, res
   `).get(lead.id)
   if (!lastInbound) return res.status(400).json({ error: 'Lead nao tem mensagem inbound pra responder' })
 
-  // instancia: usa a da ultima msg, ou a do lead, ou primeira conectada da conta
-  let instanceId = lastInbound.instance_id || lead.last_instance_id || null
+  // Instancia: prioridade
+  // 1. body.instance_id (front passa a inst ativa do "Enviar via")
+  // 2. ultima msg inbound (caso comum: bot responde na inst onde recebeu)
+  // 3. lead.last_instance_id
+  // 4. primeira instancia conectada que algum agente cobre
+  let instanceId = (req.body?.instance_id ? Number(req.body.instance_id) : null)
+                || lastInbound.instance_id
+                || lead.last_instance_id
+                || null
   if (!instanceId) {
-    const inst = db.prepare("SELECT id FROM whatsapp_instances WHERE account_id = ? AND status = 'connected' ORDER BY id LIMIT 1").get(lead.account_id)
+    // Procura instancia que algum agente cobre (em vez da primeira qualquer)
+    const inst = db.prepare(`
+      SELECT wi.id FROM whatsapp_instances wi
+      WHERE wi.account_id = ? AND wi.status = 'connected'
+        AND EXISTS (
+          SELECT 1 FROM ai_agent_instances aai
+          JOIN ai_agents ag ON ag.id = aai.agent_id
+          WHERE aai.instance_id = wi.id AND ag.is_active = 1 AND ag.account_id = wi.account_id
+        )
+      ORDER BY wi.id LIMIT 1
+    `).get(lead.account_id)
     instanceId = inst?.id || null
   }
   if (!instanceId) return res.status(400).json({ error: 'Nenhuma instancia disponivel pra essa conta' })

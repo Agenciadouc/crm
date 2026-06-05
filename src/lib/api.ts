@@ -134,10 +134,13 @@ export const optInLead = (id: number) => apiFetch(`/api/leads/${id}/opt-in`, { m
 export const optOutLead = (id: number) => apiFetch(`/api/leads/${id}/opt-out`, { method: 'POST' })
 // Custom fetch: 400 NAO lanca exception, retorna body com blockers pra UI listar motivos.
 // Path com BASE — nginx roteia /crm/* pro backend Node. Sem BASE cai no WordPress.
-export const forceAiRespond = async (id: number): Promise<{ ok: boolean; message?: string; error?: string; blockers?: string[] }> => {
+// instanceId opcional: instancia ativa no "Enviar via" do chat (caso user queira forcar
+// resposta em uma instancia especifica diferente da que recebeu a inbound).
+export const forceAiRespond = async (id: number, instanceId?: number): Promise<{ ok: boolean; message?: string; error?: string; blockers?: string[] }> => {
   const res = await fetch(`${BASE}/api/leads/${id}/force-ai-respond`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${getToken()}`, 'Content-Type': 'application/json' },
+    body: instanceId ? JSON.stringify({ instance_id: instanceId }) : undefined,
   })
   if (res.status === 401) { localStorage.removeItem('dros_crm_token'); window.location.href = `${BASE}/login`; throw new Error('Unauthorized') }
   const body = await res.json().catch(() => ({}))

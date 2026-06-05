@@ -439,7 +439,10 @@ export default function Chat() {
     if (!lead) return
     const runForceAi = async () => {
       try {
-        const r = await forceAiRespond(lead.id)
+        // Passa instancia ativa do "Enviar via" pra resposta sair pela mesma que o user
+        // tem selecionada no momento (ex: bot welcome veio por inst A mas user quer
+        // que resposta saia pela inst B configurada no agente).
+        const r = await forceAiRespond(lead.id, resolvedSendInstance?.id)
         if (r.ok) {
           setNotice({ kind: 'success', title: 'IA disparada', message: r.message || 'Resposta deve chegar em segundos.' })
         } else if (r.blockers && r.blockers.length > 0) {
