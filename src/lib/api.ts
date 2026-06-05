@@ -132,8 +132,17 @@ export async function createLeadOrFindExisting(accountId: number, data: Partial<
 export const updateLead = (id: number, data: Partial<Lead>) => apiFetch(`/api/leads/${id}`, { method: 'PUT', body: JSON.stringify(data) })
 export const optInLead = (id: number) => apiFetch(`/api/leads/${id}/opt-in`, { method: 'POST' })
 export const optOutLead = (id: number) => apiFetch(`/api/leads/${id}/opt-out`, { method: 'POST' })
-export const forceAiRespond = (id: number) =>
-  apiFetch<{ ok: boolean; message?: string; error?: string; blockers?: string[] }>(`/api/leads/${id}/force-ai-respond`, { method: 'POST' })
+// Custom fetch: 400 NAO lanca exception, retorna body com blockers pra UI listar motivos.
+export const forceAiRespond = async (id: number): Promise<{ ok: boolean; message?: string; error?: string; blockers?: string[] }> => {
+  const res = await fetch(`/api/leads/${id}/force-ai-respond`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${getToken()}`, 'Content-Type': 'application/json' },
+  })
+  if (res.status === 401) { localStorage.removeItem('dros_crm_token'); window.location.href = `${BASE}/login`; throw new Error('Unauthorized') }
+  const body = await res.json().catch(() => ({}))
+  if (!res.ok) return { ok: false, error: body.error || `Erro ${res.status}`, blockers: body.blockers, message: body.message }
+  return body
+}
 export const moveLeadStage = (id: number, stageId: number) => apiFetch(`/api/leads/${id}/stage`, { method: 'PUT', body: JSON.stringify({ stage_id: stageId }) })
 export const assignLead = (id: number, attendantId: number | null, notify?: boolean) => apiFetch(`/api/leads/${id}/assign`, { method: 'PUT', body: JSON.stringify({ attendant_id: attendantId, notify_attendant: !!notify }) })
 export const refreshProfilePic = (id: number) => apiFetch<{ profile_pic_url: string | null }>(`/api/leads/${id}/refresh-profile-pic`, { method: 'POST' })
