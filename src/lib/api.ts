@@ -133,8 +133,9 @@ export const updateLead = (id: number, data: Partial<Lead>) => apiFetch(`/api/le
 export const optInLead = (id: number) => apiFetch(`/api/leads/${id}/opt-in`, { method: 'POST' })
 export const optOutLead = (id: number) => apiFetch(`/api/leads/${id}/opt-out`, { method: 'POST' })
 // Custom fetch: 400 NAO lanca exception, retorna body com blockers pra UI listar motivos.
+// Path SEM BASE — nginx mapeia /api/ direto pro backend (igual triggerAnalysisNow faz).
 export const forceAiRespond = async (id: number): Promise<{ ok: boolean; message?: string; error?: string; blockers?: string[] }> => {
-  const res = await fetch(`${BASE}/api/leads/${id}/force-ai-respond`, {
+  const res = await fetch(`/api/leads/${id}/force-ai-respond`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${getToken()}`, 'Content-Type': 'application/json' },
   })
