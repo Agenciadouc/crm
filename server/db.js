@@ -857,6 +857,8 @@ addColumnIfNotExists('accounts', 'ai_agents_enabled', 'INTEGER NOT NULL DEFAULT 
 addColumnIfNotExists('users', 'is_bot', 'INTEGER NOT NULL DEFAULT 0')
 addColumnIfNotExists('messages', 'ai_agent_id', 'INTEGER')
 addColumnIfNotExists('leads', 'ai_handed_off_at', 'TEXT')
+// Auto-rescue do bot: cooldown pra evitar disparar 2x mesmo lead em ticks consecutivos
+addColumnIfNotExists('leads', 'last_rescue_attempt_at', 'TEXT')
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS ai_agents (

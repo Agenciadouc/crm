@@ -8,6 +8,7 @@ import { triggerCapiForStageChange } from './services/metaCapi.js'
 import { aggregateAllAccounts } from './services/attendantMetrics.js'
 import { analyzeAllAccounts } from './services/conversationAnalyzer.js'
 import { generateAllCoachings, isoMonday } from './services/coachingAnalyzer.js'
+import { runAutoRescue } from './services/botAutoRescue.js'
 
 // Roda a cada 1min — precisao do agendamento <= 60s. Custo desprezivel (1 SELECT/min).
 const INTERVAL_MS = 60 * 1000
@@ -853,6 +854,16 @@ export function startScheduler() {
   setInterval(() => {
     try { revertFalseFailures() } catch (e) { console.error('[RevertFalse tick]', e.message) }
   }, 10 * 1000)
+  // Auto-rescue do bot: a cada 30min, dispara bot pra leads com inbound sem resposta.
+  // Resolve casos onde bot ficou travado (cap antigo, race, falha temporaria).
+  // Reusa processInboundMessage + diagnoseForceAi — mesmo fluxo do botao manual.
+  setInterval(() => {
+    runAutoRescue().catch(e => console.error('[AutoRescue tick]', e.message))
+  }, 30 * 60 * 1000)
+  // Roda 1x apos 60s do boot pra pegar backlog acumulado antes do primeiro tick
+  setTimeout(() => {
+    runAutoRescue().catch(e => console.error('[AutoRescue boot]', e.message))
+  }, 60 * 1000)
   // Daily instance health check (auto-reconecta disconnected)
   scheduleDailyHealthCheck()
 }
