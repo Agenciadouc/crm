@@ -350,7 +350,12 @@ addColumnIfNotExists('whatsapp_instances', 'daily_send_limit', 'INTEGER')   // n
 addColumnIfNotExists('whatsapp_instances', 'warmup_until', 'TEXT')          // datetime fim do warm-up; null = sem warm-up
 // Anti-ban Tier 1+2: horario comercial, cap por lead, auto-pause por delivered_rate
 addColumnIfNotExists('whatsapp_instances', 'business_hours_json', 'TEXT')                    // {mon:[{start,end}],...}; null = 24/7
-addColumnIfNotExists('whatsapp_instances', 'lead_daily_msg_cap', 'INTEGER DEFAULT 5')        // max msgs automaticas pro mesmo lead em 24h
+addColumnIfNotExists('whatsapp_instances', 'lead_daily_msg_cap', 'INTEGER DEFAULT 50')       // max msgs automaticas pro mesmo lead em 24h
+// Migration: sobe instancias que estavam no default antigo (5) pra 50
+try {
+  const r = db.prepare("UPDATE whatsapp_instances SET lead_daily_msg_cap = 50 WHERE lead_daily_msg_cap = 5").run()
+  if (r.changes > 0) console.log(`[db] migration: lead_daily_msg_cap 5->50 em ${r.changes} instancias`)
+} catch (e) { console.warn('[db] cap migration:', e.message) }
 addColumnIfNotExists('whatsapp_instances', 'paused_at', 'TEXT')                              // datetime pausa (auto ou manual); null = ativa
 addColumnIfNotExists('whatsapp_instances', 'paused_reason', 'TEXT')                          // 'delivered_rate_low' | 'manual' | 'ghost_detected'
 addColumnIfNotExists('whatsapp_instances', 'health_check_window_min', 'INTEGER DEFAULT 120') // janela pra delivered_rate (default 2h)

@@ -647,13 +647,20 @@ export async function processInboundMessage(lead, msgContent, mediaType, instanc
           try { broadcastSSE(lead.account_id, 'lead:message', { lead_id: lead.id }) } catch {}
         } else {
           console.error(`[AI Agent] Falha envio agent=${agent.id} lead=${lead.id}: ${sendRes.reason}`)
+          return { ok: false, reason: 'send_blocked', sendReason: sendRes.reason }
         }
+      } else if (inst && inst.status !== 'connected') {
+        return { ok: false, reason: 'instance_disconnected' }
+      } else {
+        return { ok: false, reason: 'instance_not_found' }
       }
     }
 
     console.log(`[AI Agent] Processed lead=${lead.id} agent=${agent.id} iters=${iterationsRun} tokens=${totalTokens} cost_usd=${totalCost.toFixed(6)} tools=${totalToolsExecuted} handoff=${handoffTriggered} text_len=${finalText.length}`)
+    return { ok: true }
   } catch (err) {
     console.error('[AI Agent] processInboundMessage erro:', err.message)
+    return { ok: false, reason: 'exception', detail: err.message }
   }
 }
 

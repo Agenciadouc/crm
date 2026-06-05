@@ -878,7 +878,26 @@ router.post('/:id/force-ai-respond', requireRole('super_admin'), async (req, res
       instanceId
     )
     if (result && result.ok === false) {
-      return res.status(400).json({ error: 'Bot nao pode atuar', reason: result.reason || 'unknown' })
+      // Traduz reason interno em msg legivel
+      const reason = result.reason || 'unknown'
+      const sendReason = result.sendReason || ''
+      let humanMsg = 'Bot nao pode atuar nesse lead'
+      if (reason === 'no_matching_agent') humanMsg = 'Nenhum agente compativel com o lead'
+      else if (reason === 'instance_disconnected') humanMsg = 'Instancia esta desconectada'
+      else if (reason === 'instance_not_found') humanMsg = 'Instancia nao encontrada'
+      else if (reason === 'send_blocked') {
+        if (sendReason.startsWith('lead_daily_cap_')) {
+          const cap = sendReason.replace('lead_daily_cap_', '')
+          humanMsg = `Lead ja recebeu ${cap} msgs automaticas em 24h (limite atingido). Aumente lead_daily_msg_cap da instancia ou aguarde 24h.`
+        } else if (sendReason.startsWith('quota_hourly_')) humanMsg = `Quota horaria da instancia atingida (${sendReason})`
+        else if (sendReason.startsWith('quota_daily_')) humanMsg = `Quota diaria da instancia atingida (${sendReason})`
+        else if (sendReason === 'outside_business_hours') humanMsg = 'Fora do horario comercial configurado pra essa instancia'
+        else if (sendReason.startsWith('instance_paused_')) humanMsg = `Instancia esta pausada (${sendReason.replace('instance_paused_', '')})`
+        else if (sendReason === 'auto_paused_low_delivery') humanMsg = 'Instancia foi auto-pausada por taxa de falha alta. Aguarde 4h ou libere manualmente.'
+        else if (sendReason === 'number_not_on_whatsapp') humanMsg = 'Numero do lead nao tem WhatsApp'
+        else humanMsg = `Envio bloqueado: ${sendReason}`
+      } else if (reason === 'exception') humanMsg = `Erro interno: ${result.detail || 'sem detalhes'}`
+      return res.status(400).json({ error: humanMsg, blockers: [humanMsg], message: humanMsg, reason, sendReason })
     }
 
     // Verifica se houve realmente envio de msg pelo bot
