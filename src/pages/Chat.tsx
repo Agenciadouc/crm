@@ -22,6 +22,7 @@ import {
   Menu as MenuIcon, MessagesSquare, Info as InfoIcon, History as HistoryIcon, ChevronLeft,
 } from 'lucide-react'
 import MessageMedia from '../components/MessageMedia'
+import AudioRecorder from '../components/AudioRecorder'
 import { applyMessageVars } from '../lib/messageVars'
 import { parseSqlDate, formatTime, formatDayLabel, localDayKey } from '../lib/dates'
 import { useIsMobile } from '../hooks/useIsMobile'
@@ -680,6 +681,39 @@ export default function Chat() {
     setSending(false)
   }
 
+  const handleSendAudio = async (blob: Blob, mime: string) => {
+    if (!lead || !accountId) return
+    setSending(true)
+    try {
+      const base64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onload = () => {
+          const result = reader.result as string
+          resolve(result.split(',')[1] || '')
+        }
+        reader.onerror = () => reject(new Error('Falha ao ler audio'))
+        reader.readAsDataURL(blob)
+      })
+      const override = sendInstanceOverride || activeConvInstance || undefined
+      const ext = (mime.split(';')[0].split('/')[1] || 'webm').toLowerCase()
+      const result = await sendMessageMedia(lead.id, accountId, {
+        base64,
+        mime: mime.split(';')[0] || 'audio/webm',
+        file_name: `audio-${Date.now()}.${ext}`,
+        instance_id: override,
+      })
+      setMessages(prev => [...prev, result.message])
+      if (!result.delivered) setNotice({ kind: 'error', title: 'Audio nao entregue', message: 'O audio foi salvo mas NAO foi enviado no WhatsApp. Verifique a conexao da instancia.' })
+      setSendInstanceOverride(null)
+      loadLead()
+    } catch (e: any) {
+      setNotice({ kind: 'error', title: 'Erro ao enviar audio', message: e?.message || 'Erro desconhecido' })
+      throw e
+    } finally {
+      setSending(false)
+    }
+  }
+
   // Tab ativa define a instancia de envio
   const resolvedSendInstance = (() => {
     if (!lead || !instances.length) return null
@@ -1056,6 +1090,7 @@ export default function Chat() {
                 >
                   <Paperclip size={16} />
                 </button>
+                <AudioRecorder onSend={handleSendAudio} disabled={sending} />
                 <div ref={readyMsgsContainerRef} style={{ position: 'relative', flex: 1, display: 'flex' }}>
                   <input
                     ref={msgInputRef}
