@@ -5,19 +5,47 @@ import { useAuth } from '../context/AuthContext'
 import { useAccount } from '../context/AccountContext'
 import { fetchWhatsAppInstances, type WhatsAppInstance } from '../lib/api'
 
-// Mostra um popup pra gerente/admin quando alguma instancia WhatsApp da conta esta desconectada.
-// Re-checa a cada 60s. Dispensa por sessao (sessionStorage) por accountId+conjunto-de-instancias —
-// se uma NOVA instancia cair depois, o popup volta a aparecer.
-const DISMISS_KEY = 'dros_disc_instances_dismissed'
+// Alerta de instancias DESCONECTADAS pra gerente/admin.
+//
+// Comportamento "inteligente" (jun/2026, ajuste depois de o popup ficar piscando):
+// 1. Filtra SO status='disconnected' (ignora connecting/qr_pending — sao transitorios)
+// 2. Dismiss persiste por 30min em localStorage (nao por sessao)
+// 3. Quando dismiss, guarda o CONJUNTO de IDs dispensados. Nao reabre se conjunto so
+//    diminui ou trocou ordem — so reabre se inst NOVA cair (id nao estava no dismiss)
+//    OU se passou a janela de 30min.
+const STORAGE_KEY = 'dros_disc_instances_dismissed_v2'
+const DISMISS_WINDOW_MS = 30 * 60 * 1000  // 30 minutos
+const CHECK_INTERVAL_MS = 60_000
+
+type DismissState = {
+  accountId: number
+  at: number  // timestamp
+  ids: number[]
+}
+
+function loadDismiss(): DismissState | null {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY)
+    if (!raw) return null
+    const parsed = JSON.parse(raw)
+    if (typeof parsed?.at !== 'number' || !Array.isArray(parsed?.ids)) return null
+    return parsed as DismissState
+  } catch { return null }
+}
+
+function saveDismiss(state: DismissState | null) {
+  try {
+    if (state) localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
+    else localStorage.removeItem(STORAGE_KEY)
+  } catch {}
+}
 
 export default function DisconnectedInstancesAlert() {
   const { user } = useAuth()
   const { accountId } = useAccount()
   const navigate = useNavigate()
   const [disconnected, setDisconnected] = useState<WhatsAppInstance[]>([])
-  const [dismissedKey, setDismissedKey] = useState<string>(() => {
-    try { return sessionStorage.getItem(DISMISS_KEY) || '' } catch { return '' }
-  })
+  const [dismiss, setDismiss] = useState<DismissState | null>(loadDismiss)
 
   const isManager = user?.role === 'gerente' || user?.role === 'super_admin'
 
@@ -28,39 +56,55 @@ export default function DisconnectedInstancesAlert() {
       fetchWhatsAppInstances(accountId)
         .then(list => {
           if (cancelled) return
-          setDisconnected(list.filter(i => i.status !== 'connected'))
+          // SO disconnected — ignora connecting/qr_pending/etc. (transitorios)
+          setDisconnected(list.filter(i => i.status === 'disconnected'))
         })
         .catch(() => {})
     }
     check()
-    const t = setInterval(check, 60_000)
+    const t = setInterval(check, CHECK_INTERVAL_MS)
     return () => { cancelled = true; clearInterval(t) }
   }, [isManager, accountId])
 
   if (!isManager || disconnected.length === 0) return null
 
-  const currentKey = `${accountId}-${disconnected.map(i => i.id).sort((a, b) => a - b).join(',')}`
-  if (currentKey === dismissedKey) return null
+  const currentIds = disconnected.map(i => i.id).sort((a, b) => a - b)
+  const now = Date.now()
 
-  const dismiss = () => {
-    try { sessionStorage.setItem(DISMISS_KEY, currentKey) } catch {}
-    setDismissedKey(currentKey)
+  // Avalia se dismiss ainda eh valido pra ESSA conta
+  const dismissActive = !!(
+    dismiss &&
+    dismiss.accountId === accountId &&
+    (now - dismiss.at) < DISMISS_WINDOW_MS
+  )
+
+  if (dismissActive) {
+    // So reabre se houver alguma inst NOVA caida que NAO estava no conjunto dispensado
+    const dismissedSet = new Set(dismiss!.ids)
+    const hasNewlyDisconnected = currentIds.some(id => !dismissedSet.has(id))
+    if (!hasNewlyDisconnected) return null
+  }
+
+  const handleDismiss = () => {
+    const next: DismissState = { accountId: accountId!, at: Date.now(), ids: currentIds }
+    saveDismiss(next)
+    setDismiss(next)
   }
 
   const goToIntegrations = () => {
-    dismiss()
+    handleDismiss()
     navigate('/integrations')
   }
 
   return (
-    <div className="modal-overlay" onClick={dismiss}>
+    <div className="modal-overlay" onClick={handleDismiss}>
       <div className="modal" style={{ maxWidth: 520 }} onClick={e => e.stopPropagation()}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
           <h2 style={{ display: 'flex', alignItems: 'center', gap: 8, margin: 0, fontSize: 18 }}>
             <AlertTriangle size={20} style={{ color: '#FF6B6B' }} />
             {disconnected.length === 1 ? 'WhatsApp desconectado' : `${disconnected.length} WhatsApps desconectados`}
           </h2>
-          <button className="btn btn-secondary btn-sm btn-icon" onClick={dismiss} title="Fechar"><X size={14} /></button>
+          <button className="btn btn-secondary btn-sm btn-icon" onClick={handleDismiss} title="Fechar"><X size={14} /></button>
         </div>
 
         <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 12 }}>
@@ -91,7 +135,7 @@ export default function DisconnectedInstancesAlert() {
         </div>
 
         <div className="modal-actions">
-          <button className="btn btn-secondary" onClick={dismiss}>Lembrar mais tarde</button>
+          <button className="btn btn-secondary" onClick={handleDismiss}>Lembrar mais tarde</button>
           <button className="btn btn-primary" onClick={goToIntegrations}>Ir pra Integracoes</button>
         </div>
       </div>
