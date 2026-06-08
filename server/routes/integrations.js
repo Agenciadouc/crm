@@ -149,7 +149,9 @@ router.post('/whatsapp/:id/connect', allowInstanceOwner, async (req, res) => {
       headers: { apikey: instance.api_key },
     })
     const data = await r.json()
-    const qrCode = data?.base64 || data?.qrcode || null
+    // Evolution v2.3 pode retornar QR aninhado (data.qrcode.base64) ou direto (data.base64)
+    const qrCode = data?.qrcode?.base64 || data?.base64 || null
+    if (!qrCode) console.error('[Evolution Connect] sem QR — payload:', JSON.stringify(data).slice(0, 300))
 
     db.prepare("UPDATE whatsapp_instances SET qr_code = ?, status = 'connecting', updated_at = datetime('now') WHERE id = ?").run(qrCode, instance.id)
 
@@ -313,7 +315,8 @@ router.post('/whatsapp/:id/qrcode', allowInstanceOwner, async (req, res) => {
       headers: { apikey: instance.api_key },
     })
     const data = await r.json()
-    const qrCode = data?.base64 || data?.qrcode || null
+    const qrCode = data?.qrcode?.base64 || data?.base64 || null
+    if (!qrCode) console.error('[Evolution Refresh QR] sem QR — payload:', JSON.stringify(data).slice(0, 300))
 
     db.prepare("UPDATE whatsapp_instances SET qr_code = ?, status = 'connecting', updated_at = datetime('now') WHERE id = ?").run(qrCode, instance.id)
     const updated = db.prepare('SELECT * FROM whatsapp_instances WHERE id = ?').get(instance.id)
