@@ -348,14 +348,21 @@ router.post('/whatsapp/:id/disconnect', requireRole('super_admin', 'gerente', 'a
 router.delete('/whatsapp/:id', requireRole('super_admin', 'gerente', 'atendente'), async (req, res) => {
   const instance = getOwnedInstance(req, res)
   if (!instance) return
-  // Try to delete from Evolution API too
+  // Tenta apagar na Evolution tambem (best-effort com timeout de 8s).
+  // Se Evolution responder 404 ou timeoutar, segue o jogo e apaga do banco assim mesmo
+  // — instancia fantasma (so no CRM) eh um caso valido e nao deve travar o user.
   try {
-    await fetch(`${instance.api_url}/instance/delete/${instance.instance_name}`, {
+    const r = await fetch(`${instance.api_url}/instance/delete/${encodeURIComponent(instance.instance_name)}`, {
       method: 'DELETE',
       headers: { apikey: instance.api_key },
+      signal: AbortSignal.timeout(8000),
     })
+    if (!r.ok && r.status !== 404) {
+      const body = await r.text().catch(() => '')
+      console.error(`[Evolution Delete Instance] ${instance.instance_name} HTTP ${r.status}: ${body.slice(0, 200)}`)
+    }
   } catch (err) {
-    console.error('[Evolution Delete Instance]', err.message)
+    console.error(`[Evolution Delete Instance] ${instance.instance_name}: ${err.name === 'TimeoutError' ? 'timeout 8s' : err.message}`)
   }
   db.prepare('DELETE FROM whatsapp_instances WHERE id = ?').run(instance.id)
   res.json({ ok: true })
