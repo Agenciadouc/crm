@@ -198,11 +198,21 @@ export default function Integrations() {
     load()
   }
 
-  const handleDelete = async (inst: WhatsAppInstance) => {
-    if (!accountId || !confirm(`Deletar "${inst.instance_name}"?`)) return
-    await deleteWhatsAppInstance(inst.id, accountId)
-    setActiveQR(null)
-    load()
+  const [deleteTarget, setDeleteTarget] = useState<WhatsAppInstance | null>(null)
+  const [deleting, setDeleting] = useState(false)
+  const handleDelete = (inst: WhatsAppInstance) => setDeleteTarget(inst)
+  const confirmDelete = async () => {
+    if (!accountId || !deleteTarget) return
+    setDeleting(true)
+    try {
+      await deleteWhatsAppInstance(deleteTarget.id, accountId)
+      setActiveQR(null)
+      setDeleteTarget(null)
+      load()
+    } catch (e: any) {
+      alert('Erro ao deletar: ' + e.message)
+    }
+    setDeleting(false)
   }
 
   const [reconfiguring, setReconfiguring] = useState<number | null>(null)
@@ -1159,6 +1169,34 @@ function onChange(e) {
                 }}
               >
                 {tplSaving ? 'Salvando...' : 'Salvar'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {deleteTarget && (
+        <div className="modal-overlay" onClick={() => !deleting && setDeleteTarget(null)}>
+          <div className="modal" style={{ maxWidth: 460 }} onClick={e => e.stopPropagation()}>
+            <h2 style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+              <Trash2 size={20} style={{ color: '#ef4444' }} />
+              Deletar instância
+            </h2>
+            <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 12, lineHeight: 1.55 }}>
+              Tem certeza que quer deletar a instância <strong style={{ color: 'var(--text)' }}>"{deleteTarget.instance_name}"</strong>?
+              <br /><br />
+              Isso vai remover ela do CRM e da Evolution API. Mensagens antigas continuam no histórico do lead, mas <strong>não vai mais receber nem enviar mensagens por este número</strong>. Essa ação não pode ser desfeita.
+            </p>
+
+            <div className="modal-actions" style={{ marginTop: 20 }}>
+              <button className="btn btn-secondary" onClick={() => setDeleteTarget(null)} disabled={deleting}>Cancelar</button>
+              <button
+                className="btn"
+                disabled={deleting}
+                onClick={confirmDelete}
+                style={{ background: '#ef4444', color: 'white', border: 'none' }}
+              >
+                {deleting ? 'Deletando...' : 'Sim, deletar'}
               </button>
             </div>
           </div>

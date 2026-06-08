@@ -344,16 +344,17 @@ router.post('/whatsapp/:id/disconnect', requireRole('super_admin', 'gerente', 'a
 // ─── Delete instance ─────────────────────────────────────────────
 router.delete('/whatsapp/:id', requireRole('super_admin', 'gerente', 'atendente'), async (req, res) => {
   const instance = getOwnedInstance(req, res)
-  if (instance) {
-    // Try to delete from Evolution API too
-    try {
-      await fetch(`${instance.api_url}/instance/delete/${instance.instance_name}`, {
-        method: 'DELETE',
-        headers: { apikey: instance.api_key },
-      })
-    } catch {}
+  if (!instance) return
+  // Try to delete from Evolution API too
+  try {
+    await fetch(`${instance.api_url}/instance/delete/${instance.instance_name}`, {
+      method: 'DELETE',
+      headers: { apikey: instance.api_key },
+    })
+  } catch (err) {
+    console.error('[Evolution Delete Instance]', err.message)
   }
-  db.prepare('DELETE FROM whatsapp_instances WHERE id = ?').run(req.params.id)
+  db.prepare('DELETE FROM whatsapp_instances WHERE id = ?').run(instance.id)
   res.json({ ok: true })
 })
 
