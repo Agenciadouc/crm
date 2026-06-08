@@ -225,15 +225,18 @@ export default function Chat() {
   const [leadLoading, setLeadLoading] = useState(false)
 
   // Load selected lead detail
-  const loadLead = useCallback(async () => {
+  const loadLead = useCallback(async (opts: { silent?: boolean } = {}) => {
     if (!selectedLeadId || !accountId) {
       setLead(null); setMessages([]); setLeadTasks([]); setConversations([])
       setActiveConvInstance(null); setLeadLoading(false)
       return
     }
-    // 1. Limpa estado do lead anterior IMEDIATAMENTE pra UI nao mostrar dados stale
-    setLead(null); setMessages([]); setLeadCadence(null); setLeadFollowUp(null); setLeadTasks([]); setConversations([])
-    setLeadLoading(true)
+    // 1. Limpa estado do lead anterior IMEDIATAMENTE pra UI nao mostrar dados stale.
+    //    Silent=true pula o reset (refresh fluido pra mesma lead — SSE, otimismo, etc).
+    if (!opts.silent) {
+      setLead(null); setMessages([]); setLeadCadence(null); setLeadFollowUp(null); setLeadTasks([]); setConversations([])
+      setLeadLoading(true)
+    }
     // 2. Race token pra descartar respostas obsoletas se user trocar de lead rapido
     const myToken = ++loadLeadTokenRef.current
     const reqLeadId = selectedLeadId
@@ -283,12 +286,12 @@ export default function Chat() {
 
   // SSE: new messages / leads
   useSSE('lead:message', useCallback((data: any) => {
-    if (data.leadId === selectedLeadId) loadLead()
+    if (data.leadId === selectedLeadId) loadLead({ silent: true })
     loadLeadsList()
   }, [selectedLeadId, loadLead, loadLeadsList]))
   useSSE('lead:created', useCallback(() => loadLeadsList(), [loadLeadsList]))
   useSSE('lead:updated', useCallback((data: any) => {
-    if (data.id === selectedLeadId) loadLead()
+    if (data.id === selectedLeadId) loadLead({ silent: true })
     loadLeadsList()
   }, [selectedLeadId, loadLead, loadLeadsList]))
   useSSE('lead:archived', useCallback((data: { id: number }) => {
@@ -612,7 +615,7 @@ export default function Chat() {
       setMsgText('')
       if (!result.delivered) setNotice({ kind: 'error', title: 'Mensagem nao entregue', message: 'A mensagem foi salva mas NAO foi enviada no WhatsApp. Verifique a conexao da instancia.' })
       setSendInstanceOverride(null)
-      loadLead()
+      loadLeadsList()
     } catch (e: any) { setNotice({ kind: 'error', title: 'Erro ao enviar', message: e?.message || 'Erro desconhecido' }) }
     setSending(false)
   }
@@ -676,7 +679,7 @@ export default function Chat() {
       if (!result.delivered) setNotice({ kind: 'error', title: 'Anexo nao entregue', message: 'O anexo foi salvo mas NAO foi enviado no WhatsApp. Verifique a conexao da instancia.' })
       handleCancelAttach()
       setSendInstanceOverride(null)
-      loadLead()
+      loadLeadsList()
     } catch (e: any) { setNotice({ kind: 'error', title: 'Erro ao enviar anexo', message: e?.message || 'Erro desconhecido' }) }
     setSending(false)
   }
@@ -705,7 +708,7 @@ export default function Chat() {
       setMessages(prev => [...prev, result.message])
       if (!result.delivered) setNotice({ kind: 'error', title: 'Audio nao entregue', message: 'O audio foi salvo mas NAO foi enviado no WhatsApp. Verifique a conexao da instancia.' })
       setSendInstanceOverride(null)
-      loadLead()
+      loadLeadsList()
     } catch (e: any) {
       setNotice({ kind: 'error', title: 'Erro ao enviar audio', message: e?.message || 'Erro desconhecido' })
       throw e
