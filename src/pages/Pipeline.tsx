@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, type MouseEvent } from 'react'
+import { useState, useEffect, useCallback, useRef, type MouseEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAccount } from '../context/AccountContext'
 import AccountSelector from '../components/AccountSelector'
@@ -47,6 +47,33 @@ export default function Pipeline() {
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
   const [expandedColumns, setExpandedColumns] = useState<Set<number>>(new Set())
+
+  // Scroll horizontal sincronizado (barra em cima espelha a de baixo)
+  const topScrollRef = useRef<HTMLDivElement>(null)
+  const boardRef = useRef<HTMLDivElement>(null)
+  const [boardWidth, setBoardWidth] = useState(0)
+  const syncingRef = useRef(false) // evita loop infinito de onScroll
+
+  useEffect(() => {
+    // mede scrollWidth do board pra ajustar largura do spacer da barra de cima
+    const measure = () => {
+      if (boardRef.current) setBoardWidth(boardRef.current.scrollWidth)
+    }
+    measure()
+    window.addEventListener('resize', measure)
+    // re-mede após render dos cards (debounce com requestAnimationFrame)
+    const raf = requestAnimationFrame(measure)
+    return () => { window.removeEventListener('resize', measure); cancelAnimationFrame(raf) }
+  })
+
+  const onTopScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    if (syncingRef.current) { syncingRef.current = false; return }
+    if (boardRef.current) { syncingRef.current = true; boardRef.current.scrollLeft = e.currentTarget.scrollLeft }
+  }
+  const onBoardScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    if (syncingRef.current) { syncingRef.current = false; return }
+    if (topScrollRef.current) { syncingRef.current = true; topScrollRef.current.scrollLeft = e.currentTarget.scrollLeft }
+  }
   const CARDS_LIMIT = 5
 
   const loadData = useCallback(async () => {
@@ -284,7 +311,16 @@ export default function Pipeline() {
         </div>
       </div>
 
-      <div className="kanban-board">
+      {/* Scrollbar duplicada em cima — sincronizada com o board */}
+      <div
+        ref={topScrollRef}
+        onScroll={onTopScroll}
+        style={{ overflowX: 'auto', overflowY: 'hidden', height: 14, marginBottom: 4 }}
+      >
+        <div style={{ width: boardWidth, height: 1 }} />
+      </div>
+
+      <div ref={boardRef} onScroll={onBoardScroll} className="kanban-board">
         {stages.map(stage => {
           const stageLeads = filteredLeads.filter(l => l.stage_id === stage.id)
           const metric = metrics.find(m => m.stage_id === stage.id)
