@@ -197,11 +197,22 @@ export default function Chat() {
     setTimeout(() => msgInputRef.current?.focus(), 0)
   }
 
-  // Load leads list — passa filtros pro backend pra evitar perder leads que ficam fora do limit
+  // FASE 3 PERFORMANCE — search server-side com debounce 300ms.
+  // Em conta com 1500+ leads, search client-side era latente e nao achava leads
+  // alem do limit. Agora server-side + indice idx_leads_account_updated_desc.
+  const [debouncedSearch, setDebouncedSearch] = useState('')
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search.trim()), 300)
+    return () => clearTimeout(t)
+  }, [search])
+
+  // Load leads list — limit reduzido de 500 pra 100 (suficiente pra lista lateral ativa).
+  // Quem busca leads especificos usa o campo "Buscar contato" (server-side com debounce).
   const loadLeadsList = useCallback(() => {
     if (!accountId) return
-    const filters: any = { limit: 500 }
+    const filters: any = { limit: 100 }
     if (showArchived) filters.show_archived = '1'
+    if (debouncedSearch.length >= 2) filters.search = debouncedSearch
 
     const toCsv = (arr: FilterValue[]) => arr.filter(v => typeof v === 'number' || v === 'none' || v === 'untagged').join(',')
     const stageCsv = toCsv(stageFilter)
@@ -214,7 +225,7 @@ export default function Chat() {
     if (instCsv) filters.instance_id = instCsv
 
     fetchLeads(accountId, filters).then(data => setLeads(data.leads))
-  }, [accountId, instanceFilter, tagFilter, stageFilter, attendantFilter, showArchived])
+  }, [accountId, instanceFilter, tagFilter, stageFilter, attendantFilter, showArchived, debouncedSearch])
   useEffect(() => { loadLeadsList() }, [loadLeadsList])
 
   // Race token: cada chamada de loadLead recebe um id incremental.
