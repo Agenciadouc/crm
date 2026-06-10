@@ -88,8 +88,11 @@ export default function Pipeline() {
       const active = f.find(x => x.is_default) || f[0]
       setFunnel(active || null)
       if (active) {
+        // FASE 3 PERFORMANCE — limit reduzido de 500 pra 300 (Pipeline com 1500+ leads
+        // travava no fetchLeads). Cards por coluna ja tem CARDS_LIMIT separado, entao
+        // 300 cobre overwhelming maioria dos casos. Se conta crescer, paginar por coluna.
         const [data, m] = await Promise.all([
-          fetchLeads(accountId, { funnel_id: active.id, limit: 500 }),
+          fetchLeads(accountId, { funnel_id: active.id, limit: 300 }),
           fetchPipelineMetrics(accountId, active.id).catch(() => ({ metrics: [], totalLeads: 0 })),
         ])
         setLeads(data.leads)
