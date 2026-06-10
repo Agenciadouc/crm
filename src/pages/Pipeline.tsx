@@ -55,19 +55,16 @@ export default function Pipeline() {
   const syncingRef = useRef(false) // evita loop infinito de onScroll
 
   useEffect(() => {
-    // mede scrollWidth do board pra ajustar largura do spacer da barra de cima.
-    // Re-mede no resize + quando muda estrutura (stages/leads) que afeta largura.
+    // mede scrollWidth do board pra ajustar largura do spacer da barra de cima
     const measure = () => {
-      if (boardRef.current) {
-        const w = boardRef.current.scrollWidth
-        setBoardWidth(prev => prev === w ? prev : w)
-      }
+      if (boardRef.current) setBoardWidth(boardRef.current.scrollWidth)
     }
     measure()
     window.addEventListener('resize', measure)
+    // re-mede após render dos cards (debounce com requestAnimationFrame)
     const raf = requestAnimationFrame(measure)
     return () => { window.removeEventListener('resize', measure); cancelAnimationFrame(raf) }
-  }, [stages.length, filteredLeads.length])
+  })
 
   const onTopScroll = (e: React.UIEvent<HTMLDivElement>) => {
     if (syncingRef.current) { syncingRef.current = false; return }
