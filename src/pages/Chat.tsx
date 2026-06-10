@@ -23,6 +23,7 @@ import {
 } from 'lucide-react'
 import MessageMedia from '../components/MessageMedia'
 import AudioRecorder from '../components/AudioRecorder'
+import LeadListItem from '../components/LeadListItem'
 import { applyMessageVars } from '../lib/messageVars'
 import { parseSqlDate, formatTime, formatDayLabel, localDayKey } from '../lib/dates'
 import { useIsMobile } from '../hooks/useIsMobile'
@@ -197,11 +198,21 @@ export default function Chat() {
     setTimeout(() => msgInputRef.current?.focus(), 0)
   }
 
+  // FASE 3 PERFORMANCE — search via servidor com debounce (era so client-side).
+  // Em conta grande (1500+ leads), search client-side era latente e nao achava leads
+  // alem do limit. Agora server-side + indice.
+  const [debouncedSearch, setDebouncedSearch] = useState('')
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search.trim()), 300)
+    return () => clearTimeout(t)
+  }, [search])
+
   // Load leads list — passa filtros pro backend pra evitar perder leads que ficam fora do limit
   const loadLeadsList = useCallback(() => {
     if (!accountId) return
     const filters: any = { limit: 500 }
     if (showArchived) filters.show_archived = '1'
+    if (debouncedSearch.length >= 2) filters.search = debouncedSearch
 
     const toCsv = (arr: FilterValue[]) => arr.filter(v => typeof v === 'number' || v === 'none' || v === 'untagged').join(',')
     const stageCsv = toCsv(stageFilter)
@@ -214,7 +225,7 @@ export default function Chat() {
     if (instCsv) filters.instance_id = instCsv
 
     fetchLeads(accountId, filters).then(data => setLeads(data.leads))
-  }, [accountId, instanceFilter, tagFilter, stageFilter, attendantFilter, showArchived])
+  }, [accountId, instanceFilter, tagFilter, stageFilter, attendantFilter, showArchived, debouncedSearch])
   useEffect(() => { loadLeadsList() }, [loadLeadsList])
 
   // Race token: cada chamada de loadLead recebe um id incremental.
@@ -285,14 +296,44 @@ export default function Chat() {
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages])
 
   // SSE: new messages / leads
+  // FASE 4 PERFORMANCE — patch incremental em vez de re-fetch de toda lista.
+  // Antes: cada msg recebida disparava loadLeadsList() (puxa 500 leads + tags).
+  // Em conta com 10 msgs/min, eram 600 fetches/h. Agora atualiza so o lead afetado.
   useSSE('lead:message', useCallback((data: any) => {
     if (data.leadId === selectedLeadId) loadLead({ silent: true })
-    loadLeadsList()
+    // Patch incremental do lead na lista lateral (sem re-fetch).
+    // Se SSE mandar payload completo, usa ele; senao, bumpa updated_at + unread.
+    setLeads(prev => {
+      const idx = prev.findIndex(l => l.id === data.leadId)
+      if (idx < 0) {
+        // Lead nao esta na lista local — pode ser novo ou estar fora do filtro atual.
+        // Refetch leve so nesse caso (raro), mantem comportamento legado de aparecer.
+        loadLeadsList()
+        return prev
+      }
+      const updated = {
+        ...prev[idx],
+        last_message: data.lastMessage || data.content || prev[idx].last_message,
+        last_message_at: data.lastMessageAt || data.created_at || prev[idx].last_message_at,
+        updated_at: data.updated_at || new Date().toISOString().replace('T', ' ').slice(0, 19),
+        unread_count: data.leadId === selectedLeadId ? 0 : (prev[idx].unread_count || 0) + 1,
+      }
+      const next = [...prev]
+      next[idx] = updated
+      return next
+    })
   }, [selectedLeadId, loadLead, loadLeadsList]))
   useSSE('lead:created', useCallback(() => loadLeadsList(), [loadLeadsList]))
   useSSE('lead:updated', useCallback((data: any) => {
     if (data.id === selectedLeadId) loadLead({ silent: true })
-    loadLeadsList()
+    // Patch incremental no lugar de re-fetch
+    setLeads(prev => {
+      const idx = prev.findIndex(l => l.id === data.id)
+      if (idx < 0) { loadLeadsList(); return prev }
+      const next = [...prev]
+      next[idx] = { ...prev[idx], ...data }
+      return next
+    })
   }, [selectedLeadId, loadLead, loadLeadsList]))
   useSSE('lead:archived', useCallback((data: { id: number }) => {
     setLeads(prev => prev.filter(l => l.id !== data.id))
@@ -902,43 +943,17 @@ export default function Chat() {
             <input className="input" placeholder="Buscar contato..." value={search} onChange={e => setSearch(e.target.value)} style={{ border: 'none', background: 'transparent', flex: 1 }} />
           </div>
           <div className="chat-contacts-list">
-            {filteredLeads.map(l => {
-              const active = l.id === selectedLeadId
-              const stage = allStages.find(s => s.id === l.stage_id)
-              return (
-                <div key={l.id} className={`chat-contact-item ${active ? 'active' : ''} ${(l.unread_count || 0) > 0 ? 'has-unread' : ''}`} onClick={() => selectLead(l.id)} style={{ position: 'relative' }}>
-                  <div className="chat-contact-avatar" style={{ background: stage ? `${stage.color}25` : '#FFB30025', overflow: 'hidden' }}>
-                    {l.profile_pic_url ? (
-                      <img src={l.profile_pic_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} onError={e => { (e.target as HTMLImageElement).style.display = 'none' }} />
-                    ) : (
-                      <User size={16} style={{ color: stage?.color || '#FFB300' }} />
-                    )}
-                  </div>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 6 }}>
-                      <span className="chat-contact-name" style={{ fontWeight: (l.unread_count || 0) > 0 ? 700 : 600, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: (l.unread_count || 0) > 0 ? 'var(--text-primary)' : undefined }}>{l.name || l.phone || 'Sem nome'}</span>
-                      <span style={{ fontSize: 10, color: (l.unread_count || 0) > 0 ? 'var(--positive)' : 'var(--text-muted)', fontWeight: (l.unread_count || 0) > 0 ? 700 : 400 }}>{timeAgo(l.updated_at)}</span>
-                    </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 6, marginTop: 2, alignItems: 'center' }}>
-                      <span className="chat-contact-preview" style={{ fontSize: 11, color: (l.unread_count || 0) > 0 ? 'var(--text-secondary)' : 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
-                        {l.last_message || (l.phone ? `📞 ${l.phone}` : 'Sem mensagens')}
-                      </span>
-                      {(l.unread_count || 0) > 0 && (
-                        <span className="chat-contact-unread">{(l.unread_count || 0) > 99 ? '99+' : l.unread_count}</span>
-                      )}
-                      {stage && (l.unread_count || 0) === 0 && <span style={{ fontSize: 9, color: stage.color, background: `${stage.color}20`, padding: '1px 6px', borderRadius: 8, whiteSpace: 'nowrap' }}>{stage.name}</span>}
-                    </div>
-                  </div>
-                  <button
-                    className="chat-contact-archive"
-                    title="Arquivar"
-                    onClick={e => handleArchiveLead(l.id, e)}
-                    style={{ position: 'absolute', top: 6, right: 6, background: 'rgba(0,0,0,0.35)', border: 'none', color: '#C8C4D4', cursor: 'pointer', padding: 4, borderRadius: 4, display: 'none' }}>
-                    <Archive size={11} />
-                  </button>
-                </div>
-              )
-            })}
+            {filteredLeads.map(l => (
+              <LeadListItem
+                key={l.id}
+                lead={l}
+                active={l.id === selectedLeadId}
+                stage={allStages.find(s => s.id === l.stage_id)}
+                onSelect={selectLead}
+                onArchive={handleArchiveLead}
+                timeAgo={timeAgo}
+              />
+            ))}
             {filteredLeads.length === 0 && <div style={{ padding: 30, textAlign: 'center', color: '#6B6580', fontSize: 12 }}>Nenhum contato</div>}
           </div>
         </div>
