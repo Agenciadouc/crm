@@ -1013,6 +1013,14 @@ addColumnIfNotExists('leads', 'unread_count', 'INTEGER NOT NULL DEFAULT 0')
 try { db.exec('CREATE INDEX IF NOT EXISTS idx_messages_wa_msg_id ON messages(wa_msg_id)') } catch (e) { console.warn('[db] idx_messages_wa_msg_id:', e.message) }
 try { db.exec('CREATE INDEX IF NOT EXISTS idx_leads_unread ON leads(account_id, unread_count)') } catch (e) { console.warn('[db] idx_leads_unread:', e.message) }
 
+// ─── FASE 1 PERFORMANCE — indices compostos pra contas grandes (1500+ leads) ───
+// Aditivos / idempotentes. Aceleram queries do Chat/Pipeline/Leads.
+try { db.exec('CREATE INDEX IF NOT EXISTS idx_leads_account_active_archived_stage ON leads(account_id, is_active, is_archived, stage_id)') } catch (e) { console.warn('[db] idx_leads_account_active_archived_stage:', e.message) }
+try { db.exec('CREATE INDEX IF NOT EXISTS idx_leads_account_updated_desc ON leads(account_id, updated_at DESC)') } catch (e) { console.warn('[db] idx_leads_account_updated_desc:', e.message) }
+try { db.exec('CREATE INDEX IF NOT EXISTS idx_lead_tags_tag_lead ON lead_tags(tag_id, lead_id)') } catch (e) { console.warn('[db] idx_lead_tags_tag_lead:', e.message) }
+try { db.exec('CREATE INDEX IF NOT EXISTS idx_messages_lead_instance ON messages(lead_id, instance_id)') } catch (e) { console.warn('[db] idx_messages_lead_instance:', e.message) }
+try { db.exec('CREATE INDEX IF NOT EXISTS idx_leads_archived_count ON leads(account_id, is_archived, has_new_after_archive)') } catch (e) { console.warn('[db] idx_leads_archived_count:', e.message) }
+
 // Follow-ups (cadencias automaticas — diferentes das cadencias manuais ja existentes)
 db.exec(`
   CREATE TABLE IF NOT EXISTS follow_ups (
