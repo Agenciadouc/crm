@@ -122,22 +122,25 @@ export async function sendCapiEvent({ accountId, lead, eventName, stageId, histo
     stage_id: stageId || null,
     currency: 'BRL',
   }
-  if (isCtwa) customData.messaging_channel = 'whatsapp'
   if (lead.ctwa_clid) customData.ctwa_clid = lead.ctwa_clid
   if (lead.meta_ad_id) customData.ad_id = lead.meta_ad_id
   if (lead.meta_campaign_id) customData.campaign_id = lead.meta_campaign_id
   if (lead.meta_form_id) customData.lead_form_id = lead.meta_form_id
   if (lead.lead_form_lead_id) customData.lead_id = lead.lead_form_lead_id
 
+  const eventData = {
+    event_name: eventName,
+    event_time: eventTime,
+    event_id: eventId,
+    action_source: actionSource,
+    user_data: userData,
+    custom_data: customData,
+  }
+  // messaging_channel: campo de NIVEL RAIZ do evento (nao custom_data) — obrigatorio quando action_source=business_messaging
+  if (isCtwa) eventData.messaging_channel = 'whatsapp'
+
   const payload = {
-    data: [{
-      event_name: eventName,
-      event_time: eventTime,
-      event_id: eventId,
-      action_source: actionSource,
-      user_data: userData,
-      custom_data: customData,
-    }],
+    data: [eventData],
   }
   if (account.meta_capi_test_event_code) {
     payload.test_event_code = account.meta_capi_test_event_code
