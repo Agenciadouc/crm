@@ -425,6 +425,8 @@ addColumnIfNotExists('accounts', 'meta_pixel_id', 'TEXT')
 addColumnIfNotExists('accounts', 'meta_capi_token', 'TEXT')
 addColumnIfNotExists('accounts', 'meta_capi_test_event_code', 'TEXT')
 addColumnIfNotExists('accounts', 'meta_capi_enabled', 'INTEGER NOT NULL DEFAULT 0')
+// Page ID da Pagina do Facebook que roda os anuncios de CTWA — exigido pra eventos business_messaging
+addColumnIfNotExists('accounts', 'meta_page_id', 'TEXT')
 // Ultimo lead recebido via webhook Google Sheets (pra UI mostrar status da integração)
 addColumnIfNotExists('accounts', 'last_sheets_lead_at', 'TEXT')
 

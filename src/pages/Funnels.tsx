@@ -106,9 +106,12 @@ export default function Funnels() {
         <div className="modal-overlay" onClick={() => setEditing(null)}>
           <div className="modal" style={{ maxWidth: 600 }} onClick={e => e.stopPropagation()}>
             <h2>Editar Etapas — {editing.name}</h2>
+            <div style={{ marginTop: 8, padding: 8, background: 'rgba(91,173,226,0.06)', borderRadius: 6, fontSize: 11, color: '#9B96B0', lineHeight: 1.5 }}>
+              💡 Para leads de <strong>Click-to-WhatsApp</strong> o Meta só aceita <code>LeadSubmitted</code> e <code>Purchase</code>. Qualquer outro evento é enviado automaticamente como <code>LeadSubmitted</code> nesses leads (em leads normais, vai o evento escolhido).
+            </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 12 }}>
               {editStages.map((s, i) => {
-                const isCustomEvent = s.meta_event_name && !['Lead','Contact','Schedule','SubmitApplication','Purchase','CompleteRegistration','AddToCart','InitiateCheckout'].includes(s.meta_event_name)
+                const isCustomEvent = s.meta_event_name && !['Lead','Contact','Schedule','SubmitApplication','Purchase','CompleteRegistration','AddToCart','InitiateCheckout','LeadSubmitted'].includes(s.meta_event_name)
                 return (
                 <div
                   key={i}
@@ -151,6 +154,8 @@ export default function Funnels() {
                       style={{ fontSize: 11, flex: 1 }}
                     >
                       <option value="">— nenhum (não dispara) —</option>
+                      <option value="LeadSubmitted">LeadSubmitted (CTWA ✓)</option>
+                      <option value="Purchase">Purchase (CTWA ✓)</option>
                       <option value="Lead">Lead</option>
                       <option value="Contact">Contact</option>
                       <option value="Schedule">Schedule</option>
@@ -158,7 +163,6 @@ export default function Funnels() {
                       <option value="CompleteRegistration">CompleteRegistration</option>
                       <option value="AddToCart">AddToCart</option>
                       <option value="InitiateCheckout">InitiateCheckout</option>
-                      <option value="Purchase">Purchase</option>
                       <option value="__custom__">Custom...</option>
                     </select>
                     {isCustomEvent && (

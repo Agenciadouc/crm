@@ -63,7 +63,7 @@ router.get('/:id', (req, res) => {
 
 // Update account
 router.put('/:id', requireRole('super_admin'), (req, res) => {
-  const { name, logo_url, is_active, evolution_api_url, evolution_api_key, cnpj, razao_social, segmento, website, instagram, whatsapp_comercial, valor_mensal, contrato_inicio, cidade, estado, observacoes, trabalha_anuncio, investimento_anuncios, meta_pixel_id, meta_capi_token, meta_capi_test_event_code, meta_capi_enabled, ai_agents_enabled, attendant_analytics_enabled } = req.body
+  const { name, logo_url, is_active, evolution_api_url, evolution_api_key, cnpj, razao_social, segmento, website, instagram, whatsapp_comercial, valor_mensal, contrato_inicio, cidade, estado, observacoes, trabalha_anuncio, investimento_anuncios, meta_pixel_id, meta_capi_token, meta_capi_test_event_code, meta_capi_enabled, meta_page_id, ai_agents_enabled, attendant_analytics_enabled } = req.body
   const sets = []
   const params = []
   if (name !== undefined) { sets.push('name = ?'); params.push(name) }
@@ -88,6 +88,7 @@ router.put('/:id', requireRole('super_admin'), (req, res) => {
   if (meta_capi_token !== undefined) { sets.push('meta_capi_token = ?'); params.push(meta_capi_token || null) }
   if (meta_capi_test_event_code !== undefined) { sets.push('meta_capi_test_event_code = ?'); params.push(meta_capi_test_event_code || null) }
   if (meta_capi_enabled !== undefined) { sets.push('meta_capi_enabled = ?'); params.push(meta_capi_enabled ? 1 : 0) }
+  if (meta_page_id !== undefined) { sets.push('meta_page_id = ?'); params.push(meta_page_id || null) }
   if (ai_agents_enabled !== undefined) { sets.push('ai_agents_enabled = ?'); params.push(ai_agents_enabled ? 1 : 0) }
   if (attendant_analytics_enabled !== undefined) { sets.push('attendant_analytics_enabled = ?'); params.push(attendant_analytics_enabled ? 1 : 0) }
   if (sets.length === 0) return res.status(400).json({ error: 'Nada pra atualizar' })
@@ -107,18 +108,19 @@ router.put('/:id/meta-capi', requireRole('super_admin', 'gerente'), (req, res) =
   if (req.user.role === 'gerente' && req.user.account_id !== account.id) {
     return res.status(403).json({ error: 'Sem permissao' })
   }
-  const { meta_pixel_id, meta_capi_token, meta_capi_test_event_code, meta_capi_enabled } = req.body
+  const { meta_pixel_id, meta_capi_token, meta_capi_test_event_code, meta_capi_enabled, meta_page_id } = req.body
   const sets = []
   const params = []
   if (meta_pixel_id !== undefined) { sets.push('meta_pixel_id = ?'); params.push(meta_pixel_id || null) }
   if (meta_capi_token !== undefined) { sets.push('meta_capi_token = ?'); params.push(meta_capi_token || null) }
   if (meta_capi_test_event_code !== undefined) { sets.push('meta_capi_test_event_code = ?'); params.push(meta_capi_test_event_code || null) }
   if (meta_capi_enabled !== undefined) { sets.push('meta_capi_enabled = ?'); params.push(meta_capi_enabled ? 1 : 0) }
+  if (meta_page_id !== undefined) { sets.push('meta_page_id = ?'); params.push(meta_page_id || null) }
   if (sets.length === 0) return res.status(400).json({ error: 'Nada pra atualizar' })
   sets.push("updated_at = datetime('now')")
   params.push(accountId)
   db.prepare(`UPDATE accounts SET ${sets.join(', ')} WHERE id = ?`).run(...params)
-  const updated = db.prepare('SELECT id, meta_pixel_id, meta_capi_token, meta_capi_test_event_code, meta_capi_enabled FROM accounts WHERE id = ?').get(accountId)
+  const updated = db.prepare('SELECT id, meta_pixel_id, meta_capi_token, meta_capi_test_event_code, meta_capi_enabled, meta_page_id FROM accounts WHERE id = ?').get(accountId)
   res.json({ account: updated })
 })
 

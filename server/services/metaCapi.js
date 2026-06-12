@@ -46,7 +46,7 @@ export async function sendCapiEvent({ accountId, lead, eventName, stageId, histo
   if (!accountId || !lead || !eventName) return { skipped: true, reason: 'missing_params' }
 
   const account = db.prepare(`
-    SELECT meta_pixel_id, meta_capi_token, meta_capi_test_event_code, meta_capi_enabled
+    SELECT meta_pixel_id, meta_capi_token, meta_capi_test_event_code, meta_capi_enabled, meta_page_id
     FROM accounts WHERE id = ?
   `).get(accountId)
 
@@ -55,6 +55,18 @@ export async function sendCapiEvent({ accountId, lead, eventName, stageId, histo
       try { db.prepare('UPDATE stage_history SET capi_status = ? WHERE id = ?').run('skipped_not_configured', historyId) } catch {}
     }
     return { skipped: true, reason: 'capi_not_configured' }
+  }
+
+  // CTWA (click-to-WhatsApp) → caminho business_messaging. O Meta exige page_id (ou WABA)
+  // associado ao dataset; sem o page_id na conta o evento eh rejeitado (2804116/2804131).
+  const isCtwa = !!(lead.ctwa_clid || lead.fbc?.includes('ctwa'))
+  const isLeadForm = !!(lead.lead_form_lead_id || lead.meta_form_id)
+  if (isCtwa && !account.meta_page_id) {
+    if (historyId) {
+      try { db.prepare('UPDATE stage_history SET capi_status = ? WHERE id = ?').run('skipped_no_page_id', historyId) } catch {}
+    }
+    console.warn(`[CAPI] lead=${lead.id} CTWA sem page_id na conta ${accountId} — configure o Page ID em Integracoes. Evento nao enviado.`)
+    return { skipped: true, reason: 'ctwa_no_page_id' }
   }
 
   const eventTime = Math.floor(Date.now() / 1000)
@@ -93,9 +105,16 @@ export async function sendCapiEvent({ accountId, lead, eventName, stageId, histo
 
   // fbp/fbc — PLAINTEXT (nao hash!)
   if (lead.fbp) userData.fbp = lead.fbp
-  // fbc: usa lead.fbc se existir, senao reconstroi do ctwa_clid
-  const fbc = lead.fbc || buildFbc(lead.ctwa_clid, eventTime)
+  // fbc: usa lead.fbc real se existir. Pra CTWA NAO fabricamos fbc do ctwa_clid —
+  // o proprio ctwa_clid eh o identificador no business_messaging (ver abaixo).
+  const fbc = lead.fbc || (isCtwa ? null : buildFbc(lead.ctwa_clid, eventTime))
   if (fbc) userData.fbc = fbc
+
+  // CTWA: identificadores exigidos no user_data pra business_messaging
+  if (isCtwa) {
+    userData.ctwa_clid = lead.ctwa_clid
+    userData.page_id = String(account.meta_page_id)
+  }
 
   // lead_id Meta Lead Form — plaintext, obrigatorio pra Conversion Leads
   if (lead.lead_form_lead_id) userData.lead_id = lead.lead_form_lead_id
@@ -109,27 +128,31 @@ export async function sendCapiEvent({ accountId, lead, eventName, stageId, histo
   const ua = request?.headers?.['user-agent'] || lead.client_user_agent
   if (ua) userData.client_user_agent = ua
 
-  // Detecta se eh CTWA — define action_source e messaging_channel
-  const isCtwa = !!(lead.ctwa_clid || lead.fbc?.includes('ctwa'))
-  const isLeadForm = !!(lead.lead_form_lead_id || lead.meta_form_id)
-
+  // action_source conforme o canal (isCtwa/isLeadForm computados la em cima)
   let actionSource = 'system_generated'
   if (isCtwa) actionSource = 'business_messaging'
   else if (isLeadForm) actionSource = 'system_generated' // CRM agindo sobre lead do form
+
+  // CTWA (business_messaging) so aceita um conjunto fixo de eventos: Purchase ou LeadSubmitted.
+  // Os nomes padrao de pixel (Lead, Contact, Schedule, InitiateCheckout...) sao rejeitados (2804066).
+  // Traduz o evento configurado na etapa pro vocabulario valido de mensagens.
+  let finalEventName = eventName
+  if (isCtwa) finalEventName = eventName === 'Purchase' ? 'Purchase' : 'LeadSubmitted'
 
   const customData = {
     lead_source: lead.source || 'crm',
     stage_id: stageId || null,
     currency: 'BRL',
   }
-  if (lead.ctwa_clid) customData.ctwa_clid = lead.ctwa_clid
   if (lead.meta_ad_id) customData.ad_id = lead.meta_ad_id
   if (lead.meta_campaign_id) customData.campaign_id = lead.meta_campaign_id
   if (lead.meta_form_id) customData.lead_form_id = lead.meta_form_id
   if (lead.lead_form_lead_id) customData.lead_id = lead.lead_form_lead_id
+  // Purchase via business_messaging exige value (alem de currency). Sem valor de negocio, default 0.
+  if (isCtwa && finalEventName === 'Purchase' && customData.value == null) customData.value = 0
 
   const eventData = {
-    event_name: eventName,
+    event_name: finalEventName,
     event_time: eventTime,
     event_id: eventId,
     action_source: actionSource,
@@ -148,7 +171,7 @@ export async function sendCapiEvent({ accountId, lead, eventName, stageId, histo
 
   // Log do que esta sendo enviado (preview, sem dados sensiveis no claro)
   const sentKeys = Object.keys(userData).sort().join(',')
-  console.log(`[CAPI→Meta] account=${accountId} lead=${lead.id} event=${eventName} action_source=${actionSource} user_data_keys=[${sentKeys}] custom_data_keys=[${Object.keys(customData).join(',')}]`)
+  console.log(`[CAPI→Meta] account=${accountId} lead=${lead.id} event=${finalEventName}${finalEventName !== eventName ? ` (orig:${eventName})` : ''} action_source=${actionSource} user_data_keys=[${sentKeys}] custom_data_keys=[${Object.keys(customData).join(',')}]`)
 
   try {
     const url = `https://graph.facebook.com/v21.0/${account.meta_pixel_id}/events?access_token=${encodeURIComponent(account.meta_capi_token)}`

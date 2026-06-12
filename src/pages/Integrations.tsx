@@ -57,6 +57,7 @@ export default function Integrations() {
   const [account, setAccount] = useState<Account | null>(null)
   const [metaPixelId, setMetaPixelId] = useState('')
   const [metaCapiToken, setMetaCapiToken] = useState('')
+  const [metaPageId, setMetaPageId] = useState('')
   const [metaEnabled, setMetaEnabled] = useState(false)
   const [showMetaToken, setShowMetaToken] = useState(false)
   const [savingMeta, setSavingMeta] = useState(false)
@@ -118,6 +119,7 @@ export default function Integrations() {
       setAccount(d.account || null)
       setMetaPixelId(d.account?.meta_pixel_id || '')
       setMetaCapiToken(d.account?.meta_capi_token || '')
+      setMetaPageId(d.account?.meta_page_id || '')
       setMetaEnabled(!!d.account?.meta_capi_enabled)
     }).catch(() => {})
   }, [accountId])
@@ -940,6 +942,14 @@ function onChange(e) {
               </div>
             </div>
 
+            <div style={{ marginBottom: 10 }}>
+              <label style={{ fontSize: 11, color: '#9B96B0', display: 'block', marginBottom: 4 }}>Page ID <span style={{ color: '#7A7590' }}>(obrigatório para anúncios Click-to-WhatsApp)</span></label>
+              <input className="input" value={metaPageId} onChange={e => setMetaPageId(e.target.value)} placeholder="Ex: 728634350338216" disabled={!metaEnabled} />
+              <div style={{ fontSize: 10, color: '#7A7590', marginTop: 4 }}>
+                ID da Página do Facebook que roda os anúncios. Leads de CTWA só convertem no Meta com esse ID + a Página vinculada ao dataset (Gerenciador de Eventos).
+              </div>
+            </div>
+
             <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
               <button
                 className="btn btn-primary btn-sm"
@@ -951,6 +961,7 @@ function onChange(e) {
                       meta_pixel_id: metaPixelId || null,
                       meta_capi_token: metaCapiToken || null,
                       meta_capi_enabled: metaEnabled ? 1 : 0,
+                      meta_page_id: metaPageId || null,
                     })
                     setMetaSaved(true)
                     setTimeout(() => setMetaSaved(false), 2000)
@@ -1023,6 +1034,7 @@ function onChange(e) {
                       meta_pixel_id: metaPixelId || null,
                       meta_capi_token: metaCapiToken || null,
                       meta_capi_enabled: metaEnabled ? 1 : 0,
+                      meta_page_id: metaPageId || null,
                     })
                     const r = await testMetaCapi(accountId)
                     setMetaTestResult({
