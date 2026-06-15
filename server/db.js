@@ -856,6 +856,9 @@ for (const e of errorCatalogSeed) {
 
 // Agentes de IA (Claude Haiku 4.5) — F0+1 schema
 addColumnIfNotExists('accounts', 'ai_agents_enabled', 'INTEGER NOT NULL DEFAULT 0')
+// API key Anthropic POR CONTA — cada cliente usa a propria conta Anthropic em todas as chamadas Claude.
+// Sem fallback pra chave da agencia: conta sem chave nao roda IA (texto). Audio (Deepgram) segue global.
+addColumnIfNotExists('accounts', 'anthropic_api_key', 'TEXT')
 addColumnIfNotExists('users', 'is_bot', 'INTEGER NOT NULL DEFAULT 0')
 addColumnIfNotExists('messages', 'ai_agent_id', 'INTEGER')
 addColumnIfNotExists('leads', 'ai_handed_off_at', 'TEXT')

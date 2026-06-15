@@ -11,6 +11,7 @@ export default function Agents() {
   const { accountId } = useAccount()
   const [agents, setAgents] = useState<Agent[]>([])
   const [featureEnabled, setFeatureEnabled] = useState(false)
+  const [hasApiKey, setHasApiKey] = useState(true)
   const [loading, setLoading] = useState(true)
   const [editingId, setEditingId] = useState<'new' | number | null>(null)
   const [togglingId, setTogglingId] = useState<number | null>(null)
@@ -27,7 +28,7 @@ export default function Agents() {
     if (!accountId) return
     setLoading(true)
     fetchAgents(accountId)
-      .then(d => { setAgents(d.agents); setFeatureEnabled(d.feature_enabled) })
+      .then(d => { setAgents(d.agents); setFeatureEnabled(d.feature_enabled); setHasApiKey(d.has_api_key !== false) })
       .finally(() => setLoading(false))
   }
   useEffect(load, [accountId])
@@ -78,6 +79,15 @@ export default function Agents() {
           </button>
         )}
       </div>
+
+      {featureEnabled && !hasApiKey && (
+        <div className="card" style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: 14, marginBottom: 16, background: 'rgba(255,179,0,0.07)', border: '1px solid rgba(255,179,0,0.3)' }}>
+          <AlertCircle size={20} style={{ color: '#FFB300', flexShrink: 0, marginTop: 2 }} />
+          <div style={{ fontSize: 13, lineHeight: 1.5 }}>
+            <strong style={{ color: '#FFCB45' }}>Falta cadastrar a API Anthropic.</strong> Os agentes de IA estão habilitados, mas <strong>não respondem</strong> até você cadastrar sua chave Anthropic em <strong>Integrações → Agentes de IA — API Anthropic</strong>. Toda a IA desta conta usa a sua própria conta Anthropic.
+          </div>
+        </div>
+      )}
 
       {loading ? (
         <div className="loading-container"><div className="spinner" /></div>

@@ -2,6 +2,7 @@ import { Router } from 'express'
 import db, { DEFAULT_EVOLUTION_API_URL, DEFAULT_EVOLUTION_API_KEY } from '../db.js'
 import { requireRole } from '../middleware/auth.js'
 import { testCapi } from '../services/metaCapi.js'
+import { smokeTest, resolveAnthropicKey } from '../services/anthropicClient.js'
 
 const router = Router()
 
@@ -63,7 +64,7 @@ router.get('/:id', (req, res) => {
 
 // Update account
 router.put('/:id', requireRole('super_admin'), (req, res) => {
-  const { name, logo_url, is_active, evolution_api_url, evolution_api_key, cnpj, razao_social, segmento, website, instagram, whatsapp_comercial, valor_mensal, contrato_inicio, cidade, estado, observacoes, trabalha_anuncio, investimento_anuncios, meta_pixel_id, meta_capi_token, meta_capi_test_event_code, meta_capi_enabled, meta_page_id, ai_agents_enabled, attendant_analytics_enabled } = req.body
+  const { name, logo_url, is_active, evolution_api_url, evolution_api_key, cnpj, razao_social, segmento, website, instagram, whatsapp_comercial, valor_mensal, contrato_inicio, cidade, estado, observacoes, trabalha_anuncio, investimento_anuncios, meta_pixel_id, meta_capi_token, meta_capi_test_event_code, meta_capi_enabled, meta_page_id, ai_agents_enabled, attendant_analytics_enabled, anthropic_api_key, analysis_token_limit } = req.body
   const sets = []
   const params = []
   if (name !== undefined) { sets.push('name = ?'); params.push(name) }
@@ -91,6 +92,8 @@ router.put('/:id', requireRole('super_admin'), (req, res) => {
   if (meta_page_id !== undefined) { sets.push('meta_page_id = ?'); params.push(meta_page_id || null) }
   if (ai_agents_enabled !== undefined) { sets.push('ai_agents_enabled = ?'); params.push(ai_agents_enabled ? 1 : 0) }
   if (attendant_analytics_enabled !== undefined) { sets.push('attendant_analytics_enabled = ?'); params.push(attendant_analytics_enabled ? 1 : 0) }
+  if (anthropic_api_key !== undefined) { sets.push('anthropic_api_key = ?'); params.push(anthropic_api_key || null) }
+  if (analysis_token_limit !== undefined) { sets.push('analysis_token_limit = ?'); params.push(analysis_token_limit || 200000) }
   if (sets.length === 0) return res.status(400).json({ error: 'Nada pra atualizar' })
   sets.push("updated_at = datetime('now')")
   params.push(req.params.id)
@@ -134,6 +137,46 @@ router.post('/:id/test-meta-capi', requireRole('super_admin', 'gerente'), async 
   }
   const result = await testCapi(account.id)
   res.json(result)
+})
+
+// Config de IA (chave Anthropic + limite mensal de tokens) — gerente da propria conta pode editar
+router.put('/:id/ai-config', requireRole('super_admin', 'gerente'), (req, res) => {
+  const accountId = parseInt(req.params.id)
+  const account = db.prepare('SELECT id FROM accounts WHERE id = ?').get(accountId)
+  if (!account) return res.status(404).json({ error: 'Conta nao encontrada' })
+  if (req.user.role === 'gerente' && req.user.account_id !== account.id) {
+    return res.status(403).json({ error: 'Sem permissao' })
+  }
+  const { anthropic_api_key, analysis_token_limit } = req.body
+  const sets = []
+  const params = []
+  if (anthropic_api_key !== undefined) { sets.push('anthropic_api_key = ?'); params.push(anthropic_api_key || null) }
+  if (analysis_token_limit !== undefined) { sets.push('analysis_token_limit = ?'); params.push(analysis_token_limit || 200000) }
+  if (sets.length === 0) return res.status(400).json({ error: 'Nada pra atualizar' })
+  sets.push("updated_at = datetime('now')")
+  params.push(accountId)
+  db.prepare(`UPDATE accounts SET ${sets.join(', ')} WHERE id = ?`).run(...params)
+  // NAO retorna a chave crua — so um boolean de presenca + o limite
+  const updated = db.prepare('SELECT id, anthropic_api_key, analysis_token_limit FROM accounts WHERE id = ?').get(accountId)
+  res.json({ account: { id: updated.id, has_anthropic_key: !!updated.anthropic_api_key?.trim(), analysis_token_limit: updated.analysis_token_limit } })
+})
+
+// Teste da chave Anthropic — valida via smokeTest. Aceita chave digitada (nao salva) ou usa a da conta.
+router.post('/:id/test-anthropic', requireRole('super_admin', 'gerente'), async (req, res) => {
+  const accountId = parseInt(req.params.id)
+  const account = db.prepare('SELECT id FROM accounts WHERE id = ?').get(accountId)
+  if (!account) return res.status(404).json({ error: 'Conta nao encontrada' })
+  if (req.user.role === 'gerente' && req.user.account_id !== account.id) {
+    return res.status(403).json({ error: 'Sem permissao' })
+  }
+  const key = (req.body?.anthropic_api_key && String(req.body.anthropic_api_key).trim()) || resolveAnthropicKey(accountId)
+  if (!key) return res.json({ ok: false, msg: 'Nenhuma chave pra testar (digite ou salve uma)' })
+  try {
+    const r = await smokeTest(key)
+    return res.json({ ok: true, msg: `Conexao OK — Claude respondeu: "${(r.content || '').slice(0, 60)}"` })
+  } catch (e) {
+    return res.json({ ok: false, msg: e.message?.slice(0, 200) || 'Falha ao validar a chave' })
+  }
 })
 
 export default router

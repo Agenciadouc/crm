@@ -54,7 +54,9 @@ function isoMonday(date) {
 }
 
 function canCoach(accountId) {
-  const account = db.prepare('SELECT analysis_token_limit FROM accounts WHERE id = ?').get(accountId)
+  const account = db.prepare('SELECT analysis_token_limit, anthropic_api_key FROM accounts WHERE id = ?').get(accountId)
+  // Sem chave Anthropic propria, a conta nao roda IA (sem fallback pra agencia)
+  if (!account?.anthropic_api_key?.trim()) return { ok: false, reason: 'no_api_key', used: 0, limit: 0 }
   const limit = account?.analysis_token_limit || 200000
   const monthStart = new Date().toISOString().slice(0, 7) + '-01 00:00:00'
   const used = db.prepare(`
@@ -144,6 +146,7 @@ export async function generateCoachingForUser(accountId, userId, weekStartStr) {
       tools: [TOOL_SAVE_WEEKLY_COACHING],
       maxTokens: 1200,
       toolChoice: { type: 'tool', name: 'save_weekly_coaching' },
+      accountId,
     })
   } catch (e) {
     console.error(`[Coaching] err user=${userId} week=${weekStartStr}:`, e.message)

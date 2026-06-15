@@ -131,6 +131,17 @@ export default function ClientDetail() {
             <small style={{ color: 'var(--text-muted)', fontSize: 11, marginLeft: 24, display: 'block', marginTop: 2 }}>
               Libera o módulo "Agentes de IA" no painel do gerente desta conta. Permite cobrar separado se quiser.
             </small>
+            {(account as any).ai_agents_enabled === 1 && (
+              <div style={{ marginTop: 10, marginLeft: 24 }}>
+                <label style={{ fontSize: 12, display: 'block' }}><strong>API Anthropic da conta</strong></label>
+                <input className="input" type="password" placeholder="sk-ant-... (chave própria do cliente)" value={(account as any).anthropic_api_key || ''} onChange={e => setAccount({ ...account, anthropic_api_key: e.target.value } as any)} style={{ marginTop: 4 }} />
+                <label style={{ fontSize: 12, display: 'block', marginTop: 8 }}><strong>Limite mensal de tokens</strong></label>
+                <input className="input" type="number" min={0} step={10000} value={(account as any).analysis_token_limit ?? 200000} onChange={e => setAccount({ ...account, analysis_token_limit: Number(e.target.value) || 0 } as any)} style={{ marginTop: 4 }} />
+                <small style={{ color: 'var(--text-muted)', fontSize: 11, display: 'block', marginTop: 4 }}>
+                  Sem chave, a IA não funciona pra esta conta (sem fallback pra nossa). O cliente também pode preencher em Integrações.
+                </small>
+              </div>
+            )}
           </div>
 
           <div className="form-group" style={{ padding: 10, background: 'rgba(93,173,226,0.05)', border: '1px solid rgba(93,173,226,0.2)', borderRadius: 6, marginTop: 8 }}>

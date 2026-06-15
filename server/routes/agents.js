@@ -71,7 +71,10 @@ router.get('/', (req, res) => {
     WHERE a.account_id = ?
     ORDER BY a.created_at DESC
   `).all(req.accountId)
-  res.json({ feature_enabled: true, agents })
+  // has_api_key: conta tem chave Anthropic propria? (sem ela os agentes nao respondem)
+  const acc = db.prepare('SELECT anthropic_api_key FROM accounts WHERE id = ?').get(req.accountId)
+  const has_api_key = !!acc?.anthropic_api_key?.trim()
+  res.json({ feature_enabled: true, has_api_key, agents })
 })
 
 // Detalhe (com stages, instances, handoff_rules)

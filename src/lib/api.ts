@@ -20,7 +20,7 @@ export function pctChange(c: number, p: number) { if (p === 0) return c > 0 ? 10
 // Types
 // =============================================
 
-export interface Account { id: number; name: string; slug: string; logo_url: string | null; is_active: number; created_at: string; lead_count?: number; user_count?: number; cnpj?: string | null; razao_social?: string | null; segmento?: string | null; website?: string | null; instagram?: string | null; whatsapp_comercial?: string | null; valor_mensal?: number | null; contrato_inicio?: string | null; cidade?: string | null; estado?: string | null; observacoes?: string | null; trabalha_anuncio?: number; investimento_anuncios?: number | null; meta_pixel_id?: string | null; meta_capi_token?: string | null; meta_capi_test_event_code?: string | null; meta_capi_enabled?: number; meta_page_id?: string | null; ai_agents_enabled?: number; attendant_analytics_enabled?: number }
+export interface Account { id: number; name: string; slug: string; logo_url: string | null; is_active: number; created_at: string; lead_count?: number; user_count?: number; cnpj?: string | null; razao_social?: string | null; segmento?: string | null; website?: string | null; instagram?: string | null; whatsapp_comercial?: string | null; valor_mensal?: number | null; contrato_inicio?: string | null; cidade?: string | null; estado?: string | null; observacoes?: string | null; trabalha_anuncio?: number; investimento_anuncios?: number | null; meta_pixel_id?: string | null; meta_capi_token?: string | null; meta_capi_test_event_code?: string | null; meta_capi_enabled?: number; meta_page_id?: string | null; ai_agents_enabled?: number; attendant_analytics_enabled?: number; anthropic_api_key?: string | null; analysis_token_limit?: number }
 export interface User { id: number; account_id: number | null; account_name?: string | null; name: string; email: string; role: string; is_active: number; is_bot?: number; primary_instance_id?: number | null; notification_instance_id?: number | null; can_manage_proposals?: number; can_manage_contracts?: number; can_grab_leads?: number; created_at: string }
 export interface FunnelStage { id: number; funnel_id: number; name: string; position: number; color: string; is_conversion: number; is_terminal: number; auto_keywords: string | null; meta_event_name?: string | null }
 export interface Funnel { id: number; account_id: number; name: string; is_default: number; is_active: number; first_msg_template?: string | null; stages: FunnelStage[] }
@@ -84,6 +84,8 @@ export const createAccount = (data: Partial<Account> & { name: string }) => apiF
 export const updateAccount = (id: number, data: Partial<Account>) => apiFetch<{ account: Account }>(`/api/accounts/${id}`, { method: 'PUT', body: JSON.stringify(data) }).then(d => d.account)
 export const testMetaCapi = (id: number) => apiFetch<{ ok: boolean; error?: string; response?: any }>(`/api/accounts/${id}/test-meta-capi`, { method: 'POST' })
 export const updateMetaCapi = (id: number, data: { meta_pixel_id?: string | null; meta_capi_token?: string | null; meta_capi_enabled?: number; meta_page_id?: string | null }) => apiFetch<{ account: Account }>(`/api/accounts/${id}/meta-capi`, { method: 'PUT', body: JSON.stringify(data) }).then(d => d.account)
+export const updateAiConfig = (id: number, data: { anthropic_api_key?: string | null; analysis_token_limit?: number }) => apiFetch<{ account: { id: number; has_anthropic_key: boolean; analysis_token_limit: number } }>(`/api/accounts/${id}/ai-config`, { method: 'PUT', body: JSON.stringify(data) }).then(d => d.account)
+export const testAnthropic = (id: number, anthropic_api_key?: string | null) => apiFetch<{ ok: boolean; msg?: string }>(`/api/accounts/${id}/test-anthropic`, { method: 'POST', body: JSON.stringify({ anthropic_api_key: anthropic_api_key || undefined }) })
 export const fetchAccount = (id: number) => apiFetch<{ account: Account; users: User[]; funnels: Funnel[] }>(`/api/accounts/${id}`)
 
 // Users
@@ -645,7 +647,7 @@ export interface AgentUsage {
 }
 
 export const fetchAgents = (accountId: number) =>
-  apiFetch<{ feature_enabled: boolean; agents: Agent[] }>(`/api/agents?account_id=${accountId}`)
+  apiFetch<{ feature_enabled: boolean; has_api_key?: boolean; agents: Agent[] }>(`/api/agents?account_id=${accountId}`)
 
 export const fetchAgent = (id: number, accountId: number) =>
   apiFetch<{ agent: Agent }>(`/api/agents/${id}?account_id=${accountId}`).then(d => d.agent)

@@ -5,7 +5,7 @@ import {
   fetchWhatsAppInstances, createWhatsAppInstance, connectWhatsAppInstance,
   checkWhatsAppStatus, refreshWhatsAppQR, disconnectWhatsApp, deleteWhatsAppInstance,
   fetchEvolutionConfig, saveEvolutionConfig, setupWhatsAppWebhook, restartWhatsAppInstance, syncWhatsAppNow, setInstanceAttendant, setInstanceMode, fetchUsers, apiFetch,
-  updateMetaCapi, testMetaCapi, updateInstanceFirstMsgTemplate,
+  updateMetaCapi, testMetaCapi, updateAiConfig, testAnthropic, updateInstanceFirstMsgTemplate,
   fetchTags, fetchTagInstanceMappings, upsertTagInstanceMapping, deleteTagInstanceMapping,
   fetchDefaultFormInstance, setDefaultFormInstance, fetchSheetsStatus, setSheetsDefaultTag,
   type WhatsAppInstance, type User as UserType, type Account, type Tag, type TagInstanceMapping,
@@ -65,6 +65,14 @@ export default function Integrations() {
   const [testingMeta, setTestingMeta] = useState(false)
   const [metaTestResult, setMetaTestResult] = useState<{ ok: boolean; msg: string } | null>(null)
   const [showTestMetaConfirm, setShowTestMetaConfirm] = useState(false)
+  // IA — chave Anthropic por conta + limite
+  const [anthropicKey, setAnthropicKey] = useState('')
+  const [showAnthropicKey, setShowAnthropicKey] = useState(false)
+  const [anthropicLimit, setAnthropicLimit] = useState<number>(200000)
+  const [savingAnthropic, setSavingAnthropic] = useState(false)
+  const [anthropicSaved, setAnthropicSaved] = useState(false)
+  const [testingAnthropic, setTestingAnthropic] = useState(false)
+  const [anthropicTestResult, setAnthropicTestResult] = useState<{ ok: boolean; msg: string } | null>(null)
   const [users, setUsers] = useState<UserType[]>([])
 
   useEffect(() => {
@@ -121,6 +129,8 @@ export default function Integrations() {
       setMetaCapiToken(d.account?.meta_capi_token || '')
       setMetaPageId(d.account?.meta_page_id || '')
       setMetaEnabled(!!d.account?.meta_capi_enabled)
+      setAnthropicKey(d.account?.anthropic_api_key || '')
+      setAnthropicLimit(d.account?.analysis_token_limit || 200000)
     }).catch(() => {})
   }, [accountId])
 
@@ -995,6 +1005,91 @@ function onChange(e) {
 
             <div style={{ marginTop: 14, padding: 10, background: 'rgba(91,173,226,0.06)', borderRadius: 6, fontSize: 11, color: '#9B96B0' }}>
               💡 Depois de salvar, vai em <strong>Funis → Editar Etapas</strong> pra escolher qual evento Meta cada etapa dispara (ex: "Visita Agendada" → <code>Schedule</code>, "Venda" → <code>Purchase</code>). Confere em <strong>Meta Events Manager → Pixel → Visão geral</strong> (em até 30 minutos).
+            </div>
+          </div>
+        </section>
+      )}
+
+      {/* Agentes de IA — API Anthropic por conta (só aparece se a conta tem agentes habilitados) */}
+      {isGerenteOuAdmin && accountId && account && !!account.ai_agents_enabled && (
+        <section className="dash-section" style={{ marginTop: 24 }}>
+          <div className="section-title"><Activity size={14} /> Agentes de IA — API Anthropic</div>
+          <div className="card">
+            <p style={{ fontSize: 12, color: '#9B96B0', marginBottom: 12 }}>
+              Esta conta usa <strong>sua própria conta Anthropic</strong> em todas as funções de IA (agentes no WhatsApp, análise de atendimentos e coaching). <strong>Sem a chave, a IA não funciona</strong> — não há fallback. A transcrição de áudio continua por nossa conta.
+            </p>
+
+            {!anthropicKey.trim() && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#FFB300', background: 'rgba(255,179,0,0.08)', padding: '8px 10px', borderRadius: 6, marginBottom: 12 }}>
+                <AlertTriangle size={14} /> Agentes habilitados, mas falta cadastrar a API Anthropic. Os agentes não respondem até salvar uma chave válida.
+              </div>
+            )}
+
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
+              <div style={{ flex: 2, minWidth: 280 }}>
+                <label style={{ fontSize: 11, color: '#9B96B0', display: 'block', marginBottom: 4 }}>API Key Anthropic</label>
+                <div style={{ position: 'relative' }}>
+                  <input className="input" type={showAnthropicKey ? 'text' : 'password'} value={anthropicKey} onChange={e => setAnthropicKey(e.target.value)} placeholder="sk-ant-..." style={{ paddingRight: 36 }} />
+                  <button type="button" onClick={() => setShowAnthropicKey(s => !s)} style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', color: '#9B96B0', cursor: 'pointer', padding: 4, display: 'flex', alignItems: 'center' }}>
+                    {showAnthropicKey ? <EyeOff size={16} /> : <Eye size={16} />}
+                  </button>
+                </div>
+              </div>
+              <div style={{ flex: 1, minWidth: 200 }}>
+                <label style={{ fontSize: 11, color: '#9B96B0', display: 'block', marginBottom: 4 }}>Limite mensal de tokens</label>
+                <input className="input" type="number" min={0} step={10000} value={anthropicLimit} onChange={e => setAnthropicLimit(Number(e.target.value) || 0)} placeholder="200000" />
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+              <button
+                className="btn btn-primary btn-sm"
+                onClick={async () => {
+                  if (!accountId) return
+                  setSavingAnthropic(true)
+                  try {
+                    await updateAiConfig(accountId, { anthropic_api_key: anthropicKey || null, analysis_token_limit: anthropicLimit || 200000 })
+                    setAnthropicSaved(true)
+                    setTimeout(() => setAnthropicSaved(false), 2000)
+                  } catch (e: any) { alert('Erro: ' + e.message) }
+                  setSavingAnthropic(false)
+                }}
+                disabled={savingAnthropic}
+              >
+                {anthropicSaved ? <><Check size={14} /> Salvo</> : <><Save size={14} /> Salvar</>}
+              </button>
+              <button
+                className="btn btn-secondary btn-sm"
+                onClick={async () => {
+                  if (!accountId) return
+                  setTestingAnthropic(true)
+                  setAnthropicTestResult(null)
+                  try {
+                    const r = await testAnthropic(accountId, anthropicKey)
+                    setAnthropicTestResult({ ok: !!r.ok, msg: r.msg || (r.ok ? 'Conexão OK' : 'Falhou') })
+                  } catch (e: any) { setAnthropicTestResult({ ok: false, msg: e.message }) }
+                  setTestingAnthropic(false)
+                }}
+                disabled={testingAnthropic || !anthropicKey.trim()}
+              >
+                {testingAnthropic ? <><Loader size={14} className="spinning" /> Testando...</> : <><RefreshCw size={14} /> Testar conexão</>}
+              </button>
+              {anthropicTestResult && (
+                <div style={{
+                  fontSize: 12,
+                  color: anthropicTestResult.ok ? '#34C759' : '#FF6B6B',
+                  display: 'flex', alignItems: 'center', gap: 4,
+                  background: anthropicTestResult.ok ? 'rgba(52,199,89,0.08)' : 'rgba(255,107,107,0.08)',
+                  padding: '6px 10px', borderRadius: 6,
+                }}>
+                  {anthropicTestResult.ok ? <Check size={12} /> : <AlertTriangle size={12} />}
+                  {anthropicTestResult.msg}
+                </div>
+              )}
+            </div>
+
+            <div style={{ marginTop: 14, padding: 10, background: 'rgba(91,173,226,0.06)', borderRadius: 6, fontSize: 11, color: '#9B96B0' }}>
+              💡 Crie a chave em <strong>console.anthropic.com → API Keys</strong> (formato <code>sk-ant-...</code>). O <strong>limite mensal</strong> controla quanto a IA pode consumir nas análises/coaching antes de pausar — ajuste conforme seu orçamento. O consumo é todo na sua conta Anthropic.
             </div>
           </div>
         </section>

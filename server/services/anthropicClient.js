@@ -3,10 +3,25 @@
 // Sem dep nova: usa node-fetch que ja existe.
 
 import fetch from 'node-fetch'
+import db from '../db.js'
 
 const ANTHROPIC_URL = 'https://api.anthropic.com/v1/messages'
 const MODEL = 'claude-haiku-4-5-20251001'
 const ANTHROPIC_VERSION = '2023-06-01'
+
+/**
+ * Resolve a API key Anthropic da CONTA. Cada cliente usa a propria chave.
+ * NAO ha fallback pra chave global da agencia em fluxo de conta: se a conta
+ * nao tem chave, retorna null e o caller deve pular a chamada (IA nao roda).
+ * @param {number|null} accountId
+ * @returns {string|null}
+ */
+export function resolveAnthropicKey(accountId) {
+  if (!accountId) return null
+  const acc = db.prepare('SELECT anthropic_api_key FROM accounts WHERE id = ?').get(accountId)
+  const key = acc?.anthropic_api_key?.trim()
+  return key || null
+}
 
 // Precos por MTok (Haiku 4.5 — atualizado conforme docs Anthropic)
 const PRICING = {
@@ -27,9 +42,10 @@ const PRICING = {
  * @param {string} [params.toolChoice] - 'auto'|'any'|'none' ou {type:'tool',name:'X'}
  * @returns {Promise<{content, toolUses, usage, costUsd, raw}>}
  */
-export async function callHaiku({ systemPrompt, messages, tools, maxTokens = 300, toolChoice = 'auto' }) {
-  const apiKey = process.env.ANTHROPIC_API_KEY
-  if (!apiKey) throw new Error('ANTHROPIC_API_KEY nao configurada no .env')
+export async function callHaiku({ systemPrompt, messages, tools, maxTokens = 300, toolChoice = 'auto', accountId = null, apiKey = null }) {
+  // Chave explicita (ex: teste de chave ainda nao salva) tem precedencia; senao resolve pela conta.
+  const key = apiKey || resolveAnthropicKey(accountId)
+  if (!key) throw new Error('Conta sem API Anthropic configurada (cadastre o token em Integracoes)')
 
   const body = {
     model: MODEL,
@@ -49,7 +65,7 @@ export async function callHaiku({ systemPrompt, messages, tools, maxTokens = 300
     method: 'POST',
     headers: {
       'content-type': 'application/json',
-      'x-api-key': apiKey,
+      'x-api-key': key,
       'anthropic-version': ANTHROPIC_VERSION,
     },
     body: JSON.stringify(body),
@@ -100,12 +116,13 @@ export async function callHaiku({ systemPrompt, messages, tools, maxTokens = 300
   }
 }
 
-// Smoke test util — pra rodar via curl ou node script
-export async function smokeTest() {
+// Smoke test util — valida uma chave (pode receber apiKey explicita pra testar antes de salvar)
+export async function smokeTest(apiKey = null) {
   const r = await callHaiku({
     systemPrompt: 'Voce e um assistente. Responda em PT-BR, 1 frase curta.',
     messages: [{ role: 'user', content: 'Diga um oi simpatico.' }],
     maxTokens: 50,
+    apiKey,
   })
   console.log('[Smoke test Haiku]')
   console.log('  Content:', r.content)

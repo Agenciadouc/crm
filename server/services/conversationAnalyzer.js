@@ -284,7 +284,9 @@ ${SYSTEM_PROMPT_V2.replace(/^Voce e um analista[\s\S]*?ESCOPO:/, 'ESCOPO:')}`
 const TEMP_TO_INTENT = { quente: 'hot', morno: 'warm', frio: 'cold' }
 
 function canAnalyze(accountId) {
-  const account = db.prepare('SELECT analysis_token_limit FROM accounts WHERE id = ?').get(accountId)
+  const account = db.prepare('SELECT analysis_token_limit, anthropic_api_key FROM accounts WHERE id = ?').get(accountId)
+  // Sem chave Anthropic propria, a conta nao roda IA (sem fallback pra agencia)
+  if (!account?.anthropic_api_key?.trim()) return { ok: false, reason: 'no_api_key', used: 0, limit: 0 }
   const limit = account?.analysis_token_limit || 200000
   const monthStart = new Date().toISOString().slice(0, 7) + '-01 00:00:00'
   const used = db.prepare(`
@@ -562,6 +564,7 @@ export async function analyzeConversation(leadId) {
       tools: [TOOL_SAVE_INSIGHTS_V2],
       maxTokens: 2000,
       toolChoice: { type: 'tool', name: 'save_insights_v2' },
+      accountId: lead.account_id,
     })
   } catch (e) {
     console.error(`[Analyzer V2] Haiku err lead=${leadId}:`, e.message)
