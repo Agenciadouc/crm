@@ -6,10 +6,10 @@ It contains the complete file map with exports and purpose for every file.
 Use it to locate the exact file you need, then read only that file.
 
 ## Git
-- **Repo:** https://github.com/soaresjoaoluiz1/crm
+- **Repo:** https://github.com/Agenciadouc/crm
 - **Branch:** main
 - **Remote:** `origin` (não `platform` — esse é do Hub!)
-- ⚠ **Pasta tem seu próprio `.git`** apontando pra `soaresjoaoluiz1/crm`, separado do monorepo Open Squad
+- ⚠ **Pasta tem seu próprio `.git`** apontando pra `Agenciadouc/crm`, separado do monorepo Open Squad
 - Pra commitar mudanças do CRM: `cd crm-dashboard && git add ... && git commit ... && git push origin main`
 - Always commit + push ao terminar mudanças. User pede comando de deploy depois.
 
