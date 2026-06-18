@@ -1,0 +1,1617 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Proposta Comercial — {{CLIENT_NAME}} | Dros Agência</title>
+<meta name="description" content="Proposta Comercial para {{CLIENT_NAME}} — Dros Agência">
+<meta property="og:title" content="Proposta Comercial — {{CLIENT_NAME}}">
+<meta property="og:description" content="Proposta exclusiva da Dros Agência para {{CLIENT_NAME}}.">
+<meta property="og:image" content="https://drosagencia.com.br/wp-content/uploads/2025/12/DROS-LOGO-1-1024x1024.png">
+<link rel="icon" type="image/png" href="https://drosagencia.com.br/wp-content/uploads/2025/12/DROS-LOGO-1-1024x1024.png">
+<meta name="theme-color" content="#0A1A3F">
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800;900&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #FFFFFF;
+  --bg2: #F7F8FA;
+  --bg3: #EEF1F6;
+  --bg4: #E5EAF2;
+  --navy: #0A1A3F;
+  --navy2: #142547;
+  --navy3: #1F3563;
+  --accent: #FFB300;
+  --accent2: #FF8A2B;
+  --green: #10B981;
+  --blue: #3B82F6;
+  --purple: #7C3AED;
+  --red: #EF4444;
+  --text: #0A1A3F;
+  --text2: #475569;
+  --text3: #64748B;
+  --border: rgba(10, 26, 63, 0.08);
+  --border2: rgba(10, 26, 63, 0.16);
+  --shadow-sm: 0 1px 2px rgba(10, 26, 63, 0.04);
+  --shadow: 0 4px 16px rgba(10, 26, 63, 0.06);
+  --shadow-lg: 0 12px 40px rgba(10, 26, 63, 0.10);
+  --shadow-orange: 0 4px 20px rgba(255, 179, 0, 0.20);
+}
+* { margin: 0; padding: 0; box-sizing: border-box; min-width: 0; }
+html, body { max-width: 100vw; overflow-x: hidden; }
+html { scroll-behavior: smooth; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Inter', sans-serif;
+  line-height: 1.7;
+  scroll-snap-type: y mandatory;
+  scroll-behavior: smooth;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  -webkit-text-size-adjust: 100%;
+}
+img, svg, table { max-width: 100%; }
+table { table-layout: auto; }
+
+:focus-visible {
+  outline: 2px solid var(--accent2);
+  outline-offset: 3px;
+  border-radius: 4px;
+}
+.btn:focus-visible { outline-offset: 4px; }
+.nav :focus-visible { outline-color: var(--accent); }
+h1, h2, h3, h4 { font-family: 'Outfit', sans-serif; line-height: 1.15; color: var(--navy); }
+a { color: var(--accent2); text-decoration: none; }
+
+/* Top progress bar */
+.progress-bar {
+  position: fixed;
+  top: 0; left: 0;
+  height: 3px;
+  background: linear-gradient(90deg, var(--accent), var(--accent2));
+  z-index: 1000;
+  width: 0;
+  transition: width 0.2s;
+}
+
+/* Side nav */
+.side-nav {
+  position: fixed;
+  right: 28px;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.side-nav .dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--border2);
+  cursor: pointer;
+  transition: all 0.3s;
+  position: relative;
+}
+.side-nav .dot:hover { background: var(--text2); transform: scale(1.3); }
+.side-nav .dot.active {
+  background: var(--accent);
+  box-shadow: 0 0 0 4px rgba(255, 179, 0, 0.18);
+  transform: scale(1.4);
+}
+.side-nav .dot::after {
+  content: attr(data-label);
+  position: absolute;
+  right: 22px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: var(--navy);
+  color: #fff;
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s;
+}
+.side-nav .dot:hover::after { opacity: 1; }
+
+/* Top fixed nav */
+.nav {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  z-index: 90;
+  padding: 18px 0;
+  background: var(--navy);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 2px 12px rgba(10, 26, 63, 0.08);
+}
+.nav-inner {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 32px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.nav-logo {
+  height: 32px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.nav-logo img { height: 32px; }
+.nav-logo-text {
+  font-family: 'Outfit', sans-serif;
+  font-weight: 800;
+  font-size: 16px;
+  letter-spacing: 0.5px;
+  color: #fff;
+}
+.nav-meta {
+  display: flex;
+  gap: 18px;
+  align-items: center;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.75);
+  font-weight: 500;
+}
+.nav-meta .badge {
+  background: rgba(255, 179, 0, 0.18);
+  color: var(--accent);
+  padding: 4px 12px;
+  border-radius: 50px;
+  font-weight: 700;
+  font-size: 11px;
+  letter-spacing: 0.5px;
+  border: 1px solid rgba(255, 179, 0, 0.35);
+}
+
+/* Slide */
+.slide {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  padding: 100px 32px 80px;
+  position: relative;
+  overflow: hidden;
+  scroll-snap-align: start;
+  scroll-snap-stop: always;
+}
+@supports (min-height: 100dvh) { .slide { min-height: 100dvh; } }
+.slide-inner {
+  max-width: 1200px;
+  margin: 0 auto;
+  width: 100%;
+  position: relative;
+  z-index: 2;
+}
+.slide-number {
+  position: absolute;
+  top: 100px;
+  right: 32px;
+  font-family: 'Outfit', sans-serif;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text3);
+  letter-spacing: 2px;
+  z-index: 3;
+}
+
+/* Slide bg variations */
+.slide-alt { background: var(--bg2); }
+.slide-deep { background: linear-gradient(180deg, var(--bg) 0%, var(--bg2) 100%); }
+.slide::before {
+  content: '';
+  position: absolute;
+  top: -200px;
+  right: -200px;
+  width: 600px;
+  height: 600px;
+  background: radial-gradient(circle, rgba(255, 179, 0, 0.07), transparent 70%);
+  border-radius: 50%;
+  pointer-events: none;
+}
+
+/* Section tag */
+.tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(255, 179, 0, 0.10);
+  color: var(--accent2);
+  padding: 6px 16px;
+  border-radius: 50px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  margin-bottom: 20px;
+  border: 1px solid rgba(255, 179, 0, 0.22);
+}
+
+/* Heading */
+h1.hero-title {
+  font-size: clamp(48px, 6vw, 84px);
+  font-weight: 900;
+  line-height: 1.05;
+  margin-bottom: 24px;
+  letter-spacing: -1px;
+  color: var(--navy);
+}
+h1.hero-title .gradient {
+  background: linear-gradient(135deg, var(--accent2), var(--accent));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+h2.slide-title {
+  font-size: clamp(32px, 4.4vw, 56px);
+  font-weight: 800;
+  margin-bottom: 16px;
+  letter-spacing: -0.5px;
+  color: var(--navy);
+}
+h2.slide-title .gradient {
+  background: linear-gradient(135deg, var(--accent2), var(--accent));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+.lead {
+  font-size: 18px;
+  color: var(--text2);
+  max-width: 720px;
+  margin-bottom: 40px;
+  line-height: 1.7;
+}
+
+/* Cover */
+.cover-content {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr;
+  gap: 60px;
+  align-items: center;
+}
+.cover-left .pretitle {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  font-family: 'Outfit', sans-serif;
+  font-weight: 700;
+  font-size: 13px;
+  letter-spacing: 4px;
+  color: var(--text2);
+  text-transform: uppercase;
+  margin-bottom: 28px;
+}
+.cover-left .pretitle::before {
+  content: '';
+  width: 40px;
+  height: 2px;
+  background: linear-gradient(90deg, var(--accent), transparent);
+  border-radius: 1px;
+}
+.cover-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 36px;
+  padding-top: 28px;
+  border-top: 1px solid var(--border);
+}
+.cover-meta .row {
+  display: flex;
+  gap: 20px;
+  font-size: 13px;
+  color: var(--text2);
+}
+.cover-meta .row .label {
+  color: var(--text3);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  font-size: 11px;
+  min-width: 130px;
+}
+.cover-meta .row .value { color: var(--navy); font-weight: 600; }
+.cover-meta .row .value.accent { color: var(--accent2); }
+
+.cover-card {
+  background: linear-gradient(135deg, var(--navy) 0%, var(--navy2) 100%);
+  color: #fff;
+  border-radius: 24px;
+  padding: 36px;
+  position: relative;
+  overflow: hidden;
+  box-shadow: var(--shadow-lg);
+}
+.cover-card::before {
+  content: '';
+  position: absolute;
+  top: 0; right: 0;
+  width: 200px;
+  height: 200px;
+  background: radial-gradient(circle at top right, rgba(255, 179, 0, 0.20), transparent 70%);
+  pointer-events: none;
+}
+.cover-card-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  color: var(--accent);
+  text-transform: uppercase;
+  margin-bottom: 16px;
+}
+.cover-card-client {
+  font-family: 'Outfit', sans-serif;
+  font-size: 32px;
+  font-weight: 800;
+  color: #fff;
+  margin-bottom: 8px;
+  line-height: 1.1;
+}
+.cover-card-sub {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.75);
+  margin-bottom: 28px;
+}
+.cover-card-stats {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 16px;
+  padding-top: 24px;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+}
+.stat-item .stat-num {
+  font-family: 'Outfit', sans-serif;
+  font-size: 30px;
+  font-weight: 800;
+  color: var(--accent);
+  line-height: 1;
+  margin-bottom: 4px;
+}
+.stat-item .stat-label {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.7);
+  font-weight: 500;
+  letter-spacing: 0.5px;
+}
+
+/* Cards grid */
+.cards-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 20px;
+  margin-top: 36px;
+}
+.cards-grid.cols-2 { grid-template-columns: repeat(2, 1fr); }
+.cards-grid.cols-4 { grid-template-columns: repeat(4, 1fr); }
+.card {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 28px;
+  transition: all 0.3s;
+  position: relative;
+  overflow: hidden;
+  box-shadow: var(--shadow-sm);
+}
+.card:hover {
+  border-color: rgba(255, 179, 0, 0.4);
+  transform: translateY(-4px);
+  box-shadow: var(--shadow-lg);
+}
+.card-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 16px;
+  background: rgba(255, 179, 0, 0.12);
+  color: var(--accent2);
+}
+.card-icon svg { width: 22px; height: 22px; }
+.card-icon.green { background: rgba(16, 185, 129, 0.10); color: #047857; }
+.card-icon.blue { background: rgba(59, 130, 246, 0.10); color: #1E40AF; }
+.card-icon.purple { background: rgba(124, 58, 237, 0.10); color: #5B21B6; }
+.card-icon.red { background: rgba(239, 68, 68, 0.10); color: #B91C1C; }
+.card h3 {
+  font-size: 17px;
+  font-weight: 700;
+  margin-bottom: 10px;
+  color: var(--navy);
+}
+.card p {
+  font-size: 14px;
+  color: var(--text2);
+  line-height: 1.65;
+}
+
+/* Two-column scope */
+.scope-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 24px;
+  margin-top: 32px;
+}
+.scope-card {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 36px;
+  position: relative;
+  overflow: hidden;
+  box-shadow: var(--shadow-sm);
+}
+.scope-card::before {
+  content: '';
+  position: absolute;
+  top: -60px;
+  right: -60px;
+  width: 200px;
+  height: 200px;
+  background: radial-gradient(circle, rgba(255, 179, 0, 0.10), transparent 70%);
+}
+.scope-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  color: #fff;
+  font-family: 'Outfit', sans-serif;
+  font-weight: 800;
+  font-size: 18px;
+  margin-bottom: 18px;
+  box-shadow: var(--shadow-orange);
+}
+.scope-card h3 {
+  font-size: 22px;
+  font-weight: 800;
+  margin-bottom: 8px;
+  color: var(--navy);
+}
+.scope-card .scope-volume {
+  font-size: 13px;
+  color: var(--accent2);
+  font-weight: 700;
+  margin-bottom: 20px;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+.scope-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.scope-list li {
+  font-size: 14px;
+  color: var(--text2);
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  line-height: 1.55;
+}
+.scope-list li::before {
+  content: '';
+  flex-shrink: 0;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  margin-top: 7px;
+  box-shadow: 0 0 0 3px rgba(255, 179, 0, 0.12);
+}
+.scope-list li strong { color: var(--navy); font-weight: 600; }
+
+/* Inclusions list */
+.includes-block {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 28px;
+  margin-top: 28px;
+}
+.includes-block h4 {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--accent2);
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  margin-bottom: 16px;
+}
+.includes-list {
+  list-style: none;
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+}
+.includes-list li {
+  font-size: 14px;
+  color: var(--text2);
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+.includes-list li::before {
+  content: '✓';
+  color: var(--green);
+  font-weight: 800;
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+/* Deliveries table */
+.deliveries-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  overflow: hidden;
+  margin-top: 32px;
+  box-shadow: var(--shadow-sm);
+}
+.deliveries-table thead { background: var(--bg2); }
+.deliveries-table th {
+  text-align: left;
+  padding: 18px 24px;
+  font-family: 'Outfit', sans-serif;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--accent2);
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  border-bottom: 1px solid var(--border);
+}
+.deliveries-table th:last-child { text-align: right; }
+.deliveries-table td {
+  padding: 16px 24px;
+  font-size: 14px;
+  color: var(--text2);
+  border-bottom: 1px solid var(--border);
+}
+.deliveries-table td:last-child {
+  text-align: right;
+  font-weight: 700;
+  color: var(--navy);
+  font-family: 'Outfit', sans-serif;
+}
+.deliveries-table tbody tr:last-child td { border-bottom: none; }
+.deliveries-table tbody tr:hover td { background: rgba(255, 179, 0, 0.04); }
+.deliveries-summary {
+  margin-top: 24px;
+  background: linear-gradient(135deg, rgba(255, 179, 0, 0.10), rgba(255, 138, 43, 0.06));
+  border: 1px solid rgba(255, 179, 0, 0.30);
+  border-radius: 14px;
+  padding: 20px 28px;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+}
+.deliveries-summary .ds-num {
+  font-family: 'Outfit', sans-serif;
+  font-size: 36px;
+  font-weight: 800;
+  color: var(--accent2);
+  line-height: 1;
+}
+.deliveries-summary .ds-text { color: var(--navy); font-size: 15px; line-height: 1.5; }
+.deliveries-summary .ds-text strong { color: var(--accent2); }
+
+/* Pricing */
+.pricing-card {
+  background: linear-gradient(180deg, #fff, var(--bg2));
+  border: 1px solid rgba(255, 179, 0, 0.45);
+  border-top: 4px solid var(--accent);
+  border-radius: 24px;
+  padding: 56px 48px;
+  margin: 40px auto 0;
+  max-width: 720px;
+  text-align: center;
+  position: relative;
+  box-shadow: 0 0 60px rgba(255, 179, 0, 0.18), var(--shadow);
+  overflow: hidden;
+}
+.pricing-card::before {
+  content: '';
+  position: absolute;
+  top: -120px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 400px;
+  height: 400px;
+  background: radial-gradient(circle, rgba(255, 179, 0, 0.18), transparent 70%);
+  pointer-events: none;
+}
+.pricing-card-pretitle {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 3px;
+  color: var(--accent2);
+  text-transform: uppercase;
+  margin-bottom: 14px;
+  position: relative;
+  z-index: 1;
+}
+.pricing-card-name {
+  font-family: 'Outfit', sans-serif;
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--navy);
+  margin-bottom: 10px;
+  position: relative;
+  z-index: 1;
+}
+.pricing-card-value {
+  font-family: 'Outfit', sans-serif;
+  font-size: clamp(56px, 8vw, 88px);
+  font-weight: 900;
+  margin: 18px 0 6px;
+  letter-spacing: -2px;
+  position: relative;
+  z-index: 1;
+  color: var(--navy);
+}
+.pricing-card-value .currency {
+  font-size: 0.4em;
+  vertical-align: super;
+  color: var(--accent2);
+  margin-right: 4px;
+}
+.pricing-card-value .gradient {
+  background: linear-gradient(135deg, var(--accent2), var(--accent));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+.pricing-card-period {
+  font-size: 14px;
+  color: var(--text2);
+  font-weight: 500;
+  margin-bottom: 28px;
+  position: relative;
+  z-index: 1;
+}
+.pricing-card-period strong { color: var(--navy); }
+.pricing-card-features {
+  list-style: none;
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 14px;
+  text-align: left;
+  margin: 32px auto 0;
+  max-width: 560px;
+  padding-top: 28px;
+  border-top: 1px solid var(--border);
+  position: relative;
+  z-index: 1;
+}
+.pricing-card-features li {
+  font-size: 13.5px;
+  color: var(--text2);
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  line-height: 1.5;
+}
+.pricing-card-features li::before {
+  content: '✓';
+  color: var(--green);
+  font-weight: 800;
+  flex-shrink: 0;
+}
+.pricing-commitment {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(16, 185, 129, 0.10);
+  color: var(--green);
+  border: 1px solid rgba(16, 185, 129, 0.30);
+  padding: 8px 18px;
+  border-radius: 50px;
+  font-size: 13px;
+  font-weight: 700;
+  margin-bottom: 8px;
+  position: relative;
+  z-index: 1;
+}
+.pricing-commitment svg { vertical-align: -2px; }
+
+/* Conditions */
+.conditions-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 20px;
+  margin-top: 36px;
+}
+.condition-item {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 24px;
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+  box-shadow: var(--shadow-sm);
+}
+.condition-item .ci-icon {
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  background: rgba(255, 179, 0, 0.12);
+  color: var(--accent2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.condition-item .ci-icon svg { width: 18px; height: 18px; }
+.condition-item h4 {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--navy);
+  margin-bottom: 4px;
+}
+.condition-item p { font-size: 13px; color: var(--text2); line-height: 1.55; }
+
+/* Timeline */
+.timeline {
+  margin-top: 40px;
+  position: relative;
+}
+.timeline::before {
+  content: '';
+  position: absolute;
+  left: 24px;
+  top: 24px;
+  bottom: 24px;
+  width: 2px;
+  background: linear-gradient(180deg, var(--accent), var(--accent2), transparent);
+}
+.timeline-item {
+  display: flex;
+  gap: 28px;
+  margin-bottom: 28px;
+  position: relative;
+  align-items: flex-start;
+}
+.timeline-item:last-child { margin-bottom: 0; }
+.timeline-marker {
+  width: 50px;
+  height: 50px;
+  flex-shrink: 0;
+  border-radius: 14px;
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'Outfit', sans-serif;
+  font-weight: 800;
+  font-size: 14px;
+  letter-spacing: 0.5px;
+  box-shadow: var(--shadow-orange);
+  position: relative;
+  z-index: 1;
+}
+.timeline-content {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 22px 26px;
+  flex: 1;
+  box-shadow: var(--shadow-sm);
+}
+.timeline-content h4 {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--accent2);
+  margin-bottom: 6px;
+  letter-spacing: 0.5px;
+}
+.timeline-content p { font-size: 14px; color: var(--text2); line-height: 1.6; }
+
+/* Why Dros */
+.why-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 20px;
+  margin-top: 36px;
+}
+.why-item {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  transition: all 0.3s;
+  box-shadow: var(--shadow-sm);
+}
+.why-item:hover { border-color: rgba(255, 179, 0, 0.35); transform: translateY(-3px); box-shadow: var(--shadow); }
+.why-num {
+  font-family: 'Outfit', sans-serif;
+  font-size: 38px;
+  font-weight: 900;
+  background: linear-gradient(135deg, var(--accent2), var(--accent));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  line-height: 1;
+}
+.why-item h3 { font-size: 16px; font-weight: 700; color: var(--navy); }
+.why-item p { font-size: 13.5px; color: var(--text2); line-height: 1.6; }
+
+/* Steps next */
+.next-steps {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 16px;
+  margin-top: 40px;
+}
+.next-step {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 24px 18px;
+  text-align: center;
+  position: relative;
+  box-shadow: var(--shadow-sm);
+}
+.next-step::before {
+  content: counter(step-counter);
+  counter-increment: step-counter;
+  position: absolute;
+  top: -14px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  color: #fff;
+  font-family: 'Outfit', sans-serif;
+  font-size: 13px;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: var(--shadow-orange);
+}
+.next-steps { counter-reset: step-counter; }
+.next-step p { font-size: 13px; color: var(--navy); font-weight: 500; line-height: 1.5; margin-top: 4px; }
+
+/* Closing */
+.closing {
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.closing h2 {
+  font-size: clamp(40px, 5vw, 64px);
+  font-weight: 900;
+  margin-bottom: 18px;
+}
+.closing .tagline {
+  font-size: 17px;
+  color: var(--text2);
+  max-width: 600px;
+  margin-bottom: 50px;
+}
+.signature-card {
+  background: linear-gradient(135deg, var(--navy), var(--navy2));
+  color: #fff;
+  border-radius: 22px;
+  padding: 40px;
+  max-width: 480px;
+  margin-top: 24px;
+  position: relative;
+  overflow: hidden;
+  box-shadow: 0 16px 48px rgba(10, 26, 63, 0.18);
+}
+.signature-card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, var(--accent), var(--accent2));
+}
+.signature-name {
+  font-family: 'Outfit', sans-serif;
+  font-size: 26px;
+  font-weight: 800;
+  color: #fff;
+  margin-bottom: 4px;
+}
+.signature-role {
+  font-size: 13px;
+  color: var(--accent);
+  font-weight: 600;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  margin-bottom: 18px;
+}
+.signature-address {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.75);
+  padding-top: 18px;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+}
+.cta-buttons {
+  display: flex;
+  gap: 14px;
+  justify-content: center;
+  margin-top: 34px;
+  flex-wrap: wrap;
+}
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 30px;
+  border-radius: 12px;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  border: none;
+  font-family: 'Inter', sans-serif;
+  transition: all 0.3s;
+  text-decoration: none;
+}
+.btn-primary {
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  color: #fff;
+  box-shadow: var(--shadow-orange);
+}
+.btn-primary:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 30px rgba(255, 179, 0, 0.40);
+}
+.btn-ghost {
+  background: transparent;
+  border: 1px solid var(--border2);
+  color: var(--navy);
+}
+.btn-ghost:hover { border-color: var(--accent2); color: var(--accent2); }
+
+/* Footer */
+.footer {
+  padding: 40px 32px;
+  text-align: center;
+  border-top: 1px solid var(--border);
+  background: var(--bg);
+  scroll-snap-align: end;
+}
+.footer p { font-size: 12px; color: var(--text3); }
+
+/* Print */
+@media print {
+  body { background: white; color: black; scroll-snap-type: none; }
+  .nav, .side-nav, .progress-bar, .cta-buttons { display: none !important; }
+  .slide { page-break-after: always; min-height: auto; padding: 30px; }
+}
+
+/* Responsive */
+@media (min-width: 600px) and (max-width: 968px) {
+  .cards-grid.cols-4 { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 968px) {
+  .cover-content { grid-template-columns: 1fr; gap: 40px; }
+  .cards-grid, .cards-grid.cols-2, .cards-grid.cols-4 { grid-template-columns: 1fr; }
+  .scope-grid { grid-template-columns: 1fr; }
+  .conditions-grid { grid-template-columns: 1fr; }
+  .why-grid { grid-template-columns: 1fr; }
+  .next-steps { grid-template-columns: repeat(2, 1fr); }
+  .pricing-card-features { grid-template-columns: 1fr; }
+  .includes-list { grid-template-columns: 1fr; }
+  .side-nav { display: none; }
+  .nav-meta .badge { display: none; }
+  .slide { padding: 90px 20px 60px; }
+  .deliveries-table th, .deliveries-table td { padding: 12px 14px; font-size: 13px; }
+}
+
+@media (max-width: 768px) {
+  .nav-inner { padding: 0 16px; }
+  .nav-logo-text { display: none; }
+  .nav-meta { font-size: 11px; gap: 8px; }
+  .slide { min-height: auto; padding: 80px 16px 50px; scroll-snap-align: none; }
+  body { scroll-snap-type: none; }
+  .slide-number { right: 16px; top: 90px; font-size: 11px; }
+  .lead { font-size: 15.5px; margin-bottom: 28px; line-height: 1.65; }
+  .tag { font-size: 10px; padding: 5px 12px; margin-bottom: 14px; }
+  .cover-card { padding: 24px; border-radius: 18px; }
+  .cover-card-client { font-size: 24px; }
+  .cover-card-stats { gap: 12px; padding-top: 18px; }
+  .stat-item .stat-num { font-size: 24px; }
+  .stat-item .stat-label { font-size: 10px; }
+  .cover-meta .row { flex-direction: column; gap: 2px; }
+  .cover-meta .row .label { min-width: auto; }
+  .card { padding: 22px; border-radius: 14px; }
+  .card-icon { width: 40px; height: 40px; border-radius: 10px; margin-bottom: 12px; }
+  .card-icon svg { width: 20px; height: 20px; }
+  .card h3 { font-size: 16px; }
+  .card p { font-size: 13px; }
+  .scope-card { padding: 24px; border-radius: 16px; }
+  .scope-card h3 { font-size: 19px; }
+  .scope-num { width: 38px; height: 38px; font-size: 16px; margin-bottom: 14px; }
+  .includes-block { padding: 22px; border-radius: 14px; }
+  .deliveries-table th, .deliveries-table td { padding: 8px 10px; font-size: 12.5px; line-height: 1.45; }
+  .deliveries-table td:first-child { padding-right: 8px; }
+  .deliveries-table td:last-child { white-space: normal; padding-left: 8px; min-width: 60px; }
+  .deliveries-summary { padding: 16px 20px; flex-direction: column; align-items: flex-start; gap: 8px; }
+  .deliveries-summary .ds-num { font-size: 28px; }
+  .deliveries-summary .ds-text { font-size: 13px; }
+  .pricing-card { padding: 36px 22px; border-radius: 18px; }
+  .pricing-card-name { font-size: 18px; }
+  .pricing-card-period { font-size: 13px; margin-bottom: 22px; }
+  .pricing-card-features { gap: 10px; padding-top: 22px; margin-top: 24px; }
+  .pricing-card-features li { font-size: 13px; }
+  .pricing-commitment { font-size: 12px; padding: 6px 14px; }
+  .condition-item { padding: 18px; gap: 12px; }
+  .condition-item h4 { font-size: 13.5px; }
+  .condition-item p { font-size: 12.5px; }
+  .ci-icon { width: 34px; height: 34px; }
+  .ci-icon svg { width: 16px; height: 16px; }
+  .timeline::before { left: 20px; }
+  .timeline-item { gap: 16px; margin-bottom: 20px; }
+  .timeline-marker { width: 42px; height: 42px; font-size: 11px; border-radius: 11px; }
+  .timeline-content { padding: 16px 18px; border-radius: 12px; }
+  .timeline-content h4 { font-size: 14px; }
+  .timeline-content p { font-size: 13px; }
+  .why-item { padding: 22px; }
+  .why-num { font-size: 30px; }
+  .next-step { padding: 18px 14px; }
+  .next-step p { font-size: 12px; }
+  .signature-card { padding: 28px; max-width: 100%; }
+  .signature-name { font-size: 22px; }
+  .cta-buttons { flex-direction: column; width: 100%; gap: 10px; }
+  .btn { width: 100%; justify-content: center; padding: 14px 20px; }
+  .footer { padding: 28px 16px; }
+  .footer p { font-size: 11px; }
+}
+
+@media (max-width: 480px) {
+  .nav { padding: 12px 0; }
+  .slide { padding: 72px 14px 44px; }
+  .slide-number { display: none; }
+  h1.hero-title { font-size: clamp(34px, 9vw, 48px); }
+  h2.slide-title { font-size: clamp(26px, 7vw, 36px); }
+  .lead { font-size: 14.5px; }
+  .cover-card { padding: 22px; }
+  .cover-card-client { font-size: 19px; line-height: 1.15; word-break: break-word; }
+  .cover-card-stats { grid-template-columns: 1fr 1fr; }
+  .stat-item .stat-num { font-size: 22px; }
+  .pricing-card { padding: 28px 18px; }
+  .pricing-card-value { font-size: clamp(40px, 11vw, 56px) !important; margin: 12px 0 4px; letter-spacing: -1px; }
+  .pricing-card-value .currency { font-size: 0.35em; }
+  .next-steps { grid-template-columns: 1fr; gap: 14px; }
+  .next-step::before { top: -12px; width: 24px; height: 24px; font-size: 11px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+  html { scroll-behavior: auto; }
+  body { scroll-snap-type: none; }
+}
+</style>
+</head>
+<body>
+
+<div class="progress-bar" id="progressBar"></div>
+
+<nav class="nav">
+  <div class="nav-inner">
+    <div class="nav-logo">
+      <img src="https://drosagencia.com.br/wp-content/uploads/2025/12/DROS-LOGO-1-1024x1024.png" alt="Dros Agência">
+      <span class="nav-logo-text">DROS AGÊNCIA</span>
+    </div>
+    <div class="nav-meta">
+      <span class="badge">Proposta Comercial</span>
+      <span>Abril/2026 · Validade 15 dias</span>
+    </div>
+  </div>
+</nav>
+
+<div class="side-nav" id="sideNav">
+  <a href="#slide-1" class="dot" data-label="Capa"></a>
+  <a href="#slide-2" class="dot" data-label="Quem Somos"></a>
+  <a href="#slide-3" class="dot" data-label="Cliente"></a>
+  <a href="#slide-4" class="dot" data-label="Escopo"></a>
+  <a href="#slide-5" class="dot" data-label="Entregas"></a>
+  <a href="#slide-6" class="dot" data-label="Investimento"></a>
+  <a href="#slide-7" class="dot" data-label="Condições"></a>
+  <a href="#slide-8" class="dot" data-label="Cronograma"></a>
+  <a href="#slide-9" class="dot" data-label="Por Que Dros"></a>
+  <a href="#slide-10" class="dot" data-label="Próximos Passos"></a>
+</div>
+
+<!-- SLIDE 1 — Capa -->
+<section class="slide" id="slide-1">
+  <span class="slide-number">01 / 10</span>
+  <div class="slide-inner">
+    <div class="cover-content">
+      <div class="cover-left">
+        <div class="pretitle">Marketing · Conteúdo · Crescimento</div>
+        <h1 class="hero-title">Proposta de <span class="gradient">Produção de Conteúdo Digital</span></h1>
+        <p class="lead">Vídeos, imagens e gestão de redes sociais — o pacote completo para posicionar a {{CLIENT_NAME}} como referência no digital e gerar novas oportunidades de negócio.</p>
+        <div class="cover-meta">
+          <div class="row"><span class="label">Preparada para</span><span class="value accent">{{CLIENT_NAME}}</span></div>
+          <div class="row"><span class="label">Apresentada por</span><span class="value">Dros Agência · David, Fundador</span></div>
+          <div class="row"><span class="label">Data</span><span class="value">Abril de 2026</span></div>
+          <div class="row"><span class="label">Validade</span><span class="value">15 dias</span></div>
+        </div>
+      </div>
+      <div class="cover-card">
+        <div class="cover-card-label">Cliente</div>
+        <div class="cover-card-client">SERRANO DISTRIBUIDORA</div>
+        <div class="cover-card-sub">Proposta exclusiva · {{COVER_SUB}}</div>
+        <div class="cover-card-stats">
+<!-- BEGIN:PRODUCTION -->
+          <div class="stat-item">
+            <div class="stat-num">{{NUM_VIDEOS}}</div>
+            <div class="stat-label">vídeos / mês</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-num">{{NUM_IMAGES}}</div>
+            <div class="stat-label">imagens / mês</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-num">{{TOTAL_CONTEUDOS}}</div>
+            <div class="stat-label">conteúdos / mês</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-num">{{FREQ_SEMANA}}x</div>
+            <div class="stat-label">por semana</div>
+          </div>
+<!-- END:PRODUCTION -->
+<!-- BEGIN:NO_PRODUCTION -->
+          <div class="stat-item" style="grid-column: 1 / -1;">
+            <div class="stat-num">{{CONTRATO_MESES}}</div>
+            <div class="stat-label">meses de contrato</div>
+          </div>
+<!-- END:NO_PRODUCTION -->
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- SLIDE 2 — Quem Somos -->
+<section class="slide slide-alt" id="slide-2">
+  <span class="slide-number">02 / 10</span>
+  <div class="slide-inner">
+    <div class="tag">01 · Quem Somos</div>
+    <h2 class="slide-title">A <span class="gradient">Dros Agência</span> em uma frase</h2>
+    <p class="lead">Empresa de Marketing, Publicidade e Produção de Conteúdo sediada em Sombrio/SC, com mais de 6 anos atendendo empresas dos segmentos industrial, distribuição e consumo em SC, RS e SP. Combinamos estratégia, captação profissional, criação visual e gestão de redes para construir marcas fortes no digital.</p>
+    <div class="cards-grid cols-4">
+      <div class="card">
+        <div class="card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg></div>
+        <h3>+6 anos de mercado</h3>
+        <p>Experiência consolidada atendendo empresas de SC, RS e SP nos segmentos industrial, distribuição e consumo.</p>
+      </div>
+      <div class="card">
+        <div class="card-icon green"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m22 8-6 4 6 4V8Z"></path><rect x="2" y="6" width="14" height="12" rx="2" ry="2"></rect></svg></div>
+        <h3>Produção completa</h3>
+        <p>Da estratégia à entrega: roteiro, captação, edição, design e publicação em um único fluxo.</p>
+      </div>
+      <div class="card">
+        <div class="card-icon blue"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"></path><path d="M18 17V9"></path><path d="M13 17V5"></path><path d="M8 17v-3"></path></svg></div>
+        <h3>Resultado mensurável</h3>
+        <p>Trabalho orientado por dados, métricas e relatórios mensais — você sempre sabe o que está acontecendo.</p>
+      </div>
+      <div class="card">
+        <div class="card-icon purple"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"></path><path d="m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"></path><path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0"></path><path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"></path></svg></div>
+        <h3>Cresceu 5x em 6 anos</h3>
+        <p>Nosso principal cliente cresceu 5 vezes em 6 anos com a metodologia que usamos hoje.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- SLIDE 3 — Cliente -->
+<section class="slide slide-deep" id="slide-3">
+  <span class="slide-number">03 / 10</span>
+  <div class="slide-inner">
+    <div class="tag">02 · Diagnóstico</div>
+    <h2 class="slide-title">A <span class="gradient">{{CLIENT_NAME}}</span> e o desafio do digital</h2>
+    <p class="lead">A {{CLIENT_NAME}} atua no segmento de distribuição, atendendo o mercado regional com soluções logísticas e comerciais. O momento atual exige uma presença digital forte e consistente para se diferenciar da concorrência, atrair novos clientes e fortalecer o relacionamento com a base existente.</p>
+    <div class="cards-grid">
+      <div class="card">
+        <div class="card-icon red"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><circle cx="12" cy="12" r="6"></circle><circle cx="12" cy="12" r="2"></circle></svg></div>
+        <h3>Posicionamento</h3>
+        <p>Tornar a {{CLIENT_NAME}} referência no digital dentro do seu segmento e mercado regional.</p>
+      </div>
+      <div class="card">
+        <div class="card-icon blue"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 11 18-5v12L3 14v-3z"></path><path d="M11.6 16.8a3 3 0 1 1-5.8-1.6"></path></svg></div>
+        <h3>Comunicação de diferenciais</h3>
+        <p>Comunicar com clareza o que torna a {{CLIENT_NAME}} única: estrutura, equipe, portfólio e atendimento.</p>
+      </div>
+      <div class="card">
+        <div class="card-icon green"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="14" x="2" y="7" rx="2" ry="2"></rect><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"></path></svg></div>
+        <h3>Novas oportunidades</h3>
+        <p>Gerar novos negócios através de conteúdo estratégico, consistente e profissional.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- BEGIN:PRODUCTION -->
+<!-- SLIDE 4 — Escopo (Produção) -->
+<section class="slide" id="slide-4">
+  <span class="slide-number">04 / 10</span>
+  <div class="slide-inner">
+    <div class="tag">03 · Escopo dos Serviços</div>
+    <h2 class="slide-title">Produção <span class="gradient">completa de conteúdo</span> em duas frentes</h2>
+    <p class="lead">Pacote mensal estruturado para entregar volume, consistência e profissionalismo em todos os pontos de contato digitais da {{CLIENT_NAME}}.</p>
+
+    <div class="scope-grid">
+      <div class="scope-card">
+        <div class="scope-num">1</div>
+        <h3>Produção de Vídeos</h3>
+        <div class="scope-volume">{{NUM_VIDEOS}} vídeos profissionais / mês</div>
+        <ul class="scope-list">
+          <li><span><strong>Vídeos de produto</strong> — demonstração de itens do portfólio, diferenciais e aplicações</span></li>
+          <li><span><strong>Vídeos institucionais</strong> — bastidores da operação, estrutura, logística e equipe</span></li>
+          <li><span><strong>Vídeos de relacionamento</strong> — depoimentos de clientes, dicas e conteúdo educativo</span></li>
+          <li><span><strong>Reels e Shorts</strong> — formato curto e dinâmico otimizado para Instagram</span></li>
+          <li><span><strong>Roteirização prévia</strong> de cada vídeo antes da captação</span></li>
+          <li><span><strong>Edição profissional</strong> com legendas, trilha sonora e identidade visual da {{CLIENT_NAME}}</span></li>
+          <li><span><strong>Captação</strong> na sede do cliente ou em locações combinadas</span></li>
+        </ul>
+      </div>
+      <div class="scope-card">
+        <div class="scope-num">2</div>
+        <h3>Criação de Imagens</h3>
+        <div class="scope-volume">{{NUM_IMAGES}} peças visuais / mês</div>
+        <ul class="scope-list">
+          <li><span><strong>Imagens estáticas</strong> — artes para feed com foco em produto, promoção, autoridade e relacionamento</span></li>
+          <li><span><strong>Carrosséis</strong> — conteúdo educativo, comparativos, listas e storytelling visual</span></li>
+          <li><span><strong>Legendas otimizadas</strong> com hashtags e chamadas para ação em cada publicação</span></li>
+          <li><span><strong>Identidade visual</strong> consistente seguindo os pilares de conteúdo definidos</span></li>
+          <li><span><strong>Materiais sob demanda</strong> — artes para WhatsApp, avisos e promoções pontuais</span></li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="includes-block">
+      <h4>Complementos inclusos no pacote</h4>
+      <ul class="includes-list">
+        <li>Planejamento editorial e calendário de conteúdo mensal</li>
+        <li>Definição de pilares: produto, autoridade, bastidores, relacionamento, promoções</li>
+        <li>Stories estratégicos semanais para engajamento</li>
+        <li>Relatório mensal de performance com métricas e insights</li>
+        <li>Reunião mensal de alinhamento estratégico</li>
+        <li>Materiais gráficos extras sob demanda</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- SLIDE 5 — Entregas (Produção) -->
+<section class="slide slide-alt" id="slide-5">
+  <span class="slide-number">05 / 10</span>
+  <div class="slide-inner">
+    <div class="tag">04 · Resumo das Entregas</div>
+    <h2 class="slide-title">O que entra <span class="gradient">todo mês</span> no seu pacote</h2>
+    <p class="lead">Volume mensal, frequência de publicação e itens incluídos no plano fixo.</p>
+    <table class="deliveries-table">
+      <thead>
+        <tr>
+          <th>Entrega</th>
+          <th>Quantidade</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td>Vídeos produzidos e captados (Reels, institucional, produto)</td><td>{{NUM_VIDEOS}} / mês</td></tr>
+        <tr><td>Imagens estáticas para feed</td><td>parte das {{NUM_IMAGES}} / mês</td></tr>
+        <tr><td>Carrosséis (múltiplas lâminas)</td><td>parte das {{NUM_IMAGES}} / mês</td></tr>
+        <tr><td>Legendas otimizadas (uma por publicação)</td><td>{{TOTAL_CONTEUDOS}} / mês</td></tr>
+        <tr><td>Stories estratégicos</td><td>Semanal</td></tr>
+        <tr><td>Planejamento editorial e calendário</td><td>Mensal</td></tr>
+        <tr><td>Materiais gráficos extras (WhatsApp, avisos)</td><td>Sob demanda</td></tr>
+        <tr><td>Relatório de performance e métricas</td><td>Mensal</td></tr>
+        <tr><td>Reunião de alinhamento estratégico</td><td>Mensal</td></tr>
+      </tbody>
+    </table>
+    <div class="deliveries-summary">
+      <div class="ds-num">{{TOTAL_CONTEUDOS}}</div>
+      <div class="ds-text"><strong>conteúdos publicados por mês</strong> · {{NUM_VIDEOS}} vídeos + {{NUM_IMAGES}} imagens · equivalente a <strong>{{FREQ_SEMANA}} publicações por semana</strong> no perfil da {{CLIENT_NAME}}</div>
+    </div>
+  </div>
+</section>
+<!-- END:PRODUCTION -->
+
+<!-- BEGIN:NO_PRODUCTION -->
+<!-- SLIDE 4 — Escopo (sem produção) -->
+<section class="slide" id="slide-4">
+  <span class="slide-number">04 / 10</span>
+  <div class="slide-inner">
+    <div class="tag">03 · Escopo dos Serviços</div>
+    <h2 class="slide-title">O que está <span class="gradient">incluso no plano</span></h2>
+    <p class="lead">Pacote de serviços customizado para atender as necessidades específicas da {{CLIENT_NAME}}.</p>
+    <div class="includes-block" style="background: #fff; border: 1px solid var(--border); padding: 36px;">
+      <h4>Serviços contratados</h4>
+      <div style="font-size: 14.5px; color: var(--text2); line-height: 1.75; white-space: pre-wrap; margin-top: 8px;">{{OBSERVACOES}}</div>
+    </div>
+  </div>
+</section>
+<!-- END:NO_PRODUCTION -->
+
+<!-- SLIDE 6 — Investimento -->
+<section class="slide" id="slide-6">
+  <span class="slide-number">06 / 10</span>
+  <div class="slide-inner" style="text-align: center;">
+    <div class="tag">05 · Investimento</div>
+    <h2 class="slide-title"><span class="gradient">Plano Mensal Fixo</span></h2>
+    <p class="lead" style="margin-left: auto; margin-right: auto;">Valor único mensal que inclui todas as entregas, planejamento, captação, edição e gestão. Sem surpresas, sem custos ocultos.</p>
+    <div class="pricing-card">
+      <div class="pricing-card-pretitle">Plano Mensal — Fixo</div>
+      <div class="pricing-card-name">Pacote Completo {{CLIENT_NAME}}</div>
+      <div class="pricing-card-value"><span class="currency">R$</span><span class="gradient">{{VALOR}}</span></div>
+      <div class="pricing-card-period">{{PRICING_PERIOD}}</div>
+      <div class="pricing-commitment"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg> Compromisso mínimo: {{CONTRATO_MESES}} meses</div>
+      <ul class="pricing-card-features">
+<!-- BEGIN:PRODUCTION -->
+        <li>{{NUM_VIDEOS}} vídeos captados e editados profissionalmente</li>
+        <li>{{NUM_IMAGES}} imagens para feed (estáticas + carrosséis) com legendas</li>
+        <li>Roteirização de todos os vídeos antes da captação</li>
+        <li>Planejamento editorial e calendário de conteúdo</li>
+        <li>Stories semanais estratégicos</li>
+        <li>Materiais gráficos sob demanda</li>
+        <li>Relatório mensal de performance</li>
+        <li>Reunião mensal de alinhamento estratégico</li>
+<!-- END:PRODUCTION -->
+<!-- BEGIN:NO_PRODUCTION -->
+        <li>Todos os serviços descritos no escopo</li>
+        <li>Acompanhamento mensal e relatórios de evolução</li>
+        <li>Reuniões de alinhamento estratégico</li>
+        <li>Suporte direto com a equipe Dros</li>
+<!-- END:NO_PRODUCTION -->
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- SLIDE 7 — Condições -->
+<section class="slide slide-alt" id="slide-7">
+  <span class="slide-number">07 / 10</span>
+  <div class="slide-inner">
+    <div class="tag">06 · Condições</div>
+    <h2 class="slide-title">Termos comerciais <span class="gradient">claros e objetivos</span></h2>
+    <p class="lead">Tudo o que você precisa saber sobre prazo, pagamento e regras do contrato.</p>
+    <div class="conditions-grid">
+      <div class="condition-item">
+        <div class="ci-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v4"></path><path d="M16 2v4"></path><rect width="18" height="18" x="3" y="4" rx="2"></rect><path d="M3 10h18"></path></svg></div>
+        <div>
+          <h4>Período mínimo</h4>
+          <p>{{CONTRATO_MESES}} meses de contrato inicial para garantir consistência e resultados mensuráveis.</p>
+        </div>
+      </div>
+      <div class="condition-item">
+        <div class="ci-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"></path><path d="M21 3v5h-5"></path><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"></path><path d="M8 16H3v5"></path></svg></div>
+        <div>
+          <h4>Renovação e cancelamento</h4>
+          <p>Após o período inicial, o cancelamento ocorre com aviso prévio de 30 dias.</p>
+        </div>
+      </div>
+      <div class="condition-item">
+        <div class="ci-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="14" x="2" y="5" rx="2"></rect><line x1="2" x2="22" y1="10" y2="10"></line></svg></div>
+        <div>
+          <h4>Pagamento</h4>
+          <p>Mensal via boleto ou PIX, até o dia 10 de cada mês.</p>
+        </div>
+      </div>
+<!-- BEGIN:PRODUCTION -->
+      <div class="condition-item">
+        <div class="ci-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18Z"></path><path d="M6 12H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h2"></path><path d="M18 9h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-2"></path><path d="M10 6h4"></path><path d="M10 10h4"></path><path d="M10 14h4"></path><path d="M10 18h4"></path></svg></div>
+        <div>
+          <h4>Acessos para captação</h4>
+          <p>A {{CLIENT_NAME}} garante acesso à sede, produtos e equipe para as captações de vídeo.</p>
+        </div>
+      </div>
+      <div class="condition-item">
+        <div class="ci-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg></div>
+        <div>
+          <h4>Uso exclusivo dos conteúdos</h4>
+          <p>Os conteúdos produzidos são de uso exclusivo da {{CLIENT_NAME}} durante a vigência do contrato.</p>
+        </div>
+      </div>
+      <div class="condition-item">
+        <div class="ci-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 10c0 7-8 13-8 13s-8-6-8-13a8 8 0 0 1 16 0Z"></path><circle cx="12" cy="10" r="3"></circle></svg></div>
+        <div>
+          <h4>Diárias extras</h4>
+          <p>Captações em eventos, feiras e locações externas terão valor adicional combinado previamente.</p>
+        </div>
+      </div>
+<!-- END:PRODUCTION -->
+    </div>
+  </div>
+</section>
+
+<!-- SLIDE 8 — Cronograma -->
+<section class="slide slide-deep" id="slide-8">
+  <span class="slide-number">08 / 10</span>
+  <div class="slide-inner">
+    <div class="tag">07 · Cronograma de Implantação</div>
+    <h2 class="slide-title">Como vai ser <span class="gradient">desde o dia 1</span></h2>
+    <p class="lead">Um cronograma estruturado para começar rápido, ganhar tração nas primeiras semanas e entrar em ciclo contínuo de otimização.</p>
+    <div class="timeline">
+      <div class="timeline-item">
+        <div class="timeline-marker">SEM 1</div>
+        <div class="timeline-content">
+          <h4>Kickoff e estratégia</h4>
+          <p>Reunião de kickoff, imersão no negócio, definição dos pilares de conteúdo, criação do primeiro calendário editorial e roteirização dos primeiros vídeos.</p>
+        </div>
+      </div>
+      <div class="timeline-item">
+        <div class="timeline-marker">SEM 2</div>
+        <div class="timeline-content">
+          <h4>Primeira captação e produção</h4>
+          <p>Primeira captação de vídeos na sede, início da produção das imagens e carrosséis para o feed.</p>
+        </div>
+      </div>
+      <div class="timeline-item">
+        <div class="timeline-marker">SEM 3-4</div>
+        <div class="timeline-content">
+          <h4>Publicação e ativação</h4>
+          <p>Publicação dos primeiros conteúdos (vídeos + imagens), ativação de Stories, monitoramento de resultados iniciais.</p>
+        </div>
+      </div>
+      <div class="timeline-item">
+        <div class="timeline-marker">MÊS 2+</div>
+        <div class="timeline-content">
+          <h4>Ciclo contínuo de otimização</h4>
+          <p>Planejamento → roteirização → captação → edição → publicação → análise de performance → otimização. Mês após mês, ajustando com base em dados reais.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- SLIDE 9 — Por que Dros -->
+<section class="slide" id="slide-9">
+  <span class="slide-number">09 / 10</span>
+  <div class="slide-inner">
+    <div class="tag">08 · Por Que a Dros Agência</div>
+    <h2 class="slide-title">6 motivos para <span class="gradient">escolher a Dros</span></h2>
+    <p class="lead">Não somos uma agência genérica. Conhecemos o seu segmento, temos metodologia comprovada e operamos com a estrutura de quem entrega resultado.</p>
+    <div class="why-grid">
+      <div class="why-item">
+        <div class="why-num">01</div>
+        <h3>Experiência no segmento</h3>
+        <p>+6 anos atendendo empresas industriais e de consumo — entendemos as particularidades do seu mercado.</p>
+      </div>
+      <div class="why-item">
+        <div class="why-num">02</div>
+        <h3>Equipe especializada</h3>
+        <p>Time interno dedicado à captação e edição de vídeos profissionais, sem terceirizar a qualidade.</p>
+      </div>
+      <div class="why-item">
+        <div class="why-num">03</div>
+        <h3>Metodologia própria</h3>
+        <p>Linha editorial validada que gera resultados consistentes mês após mês, com pilares claros.</p>
+      </div>
+      <div class="why-item">
+        <div class="why-num">04</div>
+        <h3>IA generativa aplicada</h3>
+        <p>Produção de conteúdo com IA generativa para escalar a criação visual sem perder identidade.</p>
+      </div>
+      <div class="why-item">
+        <div class="why-num">05</div>
+        <h3>Resultado comprovado</h3>
+        <p>Nosso principal cliente cresceu 5x em 6 anos com a metodologia que aplicaremos na {{CLIENT_NAME}}.</p>
+      </div>
+      <div class="why-item">
+        <div class="why-num">06</div>
+        <h3>Atendimento próximo</h3>
+        <p>Reuniões mensais, relatórios de performance e canal direto com a equipe — você nunca fica no escuro.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- SLIDE 10 — Próximos Passos -->
+<section class="slide slide-alt" id="slide-10">
+  <span class="slide-number">10 / 10</span>
+  <div class="slide-inner">
+    <div class="closing">
+      <div class="tag">09 · Próximos Passos</div>
+      <h2>Pronto para <span class="gradient" style="background: linear-gradient(135deg, var(--accent2), var(--accent)); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">começar?</span></h2>
+      <p class="tagline">5 passos simples para colocar a {{CLIENT_NAME}} em operação no digital com a Dros.</p>
+      <div class="next-steps">
+        <div class="next-step"><p>Aprovação desta proposta</p></div>
+        <div class="next-step"><p>Assinatura do contrato</p></div>
+        <div class="next-step"><p>Reunião de kickoff e briefing</p></div>
+        <div class="next-step"><p>Primeiro calendário editorial e roteiros</p></div>
+        <div class="next-step"><p>Primeira captação na sede</p></div>
+      </div>
+
+      <div class="signature-card">
+        <div class="signature-name">David</div>
+        <div class="signature-role">Fundador e Diretor Comercial · Dros Agência</div>
+        <div class="signature-address">Av. Getúlio Vargas, 150 — Sala 701<br>Sombrio · Santa Catarina</div>
+      </div>
+
+      <div class="cta-buttons">
+        <a href="https://wa.me/5548991064153?text=Aprovo%20a%20proposta%20da%20{{CLIENT_NAME_URL}}" class="btn btn-primary">Aprovar proposta →</a>
+        <a href="javascript:window.print()" class="btn btn-ghost">Imprimir / Salvar PDF</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer class="footer">
+  <p>© 2026 Dros Agência — Marketing · Conteúdo · Crescimento · drosagencia.com.br</p>
+</footer>
+
+<script>
+const progressBar = document.getElementById('progressBar');
+const slides = document.querySelectorAll('.slide');
+const dots = document.querySelectorAll('#sideNav .dot');
+
+function updateProgress() {
+  const scrollTop = window.scrollY;
+  const docHeight = document.documentElement.scrollHeight - window.innerHeight;
+  const progress = (scrollTop / docHeight) * 100;
+  progressBar.style.width = progress + '%';
+
+  let activeIdx = 0;
+  slides.forEach((slide, idx) => {
+    const rect = slide.getBoundingClientRect();
+    if (rect.top <= window.innerHeight / 2 && rect.bottom >= window.innerHeight / 2) {
+      activeIdx = idx;
+    }
+  });
+  dots.forEach((d, i) => d.classList.toggle('active', i === activeIdx));
+}
+
+window.addEventListener('scroll', updateProgress, { passive: true });
+window.addEventListener('load', updateProgress);
+
+let currentSlide = 0;
+document.addEventListener('keydown', (e) => {
+  slides.forEach((slide, idx) => {
+    const rect = slide.getBoundingClientRect();
+    if (rect.top <= window.innerHeight / 2 && rect.bottom >= window.innerHeight / 2) {
+      currentSlide = idx;
+    }
+  });
+
+  if (e.key === 'ArrowDown' || e.key === 'PageDown' || e.key === ' ') {
+    e.preventDefault();
+    if (currentSlide < slides.length - 1) {
+      slides[currentSlide + 1].scrollIntoView({ behavior: 'smooth' });
+    }
+  } else if (e.key === 'ArrowUp' || e.key === 'PageUp') {
+    e.preventDefault();
+    if (currentSlide > 0) {
+      slides[currentSlide - 1].scrollIntoView({ behavior: 'smooth' });
+    }
+  } else if (e.key === 'Home') {
+    e.preventDefault();
+    slides[0].scrollIntoView({ behavior: 'smooth' });
+  } else if (e.key === 'End') {
+    e.preventDefault();
+    slides[slides.length - 1].scrollIntoView({ behavior: 'smooth' });
+  }
+});
+</script>
+
+</body>
+</html>

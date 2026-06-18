@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<title>Contrato {{NUMERO}} — Dros Agencia</title>
+<style>
+  :root { --navy: #0A1A3F; --accent: #FFB300; --text: #1a1a1a; --muted: #5a5a5a; --border: #d4d4d4; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Helvetica Neue', Arial, sans-serif; color: var(--text); background: #f0f0f0; padding: 24px 0; line-height: 1.45; font-size: 11pt; }
+  .page { max-width: 210mm; margin: 0 auto 16px; background: #fff; padding: 22mm 18mm; box-shadow: 0 2px 12px rgba(0,0,0,0.08); }
+  .logo-bar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; padding-bottom: 10px; border-bottom: 2px solid var(--navy); }
+  .logo { font-weight: 900; font-size: 22pt; color: var(--navy); letter-spacing: -1px; }
+  .logo .dot { color: var(--accent); }
+  .head-meta { font-size: 9pt; color: var(--muted); text-align: right; }
+  h1 { font-size: 16pt; color: var(--navy); text-align: center; margin: 18px 0 4px; }
+  h2 { font-size: 11pt; color: var(--accent); margin: 16px 0 8px; text-transform: uppercase; letter-spacing: 0.5px; }
+  h2.no-spacing-top { margin-top: 0; }
+  p { margin: 6px 0; text-align: justify; }
+  ul { margin: 4px 0 8px 22px; }
+  li { margin: 3px 0; }
+  .strong { font-weight: 700; }
+  .num-titulo { text-align: center; font-size: 10pt; color: var(--accent); margin-bottom: 4px; }
+  .signers { display: flex; justify-content: space-between; gap: 40px; margin-top: 48px; }
+  .signer { flex: 1; text-align: center; }
+  .signer-line { border-top: 1px solid var(--text); padding-top: 6px; font-weight: 600; font-size: 10pt; }
+  .signer-sub { font-size: 9pt; color: var(--muted); margin-top: 2px; }
+  .witnesses { margin-top: 36px; }
+  .witness-row { display: flex; gap: 40px; margin-top: 28px; }
+  .witness { flex: 1; }
+  .witness-line { border-top: 1px solid var(--text); padding-top: 6px; font-size: 9pt; }
+  .anexo-title { text-align: center; font-size: 14pt; color: var(--accent); margin: 20px 0 16px; text-transform: uppercase; }
+  table.fat { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 10pt; }
+  table.fat th, table.fat td { padding: 8px 10px; border: 1px solid var(--border); }
+  table.fat thead th { background: var(--navy); color: #fff; text-align: left; font-weight: 600; }
+  table.fat tfoot td { background: rgba(255, 179, 0, 0.15); font-weight: 700; }
+  .footer-page { display: none; text-align: center; padding-top: 10px; margin-top: 24px; border-top: 1px solid var(--border); font-size: 8pt; color: var(--muted); }
+  .declaracao { margin-top: 12px; font-size: 10pt; }
+  .print-controls { position: fixed; top: 12px; right: 12px; background: var(--navy); color: #fff; padding: 8px 14px; border-radius: 4px; cursor: pointer; font-size: 10pt; box-shadow: 0 2px 8px rgba(0,0,0,0.2); border: none; }
+  .print-controls:hover { background: var(--accent); color: var(--navy); }
+
+  @media print {
+    @page { size: A4; margin: 18mm 14mm; }
+    body { background: #fff; padding: 0; font-size: 10pt; }
+    .page { max-width: 100%; margin: 0; padding: 0; box-shadow: none; }
+    .page + .page { page-break-before: always; }
+    .footer-page { display: block; }
+    .print-controls { display: none !important; }
+    h2 { color: var(--navy); }
+    .anexo-title { color: var(--navy); }
+    table.fat thead th { background: #444; }
+  }
+</style>
+</head>
+<body>
+
+<button class="print-controls" onclick="window.print()">Imprimir / Salvar como PDF</button>
+
+<div class="page">
+  <div class="logo-bar">
+    <div class="logo">DR<span class="dot">O</span>S</div>
+    <div class="head-meta">Agência de Estratégia<br>Comercial e Marketing Digital</div>
+  </div>
+
+  <div class="num-titulo">Contrato Nº {{NUMERO}}</div>
+  <h1>CONTRATO DE PRESTAÇÃO DE SERVIÇOS</h1>
+  <p style="text-align:center; font-size: 10pt; color: var(--muted);">DE ESTRATÉGIA COMERCIAL E MARKETING DIGITAL</p>
+
+  <h2>CLÁUSULA PRIMEIRA — DAS PARTES</h2>
+  <p><span class="strong">CONTRATANTE:</span> <span class="strong">{{RAZAO_SOCIAL}}</span>, pessoa jurídica de direito privado, inscrita no CNPJ sob o nº <span class="strong">{{CNPJ}}</span><!-- BEGIN:TEM_IE -->, Inscrição Estadual nº {{INSCRICAO_ESTADUAL}}<!-- END:TEM_IE -->, com sede em {{ENDERECO_LOGRADOURO}}, {{ENDERECO_BAIRRO}}, CEP {{ENDERECO_CEP}}, {{ENDERECO_CIDADE}}/{{ENDERECO_ESTADO}}, neste ato representada por seu(s) sócio(s) administrador(es), doravante denominada simplesmente <span class="strong">CONTRATANTE</span>.</p>
+  <p><span class="strong">CONTRATADA:</span> <span class="strong">AGENCIA DROS LTDA</span>, pessoa jurídica de direito privado, inscrita no CNPJ sob o nº <span class="strong">38.258.811/0001-60</span>, com sede na Av. Getúlio Vargas, nº 150, Salas 701/702-B, Centro, CEP 88.960-000, Sombrio/SC, neste ato representada por seu(s) sócio(s) administrador(es), doravante denominada simplesmente <span class="strong">CONTRATADA</span>.</p>
+  <p>As partes acima qualificadas têm entre si justo e acertado o presente Contrato de Prestação de Serviços de Estratégia Comercial e Marketing Digital, que se regerá pelas cláusulas e condições a seguir estipuladas.</p>
+
+  <h2>CLÁUSULA SEGUNDA — DO OBJETO</h2>
+  <p>2.1. O presente contrato tem por objeto a prestação, pela CONTRATADA à CONTRATANTE, de serviços de estratégia comercial e marketing digital, compreendendo as seguintes frentes de atuação:</p>
+
+  <!-- BEGIN:FRENTE_DIAGNOSTICO -->
+  <p class="strong">FRENTE 1 — DIAGNÓSTICO ESTRUTURAL (Entrada)</p>
+  <ul>
+    <li>Análise do processo comercial atual da CONTRATANTE</li>
+    <li>Identificação de gargalos no funil de vendas</li>
+    <li>Mapeamento completo do funil de atendimento comercial</li>
+    <li>Diagnóstico de perda de leads e motivos de não conversão</li>
+    <li>Avaliação do CRM atual ou recomendação e implementação de novo CRM</li>
+    <li>Análise de posicionamento de preço frente à concorrência</li>
+    <li>Avaliação dos canais de venda atuais (margem, volume, performance)</li>
+    <li>Mapeamento do ICP (Perfil de Cliente Ideal) por canal de venda</li>
+    <li>Pesquisa de mercado e análise de concorrência na região de atuação</li>
+  </ul>
+  <!-- END:FRENTE_DIAGNOSTICO -->
+
+  <!-- BEGIN:FRENTE_ESTRUTURACAO -->
+  <p class="strong">FRENTE 2 — ESTRUTURAÇÃO COMERCIAL</p>
+  <ul>
+    <li>Implementação e configuração de CRM</li>
+    <li>Criação do mapa de atendimento comercial</li>
+    <li>Estruturação do processo comercial (da prospecção ao pós-venda)</li>
+    <li>Padronização de etapas de conversão com critérios claros de avanço no funil</li>
+    <li>Criação de scripts de vendas para a equipe interna</li>
+    <li>Treinamento do time comercial (técnicas de venda, objeções, fechamento, funil)</li>
+    <li>Recuperação de leads parados na base existente</li>
+    <li>Criação de fluxo de reativação de clientes inativos</li>
+    <li>Acompanhamento estratégico semanal da equipe comercial com métricas</li>
+  </ul>
+  <!-- END:FRENTE_ESTRUTURACAO -->
+
+  <!-- BEGIN:FRENTE_AQUISICAO -->
+  <p class="strong">FRENTE 3 — AQUISIÇÃO E EXPANSÃO</p>
+  <ul>
+    <li>Definição de estratégia de canais digitais por público-alvo</li>
+    <li>Criação e gestão de campanhas de anúncios no Google Ads</li>
+    <li>Criação e gestão de campanhas de anúncios no Meta Ads (Instagram e Facebook)</li>
+    <li>Criação de landing pages de alta conversão para captação de leads e vendas</li>
+    <li>Implementação de automações de marketing (e-mail, WhatsApp, fluxos de nutrição)</li>
+    <li>Estratégias de novos canais de venda (marketplaces, parcerias, influenciadores)</li>
+    <li>Ajuste de oferta (ticket médio, upsell, cross-sell, testes de comunicação)</li>
+  </ul>
+  <!-- END:FRENTE_AQUISICAO -->
+
+  <!-- BEGIN:FRENTE_EDITORIAL -->
+  <p class="strong">FRENTE 4 — LINHA EDITORIAL E CONTEÚDO</p>
+  <ul>
+    <li>Definição de linha editorial e pilares de conteúdo para a marca</li>
+    <li>Criação de calendário editorial mensal</li>
+    <li>Definição de tom de voz, identidade visual e territórios narrativos da marca</li>
+    <li>Planejamento de pautas e temas para redes sociais</li>
+    <li>Gestão de conteúdo para redes sociais (estratégia, criação e publicação)</li>
+    <li>Criação de peças gráficas e artes para comunicação digital e campanhas</li>
+    <li>Edição de vídeos e imagens fornecidos pela CONTRATANTE para uso em redes sociais e campanhas</li>
+    <li>Serão postados nas redes sociais (Instagram e Facebook) do CONTRATANTE <span class="strong">{{VIDEOS_POR_MES}}</span> vídeos e <span class="strong">{{IMAGENS_POR_MES}}</span> imagens por mês pela CONTRATADA</li>
+  </ul>
+  <!-- END:FRENTE_EDITORIAL -->
+
+  <p class="strong">ENTREGÁVEIS RECORRENTES MENSAIS</p>
+  <ul>
+    <li>Edição de imagens e vídeos fornecidos pela CONTRATANTE para campanhas e redes sociais</li>
+    <li>Criação de peças gráficas para comunicação digital</li>
+    <li>Relatório semanal de performance (leads, conversões, custo por lead, vendas)</li>
+    <li>Relatório mensal completo com análise de ROI e recomendações estratégicas</li>
+    <li>Reunião estratégica semanal de acompanhamento com a CONTRATANTE</li>
+    <li>Consultoria estratégica contínua (comercial, digital, posicionamento, expansão)</li>
+  </ul>
+
+  <p>2.2. Ficam expressamente <span class="strong">excluídos</span> do escopo deste contrato:</p>
+  <ul>
+    <li>Criação de website institucional (a CONTRATADA criará landing pages de alta conversão, distintas de site institucional)</li>
+    <li>Captação e produção de vídeos (filmagens, gravações, direção de cena). A CONTRATADA realizará apenas a edição de materiais de vídeo e imagem fornecidos pela CONTRATANTE</li>
+    {{EXCLUSOES_EXTRAS}}
+  </ul>
+
+  <div class="footer-page">DROS AGÊNCIA · Contrato de Prestação de Serviços · Página 1</div>
+</div>
+
+<div class="page">
+  <h2 class="no-spacing-top">CLÁUSULA TERCEIRA — DA REMUNERAÇÃO</h2>
+  <p>3.1. Pelos serviços descritos na Cláusula Segunda, a CONTRATANTE pagará à CONTRATADA:</p>
+  <p><span class="strong">a) Fee mensal fixo:</span> R$ {{FEE_MENSAL}}, a ser pago até o dia 10 (dez) de cada mês, mediante emissão de nota fiscal ou boleto bancário pela CONTRATADA.</p>
+  <p><span class="strong">b) Comissão de performance:</span> {{COMISSAO_PERCENT}}% sobre o faturamento bruto mensal da CONTRATANTE que exceder o faturamento base, conforme subcláusula 3.2.</p>
+  <p>3.2. Para fins de cálculo da comissão de performance, as partes definem:</p>
+  <p><span class="strong">(a) Faturamento Bruto Mensal:</span> a soma total de todas as notas fiscais de venda emitidas pela CONTRATANTE no mês, excluídas devoluções, cancelamentos e impostos (ICMS, PIS, COFINS, IPI).</p>
+  <p><span class="strong">(b) Faturamento Base:</span> a média aritmética simples do Faturamento Bruto Mensal nos 3 (três) meses anteriores ao início da vigência, conforme Anexo I.</p>
+  <p><span class="strong">(c)</span> A comissão de {{COMISSAO_PERCENT}}% incidirá exclusivamente sobre a diferença positiva entre o Faturamento Bruto Mensal e o Faturamento Base. Se igual ou inferior, nenhuma comissão será devida.</p>
+  <p>3.3. A comissão será apurada mensalmente com base nos relatórios de faturamento fornecidos pela CONTRATANTE até o 5º dia útil do mês subsequente, e paga até o 15º dia útil do mesmo mês.</p>
+  <p>3.4. A CONTRATANTE se compromete a fornecer, de boa-fé, os dados de faturamento. A recusa ou omissão por prazo superior a 15 dias constituirá infração contratual.</p>
+  <p>3.5. Os valores serão reajustados anualmente pelo {{REAJUSTE_INDICE}} acumulado nos últimos 12 meses.</p>
+
+  <h2>CLÁUSULA QUARTA — DOS CUSTOS DE FERRAMENTAS, ANÚNCIOS E PLATAFORMAS</h2>
+  <p>4.1. Ficam por conta exclusiva da CONTRATANTE todos os custos relativos a:</p>
+  <ul>
+    <li>Investimento em mídia paga (Google Ads, Meta Ads, TikTok Ads e outras plataformas)</li>
+    <li>Ferramentas de automação de marketing (RD Station, ActiveCampaign, ManyChat, ou similares)</li>
+    <li>Ferramentas de disparo de e-mails e mensagens (Mailchimp, Brevo, ou similares)</li>
+    <li>Ferramentas de CRM (Pipedrive, HubSpot, Kommo, ou similares)</li>
+    <li>Hospedagem de landing pages, domínios e certificados SSL</li>
+    <li>Produção audiovisual (filmagens, captação de vídeo, fotografia profissional, estúdio)</li>
+    <li>Quaisquer outras ferramentas ou serviços de terceiros sugeridos pela CONTRATADA</li>
+  </ul>
+  <p>4.2. A CONTRATADA aplicará sua metodologia e gerenciará as campanhas, mas <span class="strong">não arcará com os custos de assinatura, licenciamento ou investimento em mídia</span>.</p>
+  <p>4.3. A CONTRATADA recomendará as ferramentas mais adequadas, cabendo à CONTRATANTE a decisão final e o pagamento direto ao fornecedor.</p>
+
+  <h2>CLÁUSULA QUINTA — DAS OBRIGAÇÕES DA CONTRATADA</h2>
+  <p>5.1. A CONTRATADA se obriga a:</p>
+  <ul>
+    <li>Executar os serviços com diligência, zelo e competência técnica</li>
+    <li>Apresentar relatórios semanais de performance e relatório mensal consolidado</li>
+    <li>Realizar reuniões estratégicas semanais de acompanhamento</li>
+    <li>Manter sigilo sobre todas as informações comerciais e estratégicas da CONTRATANTE</li>
+    <li>Comunicar previamente alterações significativas na estratégia ou campanhas</li>
+    <li>Cumprir os prazos do cronograma de implementação</li>
+  </ul>
+  <p>5.2. A CONTRATADA <span class="strong">não garante resultados específicos de vendas, faturamento ou número de leads</span>, uma vez que dependem de fatores alheios ao seu controle exclusivo (qualidade do produto, preço, atendimento da equipe, mercado, sazonalidade, estoque).</p>
+  <p>5.3. A CONTRATADA empregará as melhores práticas e metodologias validadas para maximizar os resultados.</p>
+
+  <div class="footer-page">DROS AGÊNCIA · Contrato de Prestação de Serviços · Página 2</div>
+</div>
+
+<div class="page">
+  <h2 class="no-spacing-top">CLÁUSULA SEXTA — DAS OBRIGAÇÕES DA CONTRATANTE</h2>
+  <p>6.1. A CONTRATANTE se obriga a:</p>
+  <ul>
+    <li>Efetuar os pagamentos na forma e prazos previstos</li>
+    <li>Fornecer acessos, informações, materiais, fotos e vídeos brutos necessários</li>
+    <li>Fornecer mensalmente os dados de faturamento para apuração da comissão</li>
+    <li>Designar um responsável interno como ponto de contato</li>
+    <li>Aprovar materiais dentro de 48 horas úteis após o envio</li>
+    <li>Arcar com todos os custos de ferramentas, anúncios e produção audiovisual conforme Cláusula Quarta</li>
+    <li>Garantir participação da equipe nos treinamentos</li>
+  </ul>
+  <p>6.2. O atraso no fornecimento de acessos, informações ou aprovações poderá impactar prazos e resultados, sem configurar inadimplemento da CONTRATADA.</p>
+
+  <h2>CLÁUSULA SÉTIMA — DA VIGÊNCIA</h2>
+  <p>7.1. O presente contrato terá vigência de <span class="strong">{{VIGENCIA_MESES}} ({{VIGENCIA_MESES}}) meses</span>, com início em <span class="strong">{{DATA_INICIO}}</span> e término em <span class="strong">{{DATA_FIM}}</span>.</p>
+  <p>7.2. Ao término da vigência, o contrato poderá ser renovado por períodos de {{RENOVACAO_MESES}} ({{RENOVACAO_MESES}}) meses, mediante assinatura de aditivo contratual ou novo instrumento, com valores e condições a serem renegociados entre as partes.</p>
+  <p>7.3. A não renovação não obriga qualquer das partes ao pagamento de multa, bastando que a parte interessada comunique a outra com antecedência mínima de 15 (quinze) dias antes do término da vigência.</p>
+
+  <h2>CLÁUSULA OITAVA — DA RESCISÃO</h2>
+  <p>8.1. O presente contrato poderá ser rescindido:</p>
+  <ul>
+    <li>Por mútuo acordo entre as partes, formalizado por escrito</li>
+    <li>Por qualquer das partes, mediante notificação escrita com antecedência mínima de {{AVISO_PREVIO_DIAS}} (trinta) dias, com pagamento de multa conforme subcláusula 8.2</li>
+    <li>Por justa causa, em caso de descumprimento de obrigação essencial, após notificação com prazo de 15 dias para regularização</li>
+  </ul>
+  <p>8.2. Em caso de rescisão imotivada antes do término da vigência, a parte que der causa deverá notificar a outra com {{AVISO_PREVIO_DIAS}} dias de antecedência e pagar multa compensatória equivalente ao valor restante das mensalidades até o término da vigência.</p>
+  <p>8.3. A rescisão por justa causa não gerará obrigação de pagamento de multa pela parte prejudicada.</p>
+  <p>8.4. Em qualquer hipótese de rescisão, a CONTRATANTE deverá pagar os valores proporcionais aos serviços prestados, incluindo comissões apuradas e não pagas.</p>
+
+  <h2>CLÁUSULA NONA — DA PROPRIEDADE INTELECTUAL</h2>
+  <p>9.1. Todos os materiais, estratégias, metodologias, scripts, funis e processos desenvolvidos pela CONTRATADA são de propriedade intelectual da CONTRATADA, sendo concedida à CONTRATANTE licença de uso durante a vigência.</p>
+  <p>9.2. Após o encerramento, a CONTRATANTE poderá usar os materiais de comunicação produzidos, mas <span class="strong">não poderá reproduzir ou comercializar as metodologias proprietárias da CONTRATADA</span>.</p>
+  <p>9.3. Campanhas nas contas de anúncios da CONTRATANTE permanecem sob sua titularidade.</p>
+
+  <div class="footer-page">DROS AGÊNCIA · Contrato de Prestação de Serviços · Página 3</div>
+</div>
+
+<div class="page">
+  <h2 class="no-spacing-top">CLÁUSULA DÉCIMA — DA CONFIDENCIALIDADE</h2>
+  <p>10.1. As partes manterão sigilo absoluto sobre informações confidenciais (faturamento, carteira de clientes, estratégias, fórmulas, processos produtivos, custos, margens).</p>
+  <p>10.2. A obrigação permanecerá vigente por 2 (dois) anos após o encerramento.</p>
+  <p>10.3. A violação sujeitará a parte infratora a indenização por perdas e danos.</p>
+
+  <h2>CLÁUSULA DÉCIMA PRIMEIRA — DA LIMITAÇÃO DE RESPONSABILIDADE</h2>
+  <p>11.1. A CONTRATADA responderá pelos danos diretos comprovadamente causados exclusivamente por falha, ação ou omissão culposa ou dolosa de seus colaboradores ou prepostos.</p>
+  <p>11.2. A CONTRATADA <span class="strong">NÃO</span> será responsável por:</p>
+  <ul>
+    <li>Invasões, ataques cibernéticos, hackers, phishing, clonagem de cartões ou fraude digital nas contas de anúncios, redes sociais, CRM ou plataformas de terceiros, ainda que gerenciadas pela CONTRATADA</li>
+    <li>Gastos indevidos ou perdas financeiras por falhas de segurança nas plataformas de terceiros (Google, Meta, TikTok, CRM, automação, hospedagem)</li>
+    <li>Alterações unilaterais nas políticas, algoritmos ou termos de uso das plataformas de terceiros</li>
+    <li>Suspensão, banimento ou restrição de contas por decisão das plataformas, exceto se comprovadamente causada por dolo da CONTRATADA</li>
+    <li>Perda de dados, interrupções ou indisponibilidade de plataformas de terceiros</li>
+    <li>Resultados de vendas, faturamento ou conversão</li>
+    <li>Decisões comerciais ou de produto tomadas pela CONTRATANTE em desacordo com as recomendações da CONTRATADA</li>
+  </ul>
+  <p>11.3. A responsabilidade total da CONTRATADA fica limitada a <span class="strong">6 (seis) mensalidades do fee fixo vigente</span>, exceto em casos de dolo ou fraude (responsabilidade integral).</p>
+  <p>11.4. A CONTRATANTE é a titular e única responsável pela segurança de suas contas em plataformas de terceiros (senhas, 2FA, métodos de pagamento, permissões de acesso).</p>
+  <p>11.5. Em nenhuma hipótese haverá responsabilidade por lucros cessantes, danos indiretos, incidentais, punitivos ou consequenciais.</p>
+
+  <h2>CLÁUSULA DÉCIMA SEGUNDA — DA NÃO CONCORRÊNCIA E NÃO ALICIAMENTO</h2>
+  <p>12.1. A CONTRATANTE se compromete a não contratar, direta ou indiretamente, colaboradores ou prestadores da CONTRATADA durante a vigência e por 12 meses após o encerramento, sob pena de multa equivalente a 12 mensalidades do fee fixo.</p>
+
+  <h2>CLÁUSULA DÉCIMA TERCEIRA — DO INADIMPLEMENTO</h2>
+  <p>13.1. O atraso no pagamento por mais de 15 dias implicará:</p>
+  <ul>
+    <li>Multa de 2% sobre o valor em atraso</li>
+    <li>Juros de mora de 1% ao mês, pro rata die</li>
+    <li>Correção monetária pelo {{REAJUSTE_INDICE}}</li>
+  </ul>
+  <p>13.2. O atraso superior a <span class="strong">30 dias</span> facultará a suspensão imediata dos serviços.</p>
+  <p>13.3. O atraso superior a 60 dias facultará a rescisão por justa causa.</p>
+
+  <h2>CLÁUSULA DÉCIMA QUARTA — DAS DISPOSIÇÕES GERAIS</h2>
+  <p>14.1. Comunicações por escrito, via e-mail ou mensagens.</p>
+  <p>14.2. Tolerância não constitui renúncia.</p>
+  <p>14.3. Este contrato constitui o acordo integral entre as partes.</p>
+  <p>14.4. Alterações somente por aditivo escrito assinado por ambas as partes.</p>
+  <p>14.5. Não cria vínculo empregatício, societário ou associativo.</p>
+
+  <h2>CLÁUSULA DÉCIMA QUINTA — DO FORO</h2>
+  <p>15.1. As partes elegem o foro da Comarca de <span class="strong">Sombrio/SC</span>, com exclusão de qualquer outro, para dirimir controvérsias oriundas deste contrato.</p>
+
+  <p style="margin-top: 16px;">E por estarem assim justas e contratadas, as partes firmam o presente instrumento em 2 (duas) vias de igual teor e forma, na presença de 2 (duas) testemunhas.</p>
+
+  <p style="text-align: center; margin-top: 24px;">{{LOCAL_ASSINATURA}}, {{DATA_ASSINATURA}}.</p>
+
+  <div class="signers">
+    <div class="signer">
+      <div class="signer-line">{{RAZAO_SOCIAL}}</div>
+      <div class="signer-sub">CNPJ: {{CNPJ}}<br>CONTRATANTE</div>
+    </div>
+    <div class="signer">
+      <div class="signer-line">AGENCIA DROS LTDA</div>
+      <div class="signer-sub">CNPJ: 38.258.811/0001-60<br>CONTRATADA</div>
+    </div>
+  </div>
+
+  <div class="witnesses">
+    <p class="strong">TESTEMUNHAS:</p>
+    <div class="witness-row">
+      <div class="witness"><div class="witness-line">Nome:<br>CPF:</div></div>
+      <div class="witness"><div class="witness-line">Nome:<br>CPF:</div></div>
+    </div>
+  </div>
+
+  <div class="footer-page">DROS AGÊNCIA · Contrato de Prestação de Serviços · Página 4</div>
+</div>
+
+<!-- BEGIN:ANEXO_FAT -->
+<div class="page">
+  <div class="anexo-title">ANEXO I — FATURAMENTO BASE</div>
+  <p>Para fins de cálculo da comissão de performance (Cláusula Terceira), as partes declaram os seguintes valores de faturamento bruto mensal nos 3 meses anteriores ao início do contrato:</p>
+  <table class="fat">
+    <thead>
+      <tr><th>MÊS DE REFERÊNCIA</th><th>FATURAMENTO BRUTO (R$)</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Mês 1: {{FAT_MES1_REF}}</td><td>R$ {{FAT_MES1_VALOR}}</td></tr>
+      <tr><td>Mês 2: {{FAT_MES2_REF}}</td><td>R$ {{FAT_MES2_VALOR}}</td></tr>
+      <tr><td>Mês 3: {{FAT_MES3_REF}}</td><td>R$ {{FAT_MES3_VALOR}}</td></tr>
+    </tbody>
+    <tfoot>
+      <tr><td>FATURAMENTO BASE (MÉDIA):</td><td>R$ {{FAT_BASE}}</td></tr>
+    </tfoot>
+  </table>
+  <p class="declaracao">As partes declaram que os valores acima são verdadeiros e correspondem ao faturamento efetivo no período indicado.</p>
+
+  <div class="signers">
+    <div class="signer">
+      <div class="signer-line">CONTRATANTE</div>
+    </div>
+    <div class="signer">
+      <div class="signer-line">CONTRATADA</div>
+    </div>
+  </div>
+
+  <div class="footer-page">DROS AGÊNCIA · Contrato de Prestação de Serviços · Anexo I</div>
+</div>
+<!-- END:ANEXO_FAT -->
+
+<script>
+  // Auto-print quando aberto numa nova aba (frontend usa window.open)
+  // Pequeno delay pra fontes/estilos terminarem de aplicar
+  if (location.search.includes('autoprint')) {
+    window.addEventListener('load', () => setTimeout(() => window.print(), 350))
+  }
+</script>
+
+</body>
+</html>
