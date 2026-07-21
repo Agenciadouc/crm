@@ -49,6 +49,20 @@ function formatDate(iso: string | null | undefined) {
   return d.toLocaleDateString('pt-BR')
 }
 
+// Apenas exibicao: primeira letra de cada palavra em maiuscula, respeitando preposicoes e siglas juridicas.
+function titleCaseRazao(str: string | null | undefined): string {
+  if (!str) return ''
+  const minusculas = new Set(['de', 'da', 'do', 'das', 'dos', 'e', 'para', 'com', 'em', 'a', 'o'])
+  const siglas = new Set(['LTDA', 'ME', 'EPP', 'SA', 'S/A', 'S.A', 'S.A.', 'EIRELI', 'MEI'])
+  return String(str).toLowerCase().split(/(\s+|-|\/)/).map((token, idx) => {
+    if (!token || /^[\s\-\/]+$/.test(token)) return token
+    const upper = token.toUpperCase()
+    if (siglas.has(upper)) return upper
+    if (idx > 0 && minusculas.has(token)) return token
+    return token.charAt(0).toUpperCase() + token.slice(1)
+  }).join('')
+}
+
 function addMonths(iso: string, months: number): string {
   const d = new Date(iso + 'T00:00:00')
   d.setMonth(d.getMonth() + months)
@@ -274,7 +288,7 @@ export default function Contratos() {
                       </span>
                     )}
                   </td>
-                  <td>{c.razao_social}</td>
+                  <td>{titleCaseRazao(c.razao_social)}</td>
                   <td style={{ fontSize: 11, color: 'var(--text-muted)' }}>{c.cnpj}</td>
                   <td>{formatBRL(c.fee_mensal)}</td>
                   <td>{formatDate(c.data_inicio)}</td>
@@ -518,13 +532,13 @@ export default function Contratos() {
               <CheckCircle2 size={20} /> Aprovar contrato
             </h2>
             <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 16 }}>
-              <strong>{approveModal.contract.numero}</strong> · {approveModal.contract.razao_social}
+              <strong>{approveModal.contract.numero}</strong> · {titleCaseRazao(approveModal.contract.razao_social)}
             </p>
 
             <div style={{ padding: 12, background: 'rgba(52,199,89,0.08)', border: '1px solid rgba(52,199,89,0.2)', borderRadius: 8, marginBottom: 16, fontSize: 12, lineHeight: 1.6 }}>
               Isso vai <strong>criar um cliente no CRM</strong> com:
               <ul style={{ margin: '8px 0 0 18px', padding: 0 }}>
-                <li>Conta: <strong>{approveModal.contract.razao_social}</strong></li>
+                <li>Conta: <strong>{titleCaseRazao(approveModal.contract.razao_social)}</strong></li>
                 <li>Usuário <strong>gerente</strong></li>
                 <li>Senha: <code style={{ background: 'rgba(0,0,0,0.3)', padding: '1px 5px', borderRadius: 3 }}>dros2026</code></li>
               </ul>
@@ -610,7 +624,7 @@ export default function Contratos() {
               <RefreshCw size={20} style={{ color: '#FFB300' }} /> Sincronizar com HUB
             </h2>
             <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 16 }}>
-              <strong>{syncHubModal.numero}</strong> · {syncHubModal.razao_social}
+              <strong>{syncHubModal.numero}</strong> · {titleCaseRazao(syncHubModal.razao_social)}
             </p>
 
             <div style={{ padding: 12, background: 'rgba(255,179,0,0.08)', border: '1px solid rgba(255,179,0,0.25)', borderRadius: 8, marginBottom: 16, fontSize: 13, lineHeight: 1.6 }}>
