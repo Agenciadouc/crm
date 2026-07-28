@@ -539,6 +539,49 @@ export const fetchLeadFollowUp = (leadId: number, accountId: number) =>
   apiFetch<{ lead_follow_up: LeadFollowUp | null }>(`/api/follow-ups/lead/${leadId}?account_id=${accountId}`).then(d => d.lead_follow_up)
 
 // =============================================
+// Templates Globais (Plano C) — super_admin only
+// =============================================
+
+export interface GlobalCadence {
+  id: number; name: string; description: string | null; is_active: number;
+  created_by: number | null; created_at: string; updated_at: string;
+  attempts: Array<Omit<CadenceAttempt, 'cadence_id'> & { global_cadence_id?: number }>
+  applied_count?: number
+}
+
+export interface GlobalFollowUp {
+  id: number; name: string; description: string | null; stop_on_reply: number; is_active: number;
+  type: 'sequence' | 'inactivity';
+  inactivity_days?: number | null; inactivity_minutes?: number | null;
+  inactivity_mode?: 'rotation' | 'sequence' | null;
+  variation_delay_seconds: number;
+  on_reply_action: 'pause' | 'roulette' | 'assign_user';
+  created_by: number | null; created_at: string; updated_at: string;
+  steps: Array<Omit<FollowUpStep, 'follow_up_id'> & { global_follow_up_id?: number }>
+  applied_count?: number
+}
+
+export interface GlobalCadenceAppliedRow { cadence_id: number; cadence_name: string; account_id: number; account_name: string | null; created_at: string }
+export interface GlobalFollowUpAppliedRow { follow_up_id: number; follow_up_name: string; account_id: number; account_name: string | null; instance_id: number | null; instance_name: string | null; agent_id: number | null; created_at: string }
+
+export const fetchGlobalCadences = () => apiFetch<{ cadences: GlobalCadence[] }>('/api/global-templates/cadences').then(d => d.cadences)
+export const fetchGlobalCadence = (id: number) => apiFetch<{ cadence: GlobalCadence }>(`/api/global-templates/cadences/${id}`).then(d => d.cadence)
+export const createGlobalCadence = (data: { name: string; description?: string | null; attempts?: Partial<CadenceAttempt>[] }) => apiFetch<{ cadence: GlobalCadence }>('/api/global-templates/cadences', { method: 'POST', body: JSON.stringify(data) }).then(d => d.cadence)
+export const updateGlobalCadence = (id: number, data: { name?: string; description?: string | null; is_active?: boolean }) => apiFetch(`/api/global-templates/cadences/${id}`, { method: 'PUT', body: JSON.stringify(data) })
+export const updateGlobalCadenceAttempts = (id: number, attempts: Partial<CadenceAttempt>[]) => apiFetch(`/api/global-templates/cadences/${id}/attempts`, { method: 'PUT', body: JSON.stringify({ attempts }) })
+export const deleteGlobalCadence = (id: number) => apiFetch(`/api/global-templates/cadences/${id}`, { method: 'DELETE' })
+export const fetchGlobalCadenceAppliedIn = (id: number) => apiFetch<{ applied: GlobalCadenceAppliedRow[] }>(`/api/global-templates/cadences/${id}/applied-in`).then(d => d.applied)
+export const applyGlobalCadence = (id: number, account_ids: number[], overwrite = false) => apiFetch<{ results: Array<{ account_id: number; account_name?: string; ok: boolean; error?: string; new_cadence_id?: number }> }>(`/api/global-templates/cadences/${id}/apply`, { method: 'POST', body: JSON.stringify({ account_ids, overwrite }) }).then(d => d.results)
+
+export const fetchGlobalFollowUps = () => apiFetch<{ follow_ups: GlobalFollowUp[] }>('/api/global-templates/follow-ups').then(d => d.follow_ups)
+export const fetchGlobalFollowUp = (id: number) => apiFetch<{ follow_up: GlobalFollowUp }>(`/api/global-templates/follow-ups/${id}`).then(d => d.follow_up)
+export const createGlobalFollowUp = (data: Partial<GlobalFollowUp> & { name: string; steps: Partial<FollowUpStep>[] }) => apiFetch<{ follow_up: GlobalFollowUp }>('/api/global-templates/follow-ups', { method: 'POST', body: JSON.stringify(data) }).then(d => d.follow_up)
+export const updateGlobalFollowUp = (id: number, data: Partial<GlobalFollowUp> & { steps?: Partial<FollowUpStep>[] }) => apiFetch<{ follow_up: GlobalFollowUp }>(`/api/global-templates/follow-ups/${id}`, { method: 'PUT', body: JSON.stringify(data) }).then(d => d.follow_up)
+export const deleteGlobalFollowUp = (id: number) => apiFetch(`/api/global-templates/follow-ups/${id}`, { method: 'DELETE' })
+export const fetchGlobalFollowUpAppliedIn = (id: number) => apiFetch<{ applied: GlobalFollowUpAppliedRow[] }>(`/api/global-templates/follow-ups/${id}/applied-in`).then(d => d.applied)
+export const applyGlobalFollowUp = (id: number, mappings: Array<{ account_id: number; instance_id: number; agent_id?: number | null; inactivity_stage_id?: number | null }>, overwrite = false) => apiFetch<{ results: Array<{ account_id: number; account_name?: string; ok: boolean; error?: string; new_follow_up_id?: number }> }>(`/api/global-templates/follow-ups/${id}/apply`, { method: 'POST', body: JSON.stringify({ mappings, overwrite }) }).then(d => d.results)
+
+// =============================================
 // Lead Handoff: first_msg_template + app-settings
 // =============================================
 export const updateInstanceFirstMsgTemplate = (instanceId: number, template: string | null) =>

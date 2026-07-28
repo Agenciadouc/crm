@@ -8,7 +8,7 @@ import { apiFetch, fetchTaskCounts, fetchPendingTransferRequests, fetchAlerts } 
 import {
   LayoutDashboard, Kanban, Users, MessageCircle, UserCog, GitBranch,
   Plug, Settings, Building2, LogOut, UsersRound, Menu, X,
-  ListOrdered, MessageSquarePlus, ClipboardList, Rocket, ListTodo, ExternalLink, Tag as TagIcon, FileText, FileSignature, ArrowRightLeft, Zap, Bot, Sun, Moon, BarChart3,
+  ListOrdered, MessageSquarePlus, ClipboardList, Rocket, ListTodo, ExternalLink, Tag as TagIcon, FileText, FileSignature, ArrowRightLeft, Zap, Bot, Sun, Moon, BarChart3, Layers,
 } from 'lucide-react'
 
 function getInitials(name: string): string {
@@ -123,6 +123,9 @@ export default function Sidebar() {
               </NavLink>
               <NavLink to="/contratos" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`} onClick={closeMobile}>
                 <FileSignature size={16} /> Contratos
+              </NavLink>
+              <NavLink to="/global-templates" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`} onClick={closeMobile}>
+                <Layers size={16} /> Templates Globais
               </NavLink>
             </>
           )}

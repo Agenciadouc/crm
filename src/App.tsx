@@ -21,6 +21,7 @@ import Funnels from './pages/Funnels'
 import Integrations from './pages/Integrations'
 import SettingsPage from './pages/Settings'
 import Cadences from './pages/Cadences'
+import GlobalTemplates from './pages/GlobalTemplates'
 import FollowUps from './pages/FollowUps'
 import Agents from './pages/Agents'
 import ReadyMessages from './pages/ReadyMessages'
@@ -90,6 +91,7 @@ function AppRoutes() {
             <Route path="/admin/clients" element={<AdminClients />} />
             <Route path="/admin/clients/:id" element={<AdminClientDetail />} />
             <Route path="/admin/users" element={<AdminUsers />} />
+            <Route path="/global-templates" element={<GlobalTemplates />} />
           </>}
           {canManageProposals && <Route path="/admin/propostas" element={<Propostas />} />}
           {canManageContracts && <Route path="/contratos" element={<Contratos />} />}

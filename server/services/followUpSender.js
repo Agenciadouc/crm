@@ -6,18 +6,7 @@ import fetch from 'node-fetch'
 import db from '../db.js'
 import { broadcastSSE } from '../sse.js'
 import { sendViaInstance } from './leadHandoff.js'
-
-// Substitui variaveis no template: {{nome}}, {{primeiro_nome}}
-function renderTemplate(template, lead) {
-  if (!template) return ''
-  const fullName = lead?.name || ''
-  const firstName = fullName.split(' ')[0] || ''
-  return template
-    .replace(/\{\{nome\}\}/g, fullName)
-    .replace(/\{\{name\}\}/g, fullName)
-    .replace(/\{\{primeiro_nome\}\}/g, firstName)
-    .replace(/\{\{first_name\}\}/g, firstName)
-}
+import { applyMessageVars, templateNeedsAttendant, buildVarContext } from '../lib/messageVars.js'
 
 // Escolhe texto da variação se step.variations tem array. Fallback message_template.
 function pickVariationText(step) {
@@ -107,7 +96,29 @@ export async function sendFollowUpMessage(leadFollowUpId) {
     }
 
     // Renderiza msg (escolhe variação aleatoria se step.variations existe, senao usa message_template)
-    const text = renderTemplate(pickVariationText(step), lead)
+    const rawText = pickVariationText(step)
+
+    // Se template usa {{atendente}} mas lead nao tem attendant_id, pausa + cria alerta
+    // (senao envia msg tipo "atenciosamente, " sem nome, quebrado)
+    let attendant = null
+    if (lead.attendant_id) {
+      attendant = db.prepare("SELECT id, name FROM users WHERE id = ?").get(lead.attendant_id)
+    }
+    if (templateNeedsAttendant(rawText) && !attendant) {
+      pauseLeadFollowUp(leadFollowUpId, 'lead_no_attendant')
+      try {
+        db.prepare(`
+          INSERT INTO analyst_alerts (account_id, lead_id, type, severity, title, description, suggested_action)
+          VALUES (?, ?, 'follow_up_paused_no_attendant', 'warning', ?, ?, 'Atribua um atendente ao lead pra retomar o follow-up.')
+        `).run(lead.account_id, lead.id,
+          `Follow-up pausado: lead sem atendente`,
+          `O template do follow-up "${followUp.name}" usa {{atendente}}, mas o lead ${lead.name || lead.id} nao tem atendente atribuido.`)
+      } catch (e) { console.error('[FollowUp] Falha ao criar alert lead_no_attendant:', e.message) }
+      console.log(`[FollowUp] Pausado lead=${lead.id} — template usa {{atendente}} mas lead sem atendente`)
+      return
+    }
+
+    const text = applyMessageVars(rawText, buildVarContext(lead, attendant))
 
     // Envia via sendViaInstance (pre-flight de numero + cache + tratamento consistente)
     const sendRes = await sendViaInstance(instance, lead.phone, text, { leadId: lead.id })
@@ -193,6 +204,24 @@ export async function sendFollowUpMessage(leadFollowUpId) {
   } finally {
     sending.delete(leadFollowUpId)
   }
+}
+
+// Retoma follow-ups pausados por 'lead_no_attendant' quando o lead ganha atendente.
+// Chamado a cada tick do scheduler pra nao perder momento (leve — 1 query indexada).
+export function resumeFollowUpsIfAttendantNowAssigned() {
+  const resumed = db.prepare(`
+    SELECT lfu.id FROM lead_follow_ups lfu
+    JOIN leads l ON l.id = lfu.lead_id
+    WHERE lfu.status = 'paused'
+      AND lfu.paused_reason = 'lead_no_attendant'
+      AND l.attendant_id IS NOT NULL
+    LIMIT 100
+  `).all()
+  if (resumed.length === 0) return 0
+  console.log(`[FollowUp] Retomando ${resumed.length} follow-up(s) — lead ganhou atendente`)
+  const stmt = db.prepare("UPDATE lead_follow_ups SET status='active', paused_at=NULL, paused_reason=NULL, next_run_at=datetime('now'), updated_at=datetime('now') WHERE id=?")
+  for (const r of resumed) stmt.run(r.id)
+  return resumed.length
 }
 
 // Reativacao quando instancia volta a conectar (chamado por scheduler.checkWhatsAppInstances)

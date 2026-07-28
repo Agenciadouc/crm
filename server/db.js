@@ -1310,6 +1310,70 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_contracts_created_at ON contracts(created_at DESC);
 `)
 
+// ─── Global templates (Plano C) ─────────────────────────────────────────
+// Templates de cadences e follow-ups criados pelo super_admin, sem account_id.
+// Ao "aplicar" numa conta, e feito um SNAPSHOT (INSERT em cadences/follow_ups com cloned_from_global_id).
+// Editar template global NAO propaga pras contas — precisa "Reaplicar".
+db.exec(`
+  CREATE TABLE IF NOT EXISTS global_cadences (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    name         TEXT NOT NULL,
+    description  TEXT,
+    is_active    INTEGER NOT NULL DEFAULT 1,
+    created_by   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE TABLE IF NOT EXISTS global_cadence_attempts (
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    global_cadence_id  INTEGER NOT NULL REFERENCES global_cadences(id) ON DELETE CASCADE,
+    position           INTEGER NOT NULL DEFAULT 1,
+    action_type        TEXT NOT NULL DEFAULT 'mensagem',
+    description        TEXT,
+    instructions       TEXT,
+    delay_days         INTEGER NOT NULL DEFAULT 0,
+    delay_minutes      INTEGER,
+    scheduled_time     TEXT,
+    auto_message       TEXT,
+    schedule_mode      TEXT NOT NULL DEFAULT 'date',
+    call_script        TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_gca_cadence ON global_cadence_attempts(global_cadence_id, position);
+
+  CREATE TABLE IF NOT EXISTS global_follow_ups (
+    id                        INTEGER PRIMARY KEY AUTOINCREMENT,
+    name                      TEXT NOT NULL,
+    description               TEXT,
+    stop_on_reply             INTEGER NOT NULL DEFAULT 1,
+    is_active                 INTEGER NOT NULL DEFAULT 1,
+    type                      TEXT NOT NULL DEFAULT 'sequence',
+    inactivity_days           INTEGER,
+    inactivity_minutes        INTEGER,
+    inactivity_mode           TEXT DEFAULT 'rotation',
+    variation_delay_seconds   INTEGER NOT NULL DEFAULT 30,
+    on_reply_action           TEXT NOT NULL DEFAULT 'pause',
+    created_by                INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    created_at                TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at                TEXT NOT NULL DEFAULT (datetime('now'))
+    -- Sem instance_id/agent_id/inactivity_stage_id/on_reply_*_id: resolvidos no apply() por conta
+  );
+  CREATE TABLE IF NOT EXISTS global_follow_up_steps (
+    id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+    global_follow_up_id   INTEGER NOT NULL REFERENCES global_follow_ups(id) ON DELETE CASCADE,
+    position              INTEGER NOT NULL DEFAULT 1,
+    delay_minutes         INTEGER NOT NULL DEFAULT 60,
+    message_template      TEXT NOT NULL DEFAULT '',
+    schedule_mode         TEXT NOT NULL DEFAULT 'relative',
+    scheduled_at          TEXT,
+    variations            TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_gfs_followup ON global_follow_up_steps(global_follow_up_id, position);
+`)
+
+// Audit: qual template global originou uma cadence/follow-up numa conta (nullable — nao migra dados antigos)
+addColumnIfNotExists('cadences', 'cloned_from_global_id', 'INTEGER REFERENCES global_cadences(id) ON DELETE SET NULL')
+addColumnIfNotExists('follow_ups', 'cloned_from_global_id', 'INTEGER REFERENCES global_follow_ups(id) ON DELETE SET NULL')
+
 // Seed super_admin if not exists
 const adminExists = db.prepare('SELECT id FROM users WHERE email = ?').get('admin@drosagencia.com.br')
 if (!adminExists) {

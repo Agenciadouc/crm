@@ -2,7 +2,7 @@ import fetch from 'node-fetch'
 import db from './db.js'
 import { broadcastSSE } from './sse.js'
 import { resumeBroadcastIfPaused, runBroadcastLoop } from './routes/broadcasts.js'
-import { sendFollowUpMessage, resumeFollowUpsIfPaused } from './services/followUpSender.js'
+import { sendFollowUpMessage, resumeFollowUpsIfPaused, resumeFollowUpsIfAttendantNowAssigned } from './services/followUpSender.js'
 import { processInactivityFollowUps } from './services/inactivityScanner.js'
 import { triggerCapiForStageChange } from './services/metaCapi.js'
 import { aggregateAllAccounts } from './services/attendantMetrics.js'
@@ -335,6 +335,9 @@ function cleanupStaleQRCodes() {
 
 // ─── Follow-ups due ─────────────────────────────────────────────
 async function processFollowUps() {
+  // Antes de disparar due: retoma follow-ups pausados por 'lead_no_attendant' se lead ja tem atendente
+  try { resumeFollowUpsIfAttendantNowAssigned() } catch (e) { console.error('[FollowUp] resume attendant err:', e.message) }
+
   const due = db.prepare(`
     SELECT id FROM lead_follow_ups
     WHERE status='active' AND next_run_at IS NOT NULL AND datetime(next_run_at) <= datetime('now')
