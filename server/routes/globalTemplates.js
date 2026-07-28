@@ -4,10 +4,85 @@
 // Editar template global NAO propaga automatico — precisa "Reaplicar".
 
 import { Router } from 'express'
-import db from '../db.js'
-import { requireRole } from '../middleware/auth.js'
+import db, { DEFAULT_EVOLUTION_API_URL, DEFAULT_EVOLUTION_API_KEY } from '../db.js'
+import { requireRole, scopeToAccount } from '../middleware/auth.js'
 
 const router = Router()
+
+// ============================================================
+// ENDPOINTS PRA GERENTE (list disponiveis + aplicar na propria conta)
+// ============================================================
+// Diferente do /apply do super_admin (que aceita account_ids), aqui gerente/super_admin
+// aplica na CONTA DELE (req.accountId, resolvido via scopeToAccount middleware do index.js).
+
+// GET /api/global-templates/available?account_id=X (gerente/super_admin)
+// Lista todos globals ativos + flag applied_here se conta ja recebeu esse template
+router.get('/available', requireRole('super_admin', 'gerente'), scopeToAccount, (req, res) => {
+  if (!req.accountId) return res.status(400).json({ error: 'account_id required' })
+
+  const cadences = db.prepare('SELECT * FROM global_cadences WHERE is_active = 1 ORDER BY name').all()
+  const stmtCadAttempts = db.prepare('SELECT * FROM global_cadence_attempts WHERE global_cadence_id = ? ORDER BY position')
+  const stmtCadApplied = db.prepare('SELECT id FROM cadences WHERE account_id = ? AND cloned_from_global_id = ? AND is_active = 1 LIMIT 1')
+  for (const c of cadences) {
+    c.attempts = stmtCadAttempts.all(c.id)
+    const applied = stmtCadApplied.get(req.accountId, c.id)
+    c.applied_here = !!applied
+    c.applied_cadence_id = applied?.id || null
+  }
+
+  const followUps = db.prepare('SELECT * FROM global_follow_ups WHERE is_active = 1 ORDER BY name').all()
+  const stmtFuSteps = db.prepare('SELECT * FROM global_follow_up_steps WHERE global_follow_up_id = ? ORDER BY position')
+  const stmtFuApplied = db.prepare('SELECT id FROM follow_ups WHERE account_id = ? AND cloned_from_global_id = ? AND is_active = 1 LIMIT 1')
+  for (const fu of followUps) {
+    fu.steps = stmtFuSteps.all(fu.id)
+    const applied = stmtFuApplied.get(req.accountId, fu.id)
+    fu.applied_here = !!applied
+    fu.applied_follow_up_id = applied?.id || null
+  }
+
+  res.json({ cadences, follow_ups: followUps })
+})
+
+// POST /api/global-templates/cadences/:id/apply-here?account_id=X — gerente aplica na CONTA DELE
+// Body: { overwrite?: boolean }
+router.post('/cadences/:id/apply-here', requireRole('super_admin', 'gerente'), scopeToAccount, (req, res) => {
+  if (!req.accountId) return res.status(400).json({ error: 'account_id required' })
+  const { overwrite } = req.body
+
+  const gc = db.prepare('SELECT id FROM global_cadences WHERE id = ? AND is_active = 1').get(req.params.id)
+  if (!gc) return res.status(404).json({ error: 'Template nao encontrado' })
+
+  try {
+    if (overwrite) {
+      db.prepare("UPDATE cadences SET is_active = 0, updated_at = datetime('now') WHERE account_id = ? AND cloned_from_global_id = ?").run(req.accountId, req.params.id)
+    }
+    const newId = cloneGlobalCadenceToAccount(req.params.id, req.accountId)
+    res.json({ ok: true, new_cadence_id: newId })
+  } catch (e) {
+    res.status(400).json({ ok: false, error: e.message })
+  }
+})
+
+// POST /api/global-templates/follow-ups/:id/apply-here?account_id=X — gerente aplica follow-up na conta dele
+// Body: { instance_id, agent_id?, inactivity_stage_id?, overwrite? }
+router.post('/follow-ups/:id/apply-here', requireRole('super_admin', 'gerente'), scopeToAccount, (req, res) => {
+  if (!req.accountId) return res.status(400).json({ error: 'account_id required' })
+  const { instance_id, agent_id, inactivity_stage_id, overwrite } = req.body
+  if (!instance_id) return res.status(400).json({ error: 'instance_id obrigatorio' })
+
+  const gfu = db.prepare('SELECT id FROM global_follow_ups WHERE id = ? AND is_active = 1').get(req.params.id)
+  if (!gfu) return res.status(404).json({ error: 'Template nao encontrado' })
+
+  try {
+    if (overwrite) {
+      db.prepare("UPDATE follow_ups SET is_active = 0, updated_at = datetime('now') WHERE account_id = ? AND cloned_from_global_id = ?").run(req.accountId, req.params.id)
+    }
+    const newId = cloneGlobalFollowUpToAccount(req.params.id, req.accountId, { instance_id, agent_id, inactivity_stage_id, created_by: req.user.id })
+    res.json({ ok: true, new_follow_up_id: newId })
+  } catch (e) {
+    res.status(400).json({ ok: false, error: e.message })
+  }
+})
 
 // ============================================================
 // CADENCES GLOBAIS

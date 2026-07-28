@@ -581,6 +581,13 @@ export const deleteGlobalFollowUp = (id: number) => apiFetch(`/api/global-templa
 export const fetchGlobalFollowUpAppliedIn = (id: number) => apiFetch<{ applied: GlobalFollowUpAppliedRow[] }>(`/api/global-templates/follow-ups/${id}/applied-in`).then(d => d.applied)
 export const applyGlobalFollowUp = (id: number, mappings: Array<{ account_id: number; instance_id: number; agent_id?: number | null; inactivity_stage_id?: number | null }>, overwrite = false) => apiFetch<{ results: Array<{ account_id: number; account_name?: string; ok: boolean; error?: string; new_follow_up_id?: number }> }>(`/api/global-templates/follow-ups/${id}/apply`, { method: 'POST', body: JSON.stringify({ mappings, overwrite }) }).then(d => d.results)
 
+// Gerente/super_admin usar templates globais na conta atual (nao precisa admin fazer o apply)
+export type GlobalTemplateAvailable = GlobalCadence & { applied_here: boolean; applied_cadence_id: number | null }
+export type GlobalFollowUpAvailable = GlobalFollowUp & { applied_here: boolean; applied_follow_up_id: number | null }
+export const fetchAvailableGlobalTemplates = (accountId: number) => apiFetch<{ cadences: GlobalTemplateAvailable[]; follow_ups: GlobalFollowUpAvailable[] }>(`/api/global-templates/available?account_id=${accountId}`)
+export const applyGlobalCadenceHere = (globalId: number, accountId: number, overwrite = false) => apiFetch<{ ok: boolean; new_cadence_id?: number; error?: string }>(`/api/global-templates/cadences/${globalId}/apply-here?account_id=${accountId}`, { method: 'POST', body: JSON.stringify({ overwrite }) })
+export const applyGlobalFollowUpHere = (globalId: number, accountId: number, opts: { instance_id: number; agent_id?: number | null; inactivity_stage_id?: number | null; overwrite?: boolean }) => apiFetch<{ ok: boolean; new_follow_up_id?: number; error?: string }>(`/api/global-templates/follow-ups/${globalId}/apply-here?account_id=${accountId}`, { method: 'POST', body: JSON.stringify(opts) })
+
 // =============================================
 // Lead Handoff: first_msg_template + app-settings
 // =============================================

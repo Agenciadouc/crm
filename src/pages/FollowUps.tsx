@@ -3,9 +3,11 @@ import { useAccount } from '../context/AccountContext'
 import {
   fetchFollowUps, createFollowUp, updateFollowUp, deleteFollowUp,
   fetchWhatsAppInstances, fetchFunnels, fetchUsers, fetchTags,
+  fetchAvailableGlobalTemplates, applyGlobalFollowUpHere,
   type FollowUp, type FollowUpStep, type WhatsAppInstance, type Funnel, type User, type Tag,
+  type GlobalFollowUpAvailable,
 } from '../lib/api'
-import { Zap, Plus, Edit3, Trash2, MessageSquare, Clock, Smartphone, Trash, Calendar, Activity } from 'lucide-react'
+import { Zap, Plus, Edit3, Trash2, MessageSquare, Clock, Smartphone, Trash, Calendar, Activity, Layers, Download, ChevronDown, ChevronUp } from 'lucide-react'
 
 type StepDraft = {
   delay_value: number
@@ -63,6 +65,9 @@ export default function FollowUps() {
   const [loading, setLoading] = useState(true)
   const [modalMode, setModalMode] = useState<'new' | number | null>(null)
   const [saving, setSaving] = useState(false)
+  const [globals, setGlobals] = useState<GlobalFollowUpAvailable[]>([])
+  const [showGlobals, setShowGlobals] = useState(true)
+  const [applyingGlobal, setApplyingGlobal] = useState<GlobalFollowUpAvailable | null>(null)
 
   // Form
   const [type, setType] = useState<FollowUpType>('sequence')
@@ -94,12 +99,14 @@ export default function FollowUps() {
       fetchFunnels(accountId),
       fetchUsers(accountId),
       fetchTags(accountId),
-    ]).then(([fus, insts, fns, usrs, tgs]) => {
+      fetchAvailableGlobalTemplates(accountId).then(d => d.follow_ups).catch(() => []),
+    ]).then(([fus, insts, fns, usrs, tgs, globs]) => {
       setFollowUps(fus)
       setInstances(insts)
       setFunnels(fns)
       setUsers(usrs.filter(u => u.is_active === 1))
       setTags(tgs)
+      setGlobals(globs)
     }).finally(() => setLoading(false))
   }
   useEffect(load, [accountId])
@@ -308,6 +315,54 @@ export default function FollowUps() {
       <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 16 }}>
         Sequências de mensagens automáticas. <strong>Sequência</strong>: atendente atribui lead e sistema envia em ordem. <strong>Inatividade</strong>: sistema scan-eia leads inativos numa etapa e envia automaticamente.
       </p>
+
+      {globals.length > 0 && (
+        <section style={{ marginBottom: 16, padding: 12, background: 'rgba(126,231,135,0.04)', border: '1px solid rgba(126,231,135,0.15)', borderRadius: 8 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer' }} onClick={() => setShowGlobals(s => !s)}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <Layers size={14} style={{ color: '#7ee787' }} />
+              <strong style={{ fontSize: 13 }}>Templates globais disponíveis</strong>
+              <span style={{ fontSize: 11, color: '#9B96B0' }}>({globals.length})</span>
+            </div>
+            {showGlobals ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+          </div>
+          {showGlobals && (
+            <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {globals.map(g => (
+                <div key={g.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', background: 'rgba(255,255,255,0.02)', borderRadius: 6, border: '1px solid var(--border-subtle)' }}>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span style={{ fontSize: 13, fontWeight: 600 }}>{g.name}</span>
+                      <span style={{ fontSize: 10, color: '#9B96B0', background: 'rgba(155,150,176,0.1)', padding: '1px 6px', borderRadius: 8 }}>{g.steps.length} steps</span>
+                      <span style={{ fontSize: 10, color: '#FFB300', background: 'rgba(255,179,0,0.1)', padding: '1px 6px', borderRadius: 8 }}>{g.type}</span>
+                      {g.applied_here && <span style={{ fontSize: 10, color: '#7ee787', background: 'rgba(126,231,135,0.15)', padding: '1px 6px', borderRadius: 8 }}>✓ já usando</span>}
+                    </div>
+                    {g.description && <div style={{ fontSize: 11, color: '#9B96B0', marginTop: 2 }}>{g.description}</div>}
+                  </div>
+                  <button
+                    className="btn btn-primary btn-sm"
+                    onClick={() => setApplyingGlobal(g)}
+                    title={g.applied_here ? 'Reaplicar sobrescreve a cópia atual desta conta' : 'Copia esse template pra sua conta'}
+                  >
+                    <Download size={12} /> {g.applied_here ? 'Reaplicar' : 'Usar aqui'}
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
+
+      {applyingGlobal && (
+        <ApplyGlobalFollowUpModal
+          global={applyingGlobal}
+          accountId={accountId || 0}
+          instances={instances}
+          funnels={funnels}
+          onClose={() => setApplyingGlobal(null)}
+          onDone={() => { setApplyingGlobal(null); load() }}
+        />
+      )}
 
       {loading ? (
         <div className="loading-container"><div className="spinner" /></div>
@@ -679,6 +734,89 @@ export default function FollowUps() {
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+// ============================================================
+// APPLY GLOBAL FOLLOW-UP MODAL — usado quando gerente clica "Usar aqui"
+// ============================================================
+
+function ApplyGlobalFollowUpModal({ global, accountId, instances, funnels, onClose, onDone }: {
+  global: GlobalFollowUpAvailable
+  accountId: number
+  instances: WhatsAppInstance[]
+  funnels: Funnel[]
+  onClose: () => void
+  onDone: () => void
+}) {
+  const connected = instances.filter(i => i.status === 'connected')
+  const [instanceId, setInstanceId] = useState<number | ''>(connected[0]?.id || '')
+  const [stageId, setStageId] = useState<number | ''>('')
+  const [saving, setSaving] = useState(false)
+  const allStages = funnels.flatMap(f => f.stages || [])
+
+  const needsStage = global.type === 'inactivity'
+
+  const handleApply = async () => {
+    if (!instanceId) { alert('Selecione uma instancia'); return }
+    if (needsStage && !stageId) { alert('Follow-up de inatividade precisa de uma etapa do funil'); return }
+    setSaving(true)
+    try {
+      const r = await applyGlobalFollowUpHere(global.id, accountId, {
+        instance_id: +instanceId,
+        inactivity_stage_id: stageId ? +stageId : null,
+        overwrite: global.applied_here,
+      })
+      if (!r.ok) throw new Error(r.error || 'erro')
+      onDone()
+    } catch (e: any) {
+      alert('Erro: ' + (e?.message || 'unknown'))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal" style={{ maxWidth: 480 }} onClick={e => e.stopPropagation()}>
+        <h2>{global.applied_here ? 'Reaplicar' : 'Usar'} follow-up global</h2>
+        <p style={{ fontSize: 12, color: '#9B96B0', marginBottom: 12 }}>
+          Vai copiar <strong>{global.name}</strong> ({global.steps.length} steps) pra sua conta. {global.applied_here && 'A cópia anterior será desativada.'}
+        </p>
+
+        <div className="form-group">
+          <label>Instância WhatsApp *</label>
+          {connected.length === 0 ? (
+            <div style={{ fontSize: 12, color: '#FF6B6B', padding: 8, background: 'rgba(255,107,107,0.05)', borderRadius: 6 }}>
+              ⚠ Nenhuma instância conectada. Conecte um WhatsApp em Integrações antes.
+            </div>
+          ) : (
+            <select className="select" value={instanceId} onChange={e => setInstanceId(e.target.value ? +e.target.value : '')}>
+              <option value="">Selecionar...</option>
+              {connected.map(i => <option key={i.id} value={i.id}>{i.instance_name}</option>)}
+            </select>
+          )}
+        </div>
+
+        {needsStage && (
+          <div className="form-group">
+            <label>Etapa do funil (inatividade) *</label>
+            <select className="select" value={stageId} onChange={e => setStageId(e.target.value ? +e.target.value : '')}>
+              <option value="">Selecionar...</option>
+              {allStages.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+            </select>
+            <small style={{ color: '#9B96B0', fontSize: 11 }}>Sistema vai escanear leads inativos nesta etapa por {global.inactivity_days || 2} dias</small>
+          </div>
+        )}
+
+        <div className="modal-actions">
+          <button className="btn btn-secondary" onClick={onClose}>Cancelar</button>
+          <button className="btn btn-primary" onClick={handleApply} disabled={saving || connected.length === 0}>
+            <Download size={14} /> {saving ? 'Aplicando...' : global.applied_here ? 'Reaplicar' : 'Usar aqui'}
+          </button>
+        </div>
+      </div>
     </div>
   )
 }

@@ -2,9 +2,10 @@ import { useState, useEffect } from 'react'
 import { useAccount } from '../context/AccountContext'
 import {
   fetchCadences, createCadence, updateCadenceAttempts, deleteCadence,
-  type Cadence, type CadenceAttempt,
+  fetchAvailableGlobalTemplates, applyGlobalCadenceHere,
+  type Cadence, type CadenceAttempt, type GlobalTemplateAvailable,
 } from '../lib/api'
-import { Plus, Trash2, Save, ListOrdered, Phone, Mail, MessageCircle, Video, MapPin, ChevronDown, ChevronUp, HelpCircle, Copy, Check } from 'lucide-react'
+import { Plus, Trash2, Save, ListOrdered, Phone, Mail, MessageCircle, Video, MapPin, ChevronDown, ChevronUp, HelpCircle, Copy, Check, Layers, Download } from 'lucide-react'
 import { MESSAGE_VARIABLES } from '../lib/messageVars'
 
 const ACTION_TYPES = [
@@ -28,6 +29,9 @@ export default function Cadences() {
   const [expanded, setExpanded] = useState<number | null>(null)
   const [showVars, setShowVars] = useState(false)
   const [copiedVar, setCopiedVar] = useState<string | null>(null)
+  const [globals, setGlobals] = useState<GlobalTemplateAvailable[]>([])
+  const [showGlobals, setShowGlobals] = useState(true)
+  const [applyingGlobalId, setApplyingGlobalId] = useState<number | null>(null)
 
   const copyVar = (token: string) => {
     navigator.clipboard.writeText(token)
@@ -35,8 +39,32 @@ export default function Cadences() {
     setTimeout(() => setCopiedVar(null), 1500)
   }
 
-  const load = () => { if (accountId) { setLoading(true); fetchCadences(accountId).then(setCadences).finally(() => setLoading(false)) } }
+  const load = () => {
+    if (!accountId) return
+    setLoading(true)
+    Promise.all([
+      fetchCadences(accountId),
+      fetchAvailableGlobalTemplates(accountId).then(d => d.cadences).catch(() => []),
+    ]).then(([cads, globs]) => {
+      setCadences(cads)
+      setGlobals(globs)
+    }).finally(() => setLoading(false))
+  }
   useEffect(load, [accountId])
+
+  const useGlobalTemplate = async (globalId: number, overwrite: boolean) => {
+    if (!accountId) return
+    setApplyingGlobalId(globalId)
+    try {
+      const r = await applyGlobalCadenceHere(globalId, accountId, overwrite)
+      if (!r.ok) throw new Error(r.error || 'erro')
+      load()
+    } catch (e: any) {
+      alert('Erro ao usar template: ' + (e?.message || 'unknown'))
+    } finally {
+      setApplyingGlobalId(null)
+    }
+  }
 
   const handleCreate = async () => {
     if (!accountId || !newName) return
@@ -100,6 +128,43 @@ export default function Cadences() {
             <div className="modal-actions"><button className="btn btn-secondary" onClick={() => setShowVars(false)}>Fechar</button></div>
           </div>
         </div>
+      )}
+
+      {globals.length > 0 && (
+        <section style={{ marginBottom: 16, padding: 12, background: 'rgba(126,231,135,0.04)', border: '1px solid rgba(126,231,135,0.15)', borderRadius: 8 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer' }} onClick={() => setShowGlobals(s => !s)}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <Layers size={14} style={{ color: '#7ee787' }} />
+              <strong style={{ fontSize: 13 }}>Templates globais disponíveis</strong>
+              <span style={{ fontSize: 11, color: '#9B96B0' }}>({globals.length})</span>
+            </div>
+            {showGlobals ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+          </div>
+          {showGlobals && (
+            <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {globals.map(g => (
+                <div key={g.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', background: 'rgba(255,255,255,0.02)', borderRadius: 6, border: '1px solid var(--border-subtle)' }}>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span style={{ fontSize: 13, fontWeight: 600 }}>{g.name}</span>
+                      <span style={{ fontSize: 10, color: '#9B96B0', background: 'rgba(155,150,176,0.1)', padding: '1px 6px', borderRadius: 8 }}>{g.attempts.length} etapas</span>
+                      {g.applied_here && <span style={{ fontSize: 10, color: '#7ee787', background: 'rgba(126,231,135,0.15)', padding: '1px 6px', borderRadius: 8 }}>✓ já usando</span>}
+                    </div>
+                    {g.description && <div style={{ fontSize: 11, color: '#9B96B0', marginTop: 2 }}>{g.description}</div>}
+                  </div>
+                  <button
+                    className="btn btn-primary btn-sm"
+                    onClick={() => useGlobalTemplate(g.id, g.applied_here)}
+                    disabled={applyingGlobalId === g.id}
+                    title={g.applied_here ? 'Reaplicar sobrescreve a cópia atual desta conta' : 'Copia esse template pra sua conta'}
+                  >
+                    <Download size={12} /> {applyingGlobalId === g.id ? 'Aplicando...' : g.applied_here ? 'Reaplicar' : 'Usar aqui'}
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
       )}
 
       {loading ? <div className="loading-container"><div className="spinner" /></div> : (
