@@ -6,6 +6,7 @@ import { broadcastSSE } from '../sse.js'
 import { triggerCapiForStageChange } from '../services/metaCapi.js'
 import { notifyAndOpenLead } from '../services/leadHandoff.js'
 import { sendBotWelcomeForSheetsLead, processInboundMessage, diagnoseForceAi } from '../services/aiAgent.js'
+import { canAtendenteAccessLead } from '../services/leadAccess.js'
 
 const router = Router()
 
@@ -47,10 +48,22 @@ router.get('/', (req, res) => {
   if (show_archived === '1') where.push('l.is_archived = 1')
   else if (show_archived !== 'all') where.push('l.is_archived = 0')
 
-  // Atendente sees leads where he is the main attendant OR assigned to any instance of the lead
+  // Atendente ve leads pela UNIAO de 4 criterios (nao rompe historico):
+  //   1) l.attendant_id = eu (atribuido direto)
+  //   2) lead_instance_assignments (M:N de historico)
+  //   3) l.instance_id = minha instancia primaria (lead nasceu na minha inst)
+  //   4) l.last_instance_id = minha instancia primaria (ultima conversa foi minha)
+  // Se atendente NAO tem primary_instance_id: cai no comportamento antigo (so 1+2), evita perder acesso enquanto gerente nao atribui.
   if (req.user.role === 'atendente') {
-    where.push('(l.attendant_id = ? OR l.id IN (SELECT lead_id FROM lead_instance_assignments WHERE attendant_id = ?))')
-    params.push(req.user.id, req.user.id)
+    const userRow = db.prepare('SELECT primary_instance_id FROM users WHERE id = ?').get(req.user.id)
+    const primaryId = userRow?.primary_instance_id || null
+    if (primaryId) {
+      where.push('(l.attendant_id = ? OR l.id IN (SELECT lead_id FROM lead_instance_assignments WHERE attendant_id = ?) OR l.instance_id = ? OR l.last_instance_id = ?)')
+      params.push(req.user.id, req.user.id, primaryId, primaryId)
+    } else {
+      where.push('(l.attendant_id = ? OR l.id IN (SELECT lead_id FROM lead_instance_assignments WHERE attendant_id = ?))')
+      params.push(req.user.id, req.user.id)
+    }
   }
 
   // Helper: parse CSV de IDs ("1,2,3" → [1,2,3])
@@ -151,19 +164,15 @@ router.post('/', (req, res) => {
       }
     }
     if (existing) {
-      // Se atendente nao eh dono do lead duplicado, retorna mensagem especial (sem expor dados do lead alheio)
-      if (req.user.role === 'atendente' && existing.attendant_id !== req.user.id) {
-        // Verifica tambem se ela esta atribuida via lead_instance_assignments (multi-instancia)
-        const isAssigned = db.prepare('SELECT 1 FROM lead_instance_assignments WHERE lead_id = ? AND attendant_id = ?').get(existing.id, req.user.id)
-        if (!isAssigned) {
-          const owner = existing.attendant_id ? db.prepare('SELECT name FROM users WHERE id = ?').get(existing.attendant_id) : null
-          return res.status(409).json({
-            error: owner ? `Esse telefone ja esta cadastrado com o atendente ${owner.name} da sua empresa.` : 'Esse telefone ja esta cadastrado com outro atendente da sua empresa.',
-            otherAttendant: true,
-            ownerName: owner?.name || null,
-            leadId: existing.id,
-          })
-        }
+      // Se atendente nao pode acessar (nao eh dono, sem assignment, nao eh da instancia dele), retorna msg especial sem expor dados alheios
+      if (req.user.role === 'atendente' && !canAtendenteAccessLead(req.user.id, existing)) {
+        const owner = existing.attendant_id ? db.prepare('SELECT name FROM users WHERE id = ?').get(existing.attendant_id) : null
+        return res.status(409).json({
+          error: owner ? `Esse telefone ja esta cadastrado com o atendente ${owner.name} da sua empresa.` : 'Esse telefone ja esta cadastrado com outro atendente da sua empresa.',
+          otherAttendant: true,
+          ownerName: owner?.name || null,
+          leadId: existing.id,
+        })
       }
       return res.status(409).json({ error: 'Contato ja existe com esse telefone', existing })
     }
@@ -222,11 +231,22 @@ router.post('/', (req, res) => {
 // Archived count (+ count with new activity). Must be declared before `/:id`.
 router.get('/archived-count', (req, res) => {
   if (!req.accountId) return res.json({ count: 0, withActivity: 0 })
-  const base = req.user.role === 'atendente'
-    ? { where: 'account_id = ? AND is_archived = 1 AND attendant_id = ?', args: [req.accountId, req.user.id] }
-    : { where: 'account_id = ? AND is_archived = 1', args: [req.accountId] }
-  const count = db.prepare(`SELECT COUNT(*) as n FROM leads WHERE ${base.where}`).get(...base.args).n
-  const withActivity = db.prepare(`SELECT COUNT(*) as n FROM leads WHERE ${base.where} AND has_new_after_archive = 1`).get(...base.args).n
+  // Espelha a UNIAO usada em GET /leads pra manter consistencia (atendente conta leads da instancia dele tambem)
+  let where = 'account_id = ? AND is_archived = 1'
+  const args = [req.accountId]
+  if (req.user.role === 'atendente') {
+    const userRow = db.prepare('SELECT primary_instance_id FROM users WHERE id = ?').get(req.user.id)
+    const primaryId = userRow?.primary_instance_id || null
+    if (primaryId) {
+      where += ' AND (attendant_id = ? OR id IN (SELECT lead_id FROM lead_instance_assignments WHERE attendant_id = ?) OR instance_id = ? OR last_instance_id = ?)'
+      args.push(req.user.id, req.user.id, primaryId, primaryId)
+    } else {
+      where += ' AND (attendant_id = ? OR id IN (SELECT lead_id FROM lead_instance_assignments WHERE attendant_id = ?))'
+      args.push(req.user.id, req.user.id)
+    }
+  }
+  const count = db.prepare(`SELECT COUNT(*) as n FROM leads WHERE ${where}`).get(...args).n
+  const withActivity = db.prepare(`SELECT COUNT(*) as n FROM leads WHERE ${where} AND has_new_after_archive = 1`).get(...args).n
   res.json({ count, withActivity })
 })
 
@@ -408,7 +428,7 @@ router.get('/:id', (req, res) => {
     WHERE l.id = ?
   `).get(req.params.id)
   if (!lead) return res.status(404).json({ error: 'Lead nao encontrado' })
-  if (req.user.role === 'atendente' && lead.attendant_id !== req.user.id && !db.prepare('SELECT 1 FROM lead_instance_assignments WHERE lead_id = ? AND attendant_id = ?').get(lead.id, req.user.id)) return res.status(403).json({ error: 'Sem permissao' })
+  if (req.user.role === 'atendente' && !canAtendenteAccessLead(req.user.id, lead)) return res.status(403).json({ error: 'Sem permissao' })
 
   // Opening an archived lead acknowledges any new activity — clear the badge
   if (lead.is_archived && lead.has_new_after_archive) {
@@ -436,47 +456,26 @@ router.get('/:id/conversations', (req, res) => {
   const lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(req.params.id)
   if (!lead) return res.status(404).json({ error: 'Lead nao encontrado' })
   if (req.accountId && lead.account_id !== req.accountId) return res.status(403).json({ error: 'Sem permissao' })
+  if (req.user.role === 'atendente' && !canAtendenteAccessLead(req.user.id, lead)) return res.status(403).json({ error: 'Sem permissao' })
 
-  // Quais instancias o user pode ver?
-  // - super_admin/gerente: todas as instancias que conversaram com este lead
-  // - atendente: apenas onde tem assignment OU e atendente principal do lead
-  let convs
-  if (req.user.role === 'atendente') {
-    convs = db.prepare(`
-      SELECT DISTINCT
-        wi.id as instance_id,
-        wi.instance_name,
-        wi.status,
-        lia.attendant_id,
-        u.name as attendant_name,
-        (SELECT COUNT(*) FROM messages WHERE lead_id = ? AND instance_id = wi.id) as msg_count,
-        (SELECT MAX(created_at) FROM messages WHERE lead_id = ? AND instance_id = wi.id) as last_msg_at
-      FROM whatsapp_instances wi
-      LEFT JOIN lead_instance_assignments lia ON lia.instance_id = wi.id AND lia.lead_id = ?
-      LEFT JOIN users u ON u.id = lia.attendant_id
-      WHERE wi.account_id = ?
-        AND (lia.attendant_id = ? OR ? = ?)
-        AND EXISTS (SELECT 1 FROM messages WHERE lead_id = ? AND instance_id = wi.id)
-      ORDER BY last_msg_at DESC
-    `).all(lead.id, lead.id, lead.id, lead.account_id, req.user.id, lead.attendant_id, req.user.id, lead.id)
-  } else {
-    convs = db.prepare(`
-      SELECT
-        wi.id as instance_id,
-        wi.instance_name,
-        wi.status,
-        lia.attendant_id,
-        u.name as attendant_name,
-        (SELECT COUNT(*) FROM messages WHERE lead_id = ? AND instance_id = wi.id) as msg_count,
-        (SELECT MAX(created_at) FROM messages WHERE lead_id = ? AND instance_id = wi.id) as last_msg_at
-      FROM whatsapp_instances wi
-      LEFT JOIN lead_instance_assignments lia ON lia.instance_id = wi.id AND lia.lead_id = ?
-      LEFT JOIN users u ON u.id = lia.attendant_id
-      WHERE wi.account_id = ?
-        AND EXISTS (SELECT 1 FROM messages WHERE lead_id = ? AND instance_id = wi.id)
-      ORDER BY last_msg_at DESC
-    `).all(lead.id, lead.id, lead.id, lead.account_id, lead.id)
-  }
+  // Todas as instancias que conversaram com este lead. Se atendente ja passou o gate acima,
+  // ele pode ler o historico completo do lead (ler != enviar; envio e restringido em messages.js).
+  const convs = db.prepare(`
+    SELECT
+      wi.id as instance_id,
+      wi.instance_name,
+      wi.status,
+      lia.attendant_id,
+      u.name as attendant_name,
+      (SELECT COUNT(*) FROM messages WHERE lead_id = ? AND instance_id = wi.id) as msg_count,
+      (SELECT MAX(created_at) FROM messages WHERE lead_id = ? AND instance_id = wi.id) as last_msg_at
+    FROM whatsapp_instances wi
+    LEFT JOIN lead_instance_assignments lia ON lia.instance_id = wi.id AND lia.lead_id = ?
+    LEFT JOIN users u ON u.id = lia.attendant_id
+    WHERE wi.account_id = ?
+      AND EXISTS (SELECT 1 FROM messages WHERE lead_id = ? AND instance_id = wi.id)
+    ORDER BY last_msg_at DESC
+  `).all(lead.id, lead.id, lead.id, lead.account_id, lead.id)
   res.json({ conversations: convs })
 })
 
@@ -556,7 +555,7 @@ router.put('/:id/stage', (req, res) => {
 router.patch('/:id/archive', (req, res) => {
   const lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(req.params.id)
   if (!lead) return res.status(404).json({ error: 'Lead nao encontrado' })
-  if (req.user.role === 'atendente' && lead.attendant_id !== req.user.id && !db.prepare('SELECT 1 FROM lead_instance_assignments WHERE lead_id = ? AND attendant_id = ?').get(lead.id, req.user.id)) return res.status(403).json({ error: 'Sem permissao' })
+  if (req.user.role === 'atendente' && !canAtendenteAccessLead(req.user.id, lead)) return res.status(403).json({ error: 'Sem permissao' })
   db.prepare("UPDATE leads SET is_archived = 1, archived_at = datetime('now'), has_new_after_archive = 0, updated_at = datetime('now') WHERE id = ?").run(lead.id)
   const updated = db.prepare('SELECT * FROM leads WHERE id = ?').get(lead.id)
   try { broadcastSSE(lead.account_id, 'lead:archived', { id: lead.id }) } catch {}
@@ -567,7 +566,7 @@ router.patch('/:id/archive', (req, res) => {
 router.patch('/:id/unarchive', (req, res) => {
   const lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(req.params.id)
   if (!lead) return res.status(404).json({ error: 'Lead nao encontrado' })
-  if (req.user.role === 'atendente' && lead.attendant_id !== req.user.id && !db.prepare('SELECT 1 FROM lead_instance_assignments WHERE lead_id = ? AND attendant_id = ?').get(lead.id, req.user.id)) return res.status(403).json({ error: 'Sem permissao' })
+  if (req.user.role === 'atendente' && !canAtendenteAccessLead(req.user.id, lead)) return res.status(403).json({ error: 'Sem permissao' })
   db.prepare("UPDATE leads SET is_archived = 0, archived_at = NULL, has_new_after_archive = 0, updated_at = datetime('now') WHERE id = ?").run(lead.id)
   const updated = db.prepare('SELECT * FROM leads WHERE id = ?').get(lead.id)
   try { broadcastSSE(lead.account_id, 'lead:unarchived', updated) } catch {}
@@ -580,7 +579,7 @@ router.post('/:id/block', (req, res) => {
   const lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(req.params.id)
   if (!lead) return res.status(404).json({ error: 'Lead nao encontrado' })
   if (req.accountId && lead.account_id !== req.accountId) return res.status(403).json({ error: 'Sem permissao' })
-  if (req.user.role === 'atendente' && lead.attendant_id !== req.user.id && !db.prepare('SELECT 1 FROM lead_instance_assignments WHERE lead_id = ? AND attendant_id = ?').get(lead.id, req.user.id)) return res.status(403).json({ error: 'Sem permissao' })
+  if (req.user.role === 'atendente' && !canAtendenteAccessLead(req.user.id, lead)) return res.status(403).json({ error: 'Sem permissao' })
   db.prepare("UPDATE leads SET is_blocked = 1, blocked_at = datetime('now'), blocked_by = ?, updated_at = datetime('now') WHERE id = ?").run(req.user.id, lead.id)
   const updated = db.prepare('SELECT * FROM leads WHERE id = ?').get(lead.id)
   try { broadcastSSE(lead.account_id, 'lead:archived', { id: lead.id }) } catch {}
@@ -592,7 +591,7 @@ router.post('/:id/unblock', (req, res) => {
   const lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(req.params.id)
   if (!lead) return res.status(404).json({ error: 'Lead nao encontrado' })
   if (req.accountId && lead.account_id !== req.accountId) return res.status(403).json({ error: 'Sem permissao' })
-  if (req.user.role === 'atendente' && lead.attendant_id !== req.user.id && !db.prepare('SELECT 1 FROM lead_instance_assignments WHERE lead_id = ? AND attendant_id = ?').get(lead.id, req.user.id)) return res.status(403).json({ error: 'Sem permissao' })
+  if (req.user.role === 'atendente' && !canAtendenteAccessLead(req.user.id, lead)) return res.status(403).json({ error: 'Sem permissao' })
   db.prepare("UPDATE leads SET is_blocked = 0, blocked_at = NULL, blocked_by = NULL, updated_at = datetime('now') WHERE id = ?").run(lead.id)
   const updated = db.prepare('SELECT * FROM leads WHERE id = ?').get(lead.id)
   try { broadcastSSE(lead.account_id, 'lead:unarchived', updated) } catch {}

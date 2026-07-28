@@ -2,6 +2,7 @@ import { Router, json as jsonBodyParser } from 'express'
 import fetch from 'node-fetch'
 import db from '../db.js'
 import { sendViaInstance, checkWhatsAppNumber } from '../services/leadHandoff.js'
+import { canAtendenteAccessLead, getUserPrimaryInstanceId } from '../services/leadAccess.js'
 
 const router = Router()
 
@@ -20,39 +21,47 @@ function detectMediaType(mime = '') {
 }
 
 // Resolve which WhatsApp instance to use when sending a message.
-// Priority:
-//   1. Override (explicit user choice — dropdown ou filtro de instancia ativo)
-//   2. Se user e atendente DO LEAD (atendente principal): usa last_instance_id (continuidade)
-//   3. Se user tem assignment em alguma instancia desse lead: usa essa instancia
-//   4. user.primary_instance_id (gerente/admin entrando "por fora")
-//   5. lead.last_instance_id (fallback continuidade)
-//   6. lead.instance_id (original)
-//   7. Most recently created connected instance on the account
+// ATENDENTE: SEMPRE forca uso da primary_instance_id dele (independente de override).
+//   Se atendente passa override != primary → lanca erro { code: 'atendente_wrong_instance' }.
+//   Se atendente nao tem primary → lanca { code: 'atendente_sem_instancia' }.
+// GERENTE/ADMIN: mantem prioridade original:
+//   1. Override (dropdown do dropdown/filtro ativo)
+//   2. lead.last_instance_id (continuidade)
+//   3. user.primary_instance_id (gerente entrando "por fora")
+//   4. lead.instance_id (original)
+//   5. Most recently created connected instance
 function resolveInstanceForSend({ lead, user, override }) {
   const tryGet = (id) => id ? db.prepare('SELECT * FROM whatsapp_instances WHERE id = ? AND status = ?').get(id, 'connected') : null
 
-  // 1. Override sempre vence
-  const ovr = tryGet(override)
-  if (ovr) return ovr
-
-  // 2. Se for o atendente principal do lead → continuidade
-  if (user?.id && lead.attendant_id === user.id) {
-    const cont = tryGet(lead.last_instance_id) || tryGet(lead.instance_id)
-    if (cont) return cont
+  // ATENDENTE: forca instancia dele
+  if (user?.role === 'atendente') {
+    const primaryId = getUserPrimaryInstanceId(user.id)
+    if (!primaryId) {
+      const err = new Error('Voce nao tem uma instancia WhatsApp atribuida. Peca pro gerente atribuir em Equipe.')
+      err.code = 'atendente_sem_instancia'
+      err.status = 403
+      throw err
+    }
+    if (override && Number(override) !== Number(primaryId)) {
+      const err = new Error('Voce so pode enviar pela sua instancia atribuida.')
+      err.code = 'atendente_wrong_instance'
+      err.status = 403
+      throw err
+    }
+    const inst = tryGet(primaryId)
+    if (!inst) {
+      const err = new Error('Sua instancia WhatsApp nao esta conectada. Vai em Integracoes e reconecte.')
+      err.code = 'atendente_instancia_offline'
+      err.status = 400
+      throw err
+    }
+    return inst
   }
 
-  // 3. Se user tem assignment em alguma instancia desse lead → usa essa
-  if (user?.id) {
-    const assignment = db.prepare(
-      'SELECT instance_id FROM lead_instance_assignments WHERE lead_id = ? AND attendant_id = ? LIMIT 1'
-    ).get(lead.id, user.id)
-    const inst = tryGet(assignment?.instance_id)
-    if (inst) return inst
-  }
-
-  // 4-7. Gerente/admin "por fora" ou fallbacks
-  return tryGet(user?.primary_instance_id)
+  // GERENTE/SUPER_ADMIN: prioridade original
+  return tryGet(override)
     || tryGet(lead.last_instance_id)
+    || tryGet(user?.primary_instance_id)
     || tryGet(lead.instance_id)
     || db.prepare('SELECT * FROM whatsapp_instances WHERE account_id = ? AND status = ? ORDER BY id DESC LIMIT 1').get(lead.account_id, 'connected')
 }
@@ -60,10 +69,10 @@ function resolveInstanceForSend({ lead, user, override }) {
 // Get conversation messages for a lead
 router.get('/:leadId', (req, res) => {
   // Verify lead belongs to user's account
-  const lead = db.prepare('SELECT account_id, attendant_id FROM leads WHERE id = ?').get(req.params.leadId)
+  const lead = db.prepare('SELECT id, account_id, attendant_id, instance_id, last_instance_id FROM leads WHERE id = ?').get(req.params.leadId)
   if (!lead) return res.status(404).json({ error: 'Lead nao encontrado' })
   if (req.accountId && lead.account_id !== req.accountId) return res.status(403).json({ error: 'Sem permissao' })
-  if (req.user.role === 'atendente' && lead.attendant_id !== req.user.id && !db.prepare('SELECT 1 FROM lead_instance_assignments WHERE lead_id = ? AND attendant_id = ?').get(lead.id, req.user.id)) return res.status(403).json({ error: 'Sem permissao' })
+  if (req.user.role === 'atendente' && !canAtendenteAccessLead(req.user.id, lead)) return res.status(403).json({ error: 'Sem permissao' })
 
   const { page = '1', limit = '50' } = req.query
   const offset = (parseInt(page) - 1) * parseInt(limit)
@@ -151,6 +160,7 @@ router.post('/:leadId', async (req, res) => {
       : 'Falha ao enviar pelo WhatsApp. Verifique a conexao.')
     res.json({ message, delivered, instance: { id: instance.id, name: instance.instance_name }, error: errorMsg })
   } catch (err) {
+    if (err.status) return res.status(err.status).json({ error: err.message, code: err.code })
     res.status(500).json({ error: err.message })
   }
 })
@@ -274,6 +284,7 @@ router.post('/:leadId/media', jsonBodyParser({ limit: '150mb' }), async (req, re
     res.json({ message, delivered, instance: { id: instance.id, name: instance.instance_name }, error: delivered ? undefined : 'Falha ao enviar pelo WhatsApp.' })
   } catch (err) {
     console.error('[Messages/Media] Exception:', err.message)
+    if (err.status) return res.status(err.status).json({ error: err.message, code: err.code })
     res.status(500).json({ error: err.message })
   }
 })

@@ -23,6 +23,7 @@ import {
 } from 'lucide-react'
 import MessageMedia from '../components/MessageMedia'
 import AudioRecorder from '../components/AudioRecorder'
+import { BlockedBanner } from '../components/BlockedBanner'
 import { applyMessageVars } from '../lib/messageVars'
 import { parseSqlDate, formatTime, formatDayLabel, localDayKey } from '../lib/dates'
 import { useIsMobile } from '../hooks/useIsMobile'
@@ -842,6 +843,15 @@ export default function Chat() {
   // Gerentes tambem atendem leads — incluir junto com atendentes no dropdown
   const attendants = users.filter(u => (u.role === 'atendente' || u.role === 'gerente') && u.is_active)
   const availableTags = lead ? tags.filter(t => !lead.tags?.some(lt => lt.id === t.id)) : []
+
+  if (user?.role === 'atendente' && !user?.primary_instance_id) {
+    return (
+      <div style={{ padding: 24 }}>
+        <h1 style={{ fontSize: 20, marginBottom: 8 }}><MessageCircle size={20} style={{ verticalAlign: -4, marginRight: 6 }} />Chat</h1>
+        <BlockedBanner />
+      </div>
+    )
+  }
 
   return (
     <div className={isMobile ? `chat-page chat-mobile-active mobile-tab-${mobileTab}` : 'chat-page'}>

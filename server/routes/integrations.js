@@ -42,15 +42,24 @@ router.put('/evolution-config', requireRole('super_admin', 'gerente'), (req, res
 })
 
 // ─── List WhatsApp instances ─────────────────────────────────────
-// Atendente tb le (precisa pra saber qual instancia ta conectada e mandar msg),
-// mas recebe versao saneada — sem api_url, api_key, webhook_secret.
+// Gerente/super_admin ve todas da conta.
+// Atendente ve SO a instancia atribuida a ele (users.primary_instance_id) e
+// recebe versao saneada — sem api_url, api_key, webhook_secret.
+// Se atendente nao tem primary_instance_id: retorna array vazio (frontend mostra banner "Aguarde gerente atribuir").
 router.get('/whatsapp', requireRole('super_admin', 'gerente', 'atendente'), (req, res) => {
   if (!req.accountId) return res.status(400).json({ error: 'account_id required' })
-  const rows = db.prepare('SELECT * FROM whatsapp_instances WHERE account_id = ? ORDER BY created_at DESC').all(req.accountId)
+
   if (req.user.role === 'atendente') {
-    const safe = rows.map(({ api_url, api_key, webhook_secret, ...rest }) => rest)
-    return res.json({ instances: safe })
+    const userRow = db.prepare('SELECT primary_instance_id FROM users WHERE id = ?').get(req.user.id)
+    const primaryId = userRow?.primary_instance_id
+    if (!primaryId) return res.json({ instances: [] })
+    const row = db.prepare('SELECT * FROM whatsapp_instances WHERE id = ? AND account_id = ?').get(primaryId, req.accountId)
+    if (!row) return res.json({ instances: [] })
+    const { api_url, api_key, webhook_secret, ...safe } = row
+    return res.json({ instances: [safe] })
   }
+
+  const rows = db.prepare('SELECT * FROM whatsapp_instances WHERE account_id = ? ORDER BY created_at DESC').all(req.accountId)
   res.json({ instances: rows })
 })
 
@@ -113,6 +122,14 @@ router.post('/whatsapp', requireRole('super_admin', 'gerente', 'atendente'), asy
     "INSERT INTO whatsapp_instances (account_id, instance_name, api_url, api_key, status, qr_code, lead_intake_mode, warmup_until) VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now', '+3 days'))"
   ).run(req.accountId, instance_name, baseUrl, api_key, qrCode ? 'connecting' : 'disconnected', qrCode, lead_intake_mode)
   const instance = db.prepare('SELECT * FROM whatsapp_instances WHERE id = ?').get(result.lastInsertRowid)
+
+  // Se atendente criou, vira dono automatico (seta primary_instance_id + default_attendant_id).
+  // Assim ele passa a ver a instancia dele em /integrations e opera sem intervencao do gerente.
+  if (req.user.role === 'atendente') {
+    db.prepare("UPDATE users SET primary_instance_id = ?, updated_at = datetime('now') WHERE id = ?").run(instance.id, req.user.id)
+    db.prepare("UPDATE whatsapp_instances SET default_attendant_id = ?, updated_at = datetime('now') WHERE id = ?").run(req.user.id, instance.id)
+    console.log(`[integrations] Atendente ${req.user.id} virou dono da instancia recem-criada ${instance.id}`)
+  }
 
   // Setup webhook automatically (Evolution v2.3 format)
   await registerEvolutionWebhook(baseUrl, api_key, instance_name, account.slug)

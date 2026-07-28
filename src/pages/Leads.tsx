@@ -148,7 +148,12 @@ export default function Leads() {
             const a = document.createElement('a'); a.href = url; a.download = `leads-${new Date().toISOString().slice(0,10)}.csv`; a.click()
             URL.revokeObjectURL(url)
           }}><Download size={14} /> Exportar</button>
-          <button className="btn btn-primary btn-sm" onClick={() => setShowNew(true)}><Plus size={14} /> Novo Lead</button>
+          <button
+            className="btn btn-primary btn-sm"
+            onClick={() => setShowNew(true)}
+            disabled={user?.role === 'atendente' && !user?.primary_instance_id}
+            title={user?.role === 'atendente' && !user?.primary_instance_id ? 'Peca pro gerente atribuir uma instancia WhatsApp em Equipe' : ''}
+          ><Plus size={14} /> Novo Lead</button>
         </div>
       </div>
 

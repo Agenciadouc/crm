@@ -47,24 +47,38 @@ export default function Team() {
   const atendentes = users.filter(u => u.role === 'atendente')
   const gerentes = users.filter(u => u.role === 'gerente')
 
-  const renderUserRow = (u: UserType, canEdit: boolean) => (
-    <tr key={u.id}>
-      <td className="name">{u.name}</td>
-      <td>{u.email}</td>
-      <td><span style={{ color: u.is_active ? '#34C759' : '#FF6B6B' }}>{u.is_active ? 'Ativo' : 'Inativo'}</span></td>
-      <td className="right">
-        {canEdit && (
-          <div style={{ display: 'inline-flex', gap: 4 }}>
-            <button className="btn btn-secondary btn-sm btn-icon" onClick={() => openEdit(u)} title="Editar"><Edit3 size={12} /></button>
-            <button className="btn btn-secondary btn-sm btn-icon" onClick={() => toggleActive(u)} title={u.is_active ? 'Desativar' : 'Ativar'}>
-              {u.is_active ? <ToggleRight size={14} style={{ color: '#34C759' }} /> : <ToggleLeft size={14} />}
-            </button>
-            <button className="btn btn-danger btn-sm btn-icon" onClick={() => handleDelete(u)} title="Excluir"><Trash2 size={12} /></button>
-          </div>
+  const renderUserRow = (u: UserType, canEdit: boolean, showInstance: boolean = false) => {
+    const inst = u.primary_instance_id ? instances.find(i => i.id === u.primary_instance_id) : null
+    return (
+      <tr key={u.id}>
+        <td className="name">{u.name}</td>
+        <td>{u.email}</td>
+        {showInstance && (
+          <td>
+            {inst ? (
+              <span style={{ color: '#9B96B0', fontSize: 12 }}>{inst.instance_name}{inst.status === 'connected' ? ' ✓' : ' ✗'}</span>
+            ) : u.role === 'atendente' && u.is_active ? (
+              <span style={{ color: '#F59E0B', fontSize: 12, fontWeight: 600 }} title="Atendente sem WhatsApp — nao consegue enviar. Clique em Editar pra atribuir.">⚠ Sem WhatsApp</span>
+            ) : (
+              <span style={{ color: '#6B6580', fontSize: 12 }}>—</span>
+            )}
+          </td>
         )}
-      </td>
-    </tr>
-  )
+        <td><span style={{ color: u.is_active ? '#34C759' : '#FF6B6B' }}>{u.is_active ? 'Ativo' : 'Inativo'}</span></td>
+        <td className="right">
+          {canEdit && (
+            <div style={{ display: 'inline-flex', gap: 4 }}>
+              <button className="btn btn-secondary btn-sm btn-icon" onClick={() => openEdit(u)} title="Editar"><Edit3 size={12} /></button>
+              <button className="btn btn-secondary btn-sm btn-icon" onClick={() => toggleActive(u)} title={u.is_active ? 'Desativar' : 'Ativar'}>
+                {u.is_active ? <ToggleRight size={14} style={{ color: '#34C759' }} /> : <ToggleLeft size={14} />}
+              </button>
+              <button className="btn btn-danger btn-sm btn-icon" onClick={() => handleDelete(u)} title="Excluir"><Trash2 size={12} /></button>
+            </div>
+          )}
+        </td>
+      </tr>
+    )
+  }
 
   return (
     <div>
@@ -88,10 +102,10 @@ export default function Team() {
           <section className="dash-section">
             <div className="section-title">Atendentes ({atendentes.length})</div>
             <div className="table-card"><table>
-              <thead><tr><th>Nome</th><th>Email</th><th>Status</th><th className="right">Acoes</th></tr></thead>
+              <thead><tr><th>Nome</th><th>Email</th><th>WhatsApp</th><th>Status</th><th className="right">Acoes</th></tr></thead>
               <tbody>
-                {atendentes.map(u => renderUserRow(u, true))}
-                {atendentes.length === 0 && <tr><td colSpan={4} style={{ textAlign: 'center', padding: 30, color: '#6B6580' }}>Nenhum atendente cadastrado</td></tr>}
+                {atendentes.map(u => renderUserRow(u, true, true))}
+                {atendentes.length === 0 && <tr><td colSpan={5} style={{ textAlign: 'center', padding: 30, color: '#6B6580' }}>Nenhum atendente cadastrado</td></tr>}
               </tbody>
             </table></div>
           </section>
@@ -121,12 +135,16 @@ export default function Team() {
             <div className="form-group"><label>Email</label><input className="input" type="email" value={editForm.email} onChange={e => setEditForm(p => ({ ...p, email: e.target.value }))} /></div>
             <div className="form-group"><label>Nova senha (deixe em branco para manter)</label><input className="input" type="password" value={editForm.password} onChange={e => setEditForm(p => ({ ...p, password: e.target.value }))} placeholder="••••••••" /></div>
             <div className="form-group">
-              <label>Instancia primaria (numero padrao para envios)</label>
+              <label>Instancia WhatsApp (obrigatoria pra atendente)</label>
               <select className="select" value={editForm.primary_instance_id} onChange={e => setEditForm(p => ({ ...p, primary_instance_id: e.target.value }))}>
-                <option value="">Nenhuma (usa instancia do lead)</option>
+                <option value="">Nenhuma</option>
                 {instances.map(i => <option key={i.id} value={i.id}>{i.instance_name}{i.status === 'connected' ? ' ✓' : ' ✗'}</option>)}
               </select>
-              <small style={{ color: '#9B96B0', fontSize: 11 }}>Usado quando lead nao tem conversa previa. Casos normais: lead manda primeiro, sistema usa o numero que recebeu.</small>
+              <small style={{ color: editingUser?.role === 'atendente' && !editForm.primary_instance_id ? '#F59E0B' : '#9B96B0', fontSize: 11 }}>
+                {editingUser?.role === 'atendente' && !editForm.primary_instance_id
+                  ? '⚠ Sem instancia atribuida, o atendente nao consegue enviar mensagens nem criar novos leads.'
+                  : 'Atendente so ve/opera essa instancia. Gerentes usam como fallback quando lead nao tem conversa previa.'}
+              </small>
             </div>
             <div className="form-group">
               <label>Instancia de notificacao (recebe alertas de novo lead)</label>

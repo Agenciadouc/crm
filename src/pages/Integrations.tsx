@@ -12,6 +12,7 @@ import {
 } from '../lib/api'
 import { Plug, Plus, Wifi, WifiOff, Loader, Trash2, QrCode, Power, PowerOff, RefreshCw, Smartphone, Save, Check, Settings, FileSpreadsheet, Copy, Webhook, RotateCw, Download, User, Eye, EyeOff, Activity, AlertTriangle, MessageSquare, Link as LinkIcon, GitBranch } from 'lucide-react'
 import InstanceAutoMessagesModal from '../components/InstanceAutoMessagesModal'
+import { BlockedBanner } from '../components/BlockedBanner'
 import { parseSqlDate } from '../lib/dates'
 
 function sheetsTimeAgo(s: string | null) {
@@ -386,6 +387,10 @@ export default function Integrations() {
           )}
         </div>
       </div>
+
+      {isAtendente && !user?.primary_instance_id && (
+        <BlockedBanner message="Voce ainda nao tem WhatsApp atribuido. Peca pro gerente atribuir em Equipe > Editar, ou conecte um novo WhatsApp acima (voce vira dono automaticamente)." />
+      )}
 
       {/* Evolution API Config — gerente/admin only */}
       {isGerenteOuAdmin && (
