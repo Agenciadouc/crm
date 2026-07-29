@@ -6,6 +6,7 @@ import {
   fetchWhatsAppInstances, fetchLeads, fetchLead, fetchFunnels, fetchUsers, fetchTags,
   sendMessage, sendMessageMedia, updateLead, moveLeadStage, assignLead, addLeadNote, addLeadTag, removeLeadTag,
   fetchLeadCadence, advanceLeadCadence, removeLeadCadence, fetchCadences, assignLeadCadence, createTag,
+  fetchAvailableGlobalTemplates, applyGlobalCadenceHere, type GlobalTemplateAvailable,
   fetchLeadFollowUp, fetchFollowUps, assignFollowUp, pauseLeadFollowUp, resumeLeadFollowUp, cancelLeadFollowUp,
   archiveLead, blockLead, createStandaloneTask, fetchLeadTasks, completeStandaloneTask, deleteStandaloneTask, completeTask, skipTask, fetchLeadConversations, forceAiRespond, type LeadConversation,
   fetchReadyMessages, type ReadyMessage,
@@ -95,6 +96,8 @@ export default function Chat() {
   const [tags, setTags] = useState<Tag[]>([])
   const [leadCadence, setLeadCadence] = useState<LeadCadence | null>(null)
   const [cadences, setCadences] = useState<Cadence[]>([])
+  const [globalCadences, setGlobalCadences] = useState<GlobalTemplateAvailable[]>([])
+  const [applyingGlobalId, setApplyingGlobalId] = useState<number | null>(null)
   const [showCadenceMenu, setShowCadenceMenu] = useState(false)
   const [leadFollowUp, setLeadFollowUp] = useState<LeadFollowUp | null>(null)
   const [followUps, setFollowUps] = useState<FollowUp[]>([])
@@ -154,6 +157,7 @@ export default function Chat() {
     fetchUsers(accountId).then(setUsers)
     fetchTags(accountId).then(setTags)
     fetchCadences(accountId).then(setCadences)
+    fetchAvailableGlobalTemplates(accountId).then(d => setGlobalCadences(d.cadences)).catch(() => {})
     fetchFollowUps(accountId).then(setFollowUps).catch(() => {})
     fetchReadyMessages(accountId).then(setReadyMessages).catch(() => {})
   }, [accountId])
@@ -825,6 +829,34 @@ export default function Chat() {
     setSending(false)
   }
   const handleAssignCadence = async (cadenceId: number) => { if (lead && accountId) { await assignLeadCadence(cadenceId, accountId, lead.id); setShowCadenceMenu(false); loadLead() } }
+  const handleAssignGlobalCadence = async (globalId: number) => {
+    if (!lead || !accountId) return
+    setApplyingGlobalId(globalId)
+    try {
+      const already = globalCadences.find(g => g.id === globalId)
+      let localCadenceId: number | undefined = already?.applied_cadence_id || undefined
+      if (!localCadenceId) {
+        // Clona pro tenant e usa o id retornado
+        const r = await applyGlobalCadenceHere(globalId, accountId, false)
+        if (!r.ok || !r.new_cadence_id) throw new Error(r.error || 'Falha ao aplicar template global')
+        localCadenceId = r.new_cadence_id
+        // Recarrega listas
+        const [cads, avail] = await Promise.all([
+          fetchCadences(accountId),
+          fetchAvailableGlobalTemplates(accountId).then(d => d.cadences).catch(() => []),
+        ])
+        setCadences(cads)
+        setGlobalCadences(avail)
+      }
+      await assignLeadCadence(localCadenceId, accountId, lead.id)
+      setShowCadenceMenu(false)
+      loadLead()
+    } catch (e: any) {
+      alert('Erro: ' + (e?.message || 'unknown'))
+    } finally {
+      setApplyingGlobalId(null)
+    }
+  }
 
   const handleCreateTag = async () => {
     if (!accountId || !newTagName.trim() || !lead) return
@@ -1441,13 +1473,31 @@ export default function Chat() {
                       <div style={{ position: 'relative' }}>
                         <button className="btn btn-secondary btn-sm" onClick={() => { setCadenceCollapsed(false); setShowCadenceMenu(!showCadenceMenu) }} style={{ padding: '2px 8px', fontSize: 10 }}>{leadCadence ? 'Trocar' : 'Atribuir'}</button>
                         {showCadenceMenu && (
-                          <div style={{ position: 'absolute', right: 0, top: '100%', marginTop: 4, background: 'var(--bg-card)', border: '1px solid var(--border-medium)', borderRadius: 8, padding: 4, zIndex: 50, minWidth: 180, maxHeight: 220, overflowY: 'auto' }}>
-                            {cadences.length === 0 && <div style={{ padding: 8, fontSize: 11, color: 'var(--text-muted)' }}>Nenhuma cadencia. Crie em /cadences</div>}
-                            {cadences.map(c => (
-                              <button key={c.id} onClick={() => handleAssignCadence(c.id)} style={{ display: 'block', padding: '6px 10px', border: 'none', background: 'none', color: 'var(--text-primary)', fontSize: 11, cursor: 'pointer', borderRadius: 4, width: '100%', textAlign: 'left' }}>
-                                {c.name} <span style={{ color: 'var(--text-muted)' }}>({c.attempts.length} etapas)</span>
-                              </button>
-                            ))}
+                          <div style={{ position: 'absolute', right: 0, top: '100%', marginTop: 4, background: 'var(--bg-card)', border: '1px solid var(--border-medium)', borderRadius: 8, padding: 4, zIndex: 50, minWidth: 220, maxHeight: 320, overflowY: 'auto' }}>
+                            {cadences.length === 0 && globalCadences.length === 0 && <div style={{ padding: 8, fontSize: 11, color: 'var(--text-muted)' }}>Nenhuma cadencia. Crie em /cadences</div>}
+                            {cadences.length > 0 && (
+                              <>
+                                <div style={{ padding: '4px 10px', fontSize: 9, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 0.5 }}>Desta conta</div>
+                                {cadences.map(c => (
+                                  <button key={c.id} onClick={() => handleAssignCadence(c.id)} style={{ display: 'block', padding: '6px 10px', border: 'none', background: 'none', color: 'var(--text-primary)', fontSize: 11, cursor: 'pointer', borderRadius: 4, width: '100%', textAlign: 'left' }}>
+                                    {c.name} <span style={{ color: 'var(--text-muted)' }}>({c.attempts.length} etapas)</span>
+                                  </button>
+                                ))}
+                              </>
+                            )}
+                            {globalCadences.length > 0 && (
+                              <>
+                                <div style={{ padding: '6px 10px 4px', fontSize: 9, color: '#7ee787', textTransform: 'uppercase', letterSpacing: 0.5, borderTop: cadences.length > 0 ? '1px dashed var(--border-subtle)' : 'none', marginTop: cadences.length > 0 ? 4 : 0 }}>Templates globais</div>
+                                {globalCadences.map(g => (
+                                  <button key={`g-${g.id}`} onClick={() => handleAssignGlobalCadence(g.id)} disabled={applyingGlobalId === g.id} style={{ display: 'block', padding: '6px 10px', border: 'none', background: 'none', color: 'var(--text-primary)', fontSize: 11, cursor: 'pointer', borderRadius: 4, width: '100%', textAlign: 'left', opacity: applyingGlobalId === g.id ? 0.5 : 1 }}>
+                                    <span style={{ color: '#7ee787', fontSize: 9, marginRight: 4 }}>★</span>
+                                    {g.name} <span style={{ color: 'var(--text-muted)' }}>({g.attempts.length} etapas)</span>
+                                    {g.applied_here && <span style={{ color: '#7ee787', fontSize: 9, marginLeft: 4 }}>✓</span>}
+                                    {applyingGlobalId === g.id && <span style={{ color: 'var(--text-muted)', fontSize: 9, marginLeft: 4 }}>aplicando...</span>}
+                                  </button>
+                                ))}
+                              </>
+                            )}
                           </div>
                         )}
                       </div>
