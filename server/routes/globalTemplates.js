@@ -15,9 +15,10 @@ const router = Router()
 // Diferente do /apply do super_admin (que aceita account_ids), aqui gerente/super_admin
 // aplica na CONTA DELE (req.accountId, resolvido via scopeToAccount middleware do index.js).
 
-// GET /api/global-templates/available?account_id=X (gerente/super_admin)
+// GET /api/global-templates/available?account_id=X — todos os roles da conta
 // Lista todos globals ativos + flag applied_here se conta ja recebeu esse template
-router.get('/available', requireRole('super_admin', 'gerente'), scopeToAccount, (req, res) => {
+// Atendente ve pra poder atribuir via Chat.tsx dropdown (1-click apply+assign)
+router.get('/available', requireRole('super_admin', 'gerente', 'atendente'), scopeToAccount, (req, res) => {
   if (!req.accountId) return res.status(400).json({ error: 'account_id required' })
 
   const cadences = db.prepare('SELECT * FROM global_cadences WHERE is_active = 1 ORDER BY name').all()
@@ -43,9 +44,11 @@ router.get('/available', requireRole('super_admin', 'gerente'), scopeToAccount, 
   res.json({ cadences, follow_ups: followUps })
 })
 
-// POST /api/global-templates/cadences/:id/apply-here?account_id=X — gerente aplica na CONTA DELE
+// POST /api/global-templates/cadences/:id/apply-here?account_id=X — todos roles podem aplicar na CONTA DELE
 // Body: { overwrite?: boolean }
-router.post('/cadences/:id/apply-here', requireRole('super_admin', 'gerente'), scopeToAccount, (req, res) => {
+// Atendente pode aplicar pra poder atribuir do chat com 1 clique. Idempotencia: se ja aplicada
+// (applied_here=true), o frontend nao chama de novo — reusa o applied_cadence_id.
+router.post('/cadences/:id/apply-here', requireRole('super_admin', 'gerente', 'atendente'), scopeToAccount, (req, res) => {
   if (!req.accountId) return res.status(400).json({ error: 'account_id required' })
   const { overwrite } = req.body
 
