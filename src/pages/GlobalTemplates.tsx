@@ -27,6 +27,13 @@ export default function GlobalTemplates() {
   const { user } = useAuth()
   const isAdmin = user?.role === 'super_admin'
   const [tab, setTab] = useState<Tab>('cadences')
+  const [copiedVar, setCopiedVar] = useState<string | null>(null)
+
+  const copyVar = (token: string) => {
+    navigator.clipboard.writeText(token)
+    setCopiedVar(token)
+    setTimeout(() => setCopiedVar(null), 1200)
+  }
 
   if (!isAdmin) {
     return (
@@ -42,6 +49,35 @@ export default function GlobalTemplates() {
       <div className="page-header">
         <h1><Layers size={20} style={{ verticalAlign: -4, marginRight: 6 }} />Templates Globais</h1>
       </div>
+
+      {/* Cheat sheet fixo de variaveis — clicar copia, cola direto na mensagem */}
+      <div style={{ marginBottom: 14, padding: '10px 14px', background: 'rgba(255,179,0,0.05)', border: '1px dashed rgba(255,179,0,0.3)', borderRadius: 8 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, fontSize: 11, color: '#FFB300', fontWeight: 600 }}>
+          <HelpCircle size={12} /> VARIAVEIS DISPONIVEIS (clique pra copiar, cole na mensagem)
+        </div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+          {MESSAGE_VARIABLES.map(v => (
+            <button
+              key={v.token}
+              onClick={() => copyVar(v.token)}
+              title={v.label + ' (ex: ' + v.example + ')'}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 4,
+                padding: '4px 10px', fontSize: 11, fontFamily: 'monospace',
+                background: copiedVar === v.token ? '#7ee787' : 'rgba(255,255,255,0.06)',
+                color: copiedVar === v.token ? '#000' : '#FFB300',
+                border: '1px solid ' + (copiedVar === v.token ? '#7ee787' : 'rgba(255,179,0,0.4)'),
+                borderRadius: 6, cursor: 'pointer',
+                transition: 'background 0.15s'
+              }}
+            >
+              {copiedVar === v.token ? <Check size={11} /> : <Copy size={11} />}
+              {v.token}
+            </button>
+          ))}
+        </div>
+      </div>
+
       <div style={{ display: 'flex', gap: 8, marginBottom: 16, borderBottom: '1px solid var(--border-subtle)' }}>
         <button className="btn btn-sm" style={{ background: tab === 'cadences' ? '#FFB300' : 'transparent', color: tab === 'cadences' ? '#000' : '#9B96B0', border: 'none', borderBottom: tab === 'cadences' ? '2px solid #FFB300' : 'none', borderRadius: 0 }} onClick={() => setTab('cadences')}>
           <ListOrdered size={14} style={{ marginRight: 4, verticalAlign: -2 }} /> Cadencias
