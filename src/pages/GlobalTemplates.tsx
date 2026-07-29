@@ -23,17 +23,50 @@ const ACTION_TYPES = [
 
 type Tab = 'cadences' | 'followups'
 
-export default function GlobalTemplates() {
-  const { user } = useAuth()
-  const isAdmin = user?.role === 'super_admin'
-  const [tab, setTab] = useState<Tab>('cadences')
+// Componente reusavel: barra de chips com variaveis (clicar copia).
+// Usado no header + dentro dos modais de edicao (senao modal cobre a barra do header).
+function VariablesChipBar({ compact = false }: { compact?: boolean }) {
   const [copiedVar, setCopiedVar] = useState<string | null>(null)
-
-  const copyVar = (token: string) => {
+  const copy = (token: string) => {
     navigator.clipboard.writeText(token)
     setCopiedVar(token)
     setTimeout(() => setCopiedVar(null), 1200)
   }
+  return (
+    <div style={{ marginBottom: compact ? 10 : 14, padding: compact ? '8px 10px' : '10px 14px', background: 'rgba(255,179,0,0.05)', border: '1px dashed rgba(255,179,0,0.3)', borderRadius: 8 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, fontSize: compact ? 10 : 11, color: '#FFB300', fontWeight: 600 }}>
+        <HelpCircle size={12} /> VARIAVEIS DISPONIVEIS (clique pra copiar, cole na mensagem)
+      </div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+        {MESSAGE_VARIABLES.map(v => (
+          <button
+            key={v.token}
+            type="button"
+            onClick={() => copy(v.token)}
+            title={v.label + ' (ex: ' + v.example + ')'}
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: 4,
+              padding: compact ? '3px 8px' : '4px 10px', fontSize: compact ? 10 : 11, fontFamily: 'monospace',
+              background: copiedVar === v.token ? '#7ee787' : 'rgba(255,255,255,0.06)',
+              color: copiedVar === v.token ? '#000' : '#FFB300',
+              border: '1px solid ' + (copiedVar === v.token ? '#7ee787' : 'rgba(255,179,0,0.4)'),
+              borderRadius: 6, cursor: 'pointer',
+              transition: 'background 0.15s'
+            }}
+          >
+            {copiedVar === v.token ? <Check size={11} /> : <Copy size={11} />}
+            {v.token}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+export default function GlobalTemplates() {
+  const { user } = useAuth()
+  const isAdmin = user?.role === 'super_admin'
+  const [tab, setTab] = useState<Tab>('cadences')
 
   if (!isAdmin) {
     return (
@@ -50,33 +83,7 @@ export default function GlobalTemplates() {
         <h1><Layers size={20} style={{ verticalAlign: -4, marginRight: 6 }} />Templates Globais</h1>
       </div>
 
-      {/* Cheat sheet fixo de variaveis — clicar copia, cola direto na mensagem */}
-      <div style={{ marginBottom: 14, padding: '10px 14px', background: 'rgba(255,179,0,0.05)', border: '1px dashed rgba(255,179,0,0.3)', borderRadius: 8 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, fontSize: 11, color: '#FFB300', fontWeight: 600 }}>
-          <HelpCircle size={12} /> VARIAVEIS DISPONIVEIS (clique pra copiar, cole na mensagem)
-        </div>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-          {MESSAGE_VARIABLES.map(v => (
-            <button
-              key={v.token}
-              onClick={() => copyVar(v.token)}
-              title={v.label + ' (ex: ' + v.example + ')'}
-              style={{
-                display: 'inline-flex', alignItems: 'center', gap: 4,
-                padding: '4px 10px', fontSize: 11, fontFamily: 'monospace',
-                background: copiedVar === v.token ? '#7ee787' : 'rgba(255,255,255,0.06)',
-                color: copiedVar === v.token ? '#000' : '#FFB300',
-                border: '1px solid ' + (copiedVar === v.token ? '#7ee787' : 'rgba(255,179,0,0.4)'),
-                borderRadius: 6, cursor: 'pointer',
-                transition: 'background 0.15s'
-              }}
-            >
-              {copiedVar === v.token ? <Check size={11} /> : <Copy size={11} />}
-              {v.token}
-            </button>
-          ))}
-        </div>
-      </div>
+      <VariablesChipBar />
 
       <div style={{ display: 'flex', gap: 8, marginBottom: 16, borderBottom: '1px solid var(--border-subtle)' }}>
         <button className="btn btn-sm" style={{ background: tab === 'cadences' ? '#FFB300' : 'transparent', color: tab === 'cadences' ? '#000' : '#9B96B0', border: 'none', borderBottom: tab === 'cadences' ? '2px solid #FFB300' : 'none', borderRadius: 0 }} onClick={() => setTab('cadences')}>
@@ -190,6 +197,7 @@ function CadencesTab() {
           <div className="modal" style={{ maxWidth: 700 }} onClick={e => e.stopPropagation()}>
             <h2>Editar Etapas — {editing.name}</h2>
             <p style={{ fontSize: 11, color: '#FFB300', marginBottom: 8 }}>⚠ Alteracoes aqui NAO propagam pras contas ja aplicadas. Use "Aplicar em contas" (com sobrescrever) pra atualizar.</p>
+            <VariablesChipBar compact />
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 400, overflowY: 'auto' }}>
               {editAttempts.map((a, i) => (
                 <div key={i} style={{ display: 'flex', gap: 6, alignItems: 'flex-start', padding: 8, background: 'rgba(255,255,255,0.02)', borderRadius: 8, border: '1px solid var(--border-subtle)' }}>
@@ -433,6 +441,7 @@ function FollowUpEditorModal({ initial, onClose, onDone }: { initial: GlobalFoll
       <div className="modal" style={{ maxWidth: 720 }} onClick={e => e.stopPropagation()}>
         <h2>{initial ? `Editar Follow-up — ${initial.name}` : 'Novo Follow-up Global'}</h2>
         {initial && <p style={{ fontSize: 11, color: '#FFB300', marginBottom: 8 }}>⚠ Alteracoes NAO propagam pras contas ja aplicadas. Use "Aplicar" com sobrescrever pra atualizar.</p>}
+        <VariablesChipBar compact />
 
         <div className="form-group"><label>Nome</label><input className="input" value={name} onChange={e => setName(e.target.value)} placeholder="Ex: Reativacao 3 dias" /></div>
         <div className="form-group"><label>Descricao (opcional)</label><textarea className="input" value={description} onChange={e => setDescription(e.target.value)} rows={2} style={{ resize: 'vertical' }} /></div>
