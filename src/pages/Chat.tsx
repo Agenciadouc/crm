@@ -6,7 +6,8 @@ import {
   fetchWhatsAppInstances, fetchLeads, fetchLead, fetchFunnels, fetchUsers, fetchTags,
   sendMessage, sendMessageMedia, updateLead, moveLeadStage, assignLead, addLeadNote, addLeadTag, removeLeadTag,
   fetchLeadCadence, advanceLeadCadence, removeLeadCadence, fetchCadences, assignLeadCadence, createTag,
-  fetchAvailableGlobalTemplates, applyGlobalCadenceHere, type GlobalTemplateAvailable,
+  fetchAvailableGlobalTemplates, applyGlobalCadenceHere, applyGlobalFollowUpHere,
+  type GlobalTemplateAvailable, type GlobalFollowUpAvailable,
   fetchLeadFollowUp, fetchFollowUps, assignFollowUp, pauseLeadFollowUp, resumeLeadFollowUp, cancelLeadFollowUp,
   archiveLead, blockLead, createStandaloneTask, fetchLeadTasks, completeStandaloneTask, deleteStandaloneTask, completeTask, skipTask, fetchLeadConversations, forceAiRespond, type LeadConversation,
   fetchReadyMessages, type ReadyMessage,
@@ -97,7 +98,9 @@ export default function Chat() {
   const [leadCadence, setLeadCadence] = useState<LeadCadence | null>(null)
   const [cadences, setCadences] = useState<Cadence[]>([])
   const [globalCadences, setGlobalCadences] = useState<GlobalTemplateAvailable[]>([])
+  const [globalFollowUps, setGlobalFollowUps] = useState<GlobalFollowUpAvailable[]>([])
   const [applyingGlobalId, setApplyingGlobalId] = useState<number | null>(null)
+  const [applyingGlobalFuId, setApplyingGlobalFuId] = useState<number | null>(null)
   const [showCadenceMenu, setShowCadenceMenu] = useState(false)
   const [leadFollowUp, setLeadFollowUp] = useState<LeadFollowUp | null>(null)
   const [followUps, setFollowUps] = useState<FollowUp[]>([])
@@ -157,7 +160,7 @@ export default function Chat() {
     fetchUsers(accountId).then(setUsers)
     fetchTags(accountId).then(setTags)
     fetchCadences(accountId).then(setCadences)
-    fetchAvailableGlobalTemplates(accountId).then(d => setGlobalCadences(d.cadences)).catch(() => {})
+    fetchAvailableGlobalTemplates(accountId).then(d => { setGlobalCadences(d.cadences); setGlobalFollowUps(d.follow_ups) }).catch(() => {})
     fetchFollowUps(accountId).then(setFollowUps).catch(() => {})
     fetchReadyMessages(accountId).then(setReadyMessages).catch(() => {})
   }, [accountId])
@@ -793,6 +796,37 @@ export default function Chat() {
       setShowFollowUpMenu(false)
       loadLead()
     } catch (e: any) { setNotice({ kind: 'error', title: 'Erro ao atribuir follow-up', message: e?.message || '' }) }
+  }
+  const handleAssignGlobalFollowUp = async (globalId: number) => {
+    if (!lead || !accountId) return
+    setApplyingGlobalFuId(globalId)
+    try {
+      const already = globalFollowUps.find(g => g.id === globalId)
+      let localFuId: number | undefined = already?.applied_follow_up_id || undefined
+      if (!localFuId) {
+        // Resolve instance_id (obrigatorio pro apply). Ordem: lead atual → user primary → primeira connected
+        const resolvedInstanceId = lead.last_instance_id || lead.instance_id || user?.primary_instance_id || instances.find(i => i.status === 'connected')?.id
+        if (!resolvedInstanceId) throw new Error('Nenhuma instancia WhatsApp conectada disponivel')
+        const r = await applyGlobalFollowUpHere(globalId, accountId, { instance_id: resolvedInstanceId })
+        if (!r.ok || !r.new_follow_up_id) throw new Error(r.error || 'Falha ao aplicar template global')
+        localFuId = r.new_follow_up_id
+        // Recarrega listas
+        const [fus, avail] = await Promise.all([
+          fetchFollowUps(accountId).catch(() => followUps),
+          fetchAvailableGlobalTemplates(accountId).catch(() => ({ cadences: globalCadences, follow_ups: globalFollowUps })),
+        ])
+        setFollowUps(fus)
+        setGlobalCadences(avail.cadences)
+        setGlobalFollowUps(avail.follow_ups)
+      }
+      await assignFollowUp(localFuId, accountId, lead.id)
+      setShowFollowUpMenu(false)
+      loadLead()
+    } catch (e: any) {
+      setNotice({ kind: 'error', title: 'Erro ao atribuir follow-up global', message: e?.message || '' })
+    } finally {
+      setApplyingGlobalFuId(null)
+    }
   }
   const handlePauseFollowUp = async () => {
     if (!leadFollowUp || !accountId) return
@@ -1554,16 +1588,38 @@ export default function Chat() {
                         <button className="btn btn-secondary btn-sm" onClick={() => setShowFollowUpMenu(!showFollowUpMenu)} style={{ padding: '2px 8px', fontSize: 10 }}>
                           {leadFollowUp ? 'Trocar' : 'Atribuir'}
                         </button>
-                        {showFollowUpMenu && (
-                          <div style={{ position: 'absolute', right: 0, top: '100%', marginTop: 4, background: 'var(--bg-card)', border: '1px solid var(--border-medium)', borderRadius: 8, padding: 4, zIndex: 50, minWidth: 220, maxHeight: 220, overflowY: 'auto' }}>
-                            {followUps.length === 0 && <div style={{ padding: 8, fontSize: 11, color: 'var(--text-muted)' }}>Nenhum follow-up. Crie em /follow-ups</div>}
-                            {followUps.filter(f => f.is_active && (f.type || 'sequence') === 'sequence').map(f => (
-                              <button key={f.id} onClick={() => handleAssignFollowUp(f.id)} style={{ display: 'block', padding: '6px 10px', border: 'none', background: 'none', color: 'var(--text-primary)', fontSize: 11, cursor: 'pointer', borderRadius: 4, width: '100%', textAlign: 'left' }}>
-                                {f.name} <span style={{ color: 'var(--text-muted)' }}>({f.steps_count} etapas · {f.instance_name})</span>
-                              </button>
-                            ))}
-                          </div>
-                        )}
+                        {showFollowUpMenu && (() => {
+                          const localSeq = followUps.filter(f => f.is_active && (f.type || 'sequence') === 'sequence')
+                          const globalSeq = globalFollowUps.filter(g => (g.type || 'sequence') === 'sequence')
+                          return (
+                            <div style={{ position: 'absolute', right: 0, top: '100%', marginTop: 4, background: 'var(--bg-card)', border: '1px solid var(--border-medium)', borderRadius: 8, padding: 4, zIndex: 50, minWidth: 240, maxHeight: 320, overflowY: 'auto' }}>
+                              {localSeq.length === 0 && globalSeq.length === 0 && <div style={{ padding: 8, fontSize: 11, color: 'var(--text-muted)' }}>Nenhum follow-up. Crie em /follow-ups</div>}
+                              {localSeq.length > 0 && (
+                                <>
+                                  <div style={{ padding: '4px 10px', fontSize: 9, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 0.5 }}>Desta conta</div>
+                                  {localSeq.map(f => (
+                                    <button key={f.id} onClick={() => handleAssignFollowUp(f.id)} style={{ display: 'block', padding: '6px 10px', border: 'none', background: 'none', color: 'var(--text-primary)', fontSize: 11, cursor: 'pointer', borderRadius: 4, width: '100%', textAlign: 'left' }}>
+                                      {f.name} <span style={{ color: 'var(--text-muted)' }}>({f.steps_count} etapas · {f.instance_name})</span>
+                                    </button>
+                                  ))}
+                                </>
+                              )}
+                              {globalSeq.length > 0 && (
+                                <>
+                                  <div style={{ padding: '6px 10px 4px', fontSize: 9, color: '#7ee787', textTransform: 'uppercase', letterSpacing: 0.5, borderTop: localSeq.length > 0 ? '1px dashed var(--border-subtle)' : 'none', marginTop: localSeq.length > 0 ? 4 : 0 }}>Templates globais</div>
+                                  {globalSeq.map(g => (
+                                    <button key={`g-${g.id}`} onClick={() => handleAssignGlobalFollowUp(g.id)} disabled={applyingGlobalFuId === g.id} style={{ display: 'block', padding: '6px 10px', border: 'none', background: 'none', color: 'var(--text-primary)', fontSize: 11, cursor: 'pointer', borderRadius: 4, width: '100%', textAlign: 'left', opacity: applyingGlobalFuId === g.id ? 0.5 : 1 }}>
+                                      <span style={{ color: '#7ee787', fontSize: 9, marginRight: 4 }}>★</span>
+                                      {g.name} <span style={{ color: 'var(--text-muted)' }}>({g.steps.length} steps)</span>
+                                      {g.applied_here && <span style={{ color: '#7ee787', fontSize: 9, marginLeft: 4 }}>✓</span>}
+                                      {applyingGlobalFuId === g.id && <span style={{ color: 'var(--text-muted)', fontSize: 9, marginLeft: 4 }}>aplicando...</span>}
+                                    </button>
+                                  ))}
+                                </>
+                              )}
+                            </div>
+                          )
+                        })()}
                       </div>
                     </div>
                     {leadFollowUp ? (

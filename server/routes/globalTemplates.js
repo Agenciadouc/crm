@@ -66,9 +66,10 @@ router.post('/cadences/:id/apply-here', requireRole('super_admin', 'gerente', 'a
   }
 })
 
-// POST /api/global-templates/follow-ups/:id/apply-here?account_id=X — gerente aplica follow-up na conta dele
+// POST /api/global-templates/follow-ups/:id/apply-here?account_id=X — todos roles aplicam na conta
 // Body: { instance_id, agent_id?, inactivity_stage_id?, overwrite? }
-router.post('/follow-ups/:id/apply-here', requireRole('super_admin', 'gerente'), scopeToAccount, (req, res) => {
+// Atendente pode aplicar pra atribuir via Chat.tsx (idempotente: reusa applied_follow_up_id se ja existe)
+router.post('/follow-ups/:id/apply-here', requireRole('super_admin', 'gerente', 'atendente'), scopeToAccount, (req, res) => {
   if (!req.accountId) return res.status(400).json({ error: 'account_id required' })
   const { instance_id, agent_id, inactivity_stage_id, overwrite } = req.body
   if (!instance_id) return res.status(400).json({ error: 'instance_id obrigatorio' })
