@@ -621,6 +621,10 @@ addColumnIfNotExists('accounts', 'analysis_token_limit', 'INTEGER NOT NULL DEFAU
 // Feature flag — gerente da conta só vê /atendimentos se super_admin ativou.
 // Cron noturno + analyzeAllAccounts SO processam contas com flag = 1 (economiza custo).
 addColumnIfNotExists('accounts', 'attendant_analytics_enabled', 'INTEGER NOT NULL DEFAULT 0')
+// Feature flag — se 1, super_admin tambem marca msgs como lidas ao abrir conversa dessa conta.
+// Default 0 preserva comportamento antigo (admin audita sem afetar badge do atendente).
+// Ligar so quando super_admin ESTA operando a conta ativamente (ex: cliente que a agencia atende direto).
+addColumnIfNotExists('accounts', 'admin_marks_as_read', 'INTEGER NOT NULL DEFAULT 0')
 // Timestamp do último coaching weekly run (segunda 3h05 UTC). Idempotencia weekly.
 addColumnIfNotExists('accounts', 'last_weekly_coaching_at', 'TEXT')
 

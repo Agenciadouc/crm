@@ -158,6 +158,20 @@ export default function ClientDetail() {
               Quando ativo, a IA analisa as conversas todos os dias às 0h Brasília. Custo: ~$8-32/mês por conta dependendo do volume.
             </small>
           </div>
+
+          <div className="form-group" style={{ padding: 10, background: 'rgba(93,173,226,0.05)', border: '1px solid rgba(93,173,226,0.2)', borderRadius: 6, marginTop: 8 }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', marginBottom: 0 }}>
+              <input
+                type="checkbox"
+                checked={(account as any).admin_marks_as_read === 1}
+                onChange={e => setAccount({ ...account, admin_marks_as_read: e.target.checked ? 1 : 0 } as any)}
+              />
+              <span><strong>Super admin tambem marca msgs como lidas</strong></span>
+            </label>
+            <small style={{ color: 'var(--text-muted)', fontSize: 11, marginLeft: 24, display: 'block', marginTop: 2 }}>
+              Por padrao, super_admin so audita conversas (nao zera badge nao-lida). Ative quando a agencia atende esse cliente direto, pra o admin tambem limpar o contador de nao-lidas ao abrir a conversa.
+            </small>
+          </div>
         </div>
       </section>
 

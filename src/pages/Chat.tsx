@@ -69,7 +69,10 @@ export default function Chat() {
     if (isMobile && id !== null) setMobileTab('chat')
     // Auto mark-as-read otimista: zera badge local + chama API em bg. Outras abas recebem via SSE 'lead:read'.
     // SUPER_ADMIN nao marca como lido — ele audita conversas sem afetar o atendimento do cliente.
-    if (id !== null && user?.role !== 'super_admin') {
+    // Exceção: contas com flag admin_marks_as_read=1 (setada em ClientDetail) tambem limpam pro super_admin.
+    const currentAccount = accounts.find(a => a.id === accountId)
+    const adminShouldMark = user?.role === 'super_admin' && currentAccount?.admin_marks_as_read === 1
+    if (id !== null && (user?.role !== 'super_admin' || adminShouldMark)) {
       const target = leads.find(l => l.id === id)
       if (target && (target.unread_count || 0) > 0) {
         setLeads(prev => prev.map(l => l.id === id ? { ...l, unread_count: 0 } : l))
