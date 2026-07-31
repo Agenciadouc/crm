@@ -63,6 +63,10 @@ export default function Chat() {
   // Mobile single-pane com bottom nav de 5 tabs
   const isMobile = useIsMobile()
   const [mobileTab, setMobileTab] = useState<'conversas' | 'chat' | 'info' | 'history'>('conversas')
+  // Guarda leads que o user acabou de marcar como lidos NESTA sessao — a lista de sort
+  // trata como se ainda estivessem "unread" pra nao afundar o item na hora do clique.
+  // Ao recarregar a pagina (F5) ou trocar de conta, esse set some naturalmente.
+  const [recentlyReadIds, setRecentlyReadIds] = useState<Set<number>>(new Set())
   // Quando seleciona lead em mobile, auto-vai pra tab Chat (UX igual WhatsApp)
   const selectLead = (id: number | null) => {
     setSelectedLeadId(id)
@@ -76,6 +80,8 @@ export default function Chat() {
       const target = leads.find(l => l.id === id)
       if (target && (target.unread_count || 0) > 0) {
         setLeads(prev => prev.map(l => l.id === id ? { ...l, unread_count: 0 } : l))
+        // "Cola" o item na posicao atual pro sort — sem isso ele afundaria por perder o unread.
+        setRecentlyReadIds(prev => { const next = new Set(prev); next.add(id); return next })
         markLeadAsRead(id).catch(() => {/* silencioso — re-tentava no proximo click */})
       }
     }
@@ -605,14 +611,16 @@ export default function Chat() {
       const s = search.toLowerCase()
       result = result.filter(l => (l.name || '').toLowerCase().includes(s) || (l.phone || '').includes(s))
     }
-    // Ordenacao estilo WhatsApp: leads com unread primeiro (badge no topo), depois por updated_at desc
+    // Ordenacao estilo WhatsApp: leads com unread primeiro (badge no topo), depois por updated_at desc.
+    // Leads recem-marcados como lidos NESTA sessao ainda contam como "com prioridade" pra nao afundar.
+    // Refresh limpa recentlyReadIds e a ordem volta a refletir 100% o estado do backend.
     return [...result].sort((a, b) => {
-      const aUnread = (a.unread_count || 0) > 0 ? 1 : 0
-      const bUnread = (b.unread_count || 0) > 0 ? 1 : 0
-      if (aUnread !== bUnread) return bUnread - aUnread
+      const aHighlighted = (a.unread_count || 0) > 0 || recentlyReadIds.has(a.id) ? 1 : 0
+      const bHighlighted = (b.unread_count || 0) > 0 || recentlyReadIds.has(b.id) ? 1 : 0
+      if (aHighlighted !== bHighlighted) return bHighlighted - aHighlighted
       return (b.updated_at || '').localeCompare(a.updated_at || '')
     })
-  }, [leads, search, tagFilter, attendantFilter, stageFilter])
+  }, [leads, search, tagFilter, attendantFilter, stageFilter, recentlyReadIds])
 
   // Title da aba: soma total de unread → mostra "(N) Dros CRM"
   useEffect(() => {
