@@ -15,13 +15,15 @@ const INTERVAL_MS = 60 * 1000
 
 // ─── Check WhatsApp instances + auto-reconnect ─────────────────
 async function checkWhatsAppInstances() {
-  // First check if Evolution API is alive
+  // First check if Evolution API is alive. Usa EVOLUTION_API_URL do env (setup Docker do fork
+  // Sheraos aponta pra http://evolution:8080), com fallback pro localhost do setup Dros nativo.
   let evolutionAlive = false
+  const healthUrl = (process.env.EVOLUTION_API_URL || 'http://127.0.0.1:8080').replace(/\/+$/, '') + '/'
   try {
-    const r = await fetch('http://127.0.0.1:8080/', { timeout: 5000 })
+    const r = await fetch(healthUrl, { timeout: 5000 })
     evolutionAlive = r.ok || r.status === 401 || r.status === 404
   } catch {
-    console.error('[Health] Evolution API is DOWN — cannot check instances')
+    console.error(`[Health] Evolution API is DOWN at ${healthUrl} — cannot check instances`)
     return
   }
 
