@@ -625,6 +625,13 @@ addColumnIfNotExists('accounts', 'attendant_analytics_enabled', 'INTEGER NOT NUL
 // Default 0 preserva comportamento antigo (admin audita sem afetar badge do atendente).
 // Ligar so quando super_admin ESTA operando a conta ativamente (ex: cliente que a agencia atende direto).
 addColumnIfNotExists('accounts', 'admin_marks_as_read', 'INTEGER NOT NULL DEFAULT 0')
+
+// Timestamp da ultima msg INBOUND (do cliente pra nos). Usado como sort primario do chat:
+// leads que recebem msg do cliente sobem pro topo, msgs enviadas pelo atendente NAO sobem.
+// Isso mimica o comportamento do WhatsApp Business (msg recebida move contato pro topo).
+// Backfill inicial via updated_at seria caro; comeca NULL e vai populando na proxima msg inbound.
+addColumnIfNotExists('leads', 'last_inbound_at', 'TEXT')
+try { db.exec('CREATE INDEX IF NOT EXISTS idx_leads_account_last_inbound ON leads(account_id, last_inbound_at DESC)') } catch (e) { console.warn('[db] idx_leads_account_last_inbound:', e.message) }
 // Timestamp do último coaching weekly run (segunda 3h05 UTC). Idempotencia weekly.
 addColumnIfNotExists('accounts', 'last_weekly_coaching_at', 'TEXT')
 
@@ -644,6 +651,31 @@ addColumnIfNotExists('leads', 'qualified_at', 'TEXT')
 
 // Flag em funnel_stages: marca stages "qualificado+" (gerente configura).
 addColumnIfNotExists('funnel_stages', 'is_qualified', 'INTEGER NOT NULL DEFAULT 0')
+// Flag em funnel_stages: marca stages de "reuniao/visita" (marco intermediario entre qualificado e venda).
+// Usado no painel Funil Mensal do dashboard pra calcular taxa Qualificado -> Reuniao -> Venda.
+addColumnIfNotExists('funnel_stages', 'is_meeting', 'INTEGER NOT NULL DEFAULT 0')
+
+// Ticket medio default da conta (valor por venda, em R$). Usado como fallback quando o mes nao
+// tiver override em account_monthly_metrics.avg_ticket. Aparece no painel de ROAS.
+addColumnIfNotExists('accounts', 'avg_ticket', 'REAL')
+
+// Metricas mensais por conta — investimento em ads, meta de vendas, ticket medio do mes.
+// Uma linha por (account_id, year_month). Se linha nao existe, painel usa defaults da account.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS account_monthly_metrics (
+    account_id    INTEGER NOT NULL,
+    year_month    TEXT NOT NULL,             -- '2026-08'
+    ad_investment REAL DEFAULT 0,             -- R$ gastos em ads no mes
+    sales_target  INTEGER DEFAULT 0,          -- meta de vendas do mes
+    avg_ticket    REAL,                       -- se preenchido, sobrescreve accounts.avg_ticket
+    notes         TEXT,
+    updated_by    INTEGER,
+    updated_at    TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (account_id, year_month),
+    FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE,
+    FOREIGN KEY (updated_by) REFERENCES users(id) ON DELETE SET NULL
+  );
+`)
 
 // Extender conversation_insights (V1 colunas permanecem; V2 adiciona em cima).
 addColumnIfNotExists('conversation_insights', 'insights_version', 'INTEGER NOT NULL DEFAULT 1')

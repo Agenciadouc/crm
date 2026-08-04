@@ -8,6 +8,7 @@ import Sidebar from './components/Sidebar'
 import DisconnectedInstancesAlert from './components/DisconnectedInstancesAlert'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
+import Projecao from './pages/Projecao'
 import AttendantAnalytics from './pages/AttendantAnalytics'
 import Pipeline from './pages/Pipeline'
 import Leads from './pages/Leads'
@@ -99,6 +100,7 @@ function AppRoutes() {
           {/* Gerente + Admin routes */}
           {(isGerente || isAdmin) && <>
             <Route path="/dashboard" element={<Dashboard />} />
+            <Route path="/projecao" element={<Projecao />} />
             <Route path="/atendimentos" element={<AttendantAnalytics />} />
             <Route path="/messages" element={<Messages />} />
             <Route path="/messages/:id" element={<BroadcastDetail />} />

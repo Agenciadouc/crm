@@ -134,7 +134,13 @@ export default function Funnels() {
                     <GripVertical size={14} style={{ color: '#9B96B0', cursor: 'grab' }} />
                     <input type="color" value={s.color || '#FFB300'} onChange={e => updateStage(i, 'color', e.target.value)} style={{ width: 30, height: 30, border: 'none', background: 'none', cursor: 'pointer' }} />
                     <input className="input" value={s.name || ''} onChange={e => updateStage(i, 'name', e.target.value)} placeholder="Nome da etapa" style={{ flex: 1 }} />
-                    <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, whiteSpace: 'nowrap', cursor: 'pointer' }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, whiteSpace: 'nowrap', cursor: 'pointer' }} title="Marca como etapa de Qualificacao (usado no painel Funil Mensal do dashboard)">
+                      <input type="checkbox" checked={!!s.is_qualified} onChange={e => updateStage(i, 'is_qualified', e.target.checked ? 1 : 0)} /> Qual.
+                    </label>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, whiteSpace: 'nowrap', cursor: 'pointer' }} title="Marca como etapa de Reuniao/Visita (usado no painel Funil Mensal)">
+                      <input type="checkbox" checked={!!s.is_meeting} onChange={e => updateStage(i, 'is_meeting', e.target.checked ? 1 : 0)} /> Reun.
+                    </label>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, whiteSpace: 'nowrap', cursor: 'pointer' }} title="Marca como Venda ganha">
                       <input type="checkbox" checked={!!s.is_conversion} onChange={e => updateStage(i, 'is_conversion', e.target.checked ? 1 : 0)} /> Conv.
                     </label>
                     <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, whiteSpace: 'nowrap', cursor: 'pointer' }}>

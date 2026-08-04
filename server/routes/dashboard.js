@@ -816,4 +816,296 @@ router.put('/leads/:leadId/value', requireRole('super_admin', 'gerente', 'atende
   res.json({ ok: r.changes > 0, value_estimated: value })
 })
 
+// ============================================================================
+// FUNIL MENSAL + ROAS + PROJECAO
+// ============================================================================
+// Endpoints usados pelo modulo "Funil & ROI" no Dashboard. A ideia:
+// - /funil-mensal/:month  -> cascata leads -> qualificados -> reunioes -> vendas do mes
+// - /monthly-metrics/:month  -> GET/PUT dados manuais (investimento, meta, ticket)
+// - /projecao?months=N  -> tabela hist+projetada dos ultimos/proximos N meses
+
+// Helper: retorna primeiro dia (inclusive) e primeiro dia do mes seguinte (exclusive)
+// no formato 'YYYY-MM-DD HH:MM:SS' (compat com created_at do DB).
+function monthBounds(yearMonth) {
+  const m = /^(\d{4})-(\d{2})$/.exec(String(yearMonth || ''))
+  if (!m) return null
+  const y = parseInt(m[1]), mo = parseInt(m[2])
+  const start = `${m[1]}-${m[2]}-01 00:00:00`
+  const nextY = mo === 12 ? y + 1 : y
+  const nextM = mo === 12 ? 1 : mo + 1
+  const end = `${nextY}-${String(nextM).padStart(2, '0')}-01 00:00:00`
+  return { start, end, yearMonth }
+}
+
+// Helper: mes atual no formato YYYY-MM
+function currentYearMonth() {
+  const d = new Date()
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`
+}
+
+// Helper: retorna configuracao efetiva do mes (com fallback pra defaults da conta).
+function loadMonthConfig(accountId, yearMonth) {
+  const acc = db.prepare('SELECT investimento_anuncios, avg_ticket FROM accounts WHERE id = ?').get(accountId) || {}
+  const row = db.prepare('SELECT ad_investment, sales_target, avg_ticket, notes, updated_at FROM account_monthly_metrics WHERE account_id = ? AND year_month = ?').get(accountId, yearMonth)
+  return {
+    year_month: yearMonth,
+    ad_investment: row?.ad_investment != null ? row.ad_investment : (acc.investimento_anuncios || 0),
+    sales_target: row?.sales_target != null ? row.sales_target : 0,
+    avg_ticket: row?.avg_ticket != null ? row.avg_ticket : (acc.avg_ticket || 0),
+    notes: row?.notes || '',
+    is_overridden: !!row,       // true se ha entrada em account_monthly_metrics pra esse mes
+    updated_at: row?.updated_at || null,
+  }
+}
+
+// Helper: computa cascata do funil pra um mes (leads criados no mes + jornada via stage_history).
+// Um lead conta como "qualificado" se JA passou por algum stage com is_qualified=1 OU is_meeting=1
+// OU is_conversion=1 (progressao acumulativa). "reuniao" idem em is_meeting/is_conversion. "won" so
+// em is_conversion. Isso reflete o fluxo (mesmo se o lead voltou pra um stage anterior, o marco fica).
+function computeFunnelCascade(accountId, yearMonth) {
+  const b = monthBounds(yearMonth)
+  if (!b) return null
+
+  // Leads criados no mes (base)
+  const totalRow = db.prepare(`
+    SELECT COUNT(*) as c FROM leads
+    WHERE account_id = ? AND is_active = 1 AND is_blocked = 0
+      AND created_at >= ? AND created_at < ?
+  `).get(accountId, b.start, b.end)
+  const total = totalRow.c
+
+  // IDs de stages classificados na conta (default funnel)
+  const stages = db.prepare(`
+    SELECT fs.id, fs.is_qualified, fs.is_meeting, fs.is_conversion
+    FROM funnel_stages fs
+    JOIN funnels f ON f.id = fs.funnel_id
+    WHERE f.account_id = ? AND f.is_default = 1
+  `).all(accountId)
+  const qualIds  = stages.filter(s => s.is_qualified || s.is_meeting || s.is_conversion).map(s => s.id)
+  const meetIds  = stages.filter(s => s.is_meeting  || s.is_conversion).map(s => s.id)
+  const wonIds   = stages.filter(s => s.is_conversion).map(s => s.id)
+
+  const configMissing = { qualified: qualIds.length === 0, meeting: meetIds.length === 0, won: wonIds.length === 0 }
+
+  // Helper query: quantos leads do mes ja passaram por pelo menos 1 dos stages da lista.
+  // Usa DISTINCT porque um lead pode ter varias entradas em stage_history apontando pros mesmos stages.
+  function countPassed(stageIds) {
+    if (stageIds.length === 0) return 0
+    const placeholders = stageIds.map(() => '?').join(',')
+    const row = db.prepare(`
+      SELECT COUNT(DISTINCT l.id) as c
+      FROM leads l
+      WHERE l.account_id = ? AND l.is_active = 1 AND l.is_blocked = 0
+        AND l.created_at >= ? AND l.created_at < ?
+        AND EXISTS (
+          SELECT 1 FROM stage_history sh
+          WHERE sh.lead_id = l.id AND sh.to_stage_id IN (${placeholders})
+        )
+    `).get(accountId, b.start, b.end, ...stageIds)
+    return row.c
+  }
+
+  const qualified = countPassed(qualIds)
+  const meeting   = countPassed(meetIds)
+  const won       = countPassed(wonIds)
+
+  // Soma de value_estimated dos leads WON do mes (faturamento real, quando informado).
+  // Se lead won nao tem value_estimated, fica 0 (o painel usa avg_ticket * won como fallback).
+  let realRevenue = 0
+  if (wonIds.length > 0) {
+    const placeholders = wonIds.map(() => '?').join(',')
+    const row = db.prepare(`
+      SELECT COALESCE(SUM(l.value_estimated), 0) as v
+      FROM leads l
+      WHERE l.account_id = ? AND l.is_active = 1 AND l.is_blocked = 0
+        AND l.created_at >= ? AND l.created_at < ?
+        AND EXISTS (
+          SELECT 1 FROM stage_history sh
+          WHERE sh.lead_id = l.id AND sh.to_stage_id IN (${placeholders})
+        )
+    `).get(accountId, b.start, b.end, ...wonIds)
+    realRevenue = row.v || 0
+  }
+
+  return {
+    total, qualified, meeting, won,
+    // Taxas em cascata (cada uma sobre a etapa anterior). null se etapa anterior = 0.
+    qualified_rate: total > 0 ? (qualified / total) * 100 : null,
+    meeting_rate:   qualified > 0 ? (meeting / qualified) * 100 : null,
+    won_rate:       meeting > 0 ? (won / meeting) * 100 : null,
+    overall_conversion: total > 0 ? (won / total) * 100 : null,
+    real_revenue: realRevenue,
+    config_missing: configMissing,
+  }
+}
+
+// GET /funil-mensal/:month -> retorna cascata + config + calculos ROAS pra o mes
+router.get('/funil-mensal/:month', requireRole('super_admin', 'gerente', 'atendente'), (req, res) => {
+  if (!req.accountId) return res.status(400).json({ error: 'account_id required' })
+  const month = req.params.month === 'current' ? currentYearMonth() : req.params.month
+  const cascade = computeFunnelCascade(req.accountId, month)
+  if (!cascade) return res.status(400).json({ error: 'formato de mes invalido (use YYYY-MM ou current)' })
+
+  const cfg = loadMonthConfig(req.accountId, month)
+  const investment = cfg.ad_investment
+  const ticket = cfg.avg_ticket
+  const target = cfg.sales_target
+
+  // Faturamento estimado: prioriza soma real de value_estimated; se zero, usa won * ticket.
+  const estimatedRevenue = cascade.real_revenue > 0 ? cascade.real_revenue : (cascade.won * ticket)
+
+  const cpl  = cascade.total > 0 ? investment / cascade.total : null
+  const cac  = cascade.won > 0 ? investment / cascade.won : null
+  const roas = investment > 0 ? estimatedRevenue / investment : null
+  const targetProgress = target > 0 ? (cascade.won / target) * 100 : null
+
+  res.json({
+    month, cascade, config: cfg,
+    calc: {
+      cpl, cac, roas,
+      estimated_revenue: estimatedRevenue,
+      target_progress: targetProgress,
+      target_remaining: Math.max(0, target - cascade.won),
+    },
+  })
+})
+
+// GET /monthly-metrics/:month -> config do mes (com defaults da conta)
+router.get('/monthly-metrics/:month', requireRole('super_admin', 'gerente', 'atendente'), (req, res) => {
+  if (!req.accountId) return res.status(400).json({ error: 'account_id required' })
+  const month = req.params.month === 'current' ? currentYearMonth() : req.params.month
+  if (!monthBounds(month)) return res.status(400).json({ error: 'formato de mes invalido (use YYYY-MM)' })
+  res.json(loadMonthConfig(req.accountId, month))
+})
+
+// PUT /monthly-metrics/:month -> upsert (grava override manual pra esse mes)
+router.put('/monthly-metrics/:month', requireRole('super_admin', 'gerente'), (req, res) => {
+  if (!req.accountId) return res.status(400).json({ error: 'account_id required' })
+  const month = req.params.month === 'current' ? currentYearMonth() : req.params.month
+  if (!monthBounds(month)) return res.status(400).json({ error: 'formato de mes invalido (use YYYY-MM)' })
+  const { ad_investment, sales_target, avg_ticket, notes } = req.body
+  db.prepare(`
+    INSERT INTO account_monthly_metrics (account_id, year_month, ad_investment, sales_target, avg_ticket, notes, updated_by, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
+    ON CONFLICT(account_id, year_month) DO UPDATE SET
+      ad_investment = excluded.ad_investment,
+      sales_target = excluded.sales_target,
+      avg_ticket = excluded.avg_ticket,
+      notes = excluded.notes,
+      updated_by = excluded.updated_by,
+      updated_at = excluded.updated_at
+  `).run(
+    req.accountId, month,
+    Math.max(0, parseFloat(ad_investment) || 0),
+    Math.max(0, parseInt(sales_target) || 0),
+    avg_ticket != null && avg_ticket !== '' ? Math.max(0, parseFloat(avg_ticket)) : null,
+    notes || null,
+    req.user.id
+  )
+  res.json(loadMonthConfig(req.accountId, month))
+})
+
+// PUT /account/avg-ticket -> atualiza ticket medio DEFAULT da conta (fallback)
+router.put('/account/avg-ticket', requireRole('super_admin', 'gerente'), (req, res) => {
+  if (!req.accountId) return res.status(400).json({ error: 'account_id required' })
+  const value = req.body.avg_ticket
+  const clean = value != null && value !== '' ? Math.max(0, parseFloat(value)) : null
+  db.prepare('UPDATE accounts SET avg_ticket = ?, updated_at = datetime(\'now\') WHERE id = ?').run(clean, req.accountId)
+  res.json({ ok: true, avg_ticket: clean })
+})
+
+// GET /projecao?months=6&futuros=3 -> tabela real+projetado
+// meses = quantos passados incluir (default 3), futuros = quantos meses projetar a partir do
+// mes atual (default 3). Projecao usa media das taxas dos meses passados que tenham dados.
+router.get('/projecao', requireRole('super_admin', 'gerente'), (req, res) => {
+  if (!req.accountId) return res.status(400).json({ error: 'account_id required' })
+  const past = Math.min(24, Math.max(0, parseInt(req.query.months) || 3))
+  const future = Math.min(24, Math.max(0, parseInt(req.query.futuros) || 3))
+
+  // Gera lista de YYYY-MM: [past atras ... atual ... future adiante]
+  const list = []
+  const now = new Date()
+  const baseY = now.getUTCFullYear(), baseM = now.getUTCMonth() // 0-based
+  for (let offset = -past; offset <= future; offset++) {
+    const d = new Date(Date.UTC(baseY, baseM + offset, 1))
+    const ym = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`
+    list.push({ year_month: ym, offset })
+  }
+
+  const rows = list.map(({ year_month, offset }) => {
+    const cfg = loadMonthConfig(req.accountId, year_month)
+    const isFuture = offset > 0
+    const cascade = isFuture
+      ? { total: 0, qualified: 0, meeting: 0, won: 0, real_revenue: 0, qualified_rate: null, meeting_rate: null, won_rate: null, overall_conversion: null }
+      : computeFunnelCascade(req.accountId, year_month)
+    return { year_month, is_future: isFuture, config: cfg, cascade }
+  })
+
+  // Calcula taxas medias historicas (dos meses passados que tem leads)
+  const past_with_data = rows.filter(r => !r.is_future && r.cascade.total > 0)
+  const avg = {
+    qualified_rate: past_with_data.length > 0 ? past_with_data.reduce((s, r) => s + (r.cascade.qualified_rate || 0), 0) / past_with_data.length : 20,
+    meeting_rate:   past_with_data.length > 0 ? past_with_data.reduce((s, r) => s + (r.cascade.meeting_rate || 0), 0) / past_with_data.length : 30,
+    won_rate:       past_with_data.length > 0 ? past_with_data.reduce((s, r) => s + (r.cascade.won_rate || 0), 0) / past_with_data.length : 30,
+  }
+  // CPL medio dos meses passados com investimento
+  const past_with_cpl = past_with_data.filter(r => r.config.ad_investment > 0 && r.cascade.total > 0)
+  const avg_cpl = past_with_cpl.length > 0
+    ? past_with_cpl.reduce((s, r) => s + (r.config.ad_investment / r.cascade.total), 0) / past_with_cpl.length
+    : 20 // fallback conservador
+
+  // Enriquece cada linha com metricas calculadas (real ou projetado)
+  const enriched = rows.map(r => {
+    const cfg = r.config
+    let cascade = r.cascade
+    let projected = false
+    if (r.is_future) {
+      projected = true
+      const projTotal = cfg.ad_investment > 0 && avg_cpl > 0 ? Math.round(cfg.ad_investment / avg_cpl) : 0
+      const projQual  = Math.round(projTotal * (avg.qualified_rate / 100))
+      const projMeet  = Math.round(projQual * (avg.meeting_rate / 100))
+      const projWon   = Math.round(projMeet * (avg.won_rate / 100))
+      cascade = {
+        total: projTotal, qualified: projQual, meeting: projMeet, won: projWon,
+        real_revenue: 0,
+        qualified_rate: avg.qualified_rate, meeting_rate: avg.meeting_rate, won_rate: avg.won_rate,
+        overall_conversion: projTotal > 0 ? (projWon / projTotal) * 100 : null,
+      }
+    }
+    const investment = cfg.ad_investment
+    const ticket = cfg.avg_ticket
+    const revenue = cascade.real_revenue > 0 ? cascade.real_revenue : (cascade.won * ticket)
+    return {
+      year_month: r.year_month,
+      is_future: r.is_future,
+      projected,
+      investment,
+      total_leads: cascade.total,
+      cpl: cascade.total > 0 ? investment / cascade.total : null,
+      qualified: cascade.qualified,
+      qualified_rate: cascade.qualified_rate,
+      meeting: cascade.meeting,
+      meeting_rate: cascade.meeting_rate,
+      won: cascade.won,
+      won_rate: cascade.won_rate,
+      target: cfg.sales_target,
+      ticket,
+      revenue,
+      cac: cascade.won > 0 ? investment / cascade.won : null,
+      roas: investment > 0 ? revenue / investment : null,
+    }
+  })
+
+  res.json({
+    rows: enriched,
+    assumptions: {
+      avg_qualified_rate: avg.qualified_rate,
+      avg_meeting_rate: avg.meeting_rate,
+      avg_won_rate: avg.won_rate,
+      avg_cpl,
+      months_used_for_avg: past_with_data.length,
+    },
+  })
+})
+
 export default router

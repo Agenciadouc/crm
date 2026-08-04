@@ -124,7 +124,7 @@ router.get('/', (req, res) => {
     LEFT JOIN users u ON l.attendant_id = u.id
     LEFT JOIN whatsapp_instances wi ON l.instance_id = wi.id
     WHERE ${where.join(' AND ')}
-    ORDER BY l.updated_at DESC
+    ORDER BY COALESCE(l.last_inbound_at, l.updated_at) DESC
     LIMIT ? OFFSET ?
   `
   const leads = db.prepare(sql).all(...params, parseInt(limit), offset)

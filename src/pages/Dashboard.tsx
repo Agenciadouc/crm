@@ -5,6 +5,7 @@ import AccountSelector from '../components/AccountSelector'
 import { fetchDashboardStats, fetchAgentStats, formatNumber, pctChange, type DashboardStats, type AgentStat } from '../lib/api'
 import { ResponsiveContainer, AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip } from 'recharts'
 import { Users, Target, TrendingUp, TrendingDown, Calendar, UserX, Zap } from 'lucide-react'
+import FunilMensalPanel from '../components/FunilMensal'
 
 const DAYS_OPTIONS = [{ label: '7d', value: 7 }, { label: '14d', value: 14 }, { label: '30d', value: 30 }, { label: '90d', value: 90 }]
 const COLORS = ['#FFB300', '#34C759', '#5DADE2', '#FF6B8A', '#9B59B6', '#FFAA83', '#EA4335', '#2ECC71']
@@ -71,6 +72,9 @@ export default function Dashboard() {
             {stats.unassigned > 5 && <div className="metric-sub" style={{ color: '#FF6B6B' }}>Distribuir leads!</div>}</div>
         </div>
       </section>
+
+      {/* Funil Mensal + ROAS (novo modulo) */}
+      <FunilMensalPanel accountId={accountId} />
 
       {/* Funnel by stage */}
       {stats.byStage.length > 0 && (

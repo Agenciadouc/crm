@@ -125,7 +125,7 @@ export default function Chat() {
   const [readyMsgFilter, setReadyMsgFilter] = useState('')
   const [readyMsgIdx, setReadyMsgIdx] = useState(0)
   const readyMsgsContainerRef = useRef<HTMLDivElement>(null)
-  const msgInputRef = useRef<HTMLInputElement>(null)
+  const msgInputRef = useRef<HTMLTextAreaElement>(null)
   const [noteText, setNoteText] = useState('')
   const [sending, setSending] = useState(false)
   const [attachFile, setAttachFile] = useState<File | null>(null)
@@ -213,6 +213,15 @@ export default function Chat() {
     setReadyMsgFilter('')
     setTimeout(() => msgInputRef.current?.focus(), 0)
   }
+
+  // Auto-ajusta altura do textarea quando msgText muda por caminho que NAO passa por onChange
+  // (ex: setMsgText apos selecionar ready-msg com \n, ou setMsgText('') apos enviar).
+  useEffect(() => {
+    const el = msgInputRef.current
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = Math.min(el.scrollHeight, 180) + 'px'
+  }, [msgText])
 
   // FASE 3 PERFORMANCE — search server-side com debounce 300ms.
   // Em conta com 1500+ leads, search client-side era latente e nao achava leads
@@ -611,14 +620,17 @@ export default function Chat() {
       const s = search.toLowerCase()
       result = result.filter(l => (l.name || '').toLowerCase().includes(s) || (l.phone || '').includes(s))
     }
-    // Ordenacao estilo WhatsApp: leads com unread primeiro (badge no topo), depois por updated_at desc.
-    // Leads recem-marcados como lidos NESTA sessao ainda contam como "com prioridade" pra nao afundar.
-    // Refresh limpa recentlyReadIds e a ordem volta a refletir 100% o estado do backend.
+    // Ordenacao estilo WhatsApp: leads com unread primeiro (badge no topo), depois por
+    // last_inbound_at (msg recebida do cliente) desc — msg outbound do atendente NAO reordena.
+    // Fallback pra updated_at pra leads sem inbound ainda. Leads recem-marcados como lidos NESTA
+    // sessao continuam contando como "com prioridade" pra nao afundar (fix de sessão anterior).
     return [...result].sort((a, b) => {
       const aHighlighted = (a.unread_count || 0) > 0 || recentlyReadIds.has(a.id) ? 1 : 0
       const bHighlighted = (b.unread_count || 0) > 0 || recentlyReadIds.has(b.id) ? 1 : 0
       if (aHighlighted !== bHighlighted) return bHighlighted - aHighlighted
-      return (b.updated_at || '').localeCompare(a.updated_at || '')
+      const aTs = a.last_inbound_at || a.updated_at || ''
+      const bTs = b.last_inbound_at || b.updated_at || ''
+      return bTs.localeCompare(aTs)
     })
   }, [leads, search, tagFilter, attendantFilter, stageFilter, recentlyReadIds])
 
@@ -1193,14 +1205,18 @@ export default function Chat() {
                 </button>
                 <AudioRecorder onSend={handleSendAudio} disabled={sending} />
                 <div ref={readyMsgsContainerRef} style={{ position: 'relative', flex: 1, display: 'flex' }}>
-                  <input
+                  <textarea
                     ref={msgInputRef}
                     className="input"
-                    style={{ flex: 1 }}
-                    placeholder='Mensagem... (digite "/" para usar mensagens prontas)'
+                    rows={1}
+                    style={{ flex: 1, resize: 'none', minHeight: 38, maxHeight: 180, overflowY: 'auto', fontFamily: 'inherit', lineHeight: '1.4' }}
+                    placeholder='Mensagem... (digite "/" para usar mensagens prontas, Shift+Enter pra nova linha)'
                     value={showReadyMsgs ? `/${readyMsgFilter}` : msgText}
                     onChange={e => {
                       const v = e.target.value
+                      // Auto-resize: cresce ate maxHeight, depois vira scroll
+                      e.target.style.height = 'auto'
+                      e.target.style.height = Math.min(e.target.scrollHeight, 180) + 'px'
                       if (showReadyMsgs) {
                         if (v.startsWith('/')) {
                           setReadyMsgFilter(v.slice(1))
@@ -1244,6 +1260,7 @@ export default function Chat() {
                         }
                         return
                       }
+                      // Enter = envia, Shift+Enter = quebra de linha (comportamento nativo do textarea)
                       if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
                         e.preventDefault()
                         handleSendMsg()

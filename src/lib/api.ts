@@ -20,9 +20,9 @@ export function pctChange(c: number, p: number) { if (p === 0) return c > 0 ? 10
 // Types
 // =============================================
 
-export interface Account { id: number; name: string; slug: string; logo_url: string | null; is_active: number; created_at: string; lead_count?: number; user_count?: number; cnpj?: string | null; razao_social?: string | null; segmento?: string | null; website?: string | null; instagram?: string | null; whatsapp_comercial?: string | null; valor_mensal?: number | null; contrato_inicio?: string | null; cidade?: string | null; estado?: string | null; observacoes?: string | null; trabalha_anuncio?: number; investimento_anuncios?: number | null; meta_pixel_id?: string | null; meta_capi_token?: string | null; meta_capi_test_event_code?: string | null; meta_capi_enabled?: number; meta_page_id?: string | null; ai_agents_enabled?: number; attendant_analytics_enabled?: number; admin_marks_as_read?: number; anthropic_api_key?: string | null; analysis_token_limit?: number }
+export interface Account { id: number; name: string; slug: string; logo_url: string | null; is_active: number; created_at: string; lead_count?: number; user_count?: number; cnpj?: string | null; razao_social?: string | null; segmento?: string | null; website?: string | null; instagram?: string | null; whatsapp_comercial?: string | null; valor_mensal?: number | null; contrato_inicio?: string | null; cidade?: string | null; estado?: string | null; observacoes?: string | null; trabalha_anuncio?: number; investimento_anuncios?: number | null; avg_ticket?: number | null; meta_pixel_id?: string | null; meta_capi_token?: string | null; meta_capi_test_event_code?: string | null; meta_capi_enabled?: number; meta_page_id?: string | null; ai_agents_enabled?: number; attendant_analytics_enabled?: number; admin_marks_as_read?: number; anthropic_api_key?: string | null; analysis_token_limit?: number }
 export interface User { id: number; account_id: number | null; account_name?: string | null; name: string; email: string; role: string; is_active: number; is_bot?: number; primary_instance_id?: number | null; notification_instance_id?: number | null; can_manage_proposals?: number; can_manage_contracts?: number; can_grab_leads?: number; created_at: string }
-export interface FunnelStage { id: number; funnel_id: number; name: string; position: number; color: string; is_conversion: number; is_terminal: number; auto_keywords: string | null; meta_event_name?: string | null }
+export interface FunnelStage { id: number; funnel_id: number; name: string; position: number; color: string; is_conversion: number; is_terminal: number; is_qualified?: number; is_meeting?: number; auto_keywords: string | null; meta_event_name?: string | null }
 export interface Funnel { id: number; account_id: number; name: string; is_default: number; is_active: number; first_msg_template?: string | null; stages: FunnelStage[] }
 export interface Tag { id: number; account_id: number; name: string; color: string }
 export interface Lead {
@@ -32,6 +32,7 @@ export interface Lead {
   wa_remote_jid: string | null; instance_id: number | null; last_instance_id?: number | null; profile_pic_url: string | null; is_active: number; created_at: string; updated_at: string
   is_archived?: number; archived_at?: string | null; has_new_after_archive?: number
   unread_count?: number  // qtd de msgs inbound nao lidas — zerado ao abrir o chat
+  last_inbound_at?: string | null  // timestamp da ultima msg do cliente (nao do atendente) — sort do chat
   empresa?: string | null; cpf_cnpj?: string | null; instagram?: string | null; trabalha_anuncio?: number; investimento_anuncios?: number | null
   opted_in_at?: string | null; opted_out_at?: string | null; last_broadcast_at?: string | null
   state?: string | null; zip?: string | null; birthdate?: string | null; gender?: string | null
@@ -243,6 +244,82 @@ export const syncContractHub = (id: number) => apiFetch<{ ok: boolean; client_id
 export const fetchDashboardStats = (accountId: number, days = 7) => apiFetch<DashboardStats>(`/api/dashboard/stats?account_id=${accountId}&days=${days}`)
 export const fetchAgentStats = (accountId: number, days = 7) => apiFetch<{ agents: AgentStat[] }>(`/api/dashboard/agents?account_id=${accountId}&days=${days}`).then(d => d.agents)
 export const fetchGlobalDashboard = () => apiFetch<{ accounts: any[]; totalLeads: number; leadsToday: number }>('/api/dashboard/global')
+
+// ─── Funil Mensal + ROAS + Projecao ────────────────────────────────────────
+export interface FunilMensalCascade {
+  total: number
+  qualified: number
+  meeting: number
+  won: number
+  qualified_rate: number | null
+  meeting_rate: number | null
+  won_rate: number | null
+  overall_conversion: number | null
+  real_revenue: number
+  config_missing: { qualified: boolean; meeting: boolean; won: boolean }
+}
+export interface MonthlyConfig {
+  year_month: string
+  ad_investment: number
+  sales_target: number
+  avg_ticket: number
+  notes: string
+  is_overridden: boolean
+  updated_at: string | null
+}
+export interface FunilMensal {
+  month: string
+  cascade: FunilMensalCascade
+  config: MonthlyConfig
+  calc: {
+    cpl: number | null
+    cac: number | null
+    roas: number | null
+    estimated_revenue: number
+    target_progress: number | null
+    target_remaining: number
+  }
+}
+export interface ProjecaoRow {
+  year_month: string
+  is_future: boolean
+  projected: boolean
+  investment: number
+  total_leads: number
+  cpl: number | null
+  qualified: number
+  qualified_rate: number | null
+  meeting: number
+  meeting_rate: number | null
+  won: number
+  won_rate: number | null
+  target: number
+  ticket: number
+  revenue: number
+  cac: number | null
+  roas: number | null
+}
+export interface ProjecaoResponse {
+  rows: ProjecaoRow[]
+  assumptions: {
+    avg_qualified_rate: number
+    avg_meeting_rate: number
+    avg_won_rate: number
+    avg_cpl: number
+    months_used_for_avg: number
+  }
+}
+
+export const fetchFunilMensal = (accountId: number, month: string) =>
+  apiFetch<FunilMensal>(`/api/dashboard/funil-mensal/${month}?account_id=${accountId}`)
+export const fetchMonthlyMetrics = (accountId: number, month: string) =>
+  apiFetch<MonthlyConfig>(`/api/dashboard/monthly-metrics/${month}?account_id=${accountId}`)
+export const updateMonthlyMetrics = (accountId: number, month: string, data: { ad_investment?: number; sales_target?: number; avg_ticket?: number | null; notes?: string }) =>
+  apiFetch<MonthlyConfig>(`/api/dashboard/monthly-metrics/${month}?account_id=${accountId}`, { method: 'PUT', body: JSON.stringify(data) })
+export const updateAccountAvgTicket = (accountId: number, avgTicket: number | null) =>
+  apiFetch<{ ok: boolean; avg_ticket: number | null }>(`/api/dashboard/account/avg-ticket?account_id=${accountId}`, { method: 'PUT', body: JSON.stringify({ avg_ticket: avgTicket }) })
+export const fetchProjecao = (accountId: number, months = 3, futuros = 3) =>
+  apiFetch<ProjecaoResponse>(`/api/dashboard/projecao?account_id=${accountId}&months=${months}&futuros=${futuros}`)
 
 export interface AiUsageData {
   period: string

@@ -8,7 +8,7 @@ import { apiFetch, fetchTaskCounts, fetchPendingTransferRequests, fetchAlerts } 
 import {
   LayoutDashboard, Kanban, Users, MessageCircle, UserCog, GitBranch,
   Plug, Settings, Building2, LogOut, UsersRound, Menu, X,
-  ListOrdered, MessageSquarePlus, ClipboardList, Rocket, ListTodo, ExternalLink, Tag as TagIcon, FileText, FileSignature, ArrowRightLeft, Zap, Bot, Sun, Moon, BarChart3, Layers,
+  ListOrdered, MessageSquarePlus, ClipboardList, Rocket, ListTodo, ExternalLink, Tag as TagIcon, FileText, FileSignature, ArrowRightLeft, Zap, Bot, Sun, Moon, BarChart3, Layers, TrendingUp,
 } from 'lucide-react'
 
 function getInitials(name: string): string {
@@ -150,6 +150,11 @@ export default function Sidebar() {
           {(isGerente || isAdmin) && (
             <NavLink to="/dashboard" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`} onClick={closeMobile}>
               <LayoutDashboard size={16} /> Dashboard
+            </NavLink>
+          )}
+          {(isGerente || isAdmin) && (
+            <NavLink to="/projecao" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`} onClick={closeMobile}>
+              <TrendingUp size={16} /> Projecao
             </NavLink>
           )}
           {/* "/atendimentos" só pra contas com feature flag ativada. Super_admin sempre vê (auditoria). */}

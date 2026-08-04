@@ -80,12 +80,12 @@ router.put('/:id/stages', requireRole('super_admin', 'gerente'), (req, res) => {
     for (let i = 0; i < stages.length; i++) {
       const s = stages[i]
       if (s.id) {
-        db.prepare('UPDATE funnel_stages SET name = ?, position = ?, color = ?, is_conversion = ?, is_terminal = ?, auto_keywords = ?, meta_event_name = ? WHERE id = ?').run(
-          s.name, i, s.color || '#FFB300', s.is_conversion ? 1 : 0, s.is_terminal ? 1 : 0, s.auto_keywords ? JSON.stringify(s.auto_keywords) : null, s.meta_event_name || null, s.id
+        db.prepare('UPDATE funnel_stages SET name = ?, position = ?, color = ?, is_conversion = ?, is_terminal = ?, is_qualified = ?, is_meeting = ?, auto_keywords = ?, meta_event_name = ? WHERE id = ?').run(
+          s.name, i, s.color || '#FFB300', s.is_conversion ? 1 : 0, s.is_terminal ? 1 : 0, s.is_qualified ? 1 : 0, s.is_meeting ? 1 : 0, s.auto_keywords ? JSON.stringify(s.auto_keywords) : null, s.meta_event_name || null, s.id
         )
       } else {
-        db.prepare('INSERT INTO funnel_stages (funnel_id, name, position, color, is_conversion, is_terminal, auto_keywords, meta_event_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(
-          funnel.id, s.name, i, s.color || '#FFB300', s.is_conversion ? 1 : 0, s.is_terminal ? 1 : 0, s.auto_keywords ? JSON.stringify(s.auto_keywords) : null, s.meta_event_name || null
+        db.prepare('INSERT INTO funnel_stages (funnel_id, name, position, color, is_conversion, is_terminal, is_qualified, is_meeting, auto_keywords, meta_event_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(
+          funnel.id, s.name, i, s.color || '#FFB300', s.is_conversion ? 1 : 0, s.is_terminal ? 1 : 0, s.is_qualified ? 1 : 0, s.is_meeting ? 1 : 0, s.auto_keywords ? JSON.stringify(s.auto_keywords) : null, s.meta_event_name || null
         )
       }
     }

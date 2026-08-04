@@ -557,8 +557,14 @@ router.post('/evolution/:accountSlug', (req, res) => {
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(lead.id, account.id, fromMe ? 'outbound' : 'inbound', content, mediaType, mediaUrl, fromMe ? '' : pushName, msgId || null, timestamp, waInstance?.id || null)
       // Incrementa unread_count se msg eh inbound e lead nao arquivado (arquivados usam has_new_after_archive).
-      if (!fromMe && !lead.is_archived) {
-        db.prepare("UPDATE leads SET unread_count = unread_count + 1, updated_at = datetime('now') WHERE id = ?").run(lead.id)
+      // Tambem seta last_inbound_at pra qualquer inbound (arquivado ou nao) — usado no sort do chat pra
+      // subir contato pro topo so quando ELE manda msg (msg outbound do atendente nao move).
+      if (!fromMe) {
+        if (!lead.is_archived) {
+          db.prepare("UPDATE leads SET unread_count = unread_count + 1, last_inbound_at = datetime('now'), updated_at = datetime('now') WHERE id = ?").run(lead.id)
+        } else {
+          db.prepare("UPDATE leads SET last_inbound_at = datetime('now') WHERE id = ?").run(lead.id)
+        }
       }
       // Update lead's last_instance_id (next message from CRM will use this instance)
       if (waInstance?.id) {
