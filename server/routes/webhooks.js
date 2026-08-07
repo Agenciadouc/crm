@@ -266,9 +266,46 @@ router.post('/evolution/:accountSlug', (req, res) => {
       content = name ? `📍 ${name}` : (lat && lng ? `📍 Localizacao: ${lat}, ${lng}` : '📍 Localizacao compartilhada')
       mediaType = 'location'
     } else if (msg.contactMessage || msg.contactsArrayMessage) {
-      const contact = msg.contactMessage?.displayName || msg.contactsArrayMessage?.contacts?.[0]?.displayName || ''
-      content = contact ? `👤 Contato: ${contact}` : '👤 Contato compartilhado'
+      // Extrai nome + telefones do vCard. Formato padrao WhatsApp:
+      //   BEGIN:VCARD ... FN:Nome ... TEL;type=CELL;waid=5511...:+55 11...\nEND:VCARD
+      // Pode vir 1 contato (contactMessage) ou varios (contactsArrayMessage).
+      const contactsRaw = msg.contactsArrayMessage?.contacts?.length
+        ? msg.contactsArrayMessage.contacts
+        : (msg.contactMessage ? [msg.contactMessage] : [])
+      const parsed = contactsRaw.map(c => {
+        const name = c?.displayName || ''
+        const vcard = c?.vcard || ''
+        // Pega TODOS os TELs do vCard (pode ter varios: celular, fixo, etc)
+        // Prefere `waid=` que ja e o numero limpo com codigo de pais; fallback pro conteudo apos ":".
+        const phones = []
+        vcard.split(/\r?\n/).forEach(line => {
+          if (!/^TEL/i.test(line)) return
+          const waidMatch = line.match(/waid=(\d+)/i)
+          if (waidMatch) { phones.push(waidMatch[1]); return }
+          const afterColon = line.split(':').slice(1).join(':').trim()
+          const digits = afterColon.replace(/\D/g, '')
+          if (digits) phones.push(digits)
+        })
+        return { name, phones: [...new Set(phones)] }
+      }).filter(p => p.name || p.phones.length > 0)
+
       mediaType = 'contact'
+      if (parsed.length === 0) {
+        content = '👤 Contato compartilhado'
+      } else if (parsed.length === 1) {
+        const c = parsed[0]
+        const phoneStr = c.phones[0] || ''
+        // content: "👤 Nome — 5511..." (frontend faz parse desse formato pra montar card)
+        content = phoneStr
+          ? `👤 ${c.name || 'Contato'} — ${phoneStr}`
+          : `👤 Contato: ${c.name}`
+        mediaUrl = phoneStr || null   // reusa media_url pra guardar o phone (facilita botao "Abrir chat")
+      } else {
+        // Multi contatos: joga tudo no content separado por " | "; media_url fica com o primeiro phone
+        const parts = parsed.map(c => c.phones[0] ? `${c.name || 'Contato'} (${c.phones[0]})` : (c.name || 'Contato'))
+        content = `👤 ${parsed.length} contatos: ${parts.join(' | ')}`
+        mediaUrl = parsed.find(p => p.phones[0])?.phones[0] || null
+      }
     } else if (msg.protocolMessage?.type === 0 || msg.protocolMessage?.type === 'REVOKE') {
       // type 0 = REVOKE (mensagem apagada pelo remetente)
       content = '🚫 Mensagem apagada'
