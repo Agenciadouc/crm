@@ -40,7 +40,7 @@ export default function Leads() {
   const [dateTo, setDateTo] = useState('')
   const [tagFilter, setTagFilter] = useState('')
   const [showNew, setShowNew] = useState(false)
-  const [newLead, setNewLead] = useState<Record<string, any>>({ name: '', phone: '', email: '', city: '', source: 'manual', empresa: '', cpf_cnpj: '', instagram: '', trabalha_anuncio: 0, investimento_anuncios: '' })
+  const [newLead, setNewLead] = useState<Record<string, any>>({ name: '', phone: '', email: '', city: '', source: 'manual', empresa: '', cpf_cnpj: '', instagram: '' })
   const [showArchived, setShowArchived] = useState(false)
   const [archivedCount, setArchivedCount] = useState<{ count: number; withActivity: number }>({ count: 0, withActivity: 0 })
   // Bulk
@@ -100,7 +100,7 @@ export default function Leads() {
   const handleCreate = async () => {
     if (!accountId || !newLead.name) return
     await createLead(accountId, newLead)
-    setShowNew(false); setNewLead({ name: '', phone: '', email: '', city: '', source: 'manual', empresa: '', cpf_cnpj: '', instagram: '', trabalha_anuncio: 0, investimento_anuncios: '' }); loadLeads()
+    setShowNew(false); setNewLead({ name: '', phone: '', email: '', city: '', source: 'manual', empresa: '', cpf_cnpj: '', instagram: '' }); loadLeads()
   }
 
   const toggleSelect = (id: number) => {
@@ -319,16 +319,6 @@ export default function Leads() {
             </div>
             <div className="form-row">
               <div className="form-group"><label>Instagram</label><input className="input" value={newLead.instagram} onChange={e => setNewLead(p => ({ ...p, instagram: e.target.value }))} placeholder="@perfil" /></div>
-              <div className="form-group"><label>Investimento Anuncios (R$)</label><input className="input" type="number" step="0.01" value={newLead.investimento_anuncios} onChange={e => setNewLead(p => ({ ...p, investimento_anuncios: e.target.value }))} placeholder="5000.00" /></div>
-            </div>
-            <div className="form-row">
-              <div className="form-group">
-                <label>Trabalha com anuncio?</label>
-                <select className="select" value={newLead.trabalha_anuncio || 0} onChange={e => setNewLead(p => ({ ...p, trabalha_anuncio: parseInt(e.target.value) }))}>
-                  <option value={0}>Nao</option>
-                  <option value={1}>Sim</option>
-                </select>
-              </div>
               {whatsappInstances.length > 0 && (
                 <div className="form-group">
                   <label>Numero WhatsApp (envia por)</label>

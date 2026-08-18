@@ -295,7 +295,7 @@ export default function Chat() {
       }).catch(() => {
         if (myToken === loadLeadTokenRef.current) { setConversations([]); setActiveConvInstance(null) }
       })
-      setEditData({ name: data.lead.name || '', phone: data.lead.phone || '', email: data.lead.email || '', city: data.lead.city || '', empresa: data.lead.empresa || '', cpf_cnpj: data.lead.cpf_cnpj || '', instagram: data.lead.instagram || '', trabalha_anuncio: data.lead.trabalha_anuncio || 0, investimento_anuncios: data.lead.investimento_anuncios || '' })
+      setEditData({ name: data.lead.name || '', phone: data.lead.phone || '', email: data.lead.email || '', city: data.lead.city || '', empresa: data.lead.empresa || '', cpf_cnpj: data.lead.cpf_cnpj || '', instagram: data.lead.instagram || '' })
       try {
         const lc = await fetchLeadCadence(reqLeadId, accountId)
         if (myToken !== loadLeadTokenRef.current) return
@@ -1419,14 +1419,6 @@ export default function Chat() {
                         <input className="input" placeholder="Nome da Empresa" value={editData.empresa} onChange={e => setEditData(p => ({ ...p, empresa: e.target.value }))} style={{ fontSize: 12 }} />
                         <input className="input" placeholder="CPF/CNPJ" value={editData.cpf_cnpj} onChange={e => setEditData(p => ({ ...p, cpf_cnpj: e.target.value }))} style={{ fontSize: 12 }} />
                         <input className="input" placeholder="Instagram (@perfil)" value={editData.instagram} onChange={e => setEditData(p => ({ ...p, instagram: e.target.value }))} style={{ fontSize: 12 }} />
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                          <span style={{ fontSize: 11, color: '#9B96B0' }}>Anuncio:</span>
-                          <select className="select" value={editData.trabalha_anuncio || 0} onChange={e => setEditData(p => ({ ...p, trabalha_anuncio: parseInt(e.target.value) }))} style={{ fontSize: 11, width: 70, padding: '3px 6px' }}>
-                            <option value={0}>Nao</option>
-                            <option value={1}>Sim</option>
-                          </select>
-                        </div>
-                        <input className="input" placeholder="Investimento Anuncios (R$)" type="number" step="0.01" value={editData.investimento_anuncios} onChange={e => setEditData(p => ({ ...p, investimento_anuncios: e.target.value }))} style={{ fontSize: 12 }} />
                       </div>
                     ) : (
                       <div style={{ fontSize: 11, display: 'flex', flexDirection: 'column', gap: 4 }}>
@@ -1437,14 +1429,12 @@ export default function Chat() {
                         {lead.empresa && <div><span style={{ color: '#6B6580' }}>Empresa:</span> {lead.empresa}</div>}
                         {lead.cpf_cnpj && <div><span style={{ color: '#6B6580' }}>CPF/CNPJ:</span> {lead.cpf_cnpj}</div>}
                         {lead.instagram && <div><span style={{ color: '#6B6580' }}>Instagram:</span> {lead.instagram}</div>}
-                        <div><span style={{ color: '#6B6580' }}>Anuncio:</span> <span style={{ color: lead.trabalha_anuncio ? '#34C759' : '#9B96B0' }}>{lead.trabalha_anuncio ? 'Sim' : 'Nao'}</span></div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                           <span style={{ color: '#6B6580' }}>Disparos:</span>
                           {!lead.opted_out_at || (lead.opted_in_at && lead.opted_in_at > lead.opted_out_at)
                             ? <span style={{ color: '#34C759', fontSize: 11 }}>Sim</span>
                             : <span style={{ color: '#FF6B6B', fontSize: 11 }}>Bloqueado</span>}
                         </div>
-                        {lead.investimento_anuncios && <div><span style={{ color: '#6B6580' }}>Investimento:</span> R$ {Number(lead.investimento_anuncios).toLocaleString('pt-BR')}</div>}
                         <div><span style={{ color: '#6B6580' }}>Fonte:</span> {lead.source || '-'}</div>
                         <div><span style={{ color: '#6B6580' }}>Criado:</span> {parseSqlDate(lead.created_at).toLocaleDateString('pt-BR')}</div>
                       </div>
