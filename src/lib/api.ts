@@ -649,6 +649,7 @@ export const updateGlobalCadenceAttempts = (id: number, attempts: Partial<Cadenc
 export const deleteGlobalCadence = (id: number) => apiFetch(`/api/global-templates/cadences/${id}`, { method: 'DELETE' })
 export const fetchGlobalCadenceAppliedIn = (id: number) => apiFetch<{ applied: GlobalCadenceAppliedRow[] }>(`/api/global-templates/cadences/${id}/applied-in`).then(d => d.applied)
 export const applyGlobalCadence = (id: number, account_ids: number[], overwrite = false) => apiFetch<{ results: Array<{ account_id: number; account_name?: string; ok: boolean; error?: string; new_cadence_id?: number }> }>(`/api/global-templates/cadences/${id}/apply`, { method: 'POST', body: JSON.stringify({ account_ids, overwrite }) }).then(d => d.results)
+export const promoteCadenceToGlobal = (cadenceId: number, opts: { name?: string; description?: string | null; mark_source?: boolean } = {}) => apiFetch<{ cadence: GlobalCadence }>(`/api/global-templates/cadences/from-account/${cadenceId}`, { method: 'POST', body: JSON.stringify(opts) }).then(d => d.cadence)
 
 export const fetchGlobalFollowUps = () => apiFetch<{ follow_ups: GlobalFollowUp[] }>('/api/global-templates/follow-ups').then(d => d.follow_ups)
 export const fetchGlobalFollowUp = (id: number) => apiFetch<{ follow_up: GlobalFollowUp }>(`/api/global-templates/follow-ups/${id}`).then(d => d.follow_up)

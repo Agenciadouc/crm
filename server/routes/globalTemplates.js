@@ -208,6 +208,41 @@ function cloneGlobalCadenceToAccount(globalCadenceId, accountId) {
   return trans()
 }
 
+// POST /api/global-templates/cadences/from-account/:cadenceId — promove cadence de conta pra template global
+// Body: { name?: string, description?: string | null, mark_source?: boolean }
+// Se mark_source=true, marca a cadence original com cloned_from_global_id = novo global (audit).
+router.post('/cadences/from-account/:cadenceId', requireRole('super_admin'), (req, res) => {
+  const src = db.prepare('SELECT * FROM cadences WHERE id = ?').get(req.params.cadenceId)
+  if (!src) return res.status(404).json({ error: 'Cadencia de origem nao encontrada' })
+  const attempts = db.prepare('SELECT * FROM cadence_attempts WHERE cadence_id = ? ORDER BY position').all(src.id)
+
+  const finalName = (req.body?.name ?? src.name)?.trim()
+  if (!finalName) return res.status(400).json({ error: 'Nome obrigatorio' })
+  const finalDesc = req.body?.description !== undefined ? req.body.description : src.description
+  const markSource = !!req.body?.mark_source
+
+  try {
+    const trans = db.transaction(() => {
+      const result = db.prepare('INSERT INTO global_cadences (name, description, created_by) VALUES (?, ?, ?)').run(finalName, finalDesc || null, req.user.id)
+      const gcId = result.lastInsertRowid
+      const stmt = db.prepare('INSERT INTO global_cadence_attempts (global_cadence_id, position, action_type, description, instructions, delay_days, delay_minutes, scheduled_time, auto_message, schedule_mode, call_script) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      attempts.forEach((a, i) => {
+        stmt.run(gcId, i, a.action_type || 'mensagem', a.description || null, a.instructions || null, parseInt(a.delay_days) || 0, parseInt(a.delay_minutes) || 0, a.scheduled_time || null, a.auto_message || null, a.schedule_mode === 'duration' ? 'duration' : 'date', a.call_script || null)
+      })
+      if (markSource) {
+        db.prepare("UPDATE cadences SET cloned_from_global_id = ?, updated_at = datetime('now') WHERE id = ?").run(gcId, src.id)
+      }
+      return gcId
+    })
+    const gcId = trans()
+    const cadence = db.prepare('SELECT * FROM global_cadences WHERE id = ?').get(gcId)
+    cadence.attempts = db.prepare('SELECT * FROM global_cadence_attempts WHERE global_cadence_id = ? ORDER BY position').all(gcId)
+    res.json({ cadence })
+  } catch (e) {
+    res.status(400).json({ error: e.message })
+  }
+})
+
 // POST /api/global-templates/cadences/:id/apply — body { account_ids: [1,2,3], overwrite?: boolean }
 // Se overwrite=true, deleta cópias anteriores (com cloned_from_global_id = this) antes de re-criar.
 router.post('/cadences/:id/apply', requireRole('super_admin'), (req, res) => {

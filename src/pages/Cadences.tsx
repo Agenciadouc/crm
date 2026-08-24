@@ -1,11 +1,12 @@
 import { useState, useEffect } from 'react'
 import { useAccount } from '../context/AccountContext'
+import { useAuth } from '../context/AuthContext'
 import {
   fetchCadences, createCadence, updateCadenceAttempts, deleteCadence,
-  fetchAvailableGlobalTemplates, applyGlobalCadenceHere,
+  fetchAvailableGlobalTemplates, applyGlobalCadenceHere, promoteCadenceToGlobal,
   type Cadence, type CadenceAttempt, type GlobalTemplateAvailable,
 } from '../lib/api'
-import { Plus, Trash2, Save, ListOrdered, Phone, Mail, MessageCircle, Video, MapPin, ChevronDown, ChevronUp, HelpCircle, Copy, Check, Layers, Download } from 'lucide-react'
+import { Plus, Trash2, Save, ListOrdered, Phone, Mail, MessageCircle, Video, MapPin, ChevronDown, ChevronUp, HelpCircle, Copy, Check, Layers, Download, Globe } from 'lucide-react'
 import { MESSAGE_VARIABLES } from '../lib/messageVars'
 
 const ACTION_TYPES = [
@@ -19,6 +20,8 @@ const ACTION_TYPES = [
 
 export default function Cadences() {
   const { accountId } = useAccount()
+  const { user } = useAuth()
+  const isSuperAdmin = user?.role === 'super_admin'
   const [cadences, setCadences] = useState<Cadence[]>([])
   const [loading, setLoading] = useState(true)
   const [editing, setEditing] = useState<Cadence | null>(null)
@@ -32,6 +35,11 @@ export default function Cadences() {
   const [globals, setGlobals] = useState<GlobalTemplateAvailable[]>([])
   const [showGlobals, setShowGlobals] = useState(true)
   const [applyingGlobalId, setApplyingGlobalId] = useState<number | null>(null)
+  const [promotingId, setPromotingId] = useState<number | null>(null)
+  const [promoteTarget, setPromoteTarget] = useState<Cadence | null>(null)
+  const [promoteName, setPromoteName] = useState('')
+  const [promoteDesc, setPromoteDesc] = useState('')
+  const [promoteMarkSource, setPromoteMarkSource] = useState(true)
 
   const copyVar = (token: string) => {
     navigator.clipboard.writeText(token)
@@ -86,6 +94,30 @@ export default function Cadences() {
   const handleDelete = async (id: number) => {
     if (!accountId) return
     await deleteCadence(id, accountId); load()
+  }
+
+  const openPromote = (c: Cadence) => {
+    setPromoteTarget(c)
+    setPromoteName(c.name)
+    setPromoteDesc(c.description || '')
+    setPromoteMarkSource(true)
+  }
+  const closePromote = () => { setPromoteTarget(null); setPromoteName(''); setPromoteDesc(''); setPromoteMarkSource(true) }
+  const handlePromote = async () => {
+    if (!promoteTarget) return
+    const finalName = promoteName.trim()
+    if (!finalName) { alert('Nome obrigatorio'); return }
+    setPromotingId(promoteTarget.id)
+    try {
+      await promoteCadenceToGlobal(promoteTarget.id, { name: finalName, description: promoteDesc.trim() || null, mark_source: promoteMarkSource })
+      closePromote()
+      load()
+      alert('Cadencia promovida a template global. Ja aparece pra todas as contas em "Templates globais disponiveis".')
+    } catch (e: any) {
+      alert('Erro ao promover: ' + (e?.message || 'unknown'))
+    } finally {
+      setPromotingId(null)
+    }
   }
 
   return (
@@ -182,6 +214,17 @@ export default function Cadences() {
                   {c.description && <p style={{ fontSize: 12, color: '#9B96B0', marginTop: 4 }}>{c.description}</p>}
                 </div>
                 <div style={{ display: 'flex', gap: 6 }}>
+                  {isSuperAdmin && (
+                    <button
+                      className="btn btn-secondary btn-sm"
+                      onClick={() => openPromote(c)}
+                      disabled={promotingId === c.id}
+                      title="Copia esta cadencia pros templates globais (visivel em todas as contas)"
+                      style={{ color: '#7ee787', borderColor: 'rgba(126,231,135,0.35)' }}
+                    >
+                      <Globe size={12} /> {promotingId === c.id ? 'Promovendo...' : 'Tornar global'}
+                    </button>
+                  )}
                   <button className="btn btn-secondary btn-sm" onClick={() => startEdit(c)}>Editar</button>
                   <button className="btn btn-danger btn-sm btn-icon" onClick={() => handleDelete(c.id)}><Trash2 size={12} /></button>
                 </div>
@@ -282,6 +325,39 @@ export default function Cadences() {
             <div className="modal-actions">
               <button className="btn btn-secondary" onClick={() => setEditing(null)}>Cancelar</button>
               <button className="btn btn-primary" onClick={saveAttempts}><Save size={14} /> Salvar</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Promote to global modal */}
+      {promoteTarget && (
+        <div className="modal-overlay" onClick={closePromote}>
+          <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 520 }}>
+            <h2><Globe size={16} style={{ display: 'inline', marginRight: 6, color: '#7ee787', verticalAlign: -2 }} /> Tornar cadencia global</h2>
+            <p style={{ fontSize: 12, color: '#9B96B0', marginBottom: 14, lineHeight: 1.5 }}>
+              Cria um snapshot desta cadencia (com todas as {promoteTarget.attempts.length} etapas) em <strong>Templates globais</strong>. Todas as contas vao ver ela em "Templates disponiveis" e podem aplicar na conta delas.
+              Editar o global depois <strong>NAO</strong> propaga automatico: cada conta tem sua copia.
+            </p>
+            <div className="form-group">
+              <label>Nome do template global</label>
+              <input className="input" value={promoteName} onChange={e => setPromoteName(e.target.value)} placeholder="Ex: Follow-up Padrao Vendas" autoFocus />
+            </div>
+            <div className="form-group">
+              <label>Descricao (opcional)</label>
+              <textarea className="input" value={promoteDesc} onChange={e => setPromoteDesc(e.target.value)} placeholder="Contexto pras outras contas entenderem quando usar" rows={3} style={{ resize: 'vertical' }} />
+            </div>
+            <div className="form-group">
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 12 }}>
+                <input type="checkbox" checked={promoteMarkSource} onChange={e => setPromoteMarkSource(e.target.checked)} />
+                Marcar cadencia original como derivada deste template (audit)
+              </label>
+            </div>
+            <div className="modal-actions">
+              <button className="btn btn-secondary" onClick={closePromote}>Cancelar</button>
+              <button className="btn btn-primary" onClick={handlePromote} disabled={promotingId === promoteTarget.id}>
+                <Globe size={14} /> {promotingId === promoteTarget.id ? 'Promovendo...' : 'Tornar global'}
+              </button>
             </div>
           </div>
         </div>
