@@ -159,6 +159,7 @@ export default function Chat() {
   const [creatingTask, setCreatingTask] = useState(false)
   const [cadenceMsgText, setCadenceMsgText] = useState('')
   const [scriptModal, setScriptModal] = useState<{ text: string } | null>(null)
+  const [sendCadenceModal, setSendCadenceModal] = useState(false)
   const chatEndRef = useRef<HTMLDivElement>(null)
 
   // Load instances + globals
@@ -876,6 +877,7 @@ export default function Chat() {
       setMessages(prev => [...prev, result.message])
       if (result.delivered) {
         await advanceLeadCadence(leadCadence.id, accountId)
+        setSendCadenceModal(false)
         loadLead()
       } else {
         setNotice({ kind: 'error', title: 'Mensagem nao entregue', message: 'A mensagem NAO foi entregue no WhatsApp. Cadencia mantida na etapa atual. Verifique a conexao e tente novamente.' })
@@ -1577,7 +1579,7 @@ export default function Chat() {
                             {leadCadence.attempt_message ? (
                               <>
                                 <textarea className="input" value={cadenceMsgText} onChange={e => setCadenceMsgText(e.target.value)} rows={3} style={{ marginTop: 8, fontSize: 11, resize: 'vertical', background: 'rgba(255,179,0,0.05)', border: '1px solid rgba(255,179,0,0.2)' }} />
-                                <button className="btn btn-primary btn-sm" style={{ marginTop: 8, width: '100%', fontSize: 11 }} onClick={handleSendCadenceMessage} disabled={sending || !cadenceMsgText.trim()}><Send size={10} /> Enviar e avancar</button>
+                                <button className="btn btn-primary btn-sm" style={{ marginTop: 8, width: '100%', fontSize: 11 }} onClick={() => setSendCadenceModal(true)} disabled={sending || !cadenceMsgText.trim()}><Send size={10} /> Enviar e avancar</button>
                                 <button className="btn btn-secondary btn-sm" style={{ marginTop: 6, width: '100%', fontSize: 10 }} onClick={handleAdvanceCadence}><ChevronRight size={10} /> So avancar (sem enviar)</button>
                               </>
                             ) : leadCadence.attempt_script ? (
@@ -1876,6 +1878,51 @@ export default function Chat() {
             </div>
             <div className="modal-actions">
               <button className="btn btn-primary" onClick={() => setScriptModal(null)}>Fechar</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {sendCadenceModal && leadCadence && lead && (
+        <div className="modal-overlay" onClick={() => !sending && setSendCadenceModal(false)}>
+          <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 620 }}>
+            <h2 style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <Send size={16} style={{ color: '#FFB300' }} /> Revisar mensagem da cadencia
+            </h2>
+            <div style={{ marginTop: 12, padding: '10px 14px', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 8, display: 'flex', gap: 16, flexWrap: 'wrap', fontSize: 12 }}>
+              <div>
+                <div style={{ color: '#9B96B0', fontSize: 10, textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 2 }}>Pra</div>
+                <div style={{ color: '#fff', fontWeight: 600 }}>{lead.name || '(sem nome)'}</div>
+              </div>
+              <div>
+                <div style={{ color: '#9B96B0', fontSize: 10, textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 2 }}>WhatsApp</div>
+                <div style={{ color: '#fff', fontFamily: 'monospace' }}>{lead.phone || '-'}</div>
+              </div>
+              <div>
+                <div style={{ color: '#9B96B0', fontSize: 10, textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 2 }}>Etapa</div>
+                <div style={{ color: '#FFB300', fontWeight: 600 }}>
+                  {(leadCadence.attempt_position ?? 0) + 1}/{leadCadence.total_attempts}
+                  {leadCadence.attempt_description ? ` · ${leadCadence.attempt_description}` : ''}
+                </div>
+              </div>
+            </div>
+            <div style={{ marginTop: 14, fontSize: 11, color: '#9B96B0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span>Edite se precisar antes de confirmar o envio</span>
+              <span style={{ color: cadenceMsgText.length > 800 ? '#FF6B6B' : '#6B6580' }}>{cadenceMsgText.length} caracteres</span>
+            </div>
+            <textarea
+              className="input"
+              value={cadenceMsgText}
+              onChange={e => setCadenceMsgText(e.target.value)}
+              rows={10}
+              autoFocus
+              style={{ marginTop: 6, fontSize: 13, resize: 'vertical', minHeight: 180, background: 'rgba(255,179,0,0.05)', border: '1px solid rgba(255,179,0,0.25)', lineHeight: 1.55, fontFamily: 'inherit', whiteSpace: 'pre-wrap' }}
+            />
+            <div className="modal-actions" style={{ marginTop: 14 }}>
+              <button className="btn btn-secondary" onClick={() => setSendCadenceModal(false)} disabled={sending}>Cancelar</button>
+              <button className="btn btn-primary" onClick={handleSendCadenceMessage} disabled={sending || !cadenceMsgText.trim()}>
+                <Send size={14} /> {sending ? 'Enviando...' : 'Confirmar e enviar'}
+              </button>
             </div>
           </div>
         </div>
