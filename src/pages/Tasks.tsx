@@ -40,6 +40,7 @@ export default function Tasks() {
   const [editingTask, setEditingTask] = useState<any>(null)
   const [scriptModal, setScriptModal] = useState<{ text: string } | null>(null)
   const [confirmModal, setConfirmModal] = useState<{ leadName: string; nextStep: NextStep | null } | null>(null)
+  const [reviewMsgModal, setReviewMsgModal] = useState<{ task: Task; text: string } | null>(null)
 
   const load = useCallback(() => {
     if (!accountId) return
@@ -67,16 +68,23 @@ export default function Tasks() {
     setActioning(null)
   }
 
-  const handleSendAndComplete = async (t: Task) => {
-    if (!accountId || !t.auto_message) return
+  const openReviewMsg = (t: Task) => {
+    if (!t.auto_message) return
+    const text = applyMessageVars(t.auto_message, {
+      leadName: t.lead_name,
+      leadEmpresa: t.lead_empresa,
+      leadCity: t.lead_city,
+      attendantName: user?.name,
+    })
+    setReviewMsgModal({ task: t, text })
+  }
+
+  const handleSendReviewedAndComplete = async () => {
+    if (!accountId || !reviewMsgModal) return
+    const { task: t, text } = reviewMsgModal
+    if (!text.trim()) return
     setActioning(t.lead_cadence_id)
     try {
-      const text = applyMessageVars(t.auto_message, {
-        leadName: t.lead_name,
-        leadEmpresa: t.lead_empresa,
-        leadCity: t.lead_city,
-        attendantName: user?.name,
-      })
       const sendResult = await sendMessage(t.lead_id, accountId, text)
       if (!sendResult.delivered) {
         alert('Mensagem NAO foi entregue no WhatsApp. Tarefa mantida. Verifique a conexao e tente novamente.')
@@ -84,6 +92,7 @@ export default function Tasks() {
         return
       }
       const result = await completeTask(t.lead_cadence_id, accountId)
+      setReviewMsgModal(null)
       setConfirmModal({ leadName: t.lead_name || t.lead_phone || 'Lead', nextStep: result.nextStep })
       load()
     } catch (e: any) { alert('Erro: ' + (e?.message || 'desconhecido')) }
@@ -168,8 +177,8 @@ export default function Tasks() {
               ) : (
                 <>
                   {t.auto_message && (t.action_type === 'mensagem' || t.action_type === 'whatsapp') && (
-                    <button className="btn btn-primary btn-sm" onClick={() => handleSendAndComplete(t)} disabled={actioning === t.lead_cadence_id} style={{ fontSize: 11 }}>
-                      <Send size={11} /> Enviar Mensagem
+                    <button className="btn btn-primary btn-sm" onClick={() => openReviewMsg(t)} disabled={actioning === t.lead_cadence_id} style={{ fontSize: 11 }}>
+                      <Send size={11} /> Revisar e enviar
                     </button>
                   )}
                 </>
@@ -303,6 +312,51 @@ export default function Tasks() {
             </div>
             <div className="modal-actions">
               <button className="btn btn-primary" onClick={() => setScriptModal(null)}>Fechar</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {reviewMsgModal && (
+        <div className="modal-overlay" onClick={() => actioning !== reviewMsgModal.task.lead_cadence_id && setReviewMsgModal(null)}>
+          <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 620 }}>
+            <h2 style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <Send size={16} style={{ color: '#FFB300' }} /> Revisar mensagem antes de enviar
+            </h2>
+            <div style={{ marginTop: 12, padding: '10px 14px', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 8, display: 'flex', gap: 16, flexWrap: 'wrap', fontSize: 12 }}>
+              <div>
+                <div style={{ color: '#9B96B0', fontSize: 10, textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 2 }}>Pra</div>
+                <div style={{ color: '#fff', fontWeight: 600 }}>{reviewMsgModal.task.lead_name || '(sem nome)'}</div>
+              </div>
+              <div>
+                <div style={{ color: '#9B96B0', fontSize: 10, textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 2 }}>WhatsApp</div>
+                <div style={{ color: '#fff', fontFamily: 'monospace' }}>{reviewMsgModal.task.lead_phone || '-'}</div>
+              </div>
+              <div>
+                <div style={{ color: '#9B96B0', fontSize: 10, textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 2 }}>Etapa</div>
+                <div style={{ color: '#FFB300', fontWeight: 600 }}>
+                  {reviewMsgModal.task.attempt_position + 1}/{reviewMsgModal.task.total_attempts}
+                  {reviewMsgModal.task.attempt_description ? ` · ${reviewMsgModal.task.attempt_description}` : ''}
+                </div>
+              </div>
+            </div>
+            <div style={{ marginTop: 14, fontSize: 11, color: '#9B96B0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span>Edite se precisar antes de confirmar o envio</span>
+              <span style={{ color: reviewMsgModal.text.length > 800 ? '#FF6B6B' : '#6B6580' }}>{reviewMsgModal.text.length} caracteres</span>
+            </div>
+            <textarea
+              className="input"
+              value={reviewMsgModal.text}
+              onChange={e => setReviewMsgModal(m => m ? { ...m, text: e.target.value } : m)}
+              rows={10}
+              autoFocus
+              style={{ marginTop: 6, fontSize: 13, resize: 'vertical', minHeight: 180, background: 'rgba(255,179,0,0.05)', border: '1px solid rgba(255,179,0,0.25)', lineHeight: 1.55, fontFamily: 'inherit', whiteSpace: 'pre-wrap' }}
+            />
+            <div className="modal-actions" style={{ marginTop: 14 }}>
+              <button className="btn btn-secondary" onClick={() => setReviewMsgModal(null)} disabled={actioning === reviewMsgModal.task.lead_cadence_id}>Cancelar</button>
+              <button className="btn btn-primary" onClick={handleSendReviewedAndComplete} disabled={actioning === reviewMsgModal.task.lead_cadence_id || !reviewMsgModal.text.trim()}>
+                <Send size={14} /> {actioning === reviewMsgModal.task.lead_cadence_id ? 'Enviando...' : 'Confirmar e enviar'}
+              </button>
             </div>
           </div>
         </div>
