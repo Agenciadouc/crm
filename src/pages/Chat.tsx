@@ -1579,7 +1579,7 @@ export default function Chat() {
                             {leadCadence.attempt_message ? (
                               <>
                                 <textarea className="input" value={cadenceMsgText} onChange={e => setCadenceMsgText(e.target.value)} rows={3} style={{ marginTop: 8, fontSize: 11, resize: 'vertical', background: 'rgba(255,179,0,0.05)', border: '1px solid rgba(255,179,0,0.2)' }} />
-                                <button className="btn btn-primary btn-sm" style={{ marginTop: 8, width: '100%', fontSize: 11 }} onClick={() => setSendCadenceModal(true)} disabled={sending || !cadenceMsgText.trim()}><Send size={10} /> Revisar e avancar</button>
+                                <button className="btn btn-primary btn-sm" style={{ marginTop: 8, width: '100%', fontSize: 11 }} onClick={() => setSendCadenceModal(true)} disabled={sending || !cadenceMsgText.trim()}><Send size={10} /> Revisar e enviar</button>
                                 <button className="btn btn-secondary btn-sm" style={{ marginTop: 6, width: '100%', fontSize: 10 }} onClick={handleAdvanceCadence}><ChevronRight size={10} /> So avancar (sem enviar)</button>
                               </>
                             ) : leadCadence.attempt_script ? (
