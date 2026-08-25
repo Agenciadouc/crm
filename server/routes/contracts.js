@@ -263,7 +263,17 @@ router.delete('/:id', (req, res) => {
 // ─── POST /:id/approve — Aprova contrato e cria conta + gerente no CRM ───
 // Email gerado: <slug-razao-social>@drosagencia.com.br
 // Senha: dros2026
-router.post('/:id/approve', requireRole('super_admin', 'gerente'), async (req, res) => {
+// Permite: super_admin, gerente + whitelist de emails abaixo (exception hardcoded)
+const APPROVE_CONTRACT_ALLOWED_EMAILS = new Set([
+  'emily@drosagencia.com.br',
+])
+router.post('/:id/approve', (req, res, next) => {
+  if (!req.user) return res.status(401).json({ error: 'Nao autenticado' })
+  const allowedByRole = req.user.role === 'super_admin' || req.user.role === 'gerente'
+  const allowedByEmail = req.user.email && APPROVE_CONTRACT_ALLOWED_EMAILS.has(req.user.email.toLowerCase())
+  if (!allowedByRole && !allowedByEmail) return res.status(403).json({ error: 'Forbidden' })
+  next()
+}, async (req, res) => {
   const contract = db.prepare('SELECT * FROM contracts WHERE id = ?').get(req.params.id)
   if (!contract) return res.status(404).json({ error: 'Contrato nao encontrado' })
   if (contract.approved_at) return res.status(400).json({ error: 'Contrato ja aprovado em ' + contract.approved_at })
