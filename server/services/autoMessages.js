@@ -46,15 +46,18 @@ export function shouldSendAway(cfg, now = new Date()) {
   const dayKeys = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat']
   const key = dayKeys[now.getDay()]
   const slots = schedule[key]
-  // Sem slots ou array vazio = SEMPRE ausente nesse dia
-  if (!Array.isArray(slots) || slots.length === 0) return true
+  // Sem slots ou array vazio nesse dia = considera atendimento aberto (nao dispara auto-ausencia).
+  // Comportamento anterior era o inverso ('sempre ausente'), mas isso ligado com away_text de saudacao
+  // fazia a auto-msg disparar toda hora quando o cliente esquecia de configurar horario de algum dia.
+  // Agora precisa slots explicitos pra o dia entrar em modo ausente.
+  if (!Array.isArray(slots) || slots.length === 0) return false
   const hh = String(now.getHours()).padStart(2, '0')
   const mm = String(now.getMinutes()).padStart(2, '0')
   const cur = `${hh}:${mm}`
   for (const slot of slots) {
     if (slot?.start && slot?.end && cur >= slot.start && cur <= slot.end) return false
   }
-  return true // fora dos slots = ausente
+  return true // tem slots mas hora atual esta fora deles = ausente
 }
 
 // Envia auto-msg via Evolution + grava em messages + grava em log
