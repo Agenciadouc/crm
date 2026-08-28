@@ -303,7 +303,30 @@ export default function Cadences() {
                     )}
                     <input className="input" value={a.instructions || ''} onChange={e => updateAttempt(i, 'instructions', e.target.value)} placeholder="Instrucoes (opcional)" style={{ fontSize: 12 }} />
                     {(a.action_type === 'whatsapp' || a.action_type === 'mensagem') && (
-                      <textarea className="input" value={a.auto_message || ''} onChange={e => updateAttempt(i, 'auto_message', e.target.value)} placeholder="Mensagem (opcional). Clique em 'Variaveis' no topo da tela para ver as tags disponiveis." rows={2} style={{ fontSize: 12, resize: 'vertical' }} />
+                      <>
+                        <textarea id={`cad-msg-${i}`} className="input" value={a.auto_message || ''} onChange={e => updateAttempt(i, 'auto_message', e.target.value)} placeholder="Digite a mensagem. Clique nas variaveis abaixo pra inserir tags que sao substituidas pelos dados reais no envio." rows={2} style={{ fontSize: 12, resize: 'vertical' }} />
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 2 }}>
+                          <span style={{ fontSize: 10, color: '#6B6580', alignSelf: 'center', marginRight: 2 }}>Variaveis:</span>
+                          {MESSAGE_VARIABLES.map(v => (
+                            <button
+                              key={v.token}
+                              type="button"
+                              title={`${v.label} · Ex: ${v.example}`}
+                              onClick={() => {
+                                const ta = document.getElementById(`cad-msg-${i}`) as HTMLTextAreaElement | null
+                                const current = a.auto_message || ''
+                                const pos = ta?.selectionStart ?? current.length
+                                const next = current.slice(0, pos) + v.token + current.slice(pos)
+                                updateAttempt(i, 'auto_message', next)
+                                setTimeout(() => {
+                                  if (ta) { ta.focus(); ta.selectionStart = ta.selectionEnd = pos + v.token.length }
+                                }, 0)
+                              }}
+                              style={{ fontSize: 10, padding: '2px 8px', borderRadius: 10, border: '1px solid rgba(255,179,0,0.35)', background: 'rgba(255,179,0,0.10)', color: '#FFB300', cursor: 'pointer', fontFamily: 'monospace' }}
+                            >{v.token}</button>
+                          ))}
+                        </div>
+                      </>
                     )}
                     {a.action_type === 'ligacao' && (
                       <>
