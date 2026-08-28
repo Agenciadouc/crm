@@ -1263,6 +1263,22 @@ function onChange(e) {
               </small>
             </div>
 
+            <div style={{ background: 'rgba(255,179,0,0.05)', border: '1px solid rgba(255,179,0,0.20)', borderRadius: 8, padding: '12px 14px', marginTop: 4 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: '#FFB300', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span>ℹ️</span> Condições pra essa mensagem disparar
+              </div>
+              <ul style={{ fontSize: 11.5, color: '#B8B4C7', lineHeight: 1.7, margin: 0, paddingLeft: 18 }}>
+                <li>Lead precisa ser <strong>novo</strong> (primeira interação com essa conta) — leads que já existem não recebem</li>
+                <li>Lead precisa ter <strong>telefone válido</strong> registrado</li>
+                <li>Lead <strong>não pode estar bloqueado</strong> nem em modo restrito</li>
+                <li>Precisa ter <strong>atendente atribuído</strong> (roleta, bot ou manual) que use esta instância</li>
+                <li>Esta instância precisa estar com status <strong style={{ color: '#34C759' }}>conectada</strong> no WhatsApp</li>
+                <li>Idempotente: só dispara <strong>1x por lead</strong> — se já foi enviada antes, não repete</li>
+                <li>Se a conta tem <strong>bot IA de boas-vindas ativado</strong> pra esse lead, o bot dispara em vez desta mensagem</li>
+                <li>Campo em branco <strong>desativa</strong> — nenhuma mensagem sai automaticamente</li>
+              </ul>
+            </div>
+
             <div className="modal-actions" style={{ marginTop: 16 }}>
               <button className="btn btn-secondary" onClick={() => setTplModal(null)} disabled={tplSaving}>Cancelar</button>
               <button
