@@ -4,6 +4,19 @@ import { requireRole } from '../middleware/auth.js'
 
 const router = Router()
 
+// Whitelist de emails autorizados a gerenciar cadencias mesmo sem role super_admin/gerente.
+// Padrao segue o mesmo de contracts.js (aprovacao de contratos).
+const MANAGE_CADENCE_ALLOWED_EMAILS = new Set([
+  'emily@drosagencia.com.br',
+])
+function canManageCadence(req, res, next) {
+  if (!req.user) return res.status(401).json({ error: 'Nao autenticado' })
+  const role = req.user.role
+  if (role === 'super_admin' || role === 'gerente') return next()
+  if (MANAGE_CADENCE_ALLOWED_EMAILS.has(req.user.email)) return next()
+  return res.status(403).json({ error: 'Sem permissao pra gerenciar cadencias' })
+}
+
 // List cadences with attempts
 router.get('/', (req, res) => {
   if (!req.accountId) return res.status(400).json({ error: 'account_id required' })
@@ -14,7 +27,7 @@ router.get('/', (req, res) => {
 })
 
 // Create cadence
-router.post('/', requireRole('super_admin', 'gerente'), (req, res) => {
+router.post('/', canManageCadence, (req, res) => {
   if (!req.accountId) return res.status(400).json({ error: 'account_id required' })
   const { name, description, attempts } = req.body
   if (!name) return res.status(400).json({ error: 'Nome obrigatorio' })
@@ -43,7 +56,7 @@ router.get('/:id', (req, res) => {
 })
 
 // Update cadence
-router.put('/:id', requireRole('super_admin', 'gerente'), (req, res) => {
+router.put('/:id', canManageCadence, (req, res) => {
   const { name, description, is_active } = req.body
   const sets = []; const params = []
   if (name !== undefined) { sets.push('name = ?'); params.push(name) }
@@ -59,7 +72,7 @@ router.put('/:id', requireRole('super_admin', 'gerente'), (req, res) => {
 })
 
 // Update attempts (full replacement)
-router.put('/:id/attempts', requireRole('super_admin', 'gerente'), (req, res) => {
+router.put('/:id/attempts', canManageCadence, (req, res) => {
   const { attempts } = req.body
   if (!attempts || !Array.isArray(attempts)) return res.status(400).json({ error: 'attempts array required' })
   const cadence = db.prepare('SELECT * FROM cadences WHERE id = ?').get(req.params.id)
@@ -80,7 +93,7 @@ router.put('/:id/attempts', requireRole('super_admin', 'gerente'), (req, res) =>
 })
 
 // Delete cadence (soft)
-router.delete('/:id', requireRole('super_admin', 'gerente'), (req, res) => {
+router.delete('/:id', canManageCadence, (req, res) => {
   db.prepare("UPDATE cadences SET is_active = 0, updated_at = datetime('now') WHERE id = ?").run(req.params.id)
   res.json({ ok: true })
 })

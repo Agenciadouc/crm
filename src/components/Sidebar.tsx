@@ -61,6 +61,9 @@ export default function Sidebar() {
 
   const isAdmin = user.role === 'super_admin'
   const isGerente = user.role === 'gerente'
+  // Emails com acesso extra a Cadencias/Follow-ups mesmo sendo atendente (mesma whitelist do backend)
+  const CADENCE_MANAGER_EMAILS = ['emily@drosagencia.com.br']
+  const canManageCadence = isAdmin || isGerente || CADENCE_MANAGER_EMAILS.includes(user.email || '')
 
   // Fetch new leads count (unassigned)
   useEffect(() => {
@@ -195,6 +198,16 @@ export default function Sidebar() {
           {/* Tags: visivel pra atendente tb (pagina restringe edicao se necessario) */}
           {!isGerente && !isAdmin && (
             <NavLink to="/tags" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`} onClick={closeMobile}><TagIcon size={16} /> Tags</NavLink>
+          )}
+
+          {/* Whitelist (Emily): atendente com acesso a Cadencias/Follow-ups/Msgs Prontas mas sem Config */}
+          {!isGerente && !isAdmin && canManageCadence && (
+            <>
+              <div className="nav-section">Automacao</div>
+              <NavLink to="/cadences" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`} onClick={closeMobile}><ListOrdered size={16} /> Cadencias</NavLink>
+              <NavLink to="/follow-ups" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`} onClick={closeMobile}><Zap size={16} /> Follow-ups</NavLink>
+              <NavLink to="/ready-messages" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`} onClick={closeMobile}><MessageSquarePlus size={16} /> Msgs Prontas</NavLink>
+            </>
           )}
 
           {(isGerente || isAdmin) && (

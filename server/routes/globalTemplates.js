@@ -9,6 +9,18 @@ import { requireRole, scopeToAccount } from '../middleware/auth.js'
 
 const router = Router()
 
+// Whitelist de emails autorizados a gerenciar templates globais alem de super_admin.
+// Mesmo padrao do contracts.js.
+const MANAGE_GLOBAL_ALLOWED_EMAILS = new Set([
+  'emily@drosagencia.com.br',
+])
+function canManageGlobal(req, res, next) {
+  if (!req.user) return res.status(401).json({ error: 'Nao autenticado' })
+  if (req.user.role === 'super_admin') return next()
+  if (MANAGE_GLOBAL_ALLOWED_EMAILS.has(req.user.email)) return next()
+  return res.status(403).json({ error: 'Sem permissao pra gerenciar templates globais' })
+}
+
 // ============================================================
 // ENDPOINTS PRA GERENTE (list disponiveis + aplicar na propria conta)
 // ============================================================
@@ -93,7 +105,7 @@ router.post('/follow-ups/:id/apply-here', requireRole('super_admin', 'gerente', 
 // ============================================================
 
 // GET /api/global-templates/cadences — lista com attempts + contagem de contas aplicadas
-router.get('/cadences', requireRole('super_admin'), (req, res) => {
+router.get('/cadences', canManageGlobal, (req, res) => {
   const cadences = db.prepare('SELECT * FROM global_cadences WHERE is_active = 1 ORDER BY name').all()
   const stmtAttempts = db.prepare('SELECT * FROM global_cadence_attempts WHERE global_cadence_id = ? ORDER BY position')
   const stmtApplied = db.prepare('SELECT COUNT(*) as n FROM cadences WHERE cloned_from_global_id = ?')
@@ -105,7 +117,7 @@ router.get('/cadences', requireRole('super_admin'), (req, res) => {
 })
 
 // GET /api/global-templates/cadences/:id
-router.get('/cadences/:id', requireRole('super_admin'), (req, res) => {
+router.get('/cadences/:id', canManageGlobal, (req, res) => {
   const cadence = db.prepare('SELECT * FROM global_cadences WHERE id = ?').get(req.params.id)
   if (!cadence) return res.status(404).json({ error: 'Template nao encontrado' })
   cadence.attempts = db.prepare('SELECT * FROM global_cadence_attempts WHERE global_cadence_id = ? ORDER BY position').all(cadence.id)
@@ -113,7 +125,7 @@ router.get('/cadences/:id', requireRole('super_admin'), (req, res) => {
 })
 
 // POST /api/global-templates/cadences — cria (com attempts inline)
-router.post('/cadences', requireRole('super_admin'), (req, res) => {
+router.post('/cadences', canManageGlobal, (req, res) => {
   const { name, description, attempts } = req.body
   if (!name) return res.status(400).json({ error: 'Nome obrigatorio' })
 
@@ -135,7 +147,7 @@ router.post('/cadences', requireRole('super_admin'), (req, res) => {
 })
 
 // PUT /api/global-templates/cadences/:id — edita metadata
-router.put('/cadences/:id', requireRole('super_admin'), (req, res) => {
+router.put('/cadences/:id', canManageGlobal, (req, res) => {
   const { name, description, is_active } = req.body
   const sets = [], params = []
   if (name !== undefined) { sets.push('name = ?'); params.push(name) }
@@ -152,7 +164,7 @@ router.put('/cadences/:id', requireRole('super_admin'), (req, res) => {
 })
 
 // PUT /api/global-templates/cadences/:id/attempts — full replace dos steps
-router.put('/cadences/:id/attempts', requireRole('super_admin'), (req, res) => {
+router.put('/cadences/:id/attempts', canManageGlobal, (req, res) => {
   const { attempts } = req.body
   if (!Array.isArray(attempts)) return res.status(400).json({ error: 'attempts array required' })
   const cadence = db.prepare('SELECT * FROM global_cadences WHERE id = ?').get(req.params.id)
@@ -172,13 +184,13 @@ router.put('/cadences/:id/attempts', requireRole('super_admin'), (req, res) => {
 })
 
 // DELETE /api/global-templates/cadences/:id — soft delete (contas com copia continuam funcionando)
-router.delete('/cadences/:id', requireRole('super_admin'), (req, res) => {
+router.delete('/cadences/:id', canManageGlobal, (req, res) => {
   db.prepare("UPDATE global_cadences SET is_active = 0, updated_at = datetime('now') WHERE id = ?").run(req.params.id)
   res.json({ ok: true })
 })
 
 // GET /api/global-templates/cadences/:id/applied-in — lista contas que ja receberam este template
-router.get('/cadences/:id/applied-in', requireRole('super_admin'), (req, res) => {
+router.get('/cadences/:id/applied-in', canManageGlobal, (req, res) => {
   const rows = db.prepare(`
     SELECT c.id as cadence_id, c.name as cadence_name, c.account_id, a.name as account_name, c.created_at
     FROM cadences c
@@ -211,7 +223,7 @@ function cloneGlobalCadenceToAccount(globalCadenceId, accountId) {
 // POST /api/global-templates/cadences/from-account/:cadenceId — promove cadence de conta pra template global
 // Body: { name?: string, description?: string | null, mark_source?: boolean }
 // Se mark_source=true, marca a cadence original com cloned_from_global_id = novo global (audit).
-router.post('/cadences/from-account/:cadenceId', requireRole('super_admin'), (req, res) => {
+router.post('/cadences/from-account/:cadenceId', canManageGlobal, (req, res) => {
   const src = db.prepare('SELECT * FROM cadences WHERE id = ?').get(req.params.cadenceId)
   if (!src) return res.status(404).json({ error: 'Cadencia de origem nao encontrada' })
   const attempts = db.prepare('SELECT * FROM cadence_attempts WHERE cadence_id = ? ORDER BY position').all(src.id)
@@ -245,7 +257,7 @@ router.post('/cadences/from-account/:cadenceId', requireRole('super_admin'), (re
 
 // POST /api/global-templates/cadences/:id/apply — body { account_ids: [1,2,3], overwrite?: boolean }
 // Se overwrite=true, deleta cópias anteriores (com cloned_from_global_id = this) antes de re-criar.
-router.post('/cadences/:id/apply', requireRole('super_admin'), (req, res) => {
+router.post('/cadences/:id/apply', canManageGlobal, (req, res) => {
   const { account_ids, overwrite } = req.body
   if (!Array.isArray(account_ids) || account_ids.length === 0) return res.status(400).json({ error: 'account_ids array required' })
 
@@ -276,7 +288,7 @@ router.post('/cadences/:id/apply', requireRole('super_admin'), (req, res) => {
 // ============================================================
 
 // GET /api/global-templates/follow-ups
-router.get('/follow-ups', requireRole('super_admin'), (req, res) => {
+router.get('/follow-ups', canManageGlobal, (req, res) => {
   const followUps = db.prepare('SELECT * FROM global_follow_ups WHERE is_active = 1 ORDER BY name').all()
   const stmtSteps = db.prepare('SELECT * FROM global_follow_up_steps WHERE global_follow_up_id = ? ORDER BY position')
   const stmtApplied = db.prepare('SELECT COUNT(*) as n FROM follow_ups WHERE cloned_from_global_id = ?')
@@ -288,7 +300,7 @@ router.get('/follow-ups', requireRole('super_admin'), (req, res) => {
 })
 
 // GET /api/global-templates/follow-ups/:id
-router.get('/follow-ups/:id', requireRole('super_admin'), (req, res) => {
+router.get('/follow-ups/:id', canManageGlobal, (req, res) => {
   const fu = db.prepare('SELECT * FROM global_follow_ups WHERE id = ?').get(req.params.id)
   if (!fu) return res.status(404).json({ error: 'Template nao encontrado' })
   fu.steps = db.prepare('SELECT * FROM global_follow_up_steps WHERE global_follow_up_id = ? ORDER BY position').all(fu.id)
@@ -297,7 +309,7 @@ router.get('/follow-ups/:id', requireRole('super_admin'), (req, res) => {
 
 // POST /api/global-templates/follow-ups — cria (com steps inline)
 // Body: { name, description, stop_on_reply, type ('sequence'|'inactivity'), inactivity_days/minutes/mode, variation_delay_seconds, on_reply_action, steps: [{delay_minutes, message_template, schedule_mode, scheduled_at, variations}] }
-router.post('/follow-ups', requireRole('super_admin'), (req, res) => {
+router.post('/follow-ups', canManageGlobal, (req, res) => {
   const { name, description, stop_on_reply, type, inactivity_days, inactivity_minutes, inactivity_mode, variation_delay_seconds, on_reply_action, steps } = req.body
   if (!name) return res.status(400).json({ error: 'Nome obrigatorio' })
   if (!Array.isArray(steps) || steps.length === 0) return res.status(400).json({ error: 'pelo menos 1 step obrigatorio' })
@@ -330,7 +342,7 @@ router.post('/follow-ups', requireRole('super_admin'), (req, res) => {
 })
 
 // PUT /api/global-templates/follow-ups/:id — edita metadata + steps
-router.put('/follow-ups/:id', requireRole('super_admin'), (req, res) => {
+router.put('/follow-ups/:id', canManageGlobal, (req, res) => {
   const existing = db.prepare('SELECT * FROM global_follow_ups WHERE id = ?').get(req.params.id)
   if (!existing) return res.status(404).json({ error: 'Template nao encontrado' })
   const { name, description, stop_on_reply, is_active, inactivity_days, inactivity_minutes, inactivity_mode, variation_delay_seconds, on_reply_action, steps } = req.body
@@ -366,13 +378,13 @@ router.put('/follow-ups/:id', requireRole('super_admin'), (req, res) => {
 })
 
 // DELETE /api/global-templates/follow-ups/:id — soft delete
-router.delete('/follow-ups/:id', requireRole('super_admin'), (req, res) => {
+router.delete('/follow-ups/:id', canManageGlobal, (req, res) => {
   db.prepare("UPDATE global_follow_ups SET is_active = 0, updated_at = datetime('now') WHERE id = ?").run(req.params.id)
   res.json({ ok: true })
 })
 
 // GET /api/global-templates/follow-ups/:id/applied-in
-router.get('/follow-ups/:id/applied-in', requireRole('super_admin'), (req, res) => {
+router.get('/follow-ups/:id/applied-in', canManageGlobal, (req, res) => {
   const rows = db.prepare(`
     SELECT fu.id as follow_up_id, fu.name as follow_up_name, fu.account_id, a.name as account_name,
            fu.instance_id, wi.instance_name, fu.agent_id, fu.created_at
@@ -439,7 +451,7 @@ function cloneGlobalFollowUpToAccount(globalFollowUpId, accountId, mapping) {
 
 // POST /api/global-templates/follow-ups/:id/apply
 // Body: { mappings: [{account_id, instance_id, agent_id?, inactivity_stage_id?}], overwrite?: boolean }
-router.post('/follow-ups/:id/apply', requireRole('super_admin'), (req, res) => {
+router.post('/follow-ups/:id/apply', canManageGlobal, (req, res) => {
   const { mappings, overwrite } = req.body
   if (!Array.isArray(mappings) || mappings.length === 0) return res.status(400).json({ error: 'mappings array required' })
 

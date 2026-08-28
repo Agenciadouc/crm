@@ -21,7 +21,9 @@ const ACTION_TYPES = [
 export default function Cadences() {
   const { accountId } = useAccount()
   const { user } = useAuth()
-  const isSuperAdmin = user?.role === 'super_admin'
+  // Emails com permissao extra alem de super_admin (deve bater com whitelist do backend em routes/globalTemplates.js)
+  const GLOBAL_ALLOWED_EMAILS = ['emily@drosagencia.com.br']
+  const isSuperAdmin = user?.role === 'super_admin' || GLOBAL_ALLOWED_EMAILS.includes(user?.email || '')
   const [cadences, setCadences] = useState<Cadence[]>([])
   const [loading, setLoading] = useState(true)
   const [editing, setEditing] = useState<Cadence | null>(null)
