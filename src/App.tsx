@@ -74,9 +74,6 @@ function AppRoutes() {
   const isGerente = user.role === 'gerente'
   const canManageProposals = isAdmin || (user as any).can_manage_proposals === 1
   const canManageContracts = isAdmin || (user as any).can_manage_contracts === 1
-  // Whitelist de emails com acesso extra a Cadencias/Follow-ups/Msgs Prontas mesmo sendo atendente
-  const CADENCE_MANAGER_EMAILS = ['emily@drosagencia.com.br']
-  const canManageCadence = isAdmin || isGerente || CADENCE_MANAGER_EMAILS.includes(user.email || '')
   const homeRoute = isAdmin ? '/admin/dashboard' : isGerente ? '/dashboard' : '/pipeline'
 
   return (
@@ -102,13 +99,6 @@ function AppRoutes() {
           {canManageProposals && <Route path="/admin/propostas" element={<Propostas />} />}
           {canManageContracts && <Route path="/contratos" element={<Contratos />} />}
 
-          {/* Cadencias, Follow-ups e Msgs Prontas — libera pra gerente/admin/whitelist emails */}
-          {canManageCadence && <>
-            <Route path="/cadences" element={<Cadences />} />
-            <Route path="/follow-ups" element={<FollowUps />} />
-            <Route path="/ready-messages" element={<ReadyMessages />} />
-          </>}
-
           {/* Gerente + Admin routes */}
           {(isGerente || isAdmin) && <>
             <Route path="/dashboard" element={<Dashboard />} />
@@ -119,7 +109,10 @@ function AppRoutes() {
             <Route path="/team" element={<Team />} />
             <Route path="/funnels" element={<Funnels />} />
             <Route path="/settings" element={<SettingsPage />} />
+            <Route path="/cadences" element={<Cadences />} />
+            <Route path="/follow-ups" element={<FollowUps />} />
             <Route path="/agents" element={<Agents />} />
+            <Route path="/ready-messages" element={<ReadyMessages />} />
             <Route path="/qualifications" element={<Qualifications />} />
             <Route path="/launches" element={<Launches />} />
           </>}
