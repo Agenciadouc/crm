@@ -4,6 +4,7 @@ import db from '../db.js'
 import { requireRole } from '../middleware/auth.js'
 import { callHaiku } from '../services/anthropicClient.js'
 import { replayLastMessagesForAgent } from '../services/aiAgent.js'
+import { pickAnthropicKey } from '../services/anthropicKeyPicker.js'
 
 const router = Router()
 
@@ -72,8 +73,8 @@ router.get('/', (req, res) => {
     ORDER BY a.created_at DESC
   `).all(req.accountId)
   // has_api_key: conta tem chave Anthropic propria? (sem ela os agentes nao respondem)
-  const acc = db.prepare('SELECT anthropic_api_key FROM accounts WHERE id = ?').get(req.accountId)
-  const has_api_key = !!acc?.anthropic_api_key?.trim()
+  const acc = db.prepare('SELECT anthropic_api_key, ai_key_source FROM accounts WHERE id = ?').get(req.accountId)
+  const has_api_key = !!pickAnthropicKey(acc)
   res.json({ feature_enabled: true, has_api_key, agents })
 })
 

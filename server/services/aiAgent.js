@@ -8,6 +8,7 @@ import { broadcastSSE } from '../sse.js'
 import { pickFromRoulette as rouletteUtil } from './roulette.js'
 import { notifyAndOpenLead, sendViaInstance, markMessageAsRead } from './leadHandoff.js'
 import { transcribeAudio, fetchAudioBuffer } from './deepgramClient.js'
+import { pickAnthropicKey } from './anthropicKeyPicker.js'
 
 // ─── Helpers ──────────────────────────────────────────────────────────
 
@@ -48,7 +49,7 @@ export function findAgentForLead(lead, instanceId, _opts = {}) {
   const account = getAccount(lead.account_id)
   if (!account || !account.ai_agents_enabled) return null
   // Sem chave Anthropic propria, o bot nao roda (sem fallback pra chave da agencia)
-  if (!account.anthropic_api_key?.trim()) {
+  if (!pickAnthropicKey(account)) {
     console.warn(`[AI Agent] conta ${lead.account_id} com agentes habilitados mas SEM API Anthropic — bot nao responde lead ${lead.id}`)
     return null
   }
@@ -108,7 +109,7 @@ export function diagnoseForceAi(lead, instanceId) {
   const account = getAccount(lead.account_id)
   if (!account) return { blockers: ['Conta nao encontrada'] }
   if (!account.ai_agents_enabled) blockers.push('IA dos agentes esta desativada na conta')
-  if (!account.anthropic_api_key?.trim()) blockers.push('Conta sem API Anthropic configurada (cadastre o token em Integracoes)')
+  if (!pickAnthropicKey(account)) blockers.push(account.ai_key_source === 'dros' ? 'Conta usa a chave da Dros, mas ANTHROPIC_API_KEY_DROS nao esta no .env' : 'Conta sem API Anthropic configurada (cadastre o token em Integracoes)')
 
   if (lead.is_blocked) blockers.push('Lead esta bloqueado')
   if (lead.is_archived) blockers.push('Lead esta arquivado')

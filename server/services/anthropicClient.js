@@ -4,6 +4,7 @@
 
 import fetch from 'node-fetch'
 import db from '../db.js'
+import { pickAnthropicKey } from './anthropicKeyPicker.js'
 
 const ANTHROPIC_URL = 'https://api.anthropic.com/v1/messages'
 const MODEL = 'claude-haiku-4-5-20251001'
@@ -18,9 +19,8 @@ const ANTHROPIC_VERSION = '2023-06-01'
  */
 export function resolveAnthropicKey(accountId) {
   if (!accountId) return null
-  const acc = db.prepare('SELECT anthropic_api_key FROM accounts WHERE id = ?').get(accountId)
-  const key = acc?.anthropic_api_key?.trim()
-  return key || null
+  const acc = db.prepare('SELECT anthropic_api_key, ai_key_source FROM accounts WHERE id = ?').get(accountId)
+  return pickAnthropicKey(acc)
 }
 
 // Precos por MTok (Haiku 4.5 — atualizado conforme docs Anthropic)
