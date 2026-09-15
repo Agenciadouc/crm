@@ -11,3 +11,5 @@ CODEBASE_INDEX.md
 .claudeignore
 .tokenmiser/
 .claude/
+.worktrees/
+.superpowers/
