@@ -121,6 +121,14 @@ test('buildSalesRulesLines: regra de preco em todos; copilot nao transfere', () 
   assert.match(buildSalesRulesLines('copilot').join('\n'), /Nao transfira/)
 })
 
+test('buildSalesRulesLines: objecao de preco usa contorno da base antes da empatia, sempre segue perguntando e nunca recusa seco', () => {
+  const rules = buildSalesRulesLines('auto').join('\n')
+  assert.match(rules, /CONTEXTO DA EMPRESA/)
+  assert.match(rules, /contorne com empatia/)
+  assert.match(rules, /PROXIMA pergunta de qualificacao/)
+  assert.match(rules, /Nunca recuse seco/)
+})
+
 test('saveLeadAnalysis grava no lead da conta e zera o contador', () => {
   const db = createTestDb()
   const { accountId, leadId } = seedAccountAndLead(db)

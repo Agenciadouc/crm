@@ -116,7 +116,7 @@ export function buildSalesRulesLines(mode) {
   const lines = [
     'REGRAS DE VENDA (obrigatorias):',
     '- NUNCA passe orcamento, preco ou proposta antes de o lead cumprir TODOS os criterios de qualificacao E estar no momento ideal.',
-    '- Se o lead insistir no preco antes da hora, contorne a objecao com empatia (explique que precisa entender a necessidade dele para passar o valor certo) e siga com a PROXIMA pergunta de qualificacao. Nunca recuse seco.',
+    '- Se o lead insistir no preco antes da hora, use o contorno de objecao da secao CONTEXTO DA EMPRESA quando houver um para essa objecao; se a base nao tiver nada sobre isso, contorne com empatia (explique que precisa entender a necessidade dele para passar o valor certo). Em qualquer caso, siga com a PROXIMA pergunta de qualificacao. Nunca recuse seco.',
     `- Em TODA resposta chame a ferramenta ${ANALYSIS_TOOL_NAME} com: momento (etapa real da conversa), chance_fechar (0 a 100), trava_principal (objecao ou bloqueio atual, ou vazio) e criterios (cada criterio obrigatorio com status atendido ou pendente e a evidencia, um trecho da conversa).`,
     '- Mudar o lead de etapa so e aceito pelo sistema com todos os campos obrigatorios preenchidos e todos os criterios atendidos. Se for recusado, continue perguntando o que falta.',
   ]
