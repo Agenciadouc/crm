@@ -2,6 +2,7 @@ import Database from 'better-sqlite3'
 import bcrypt from 'bcryptjs'
 import { fileURLToPath } from 'url'
 import { dirname, resolve } from 'path'
+import { applyCopilotSchema } from './services/copilotSchema.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const dbPath = resolve(__dirname, 'data', 'crm.db')
@@ -1420,5 +1421,8 @@ if (!adminExists) {
 }
 
 console.log('[DB] SQLite ready at', dbPath)
+
+// Copiloto do Agente de IA (modo, chave, analise no lead, pausa, ai_suggestions)
+applyCopilotSchema(db)
 
 export default db
