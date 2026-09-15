@@ -392,7 +392,7 @@ export const triggerAnalysisNow = async (
   const params = new URLSearchParams({ account_id: String(accountId), max: String(maxLeads) })
   if (opts.resetAll) params.set('reset_all', 'true')
   if (opts.resetLead) params.set('reset_lead', String(opts.resetLead))
-  const res = await fetch(`/api/dashboard/analyze-now?${params.toString()}`, {
+  const res = await fetch(`${BASE}/api/dashboard/analyze-now?${params.toString()}`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${getToken()}`, 'Content-Type': 'application/json' },
   })

@@ -142,7 +142,7 @@ export default function Leads() {
           </button>
           <button className="btn btn-secondary btn-sm" onClick={async () => {
             const token = localStorage.getItem('dros_crm_token')
-            const res = await fetch(`/api/leads/export?account_id=${accountId}`, { headers: { Authorization: `Bearer ${token}` } })
+            const res = await fetch(`${import.meta.env.BASE_URL.replace(/\/$/, '')}/api/leads/export?account_id=${accountId}`, { headers: { Authorization: `Bearer ${token}` } })
             const blob = await res.blob()
             const url = URL.createObjectURL(blob)
             const a = document.createElement('a'); a.href = url; a.download = `leads-${new Date().toISOString().slice(0,10)}.csv`; a.click()
