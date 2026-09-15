@@ -161,7 +161,11 @@ Como o SDR trabalha:
 - Os outros motivos de passagem que já existem continuam valendo (palavra-chave "humano", limite de mensagens, áudio sem transcrição, fora do escopo); nesses casos o lead também segue para o vendedor com o Copiloto ligado.
 - Depois da passagem, a IA **nunca mais envia sozinha naquele lead**, só sugere.
 
-Dados: `ai_agents.mode` aceita `auto` / `copilot` / `sdr`; `leads.ai_handed_off_at` (já existe) marca a passagem, e a partir dela `processInboundMessage` trata o lead como `copilot`.
+**Liga/desliga do atendimento (a qualquer momento):**
+- **No agente inteiro:** um interruptor **Atendimento ligado / desligado** no topo da aba Geral e no card do agente (reaproveita `ai_agents.is_active`, que já existe e hoje fica escondido no botão de pausar). Desligar vale **na hora**: timers de agrupamento em andamento são cancelados, sugestões pendentes expiram, follow-ups do agente pausam, e nenhum lead fica sem atendimento: os leads que estavam com o SDR aparecem para o vendedor responsável (ou pela roleta) com o aviso "IA desligada — assuma a conversa". Religar volta a valer para as próximas mensagens.
+- **Numa conversa só:** no cabeçalho do Chat, **Pausar IA nesta conversa / Retomar IA**. Pausada, a IA não responde nem sugere naquele lead até alguém retomar.
+
+Dados: `ai_agents.mode` aceita `auto` / `copilot` / `sdr`; `leads.ai_handed_off_at` (já existe) marca a passagem, e a partir dela `processInboundMessage` trata o lead como `copilot`; `leads.ai_paused_at TEXT` + `leads.ai_paused_by INTEGER` (pausa por conversa), checados logo no início de `processInboundMessage` e do `followUpSender`.
 
 ## 4. Dados (mudanças mínimas)
 
