@@ -4,6 +4,7 @@
 
 import db from '../db.js'
 import { callHaiku } from './anthropicClient.js'
+import { pickAnthropicKey } from './anthropicKeyPicker.js'
 
 const SYSTEM_PROMPT_COACHING = `Voce e um coach comercial. Vou te passar metricas e padroes da semana de um vendedor (atendente ou gerente que tambem atende).
 
@@ -54,9 +55,9 @@ function isoMonday(date) {
 }
 
 function canCoach(accountId) {
-  const account = db.prepare('SELECT analysis_token_limit, anthropic_api_key FROM accounts WHERE id = ?').get(accountId)
-  // Sem chave Anthropic propria, a conta nao roda IA (sem fallback pra agencia)
-  if (!account?.anthropic_api_key?.trim()) return { ok: false, reason: 'no_api_key', used: 0, limit: 0 }
+  const account = db.prepare('SELECT analysis_token_limit, anthropic_api_key, ai_key_source FROM accounts WHERE id = ?').get(accountId)
+  // Sem chave Anthropic (propria ou da Dros, conforme ai_key_source), a conta nao roda IA
+  if (!pickAnthropicKey(account)) return { ok: false, reason: 'no_api_key', used: 0, limit: 0 }
   const limit = account?.analysis_token_limit || 200000
   const monthStart = new Date().toISOString().slice(0, 7) + '-01 00:00:00'
   const used = db.prepare(`
