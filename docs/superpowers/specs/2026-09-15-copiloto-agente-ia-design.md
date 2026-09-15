@@ -16,6 +16,10 @@ Transformar o Agente de IA que já existe num **gestor de vendas**: ele entende 
 6. **Mudar de etapa só com a qualificação completa.**
 7. **Sem cobrança por disparo.** O cliente usa a chave própria ou a chave da Dros; o custo só é acompanhado internamente.
 
+### 2.1 Dros Sales (decisão do CEO, 15/09/2026)
+
+O agente é o **Dros Sales**: o robô de atendimento da própria Dros, que depois é conectado em qualquer conta. Não é ligado a um cliente específico. O fluxo dele é sempre: **pré-atendimento → validar os dados do cliente e se ele está dentro do ICP → passar para o especialista**. As regras de venda, a análise e a trava de qualificação (3.4) valem em **todos os modos** (Automático, Copiloto e SDR), inclusive para robôs que já estão no Automático.
+
 ## 3. As peças
 
 ### 3.1 Opção "Envio automático da IA" (liga/desliga, tela Agentes de IA)
