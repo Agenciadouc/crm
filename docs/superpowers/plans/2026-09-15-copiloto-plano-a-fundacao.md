@@ -15,8 +15,8 @@
 - Produção roda Node 16.20.2 no CentOS 7: só APIs disponíveis no Node 16 (nada de `structuredClone`, `fetch` global, `mock.timers` do `node:test`, `--test` com glob).
 - Sem dependências novas no `package.json` (só o script `test`).
 - Versões travadas: `vite ^4.5.5`, `better-sqlite3 ^10.1.0`, `express ^4.21.0`, `@vitejs/plugin-react ^4.2.1` — não mexer.
-- Default no deploy: `ai_agents.mode = 'auto'` e `accounts.ai_key_source = 'client'`; nenhum cliente muda de comportamento só por atualizar o código.
-- As regras de venda, a análise obrigatória e a trava de etapa só valem para agentes em `copilot` ou `sdr` (ver Decisão 1); agentes em `auto` seguem exatamente como hoje.
+- Default no deploy: `ai_agents.mode = 'auto'` e `accounts.ai_key_source = 'client'` (ninguém vira Copiloto/SDR nem troca de chave sozinho).
+- As regras de venda, a análise obrigatória e a trava de etapa/qualificação valem em TODOS os modos (`auto`, `copilot`, `sdr`). Decisão do CEO: o robô Automático atual muda de comportamento no deploy (ver Decisão 1).
 - No modo Copiloto nada é enviado ao lead sem o vendedor: a IA só grava `ai_suggestions`.
 - Toda query nova filtra por conta (`account_id`), inclusive nas funções de serviço.
 - Módulos novos testáveis NÃO importam `server/db.js` (ele abre `server/data/crm.db` ao ser importado); recebem `db` por parâmetro.
@@ -29,7 +29,7 @@
 
 ## Decisões de desenho (validar com o dono)
 
-1. **Motor de venda só em `copilot`/`sdr`.** O spec diz "nos dois modos", mas também diz que ninguém muda de comportamento no deploy. Ligar análise + regras + trava no `auto` mudaria na hora o robô dos 6 clientes ativos. Por isso existe `usesSalesEngine(agent)` (uma linha) que hoje devolve `true` só para `copilot`/`sdr`; ligar para o `auto` depois é trocar essa função.
+1. **Motor de venda em TODOS os modos (decidido pelo CEO).** Regras de venda, análise obrigatória e trava de etapa/qualificação valem em `auto`, `copilot` e `sdr`. O CEO aceita que o robô Automático atual dos clientes mude de comportamento no deploy (passa a registrar análise, contornar preço antes da hora e só mover etapa / transferir como "qualificado" com a qualificação completa; cada resposta pode custar uma chamada extra de IA quando a análise não vier junto). Nas palavras do CEO: o robô é o **"Dros Sales"**, um robô de atendimento da Dros que depois será conectado em qualquer conta; o fluxo é **pré-atendimento → validar os dados do cliente e se está dentro do ICP → passar para o especialista**. `usesSalesEngine(agent)` continua existindo como ponto único de decisão e devolve `true` para todos os modos.
 2. **Análise obrigatória sem chamada extra na maioria das vezes.** A ferramenta `record_analysis` vai junto com as outras em `tool_choice: 'auto'`. Se a IA responder texto sem chamar a análise, o código faz UMA chamada forçada (`tool_choice: {type:'tool', name:'record_analysis'}`). Se a IA devolver texto + só a análise, o laço para ali (não gasta outra volta).
 3. **Trava vale para `move_stage` e para `transfer_to_human(reason="qualified")`.** Sem análise registrada = recusado. Se o agente tem texto de qualificação e a IA devolveu lista de critérios vazia = recusado.
 4. **SDR sem nada para qualificar não passa sozinho.** A passagem automática exige pelo menos 1 campo obrigatório ou 1 critério avaliado, para não entregar o lead na primeira mensagem.
@@ -39,6 +39,7 @@
 8. **`ai_key_source = 'dros'` sem `ANTHROPIC_API_KEY_DROS` no `.env` = sem chave** (não cai na chave do cliente). Só `super_admin` troca, pela aba Identidade do agente (select visível só para ele).
 9. **"Há uma sugestão — ver"**: clicar em "ver" troca o texto da caixa pela sugestão.
 10. **Grupo de 40s usa o tipo da última mensagem.** Se o bloco tiver um áudio seguido de texto, o áudio não é transcrito naquela análise (o histórico mostra `[Audio]`).
+11. **Desligar o atendimento passa os leads na hora (decidido pelo CEO, Task 10).** "Lead com a IA" = ativo, sem `ai_handed_off_at`, com o robô do agente como atendente, ou sem atendente humano e com mensagem enviada por esse agente. "Vendedor responsável" = atendente humano ativo da conversa naquela instância; senão o atendente padrão humano da instância; senão a roleta (via `executeHandoff` sem regra `agent_off`). Todos recebem `ai_handed_off_at`, a nota "IA desligada — assuma a conversa" e a notificação de sempre (`notifyAndOpenLead`). Religar não devolve esses leads para a IA.
 
 ---
 
@@ -64,6 +65,8 @@
 | `test/leadDebouncer.test.js` | Testes do agrupamento com relógio falso. |
 | `server/services/copilotScheduler.js` | `scheduleAiForInbound(lead, content, mediaType, instanceId)` + cancelamentos; liga webhook -> IA. |
 | `server/routes/copilot.js` | API `/api/copilot`: sugestão pendente, resolver sugestão, pausar/retomar IA. |
+| `server/services/agentShutdown.js` | Desligar o atendimento: `AGENT_OFF_NOTE`, `findLeadsHeldByAgent(db, ...)`, `findResponsibleHumanId(db, ...)`. |
+| `test/agentShutdown.test.js` | Testes de quais leads estão com a IA e de quem é o vendedor responsável. |
 
 **Modificar**
 
@@ -72,14 +75,15 @@
 | `package.json` | Script `"test": "node --test test/"`. |
 | `server/db.js` | Importa e chama `applyCopilotSchema(db)` antes do `export default db` (L1424). |
 | `server/services/anthropicClient.js` | `resolveAnthropicKey` (L19-24) usa `pickAnthropicKey`. |
-| `server/services/aiAgent.js` | `findAgentForLead` (L42-99), `diagnoseForceAi` (L111-122), `buildSystemPrompt` (L184-250), `getToolsForAgent` (L333-381), `executeTool` (L385-417), `processInboundMessage` (L423-672). |
+| `server/services/aiAgent.js` | `findAgentForLead` (L42-99), `diagnoseForceAi` (L111-122), `buildSystemPrompt` (L184-250), `getToolsForAgent` (L333-381), `executeTool` (L385-417), `processInboundMessage` (L423-672) (Task 7); nova `releaseLeadsFromAgent` no fim do arquivo (Task 10). |
 | `server/routes/webhooks.js` | Import (L7) e bloco da IA (L685-693) viram UMA chamada a `scheduleAiForInbound`. |
-| `server/routes/agents.js` | `has_api_key` (L75-76), `mode` no POST (L112-156) e PUT (L204-234), expiração de sugestões ao trocar modo/desligar (PUT, toggle-active L291-299, DELETE L346-348). |
+| `server/routes/agents.js` | `has_api_key` (L75-76), `mode` no POST (L112-156) e PUT (L204-234), expiração de sugestões ao trocar modo (Task 9) e desligamento completo ao desligar/apagar: `shutdownAgentAttendance` no PUT, toggle-active (L291-299) e DELETE (L346-348) (Task 10). |
 | `server/routes/accounts.js` | `ai_key_source` no `PUT /:id` (L67, L96-98). |
 | `server/index.js` | Monta `/api/copilot` (L31 import, L81 rota). |
 | `src/context/SSEContext.tsx` | Escuta `lead:ai_suggestion` (L29). |
-| `src/lib/api.ts` | Tipos (`Account`, `Lead`, `Agent`, `AgentInput`, `AgentMode`, `AiSuggestion`) e fetchers do Copiloto. |
+| `src/lib/api.ts` | Tipos (`Account`, `Lead`, `Agent`, `AgentInput`, `AgentMode`, `AiSuggestion`) e fetchers do Copiloto (Task 11); `released_leads` no retorno de `toggleAgentActive` (Task 12). |
 | `src/components/AgentEditorModal.tsx` | Interruptor "Atendimento ligado/desligado", seletor "Como a IA atua" e select de chave (super_admin) na aba Identidade. |
+| `src/pages/Agents.tsx` | Botão do card vira "Atendimento ligado/desligado", com confirmação e aviso de quantos leads foram para o vendedor. |
 | `src/pages/Chat.tsx` | Sugestão na caixa com etiqueta, linha "Há uma sugestão — ver", selo de chance/trava, botão Pausar/Retomar IA, aviso de enviada/editada/descartada, rótulo `ai_qualified` no histórico. |
 
 ---
@@ -484,7 +488,7 @@ git commit -m "feat: chave anthropic respeita ai_key_source (cliente ou Dros)"
   - `AGENT_MODES: ['auto', 'copilot', 'sdr']`
   - `normalizeAgentMode(value: any): 'auto'|'copilot'|'sdr'` (inválido vira `'auto'`)
   - `resolveEffectiveMode(agent: { mode }, lead: { ai_handed_off_at }, attendantIsHuman?: boolean): 'auto'|'copilot'|'sdr'`
-  - `usesSalesEngine(agent: { mode }): boolean`
+  - `usesSalesEngine(agent: { mode }): boolean` (devolve `true` em todos os modos — decisão do CEO)
   - `deliveryActionForMode(mode: string): 'send'|'suggest'`
   - `agentAcceptsLead(agent: { mode, activation_mode, user_id }, lead: { attendant_id, ai_handed_off_at }, attendantIsHuman: boolean): boolean`
 
@@ -516,9 +520,9 @@ test('resolveEffectiveMode: auto, copilot e sdr antes/depois da passagem', () =>
   assert.equal(resolveEffectiveMode({ mode: 'sdr' }, {}, true), 'copilot')
 })
 
-test('usesSalesEngine so para copilot e sdr', () => {
-  assert.equal(usesSalesEngine({ mode: 'auto' }), false)
-  assert.equal(usesSalesEngine({}), false)
+test('usesSalesEngine vale para todos os modos (Dros Sales)', () => {
+  assert.equal(usesSalesEngine({ mode: 'auto' }), true)
+  assert.equal(usesSalesEngine({}), true)
   assert.equal(usesSalesEngine({ mode: 'copilot' }), true)
   assert.equal(usesSalesEngine({ mode: 'sdr' }), true)
 })
@@ -583,10 +587,11 @@ export function resolveEffectiveMode(agent, lead, attendantIsHuman = false) {
   return 'auto'
 }
 
-// Regras de venda + analise obrigatoria + trava de etapa. Hoje so fora do 'auto' (Decisao 1 do plano).
-export function usesSalesEngine(agent) {
-  const mode = normalizeAgentMode(agent && agent.mode)
-  return mode === 'copilot' || mode === 'sdr'
+// Regras de venda + analise obrigatoria + trava de etapa/qualificacao.
+// Decisao do CEO: valem em todos os modos (robo "Dros Sales": pre-atendimento -> valida dados e ICP -> especialista).
+// Mantido como funcao para ser o ponto unico de decisao.
+export function usesSalesEngine(_agent) {
+  return true
 }
 
 // Passo 13 do processInboundMessage: enviar ao lead ou gravar sugestao.
@@ -1388,7 +1393,7 @@ Observação: o arquivo usa quebra de linha CRLF; use a ferramenta Edit (ela pre
   - `stage_history.trigger_type = 'ai_qualified'` com `notes = 'Movido pela IA - qualificacao completa'`
   - Nota em `lead_notes` com o resumo da qualificação (autor = `agent.user_id`)
 
-Esta task não tem teste automatizado próprio: `aiAgent.js` importa `server/db.js` (abre o banco real). Toda regra de decisão já está coberta pelos testes das Tasks 3, 4 e 5; aqui só se liga as peças. A verificação é `node --check`, `npm test` e o roteiro manual da Task 13.
+Esta task não tem teste automatizado próprio: `aiAgent.js` importa `server/db.js` (abre o banco real). Toda regra de decisão já está coberta pelos testes das Tasks 3, 4 e 5; aqui só se liga as peças. A verificação é `node --check`, `npm test` e o roteiro manual da Task 14.
 
 - [ ] **Step 1: Imports**
 
@@ -1563,7 +1568,8 @@ function buildSystemPrompt(agent, lead, availableTags, availableStages, opts = {
     }
     if (!salesEngine) {
       parts.push('Quando qualificar, chame transfer_to_human(reason="qualified") imediatamente.')
-    } else if (mode === 'sdr') {
+    } else if (mode !== 'copilot') {
+      parts.push('Fluxo: pre-atendimento -> validar os dados do cliente e se ele esta dentro do perfil ideal (ICP) -> passar para o especialista.')
       parts.push('Quando o lead cumprir todos os criterios, chame transfer_to_human(reason="qualified"). O sistema so aceita com todos os campos obrigatorios e criterios completos.')
     }
     parts.push('')
@@ -2540,7 +2546,358 @@ git commit -m "feat: api do copiloto (sugestao, pausa por conversa), modo do age
 
 ---
 
-### Task 10: Front — tipos, fetchers e evento SSE
+### Task 10: Desligar o atendimento — leads da IA vão para o vendedor
+
+**Files:**
+- Create: `server/services/agentShutdown.js`
+- Modify: `server/services/aiAgent.js` — imports (depois dos imports da Task 7) e nova função `releaseLeadsFromAgent` no fim do arquivo (depois de `replayLastMessagesForAgent`)
+- Modify: `server/routes/agents.js` — import de `aiAgent.js` (L6), helper novo depois de `expireAgentSuggestions` (Task 9), `PUT /:id`, `PATCH /:id/toggle-active` e `DELETE /:id` (trechos criados na Task 9)
+- Test: `test/agentShutdown.test.js`
+
+**Interfaces:**
+- Consumes:
+  - Task 1: `createTestDb`, `seedAccountAndLead` (só no teste)
+  - Task 7: `executeHandoff(agent, lead, reason, instanceId)` (interna do `aiAgent.js`), `notifyAndOpenLead(leadId, userId, opts)` (já importada no `aiAgent.js`)
+  - Task 9: `expireAgentSuggestions(accountId, agentId)` em `agents.js`
+- Produces:
+  - `AGENT_OFF_NOTE = 'IA desligada — assuma a conversa'`
+  - `findLeadsHeldByAgent(db, { accountId: number, agentId: number, agentUserId: number|null }): Lead[]` — leads ativos, não arquivados, não bloqueados, sem `ai_handed_off_at`, que têm o robô do agente como atendente OU (sem atendente / atendente robô) e com mensagem enviada por esse agente
+  - `findResponsibleHumanId(db, { accountId: number, leadId: number, instanceId: number|null }): number|null` — atendente humano ativo da conversa naquela instância (`lead_instance_assignments`), senão o atendente padrão humano ativo da instância
+  - `export function releaseLeadsFromAgent(agent: { id, account_id, user_id }): { total: number, released: number }` em `aiAgent.js`
+  - `shutdownAgentAttendance(agent): { expired_suggestions: number, released_leads: number }` em `agents.js`
+  - `PATCH /api/agents/:id/toggle-active` ao desligar responde `{ ok: true, is_active: 0, released_leads: number }`
+
+Regras (spec 3.10, decisão do CEO): desligar o agente (`is_active = 0` pelo PUT, pelo botão do card ou apagando o agente) vale na hora: timers de agrupamento cancelados, sugestões pendentes expiram e cada lead que estava com a IA e ainda não foi passado vai para o vendedor responsável (ou roleta), com `ai_handed_off_at` preenchido, aviso ao vendedor por `notifyAndOpenLead` e nota "IA desligada — assuma a conversa". Trocar só o modo continua apenas expirando sugestões. Religar não devolve esses leads para a IA (eles já foram passados).
+
+- [ ] **Step 1: Escrever o teste que falha**
+
+`test/agentShutdown.test.js`:
+
+```js
+import { test } from 'node:test'
+import assert from 'node:assert/strict'
+import { createTestDb, seedAccountAndLead } from './helpers/memoryDb.js'
+import { AGENT_OFF_NOTE, findLeadsHeldByAgent, findResponsibleHumanId } from '../server/services/agentShutdown.js'
+
+// Colunas e tabelas de atendimento que o helper da Task 1 nao cria
+function addAttendanceTables(db) {
+  db.exec(`
+    ALTER TABLE users ADD COLUMN is_bot INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE users ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1;
+    ALTER TABLE leads ADD COLUMN attendant_id INTEGER;
+    ALTER TABLE leads ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1;
+    ALTER TABLE leads ADD COLUMN is_archived INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE leads ADD COLUMN is_blocked INTEGER NOT NULL DEFAULT 0;
+    CREATE TABLE messages (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      lead_id INTEGER NOT NULL,
+      account_id INTEGER NOT NULL,
+      direction TEXT NOT NULL,
+      content TEXT,
+      ai_agent_id INTEGER
+    );
+    CREATE TABLE whatsapp_instances (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      account_id INTEGER NOT NULL,
+      default_attendant_id INTEGER
+    );
+    CREATE TABLE lead_instance_assignments (
+      lead_id INTEGER NOT NULL,
+      instance_id INTEGER NOT NULL,
+      attendant_id INTEGER,
+      PRIMARY KEY (lead_id, instance_id)
+    );
+  `)
+}
+
+function setup() {
+  const db = createTestDb()
+  addAttendanceTables(db)
+  const base = seedAccountAndLead(db)
+  // O usuario semeado vira o robo do agente
+  db.prepare('UPDATE users SET is_bot = 1 WHERE id = ?').run(base.userId)
+  const humanId = Number(db.prepare('INSERT INTO users (account_id, name) VALUES (?, ?)').run(base.accountId, 'Vendedora').lastInsertRowid)
+  const newLead = (fields = {}) => {
+    const id = Number(db.prepare('INSERT INTO leads (account_id, name) VALUES (?, ?)').run(base.accountId, 'Lead').lastInsertRowid)
+    for (const [k, v] of Object.entries(fields)) db.prepare(`UPDATE leads SET ${k} = ? WHERE id = ?`).run(v, id)
+    return id
+  }
+  const aiMessage = (leadId) => db.prepare("INSERT INTO messages (lead_id, account_id, direction, content, ai_agent_id) VALUES (?, ?, 'outbound', 'oi', ?)").run(leadId, base.accountId, base.agentId)
+  return { db, ...base, humanId, newLead, aiMessage }
+}
+
+const held = (s) => findLeadsHeldByAgent(s.db, { accountId: s.accountId, agentId: s.agentId, agentUserId: s.userId }).map(l => l.id)
+
+test('AGENT_OFF_NOTE tem o texto do spec', () => {
+  assert.equal(AGENT_OFF_NOTE, 'IA desligada — assuma a conversa')
+})
+
+test('lead com o robo do agente como atendente esta com a IA', () => {
+  const s = setup()
+  const id = s.newLead({ attendant_id: s.userId })
+  assert.deepEqual(held(s), [id])
+})
+
+test('lead sem atendente mas com mensagem enviada pelo agente esta com a IA', () => {
+  const s = setup()
+  const id = s.newLead()
+  s.aiMessage(id)
+  assert.ok(held(s).includes(id))
+  assert.ok(!held(s).includes(s.leadId), 'lead sem atendente e sem mensagem da IA nao entra')
+})
+
+test('fica de fora: ja passado, humano atendendo, arquivado, bloqueado, inativo', () => {
+  const s = setup()
+  const passado = s.newLead({ attendant_id: s.userId, ai_handed_off_at: '2026-09-15 10:00:00' })
+  const humano = s.newLead({ attendant_id: s.humanId })
+  s.aiMessage(humano)
+  const arquivado = s.newLead({ attendant_id: s.userId, is_archived: 1 })
+  const bloqueado = s.newLead({ attendant_id: s.userId, is_blocked: 1 })
+  const inativo = s.newLead({ attendant_id: s.userId, is_active: 0 })
+  const ids = held(s)
+  for (const id of [passado, humano, arquivado, bloqueado, inativo]) assert.ok(!ids.includes(id), `lead ${id} nao deveria entrar`)
+})
+
+test('lead de outra conta nao entra', () => {
+  const s = setup()
+  const outra = seedAccountAndLead(s.db, { accountName: 'Outra' })
+  s.db.prepare('UPDATE leads SET attendant_id = ? WHERE id = ?').run(s.userId, outra.leadId)
+  assert.ok(!held(s).includes(outra.leadId))
+})
+
+test('responsavel: atendente humano da conversa na instancia', () => {
+  const s = setup()
+  const inst = Number(s.db.prepare('INSERT INTO whatsapp_instances (account_id, default_attendant_id) VALUES (?, NULL)').run(s.accountId).lastInsertRowid)
+  s.db.prepare('INSERT INTO lead_instance_assignments (lead_id, instance_id, attendant_id) VALUES (?, ?, ?)').run(s.leadId, inst, s.humanId)
+  assert.equal(findResponsibleHumanId(s.db, { accountId: s.accountId, leadId: s.leadId, instanceId: inst }), s.humanId)
+})
+
+test('responsavel: conversa com robo cai no atendente padrao humano da instancia', () => {
+  const s = setup()
+  const inst = Number(s.db.prepare('INSERT INTO whatsapp_instances (account_id, default_attendant_id) VALUES (?, ?)').run(s.accountId, s.humanId).lastInsertRowid)
+  s.db.prepare('INSERT INTO lead_instance_assignments (lead_id, instance_id, attendant_id) VALUES (?, ?, ?)').run(s.leadId, inst, s.userId)
+  assert.equal(findResponsibleHumanId(s.db, { accountId: s.accountId, leadId: s.leadId, instanceId: inst }), s.humanId)
+})
+
+test('responsavel: sem humano, sem instancia ou instancia de outra conta = null (vai para a roleta)', () => {
+  const s = setup()
+  const instRobo = Number(s.db.prepare('INSERT INTO whatsapp_instances (account_id, default_attendant_id) VALUES (?, ?)').run(s.accountId, s.userId).lastInsertRowid)
+  assert.equal(findResponsibleHumanId(s.db, { accountId: s.accountId, leadId: s.leadId, instanceId: instRobo }), null)
+  assert.equal(findResponsibleHumanId(s.db, { accountId: s.accountId, leadId: s.leadId, instanceId: null }), null)
+  const outra = seedAccountAndLead(s.db, { accountName: 'Outra' })
+  const instOutra = Number(s.db.prepare('INSERT INTO whatsapp_instances (account_id, default_attendant_id) VALUES (?, ?)').run(outra.accountId, s.humanId).lastInsertRowid)
+  assert.equal(findResponsibleHumanId(s.db, { accountId: s.accountId, leadId: s.leadId, instanceId: instOutra }), null)
+  s.db.prepare('UPDATE users SET is_active = 0 WHERE id = ?').run(s.humanId)
+  const instInativo = Number(s.db.prepare('INSERT INTO whatsapp_instances (account_id, default_attendant_id) VALUES (?, ?)').run(s.accountId, s.humanId).lastInsertRowid)
+  assert.equal(findResponsibleHumanId(s.db, { accountId: s.accountId, leadId: s.leadId, instanceId: instInativo }), null)
+})
+```
+
+- [ ] **Step 2: Rodar e ver falhar**
+
+Run: `npm test`
+Expected: FAIL em `test/agentShutdown.test.js` com `ERR_MODULE_NOT_FOUND` para `server/services/agentShutdown.js`.
+
+- [ ] **Step 3: Implementar as consultas**
+
+`server/services/agentShutdown.js`:
+
+```js
+// Desligamento do atendimento da IA (spec 3.10). Recebe o db por parametro. Toda query filtra por conta.
+
+export const AGENT_OFF_NOTE = 'IA desligada — assuma a conversa'
+
+// Leads que estavam com a IA e ainda nao foram passados para um humano
+export function findLeadsHeldByAgent(db, { accountId, agentId, agentUserId }) {
+  return db.prepare(`
+    SELECT l.* FROM leads l
+    LEFT JOIN users u ON u.id = l.attendant_id
+    WHERE l.account_id = ?
+      AND l.is_active = 1
+      AND COALESCE(l.is_archived, 0) = 0
+      AND COALESCE(l.is_blocked, 0) = 0
+      AND l.ai_handed_off_at IS NULL
+      AND (
+        l.attendant_id = ?
+        OR (
+          (l.attendant_id IS NULL OR u.is_bot = 1)
+          AND EXISTS (
+            SELECT 1 FROM messages m
+            WHERE m.lead_id = l.id AND m.account_id = l.account_id AND m.ai_agent_id = ?
+          )
+        )
+      )
+    ORDER BY l.id
+  `).all(accountId, agentUserId || -1, agentId)
+}
+
+// Vendedor responsavel: atendente humano ativo da conversa naquela instancia; senao o atendente padrao humano da instancia
+export function findResponsibleHumanId(db, { accountId, leadId, instanceId }) {
+  if (!instanceId) return null
+  const assigned = db.prepare(`
+    SELECT u.id FROM lead_instance_assignments a
+    JOIN leads l ON l.id = a.lead_id
+    JOIN users u ON u.id = a.attendant_id
+    WHERE a.lead_id = ? AND a.instance_id = ? AND l.account_id = ?
+      AND u.is_bot = 0 AND u.is_active = 1
+  `).get(leadId, instanceId, accountId)
+  if (assigned) return assigned.id
+  const byDefault = db.prepare(`
+    SELECT u.id FROM whatsapp_instances i
+    JOIN users u ON u.id = i.default_attendant_id
+    WHERE i.id = ? AND i.account_id = ?
+      AND u.is_bot = 0 AND u.is_active = 1
+  `).get(instanceId, accountId)
+  return byDefault ? byDefault.id : null
+}
+```
+
+- [ ] **Step 4: Rodar e ver passar**
+
+Run: `npm test`
+Expected: PASS (`# fail 0`).
+
+- [ ] **Step 5: Passar os leads no `aiAgent.js`**
+
+Em `server/services/aiAgent.js`, depois de `import { createReplySuggestion, getPendingSuggestion } from './aiSuggestions.js'` (Task 7):
+
+```js
+import { AGENT_OFF_NOTE, findLeadsHeldByAgent, findResponsibleHumanId } from './agentShutdown.js'
+```
+
+No fim do arquivo (depois do `}` que fecha `replayLastMessagesForAgent`):
+
+```js
+
+// ─── releaseLeadsFromAgent ───────────────────────────────────────────────
+// Atendimento desligado (spec 3.10): cada lead que estava com a IA vai para o vendedor
+// responsavel (ou roleta, via executeHandoff sem regra 'agent_off'), com aviso e nota.
+export function releaseLeadsFromAgent(agent) {
+  if (!agent) return { total: 0, released: 0 }
+  const leads = findLeadsHeldByAgent(db, { accountId: agent.account_id, agentId: agent.id, agentUserId: agent.user_id })
+  let released = 0
+  for (const lead of leads) {
+    try {
+      const instanceId = lead.last_instance_id || lead.instance_id || null
+      const responsibleId = findResponsibleHumanId(db, { accountId: lead.account_id, leadId: lead.id, instanceId })
+      if (responsibleId) {
+        db.prepare("UPDATE leads SET attendant_id = ?, ai_handed_off_at = datetime('now'), updated_at = datetime('now') WHERE id = ? AND account_id = ?")
+          .run(responsibleId, lead.id, lead.account_id)
+        try { broadcastSSE(lead.account_id, 'lead:updated', { id: lead.id }) } catch {}
+        setImmediate(() => {
+          notifyAndOpenLead(lead.id, responsibleId, { source: 'bot_handoff' })
+            .catch(e => console.error('[Agent off handoff]', e.message))
+        })
+      } else {
+        executeHandoff(agent, lead, 'agent_off', instanceId)
+      }
+      db.prepare('INSERT INTO lead_notes (lead_id, user_id, content) VALUES (?, ?, ?)').run(lead.id, agent.user_id, AGENT_OFF_NOTE)
+      released++
+    } catch (e) {
+      console.error(`[AI Agent] releaseLeadsFromAgent lead=${lead.id}:`, e.message)
+    }
+  }
+  console.log(`[AI Agent] Atendimento desligado agent=${agent.id} leads=${leads.length} passados=${released}`)
+  return { total: leads.length, released }
+}
+```
+
+- [ ] **Step 6: Usar nas rotas de agentes**
+
+Em `server/routes/agents.js`, trocar:
+
+```js
+import { replayLastMessagesForAgent } from '../services/aiAgent.js'
+```
+
+por:
+
+```js
+import { replayLastMessagesForAgent, releaseLeadsFromAgent } from '../services/aiAgent.js'
+```
+
+Depois da função `expireAgentSuggestions` (Task 9), trocar:
+
+```js
+  return leadIds.length
+}
+```
+
+por:
+
+```js
+  return leadIds.length
+}
+
+// Desligar o atendimento: expira sugestoes, cancela timers e passa os leads da IA para o vendedor
+function shutdownAgentAttendance(agent) {
+  const expired = expireAgentSuggestions(agent.account_id, agent.id)
+  const release = releaseLeadsFromAgent(agent)
+  return { expired_suggestions: expired, released_leads: release.released }
+}
+```
+
+No `PUT /:id`, trocar:
+
+```js
+    if (modeChanged || turnedOff) expireAgentSuggestions(req.accountId, existing.id)
+```
+
+por:
+
+```js
+    if (turnedOff) shutdownAgentAttendance(existing)
+    else if (modeChanged) expireAgentSuggestions(req.accountId, existing.id)
+```
+
+No `PATCH /:id/toggle-active`, trocar:
+
+```js
+    expireAgentSuggestions(agent.account_id, agent.id)
+    console.log(`[Bot Toggle] PAUSED agent=${agent.id} by user=${req.user.id}`)
+    return res.json({ ok: true, is_active: 0 })
+```
+
+por:
+
+```js
+    const shutdown = shutdownAgentAttendance(agent)
+    console.log(`[Bot Toggle] PAUSED agent=${agent.id} by user=${req.user.id} released_leads=${shutdown.released_leads}`)
+    return res.json({ ok: true, is_active: 0, released_leads: shutdown.released_leads })
+```
+
+No `DELETE /:id`, trocar:
+
+```js
+  expireAgentSuggestions(req.accountId, existing.id)
+  res.json({ ok: true })
+```
+
+por:
+
+```js
+  shutdownAgentAttendance(existing)
+  res.json({ ok: true })
+```
+
+- [ ] **Step 7: Verificar**
+
+Run: `node --check server/services/aiAgent.js && node --check server/routes/agents.js && npm test`
+Expected: nenhuma saída dos `--check`; testes `# fail 0`.
+
+Verificação manual (servidor local, `npm run dev:server`): num agente ativo com um lead que tem o robô como atendente (`UPDATE leads SET attendant_id = <user_id do agente>, ai_handed_off_at = NULL WHERE id = <lead>`), chamar `curl -s -X PATCH "http://localhost:3002/api/agents/<agente>/toggle-active?account_id=<conta>" -H "Authorization: Bearer $TOKEN"`.
+Expected: `{"ok":true,"is_active":0,"released_leads":1}`; o lead fica com `ai_handed_off_at` preenchido e atendente humano (ou o da roleta); `SELECT content FROM lead_notes WHERE lead_id = <lead> ORDER BY id DESC LIMIT 1` devolve `IA desligada — assuma a conversa`; o log mostra `[AI Agent] Atendimento desligado agent=<agente> leads=1 passados=1`.
+
+- [ ] **Step 8: Commit**
+
+```bash
+git add server/services/agentShutdown.js server/services/aiAgent.js server/routes/agents.js test/agentShutdown.test.js
+git commit -m "feat: desligar o atendimento passa os leads da IA para o vendedor com aviso"
+```
+
+---
+
+### Task 11: Front — tipos, fetchers e evento SSE
 
 **Files:**
 - Modify: `src/lib/api.ts:23` (`Account`), `src/lib/api.ts:41` (`Lead`), `src/lib/api.ts:703-762` (`AgentMode`, `Agent`, `AgentInput`), `src/lib/api.ts:820` (fetchers novos depois de `testAgent`)
@@ -2691,13 +3048,15 @@ git commit -m "feat: tipos e chamadas do copiloto no front e evento lead:ai_sugg
 
 ---
 
-### Task 11: Front — Agente: interruptor, "Como a IA atua" e chave (aba Identidade)
+### Task 12: Front — Agente: interruptor (modal e card), "Como a IA atua" e chave
 
 **Files:**
 - Modify: `src/components/AgentEditorModal.tsx` — imports (L1-10), constantes (antes de L36), estado (L45-54), carga (L117-119 e depois de L168), `handleSave` (L180), handler novo (antes de L238), aba Identidade (L316-340)
+- Modify: `src/lib/api.ts` — tipo de retorno de `toggleAgentActive` (L793-798)
+- Modify: `src/pages/Agents.tsx` — `handleToggle` (L46, L58, L61) e botão do card (L140-156)
 
 **Interfaces:**
-- Consumes: Task 10 (`AgentMode`, `Agent.mode`, `AgentInput.mode`, `Account.ai_key_source`), `fetchAccount`, `updateAccount` (já existem em `api.ts`), `useAuth` (`src/context/AuthContext.tsx`).
+- Consumes: Task 11 (`AgentMode`, `Agent.mode`, `AgentInput.mode`, `Account.ai_key_source`), Task 10 (`toggle-active` devolve `released_leads` ao desligar), `fetchAccount`, `updateAccount`, `toggleAgentActive` (já existem em `api.ts`), `useAuth` (`src/context/AuthContext.tsx`).
 - Produces: salva `mode` e `is_active` pelo `updateAgent`/`createAgent` que já existem; `super_admin` salva `ai_key_source` na hora com `updateAccount(accountId, { ai_key_source })`.
 
 - [ ] **Step 1: Imports**
@@ -2868,7 +3227,7 @@ por:
                 <strong>{isActive ? 'Atendimento ligado' : 'Atendimento desligado'}</strong>
               </label>
               <small style={{ color: 'var(--text-muted)', fontSize: 11, marginLeft: 24, display: 'block' }}>
-                Desligado, a IA não responde nem sugere em nenhum lead. Ao salvar, as sugestões pendentes expiram.
+                Desligado, a IA não responde nem sugere em nenhum lead. Ao salvar, as sugestões pendentes expiram e os leads que estavam com a IA vão para o vendedor responsável (ou roleta) com o aviso "IA desligada — assuma a conversa".
               </small>
             </div>
             <div className="form-group">
@@ -2913,10 +3272,122 @@ por:
         )}
 ```
 
-- [ ] **Step 7: Verificar**
+- [ ] **Step 7: Tipo da resposta do liga/desliga**
+
+Em `src/lib/api.ts`, em `toggleAgentActive`, trocar:
+
+```ts
+    is_active: number
+    replay?: { total: number; will_replay: number }
+  }>(`/api/agents/${id}/toggle-active?account_id=${accountId}`, { method: 'PATCH' })
+```
+
+por:
+
+```ts
+    is_active: number
+    replay?: { total: number; will_replay: number }
+    released_leads?: number
+  }>(`/api/agents/${id}/toggle-active?account_id=${accountId}`, { method: 'PATCH' })
+```
+
+- [ ] **Step 8: Interruptor "Atendimento ligado/desligado" no card do agente**
+
+Em `src/pages/Agents.tsx` (`handleToggle`, L46), trocar:
+
+```tsx
+      if (!confirm(`Pausar "${a.name}"?\n\nO bot vai parar de responder mensagens. Quando você reativar, ele responde a última msg de cada lead que ficou pendente.`)) return
+```
+
+por:
+
+```tsx
+      if (!confirm(`Desligar o atendimento de "${a.name}"?\n\nA IA para de responder e de sugerir na hora. Os leads que estavam com ela vão para o vendedor responsável (ou roleta) com o aviso "IA desligada — assuma a conversa".`)) return
+```
+
+Trocar (L58):
+
+```tsx
+          setToast({ type: 'success', message: `${a.name} reativado` })
+```
+
+por:
+
+```tsx
+          setToast({ type: 'success', message: `Atendimento de ${a.name} ligado` })
+```
+
+Trocar (L61):
+
+```tsx
+        setToast({ type: 'success', message: `${a.name} pausado` })
+```
+
+por:
+
+```tsx
+        const releasedLeads = r.released_leads || 0
+        setToast({
+          type: 'success',
+          message: releasedLeads > 0
+            ? `Atendimento de ${a.name} desligado. ${releasedLeads} lead(s) foram para o vendedor com o aviso "IA desligada — assuma a conversa".`
+            : `Atendimento de ${a.name} desligado`,
+        })
+```
+
+E trocar o botão (L140-156):
+
+```tsx
+                        <button
+                          className="btn btn-sm btn-icon"
+                          style={{
+                            background: a.is_active ? 'rgba(52,199,89,0.15)' : 'rgba(255,107,107,0.15)',
+                            border: `1px solid ${a.is_active ? 'rgba(52,199,89,0.4)' : 'rgba(255,107,107,0.4)'}`,
+                            color: a.is_active ? '#34C759' : '#FF6B6B',
+                            cursor: togglingId === a.id ? 'wait' : 'pointer',
+                            opacity: togglingId === a.id ? 0.6 : 1,
+                          }}
+                          title={a.is_active
+                            ? 'Pausar bot (vai parar de responder)'
+                            : 'Reativar bot (responde a última msg dos leads que mandaram durante a pausa)'}
+                          onClick={() => handleToggle(a)}
+                          disabled={togglingId === a.id}
+                        >
+                          {a.is_active ? <Power size={11} /> : <PowerOff size={11} />}
+                        </button>
+```
+
+por:
+
+```tsx
+                        <button
+                          className="btn btn-sm"
+                          style={{
+                            background: a.is_active ? 'rgba(52,199,89,0.15)' : 'rgba(255,107,107,0.15)',
+                            border: `1px solid ${a.is_active ? 'rgba(52,199,89,0.4)' : 'rgba(255,107,107,0.4)'}`,
+                            color: a.is_active ? '#34C759' : '#FF6B6B',
+                            cursor: togglingId === a.id ? 'wait' : 'pointer',
+                            opacity: togglingId === a.id ? 0.6 : 1,
+                            display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, padding: '4px 8px',
+                          }}
+                          title={a.is_active
+                            ? 'Desligar o atendimento: a IA para na hora e os leads dela vão para o vendedor'
+                            : 'Ligar o atendimento (responde a última msg dos leads que mandaram enquanto estava desligado)'}
+                          onClick={() => handleToggle(a)}
+                          disabled={togglingId === a.id}
+                        >
+                          {a.is_active ? <Power size={11} /> : <PowerOff size={11} />}
+                          {a.is_active ? 'Atendimento ligado' : 'Atendimento desligado'}
+                        </button>
+```
+
+- [ ] **Step 9: Verificar**
 
 Run: `npm run build`
 Expected: `✓ built in ...` sem erro.
+
+Run: `npx tsc --noEmit -p . 2>&1 | grep -c "error TS"`
+Expected: `21` (os mesmos erros de tipo antigos; o número não pode subir).
 
 Verificação manual (`npm run dev`, abrir `http://localhost:5173/crm/`, entrar como `super_admin`, conta Dros, Agentes de IA, editar um agente):
 - Aba Identidade mostra no topo "Atendimento ligado" (borda verde) e o seletor com Automático / Copiloto / SDR, com o modo salvo marcado (agentes antigos: Automático).
@@ -2924,23 +3395,24 @@ Verificação manual (`npm run dev`, abrir `http://localhost:5173/crm/`, entrar 
 - Desmarcar "Atendimento ligado", Salvar, reabrir: "Atendimento desligado".
 - O select "Chave da IA desta conta" aparece; trocar para "Chave da Dros" e recarregar a página: continua "Chave da Dros". Voltar para "Chave do cliente".
 - Entrando como gerente, o select de chave não aparece.
+- Na lista de agentes, o card mostra o botão "Atendimento ligado" (verde). Clicar, confirmar: vira "Atendimento desligado" (vermelho) e o aviso informa quantos leads foram para o vendedor. Clicar de novo: volta a "Atendimento ligado" com o aviso "Atendimento de <nome> ligado" (ou o aviso de replay, se houver leads pendentes).
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 10: Commit**
 
 ```bash
-git add src/components/AgentEditorModal.tsx
-git commit -m "feat: seletor automatico/copiloto/sdr, liga-desliga do atendimento e chave da IA na tela do agente"
+git add src/components/AgentEditorModal.tsx src/pages/Agents.tsx src/lib/api.ts
+git commit -m "feat: seletor automatico/copiloto/sdr, liga-desliga do atendimento (modal e card) e chave da IA na tela do agente"
 ```
 
 ---
 
-### Task 12: Front — Chat: sugestão na caixa, selo de chance e pausa da IA
+### Task 13: Front — Chat: sugestão na caixa, selo de chance e pausa da IA
 
 **Files:**
 - Modify: `src/pages/Chat.tsx` — imports (L12-13), estado (depois de L128), efeitos (depois de L321), `handleSendMsg` (L646-664), `aiEnabledForAccount` (depois de L933), cabeçalho (antes de L1082), acima da caixa (antes de L1198), histórico (L1857)
 
 **Interfaces:**
-- Consumes: Task 10 (`AiSuggestion`, `fetchPendingAiSuggestion`, `resolveAiSuggestion`, `pauseLeadAi`, `resumeLeadAi`, campos novos de `Lead`, evento `lead:ai_suggestion`); `useAccount().accounts` (já traz `ai_agents_enabled`).
+- Consumes: Task 11 (`AiSuggestion`, `fetchPendingAiSuggestion`, `resolveAiSuggestion`, `pauseLeadAi`, `resumeLeadAi`, campos novos de `Lead`, evento `lead:ai_suggestion`); `useAccount().accounts` (já traz `ai_agents_enabled`).
 - Produces: comportamento de tela (sem API nova).
 
 Regras que o código abaixo garante:
@@ -3210,7 +3682,7 @@ Run: `npm run build`
 Expected: `✓ built in ...` sem erro.
 
 Run: `npx tsc --noEmit -p . 2>&1 | grep -c "error TS"`
-Expected: não maior que o número medido na Task 10 antes das mudanças.
+Expected: `21` (os mesmos erros de tipo antigos; o número não pode subir).
 
 Verificação manual (`npm run dev`; num terminal à parte, com `sqlite3` ou `node -e`, inserir uma sugestão para simular a IA: `INSERT INTO ai_suggestions (account_id, lead_id, agent_id, content) VALUES (<conta>, <lead>, NULL, 'Oi! Qual o volume por mes?')` e `UPDATE leads SET ai_close_chance = 60, ai_main_blocker = 'preco' WHERE id = <lead>`):
 - Abrir a conversa do lead com a caixa vazia: o texto "Oi! Qual o volume por mes?" aparece na caixa com a etiqueta "sugestão da IA".
@@ -3229,18 +3701,18 @@ git commit -m "feat: chat mostra sugestao da IA na caixa, selo de chance e botao
 
 ---
 
-### Task 13: Roteiro de teste ponta a ponta (conta Dros, sem commit)
+### Task 14: Roteiro de teste ponta a ponta (conta Dros, sem commit)
 
 **Files:** nenhum arquivo muda. Roda depois do deploy de backend + front (comando 3 do `CLAUDE.md`).
 
 **Interfaces:**
-- Consumes: tudo das Tasks 1-12.
+- Consumes: tudo das Tasks 1-13.
 - Produces: confirmação de que o Plano A funciona sozinho.
 
-- [ ] **Step 1: Deploy não muda ninguém**
+- [ ] **Step 1: Deploy — robô Automático passa a vender com qualificação (decisão do CEO)**
 
 No servidor, depois do deploy: `pm2 logs dros-crm --lines 50`.
-Expected: linhas `[DB] Added column ai_agents.mode`, `accounts.ai_key_source` e `leads.ai_*` (só na primeira subida), sem erro. Um cliente em Automático continua respondendo como antes (mandar "oi" de um número de teste para uma conta com agente ativo em Automático e ver a resposta normal).
+Expected: linhas `[DB] Added column ai_agents.mode`, `accounts.ai_key_source` e `leads.ai_*` (só na primeira subida), sem erro. Nenhum agente vira Copiloto/SDR sozinho (todos em Automático). Mandar "oi" e depois "quanto custa?" de um número de teste para uma conta com agente ativo em Automático: a IA responde sozinha como antes, mas contorna o preço e faz a próxima pergunta de qualificação; o log mostra `[AI Agent] record_analysis lead=...` e o cabeçalho do Chat desse lead ganha o selo "Chance de fechar X% · trava: Y".
 
 - [ ] **Step 2: Copiloto na conta Dros**
 
@@ -3265,6 +3737,9 @@ Expected: a sugestão contorna o preço e faz a próxima pergunta; se a IA tenta
 
 Clicar "Pausar IA" e mandar mensagem: nenhuma sugestão nova (log sem `Processed`). "Retomar IA" volta a sugerir. Com uma sugestão pendente, desmarcar "Atendimento ligado" e salvar: a sugestão some do Chat e fica `expired`.
 
+Religar o agente em Automático, deixar a IA conversar com um lead novo (sem vendedor) e, na lista de Agentes, clicar no botão "Atendimento ligado" do card e confirmar.
+Expected: o botão vira "Atendimento desligado", o aviso diz quantos leads foram para o vendedor; o lead fica com atendente humano (atendente da conversa, atendente padrão da instância ou roleta), recebe a nota "IA desligada — assuma a conversa" e o vendedor recebe a notificação de WhatsApp de sempre. Mandar nova mensagem desse lead: a IA não responde sozinha.
+
 - [ ] **Step 7: SDR**
 
 Trocar o agente para **SDR**, configurar a regra de Handoff "Qualificado" (vendedor de destino e etapa) e usar um lead novo sem atendente humano.
@@ -3279,5 +3754,7 @@ Expected: a IA responde sozinha e faz uma pergunta por mensagem; quando todos os
 - **Plano D — Follow-up por etapa com IA** (spec 3.5): bloco por etapa na tela do agente, "Criar com IA", `ai_suggestions` tipo `follow_up` no Copiloto, pausa por conversa também no `followUpSender`.
 - **Plano E — Aprendizado semanal** (spec 3.6): rotina no `scheduler.js` e "Sugestões de melhoria" com Aprovar/Recusar.
 - **Plano F — Medição e custo do mês** (spec 3.7 e 3.8): resumo na tela do agente (base × IA, enviada/editada/descartada, tempo até agir, leads movidos pela IA) e custo do mês só para o admin da Dros.
-- **Ainda do spec 3.10, não coberto aqui:** ao desligar o agente, entregar os leads que estavam com o SDR ao vendedor responsável (ou roleta) com o aviso "IA desligada — assuma a conversa", pausar os follow-ups do agente, e o interruptor também no card do agente na lista.
+- **Ainda do spec 3.10, não coberto aqui:** pausar os follow-ups do agente quando o atendimento for desligado (entra junto com o Plano D).
+- **Dros Sales como modelo global de agente**, conectável a qualquer conta (reaproveitando o padrão de `globalTemplates.js`).
+- **Substituir o agente "AGENTE IA — OXI QUÍMICA" da conta Dros pelo Dros Sales.**
 - **Resumo da qualificação na notificação de WhatsApp** do vendedor (hoje vai só como nota do lead; ver Decisão 5).
