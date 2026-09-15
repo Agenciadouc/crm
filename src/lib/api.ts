@@ -387,11 +387,12 @@ export const fetchLeadInsight = (leadId: number, accountId: number) =>
 export const triggerAnalysisNow = async (
   accountId: number,
   maxLeads: number = 50,
-  opts: { resetAll?: boolean; resetLead?: number } = {}
+  opts: { resetAll?: boolean; resetLead?: number; days?: number } = {}
 ): Promise<{ ok: boolean; message?: string; error?: string; retry_after_min?: number; max_leads?: number }> => {
   const params = new URLSearchParams({ account_id: String(accountId), max: String(maxLeads) })
   if (opts.resetAll) params.set('reset_all', 'true')
   if (opts.resetLead) params.set('reset_lead', String(opts.resetLead))
+  if (opts.days) params.set('days', String(opts.days))
   const res = await fetch(`${BASE}/api/dashboard/analyze-now?${params.toString()}`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${getToken()}`, 'Content-Type': 'application/json' },

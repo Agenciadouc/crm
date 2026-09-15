@@ -346,7 +346,7 @@ export default function AttendantAnalytics() {
     setShowConfirmModal(true)
     setEstimateLoading(true)
     try {
-      const est = await fetchAnalyzeEstimate(accountId, Math.min(7, days))
+      const est = await fetchAnalyzeEstimate(accountId, days)
       setEstimate(est)
     } catch (e: any) {
       setToast({ message: e?.message || 'Erro carregando estimativa', type: 'error' })
@@ -372,7 +372,7 @@ export default function AttendantAnalytics() {
       message: opts.resetAll ? 'Reset disparado — analisando tudo do zero...' : '',
     })
     try {
-      const r = await triggerAnalysisNow(accountId, maxLeads, opts)
+      const r = await triggerAnalysisNow(accountId, maxLeads, { ...opts, days })
       if (r.ok) {
         // Backend disparou fire-and-forget. Mantém modal aberto com cronômetro.
         setAnalyzeProgress(p => p ? { ...p, message: r.message || '' } : null)
