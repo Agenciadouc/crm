@@ -144,6 +144,25 @@ A tela **Mensagens Prontas** que já existe vira a base. Cada mensagem ganha, **
 
 **Economia esperada:** perguntas repetidas (preço, frete, prazo, endereço, horário, forma de pagamento) respondidas pela base, sem custo de IA. A estimativa é de **30% a 50% menos chamadas** depois de algumas semanas, medida pelo "Custo do mês" (3.8). Além disso, o prompt do agente já usa cache (`cache_control` em `anthropicClient.js`), o que barateia cada chamada.
 
+### 3.10 SDR de qualificação (terceira opção do mesmo seletor)
+
+O seletor "Como a IA atua" (3.1) passa a ter **três opções**, e continua sendo um campo só:
+
+| Opção | O que acontece |
+|---|---|
+| **Automático** | A IA atende e responde sozinha o tempo todo (comportamento atual). |
+| **Copiloto** | A IA só sugere; o vendedor envia. |
+| **SDR** | A IA atende o lead **sozinha até ele estar qualificado**. Quando a trava de qualificação (3.4) libera, ela move o lead para a etapa de qualificado, **passa para o vendedor** e, a partir daí, **continua no mesmo lead como Copiloto**. |
+
+Como o SDR trabalha:
+- Faz as perguntas de qualificação na ordem definida na entrevista, **uma por mensagem**, respondendo dúvidas pela base (3.9) e **contornando objeções** (principalmente preço antes da hora).
+- **Passa para o vendedor só pela trava do código** (todos os `required_fields` + todos os critérios `atendido`), e não mais pelo julgamento livre da IA (`transfer_to_human(reason="qualified")` passa pela mesma trava).
+- A passagem reaproveita o que já existe: `ai_agent_handoff_rules` (motivo `qualified`: vendedor de destino, roleta, etapa, tag) e `executeHandoff` / `notifyAndOpenLead`. O vendedor recebe o aviso com um **resumo da qualificação** (os critérios e as evidências).
+- Os outros motivos de passagem que já existem continuam valendo (palavra-chave "humano", limite de mensagens, áudio sem transcrição, fora do escopo); nesses casos o lead também segue para o vendedor com o Copiloto ligado.
+- Depois da passagem, a IA **nunca mais envia sozinha naquele lead**, só sugere.
+
+Dados: `ai_agents.mode` aceita `auto` / `copilot` / `sdr`; `leads.ai_handed_off_at` (já existe) marca a passagem, e a partir dela `processInboundMessage` trata o lead como `copilot`.
+
 ## 4. Dados (mudanças mínimas)
 
 | Onde | Mudança |
