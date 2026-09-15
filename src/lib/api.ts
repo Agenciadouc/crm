@@ -409,6 +409,7 @@ export const updateAnalysisLimit = (accountId: number, limit: number) =>
 export interface EvolutionConfig { api_url: string | null; api_key: string | null; configured?: boolean }
 export const fetchEvolutionConfig = (accountId: number) => apiFetch<EvolutionConfig>(`/api/integrations/evolution-config?account_id=${accountId}`)
 export const saveEvolutionConfig = (accountId: number, data: { api_url: string; api_key: string }) => apiFetch(`/api/integrations/evolution-config?account_id=${accountId}`, { method: 'PUT', body: JSON.stringify(data) })
+export const fetchPublicConfig = () => apiFetch<{ public_base_url: string }>('/api/integrations/public-config')
 
 export const fetchWhatsAppInstances = (accountId: number) => apiFetch<{ instances: WhatsAppInstance[] }>(`/api/integrations/whatsapp?account_id=${accountId}`).then(d => d.instances)
 export const createWhatsAppInstance = (accountId: number, data: { instance_name: string; lead_intake_mode?: 'open' | 'restricted' }) => apiFetch<{ instance: WhatsAppInstance }>(`/api/integrations/whatsapp?account_id=${accountId}`, { method: 'POST', body: JSON.stringify(data) }).then(d => d.instance)

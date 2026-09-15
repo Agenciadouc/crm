@@ -3,6 +3,7 @@ import fetch from 'node-fetch'
 import db, { DEFAULT_EVOLUTION_API_URL, DEFAULT_EVOLUTION_API_KEY } from '../db.js'
 import { requireRole } from '../middleware/auth.js'
 import { runPollNow } from '../scheduler.js'
+import { getPublicBaseUrl } from '../services/publicUrl.js'
 
 const router = Router()
 
@@ -39,6 +40,11 @@ router.put('/evolution-config', requireRole('super_admin', 'gerente'), (req, res
   const baseUrl = api_url.replace(/\/+$/, '')
   db.prepare("UPDATE accounts SET evolution_api_url = ?, evolution_api_key = ?, updated_at = datetime('now') WHERE id = ?").run(baseUrl, api_key, req.accountId)
   res.json({ ok: true, api_url: baseUrl })
+})
+
+// ─── Dominio publico do CRM (usado pelo front para montar URLs de webhook) ───
+router.get('/public-config', (req, res) => {
+  res.json({ public_base_url: getPublicBaseUrl() })
 })
 
 // ─── List WhatsApp instances ─────────────────────────────────────
