@@ -1,7 +1,7 @@
 // Adaptador Evolution API (Baileys). Codigo movido de webhooks.js, leadHandoff.js, messages.js,
 // deepgramClient.js, leads.js e scheduler.js SEM mudar as requisicoes nem a interpretacao.
 import nodeFetch from 'node-fetch'
-import { normalizePhone } from './normalize.js'
+import { normalizePhone, normalizeForSend } from './normalize.js'
 
 export const EVOLUTION_CAPABILITIES = Object.freeze({
   qr: true, presence: true, readReceipts: true, numberCheck: true, templates: false, window24h: false, polling: true,
@@ -207,10 +207,176 @@ export function parseEvolutionStatuses(data) {
   return out
 }
 
+const jsonHeaders = (instance) => ({ 'Content-Type': 'application/json', apikey: instance.api_key })
+
+// Interpretacao da resposta de envio (leadHandoff.js:442-449)
+function interpretSendResponse(res, data) {
+  if (!data?.key?.id) {
+    const reason = data?.response?.message?.[0]?.exists === false
+      ? 'number_not_on_whatsapp'
+      : (data?.error || data?.message || `http_${res.status}`)
+    return { ok: false, messageId: null, reason: String(reason).substring(0, 200), raw: data }
+  }
+  return { ok: true, messageId: data.key.id, raw: data }
+}
+
 export function createEvolutionAdapter({ fetch }) {
   return {
     name: 'evolution',
     capabilities: EVOLUTION_CAPABILITIES,
+
+    async sendText(instance, phone, text) {
+      try {
+        const res = await fetch(`${instance.api_url}/message/sendText/${instance.instance_name}`, {
+          method: 'POST',
+          headers: jsonHeaders(instance),
+          body: JSON.stringify({ number: phone, text }),
+        })
+        const data = await res.json().catch(() => ({}))
+        return interpretSendResponse(res, data)
+      } catch (e) {
+        return { ok: false, messageId: null, reason: e.message }
+      }
+    },
+
+    async sendMedia(instance, phone, media) {
+      const { type, base64, url, mimetype, fileName, caption } = media
+      const name = encodeURIComponent(instance.instance_name)
+      let endpoint, payload
+      if (type === 'audio') {
+        endpoint = `${instance.api_url}/message/sendWhatsAppAudio/${name}`
+        payload = { number: phone, audio: base64 || url, encoding: true }
+      } else {
+        endpoint = `${instance.api_url}/message/sendMedia/${name}`
+        payload = { number: phone, mediatype: type, media: base64 || url, mimetype, fileName, caption: caption || undefined }
+      }
+      try {
+        const res = await fetch(endpoint, { method: 'POST', headers: jsonHeaders(instance), body: JSON.stringify(payload) })
+        const data = await res.json().catch(() => ({}))
+        return interpretSendResponse(res, data)
+      } catch (e) {
+        return { ok: false, messageId: null, reason: e.message }
+      }
+    },
+
+    async sendPresence(instance, phone, state) {
+      const controller = new AbortController()
+      const timer = setTimeout(() => controller.abort(), 3000)
+      try {
+        const res = await fetch(`${instance.api_url}/chat/sendPresence/${instance.instance_name}`, {
+          method: 'POST',
+          headers: jsonHeaders(instance),
+          body: JSON.stringify({ number: phone, presence: state, delay: 100 }),
+          signal: controller.signal,
+        })
+        return { ok: !!res.ok }
+      } catch {
+        return { ok: false }
+      } finally {
+        clearTimeout(timer)
+      }
+    },
+
+    // Lanca em erro de rede/timeout (o chamador nao cacheia). HTTP != 2xx ou corpo invalido -> tudo null.
+    // Default de timeout preserva o comportamento atual: 3s pra checagem de 1 numero
+    // (leadHandoff.js:264), 15s pra lista/broadcast (leadHandoff.js:323, matchByNumber).
+    async checkNumber(instance, phones, opts = {}) {
+      const timeoutMs = opts.timeoutMs || (opts.matchByNumber ? 15000 : 3000)
+      const controller = new AbortController()
+      const timer = setTimeout(() => controller.abort(), timeoutMs)
+      let res
+      try {
+        res = await fetch(`${instance.api_url}/chat/whatsappNumbers/${instance.instance_name}`, {
+          method: 'POST',
+          headers: jsonHeaders(instance),
+          body: JSON.stringify({ numbers: phones }),
+          signal: controller.signal,
+        })
+      } finally {
+        clearTimeout(timer)
+      }
+      const out = {}
+      for (const p of phones) out[p] = null
+      if (!res.ok) return out
+      const data = await res.json().catch(() => null)
+      if (!Array.isArray(data)) return out
+      if (!opts.matchByNumber) {
+        if (data.length > 0 && phones.length > 0) out[phones[0]] = !!data[0].exists
+        return out
+      }
+      const byNumber = new Map()
+      for (const item of data) {
+        const num = String(item.number || '').replace(/[^\d]/g, '')
+        if (num) byNumber.set(num, !!item.exists)
+      }
+      for (const p of phones) if (byNumber.has(p)) out[p] = byNumber.get(p)
+      return out
+    },
+
+    async markRead(instance, lead, messageId) {
+      const remoteJid = lead?.wa_remote_jid || (lead?.phone ? `${normalizeForSend(lead.phone)}@s.whatsapp.net` : null)
+      if (!remoteJid || !messageId) return { ok: false }
+      const controller = new AbortController()
+      const timer = setTimeout(() => controller.abort(), 3000)
+      try {
+        const res = await fetch(`${instance.api_url}/chat/markMessageAsRead/${instance.instance_name}`, {
+          method: 'POST',
+          headers: jsonHeaders(instance),
+          body: JSON.stringify({ read_messages: [{ remoteJid, fromMe: false, id: messageId }] }),
+          signal: controller.signal,
+        })
+        return { ok: !!res.ok }
+      } catch {
+        return { ok: false }
+      } finally {
+        clearTimeout(timer)
+      }
+    },
+
+    async fetchMedia(instance, message) {
+      const res = await fetch(`${instance.api_url}/chat/getBase64FromMediaMessage/${instance.instance_name}`, {
+        method: 'POST',
+        headers: jsonHeaders(instance),
+        body: JSON.stringify({ message: { key: { id: message.wa_msg_id } }, convertToMp4: false }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!data?.base64) {
+        const err = new Error(`evolution_no_base64 (status=${res.status})`)
+        err.code = 'media_not_found'
+        throw err
+      }
+      return { buffer: Buffer.from(data.base64, 'base64'), mimetype: data.mimetype || null }
+    },
+
+    async fetchProfilePictureUrl(instance, phone) {
+      const r = await fetch(`${instance.api_url}/chat/fetchProfilePictureUrl/${instance.instance_name}`, {
+        method: 'POST',
+        headers: jsonHeaders(instance),
+        body: JSON.stringify({ number: phone }),
+      })
+      const data = await r.json()
+      return data?.profilePictureUrl || null
+    },
+
+    async registerWebhook(instance, url, events = EVOLUTION_WEBHOOK_EVENTS) {
+      await fetch(`${instance.api_url}/webhook/set/${encodeURIComponent(instance.instance_name)}`, {
+        method: 'POST',
+        headers: jsonHeaders(instance),
+        body: JSON.stringify({ webhook: { url, enabled: true, events } }),
+      })
+    },
+
+    async fetchRecentMessages(instance, opts = {}) {
+      const r = await fetch(`${instance.api_url}/chat/findMessages/${encodeURIComponent(instance.instance_name)}`, {
+        method: 'POST',
+        headers: jsonHeaders(instance),
+        body: JSON.stringify({ where: {}, limit: opts.limit || 200 }),
+      })
+      if (!r.ok) return null
+      const data = await r.json()
+      const messages = data?.messages?.records || data?.messages || data || []
+      return Array.isArray(messages) ? messages : null
+    },
 
     parseWebhook(instance, body) {
       const event = body?.event
