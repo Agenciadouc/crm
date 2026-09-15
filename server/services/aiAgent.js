@@ -9,6 +9,13 @@ import { pickFromRoulette as rouletteUtil } from './roulette.js'
 import { notifyAndOpenLead, sendViaInstance, markMessageAsRead } from './leadHandoff.js'
 import { transcribeAudio, fetchAudioBuffer } from './deepgramClient.js'
 import { pickAnthropicKey } from './anthropicKeyPicker.js'
+import { resolveEffectiveMode, usesSalesEngine, deliveryActionForMode, agentAcceptsLead } from './copilotMode.js'
+import {
+  ANALYSIS_TOOL, ANALYSIS_TOOL_NAME, parseAnalysisInput, saveLeadAnalysis, readLeadCriteria,
+  checkStageGate, formatGateRefusal, buildSalesRulesLines, buildQualificationSummary,
+  shouldSdrHandoff, parseRequiredFields,
+} from './salesAnalysis.js'
+import { createReplySuggestion, getPendingSuggestion } from './aiSuggestions.js'
 
 // ─── Helpers ──────────────────────────────────────────────────────────
 
@@ -38,6 +45,29 @@ function resetMonthlyTokensIfNeeded(agent) {
   }
 }
 
+// Atendente atual do lead e humano (nao bot)?
+export function leadHasHumanAttendant(lead) {
+  if (!lead || !lead.attendant_id) return false
+  const att = getUser(lead.attendant_id)
+  return !!(att && !att.is_bot)
+}
+
+// Trava de qualificacao (spec 3.4), sempre com o lead lido do banco
+function gateForLead(agent, freshLead) {
+  return checkStageGate({
+    requiredFields: parseRequiredFields(agent.required_fields),
+    lead: freshLead,
+    criteria: readLeadCriteria(freshLead),
+    hasQualificationText: !!(agent.qualification_criteria && agent.qualification_criteria.trim()),
+  })
+}
+
+// Resumo da qualificacao para o vendedor, como nota do lead (autor = usuario-robo do agente)
+function addQualificationNote(agent, freshLead) {
+  const text = buildQualificationSummary(freshLead, readLeadCriteria(freshLead))
+  db.prepare('INSERT INTO lead_notes (lead_id, user_id, content) VALUES (?, ?, ?)').run(freshLead.id, agent.user_id, text)
+}
+
 // ─── findAgentForLead ─────────────────────────────────────────────────
 
 export function findAgentForLead(lead, instanceId, _opts = {}) {
@@ -48,7 +78,7 @@ export function findAgentForLead(lead, instanceId, _opts = {}) {
   // 0. Account tem feature gate?
   const account = getAccount(lead.account_id)
   if (!account || !account.ai_agents_enabled) return null
-  // Sem chave Anthropic propria, o bot nao roda (sem fallback pra chave da agencia)
+  // Sem chave Anthropic (da conta ou da Dros, conforme ai_key_source), o bot nao roda
   if (!pickAnthropicKey(account)) {
     console.warn(`[AI Agent] conta ${lead.account_id} com agentes habilitados mas SEM API Anthropic — bot nao responde lead ${lead.id}`)
     return null
@@ -57,14 +87,9 @@ export function findAgentForLead(lead, instanceId, _opts = {}) {
   // 1. Lead pode receber bot?
   if (lead.is_blocked || lead.is_archived || !lead.is_active) return null
 
-  // 2. Lead ja foi handoff'ed por bot? Nao volta a atender.
-  if (lead.ai_handed_off_at) return null
-
-  // 3. Lead ja tem atendente HUMANO definido? Bot nao interfere.
-  if (lead.attendant_id) {
-    const att = getUser(lead.attendant_id)
-    if (att && !att.is_bot) return null
-  }
+  // 2-3. Lead com humano (handoff anterior ou atendente humano): so agentes copilot/sdr seguem, como Copiloto.
+  //      A decisao fica em agentAcceptsLead (copilotMode.js).
+  const attendantIsHuman = leadHasHumanAttendant(lead)
 
   // 4. Busca agentes ativos
   const agents = db.prepare("SELECT * FROM ai_agents WHERE account_id = ? AND is_active = 1 ORDER BY id ASC").all(lead.account_id)
@@ -81,20 +106,8 @@ export function findAgentForLead(lead, instanceId, _opts = {}) {
     // Filtro tag obrigatoria
     if (agent.required_tag_id && !leadHasTag(lead.id, agent.required_tag_id)) continue
 
-    // Modo de ativacao
-    switch (agent.activation_mode) {
-      case 'default_attendant':
-        if (lead.attendant_id === agent.user_id || !lead.attendant_id) return agent
-        break
-      case 'roulette':
-        if (lead.attendant_id === agent.user_id) return agent
-        break
-      case 'conditional':
-        return agent
-      case 'manual':
-        if (lead.attendant_id === agent.user_id) return agent
-        break
-    }
+    // Modo do agente + modo de ativacao
+    if (agentAcceptsLead(agent, lead, attendantIsHuman)) return agent
   }
   return null
 }
@@ -115,12 +128,17 @@ export function diagnoseForceAi(lead, instanceId) {
   if (lead.is_archived) blockers.push('Lead esta arquivado')
   if (!lead.is_active) blockers.push('Lead esta inativo')
 
-  if (lead.ai_handed_off_at) blockers.push('Lead ja teve handoff anterior (bot transferiu pra humano em ' + lead.ai_handed_off_at + ')')
+  // Agentes em copilot/sdr continuam atuando (como Copiloto) em lead com humano ou ja passado
+  const hasCopilotAgent = !!db.prepare("SELECT 1 FROM ai_agents WHERE account_id = ? AND is_active = 1 AND mode IN ('copilot', 'sdr') LIMIT 1").get(lead.account_id)
+  if (!hasCopilotAgent) {
+    if (lead.ai_handed_off_at) blockers.push('Lead ja teve handoff anterior (bot transferiu pra humano em ' + lead.ai_handed_off_at + ')')
 
-  if (lead.attendant_id) {
-    const att = getUser(lead.attendant_id)
-    if (att && !att.is_bot) blockers.push(`Lead tem atendente humano atribuido: ${att.name}`)
+    if (lead.attendant_id) {
+      const att = getUser(lead.attendant_id)
+      if (att && !att.is_bot) blockers.push(`Lead tem atendente humano atribuido: ${att.name}`)
+    }
   }
+  if (lead.ai_paused_at) blockers.push('IA pausada nesta conversa (use Retomar IA no Chat)')
 
   // Verifica agentes
   const agents = db.prepare("SELECT * FROM ai_agents WHERE account_id = ? AND is_active = 1 ORDER BY id ASC").all(lead.account_id)
@@ -182,11 +200,16 @@ export function diagnoseForceAi(lead, instanceId) {
 
 // ─── buildSystemPrompt ────────────────────────────────────────────────
 
-function buildSystemPrompt(agent, lead, availableTags, availableStages) {
+function buildSystemPrompt(agent, lead, availableTags, availableStages, opts = {}) {
+  const mode = opts.mode || 'auto'
+  const salesEngine = !!opts.salesEngine
   const parts = []
   parts.push(`Voce e ${agent.name}, assistente atendendo leads no WhatsApp.`)
+  if (mode === 'copilot') {
+    parts.push('Voce escreve a SUGESTAO de resposta que um vendedor humano vai revisar e enviar. Escreva na primeira pessoa, como o vendedor, sem dizer que e IA.')
+  }
   if (agent.persona) parts.push(`Tom de voz: ${agent.persona}`)
-  if (agent.identifies_as_bot) parts.push('Voce e uma IA assistente. Pode mencionar isso se perguntado.')
+  if (agent.identifies_as_bot && mode !== 'copilot') parts.push('Voce e uma IA assistente. Pode mencionar isso se perguntado.')
   parts.push('')
 
   if (agent.knowledge_base) {
@@ -203,10 +226,12 @@ function buildSystemPrompt(agent, lead, availableTags, availableStages) {
   parts.push('- Quando o lead informar info pessoal (nome, cidade, empresa, cargo, etc), chame update_lead_info ANTES de responder. Para "cargo" use field="empresa" com valor formatado "Cargo: X - Setor".')
   parts.push('- Se o lead mandar uma mensagem vazia, "ola" ou similar sem contexto novo, NAO encerre — retome de onde parou e pergunte o proximo dado faltante.')
   if (agent.never_mention) parts.push(`- NUNCA mencione: ${agent.never_mention}`)
-  if (agent.handoff_keywords) {
-    parts.push(`- Se o lead disser uma das palavras "${agent.handoff_keywords}" -> chame transfer_to_human(reason="keyword").`)
+  if (mode !== 'copilot') {
+    if (agent.handoff_keywords) {
+      parts.push(`- Se o lead disser uma das palavras "${agent.handoff_keywords}" -> chame transfer_to_human(reason="keyword").`)
+    }
+    parts.push('- So chame transfer_to_human(reason="unknown") se REALMENTE nao tiver como continuar (ex: lead pergunta algo completamente fora do escopo da empresa). NAO use "unknown" so porque precisa de mais info — pergunte!')
   }
-  parts.push('- So chame transfer_to_human(reason="unknown") se REALMENTE nao tiver como continuar (ex: lead pergunta algo completamente fora do escopo da empresa). NAO use "unknown" so porque precisa de mais info — pergunte!')
   parts.push('')
 
   if (agent.qualification_criteria) {
@@ -225,7 +250,12 @@ function buildSystemPrompt(agent, lead, availableTags, availableStages) {
       if (requiredFields.includes('instagram') && lead.instagram) collected.push(`instagram=${lead.instagram}`)
       if (collected.length > 0) parts.push(`Ja coletados: ${collected.join('; ')}.`)
     }
-    parts.push('Quando qualificar, chame transfer_to_human(reason="qualified") imediatamente.')
+    if (!salesEngine) {
+      parts.push('Quando qualificar, chame transfer_to_human(reason="qualified") imediatamente.')
+    } else if (mode !== 'copilot') {
+      parts.push('Fluxo: pre-atendimento -> validar os dados do cliente e se ele esta dentro do perfil ideal (ICP) -> passar para o especialista.')
+      parts.push('Quando o lead cumprir todos os criterios, chame transfer_to_human(reason="qualified"). O sistema so aceita com todos os campos obrigatorios e criterios completos.')
+    }
     parts.push('')
   }
 
@@ -234,6 +264,11 @@ function buildSystemPrompt(agent, lead, availableTags, availableStages) {
   }
   if (availableTags && availableTags.length > 0) {
     parts.push('TAGS DISPONIVEIS: ' + availableTags.map(t => `"${t.name}"`).join(', '))
+  }
+
+  if (salesEngine) {
+    parts.push('')
+    for (const line of buildSalesRulesLines(mode)) parts.push(line)
   }
 
   // Anti-ban: variacao humana pra parecer menos previsivel
@@ -331,8 +366,8 @@ function executeHandoff(agent, lead, reason, instanceId) {
 
 // ─── Tools (function calling) ─────────────────────────────────────────
 
-function getToolsForAgent(availableTags, availableStages) {
-  return [
+function getToolsForAgent(availableTags, availableStages, opts = {}) {
+  const tools = [
     {
       name: 'update_lead_info',
       description: 'Salva informacao que o lead informou (nome, email, cidade, empresa, instagram). Use SEMPRE que o lead disser esses dados.',
@@ -379,14 +414,25 @@ function getToolsForAgent(availableTags, availableStages) {
       },
     },
   ]
+  // Copiloto: o humano ja atende, nao existe transferencia
+  const filtered = opts.mode === 'copilot' ? tools.filter(t => t.name !== 'transfer_to_human') : tools
+  return opts.salesEngine ? [ANALYSIS_TOOL, ...filtered] : filtered
 }
 
 // ─── executeTool ──────────────────────────────────────────────────────
 
-async function executeTool(toolUse, agent, lead, instanceId, availableTags, availableStages) {
+async function executeTool(toolUse, agent, lead, instanceId, availableTags, availableStages, ctx = {}) {
   const { name, input } = toolUse
+  const mode = ctx.mode || 'auto'
+  const salesEngine = !!ctx.salesEngine
   try {
-    if (name === 'update_lead_info') {
+    if (name === ANALYSIS_TOOL_NAME) {
+      const analysis = parseAnalysisInput(input)
+      if (!analysis) return { handoff: false, message: 'Analise invalida: envie momento, chance_fechar, trava_principal e criterios.' }
+      saveLeadAnalysis(db, lead.account_id, lead.id, analysis)
+      console.log(`[AI Agent] record_analysis lead=${lead.id} chance=${analysis.closeChance} trava="${analysis.mainBlocker || ''}" criterios=${analysis.criteria.length}`)
+      return { handoff: false, analysis, message: 'Analise registrada.' }
+    } else if (name === 'update_lead_info') {
       const allowed = ['name', 'email', 'city', 'empresa', 'instagram']
       if (allowed.includes(input.field) && input.value) {
         db.prepare(`UPDATE leads SET ${input.field} = ? WHERE id = ?`).run(String(input.value).substring(0, 200), lead.id)
@@ -400,14 +446,38 @@ async function executeTool(toolUse, agent, lead, instanceId, availableTags, avai
       }
     } else if (name === 'move_stage') {
       const stage = availableStages.find(s => s.name === input.stage_name)
-      if (stage && stage.id !== lead.stage_id) {
-        const prev = lead.stage_id
+      // Le do banco: update_lead_info e record_analysis desta mesma rodada ja gravaram
+      const fresh = stage ? getLead(lead.id) : null
+      if (stage && fresh && stage.id !== fresh.stage_id) {
+        if (salesEngine) {
+          const gate = gateForLead(agent, fresh)
+          if (!gate.allowed) {
+            console.log(`[AI Agent] move_stage RECUSADO lead=${lead.id} -> "${input.stage_name}" faltando=${JSON.stringify(gate)}`)
+            return { handoff: false, message: formatGateRefusal(gate) }
+          }
+        }
+        const prev = fresh.stage_id
         db.prepare("UPDATE leads SET stage_id = ?, updated_at = datetime('now') WHERE id = ?").run(stage.id, lead.id)
-        db.prepare('INSERT INTO stage_history (lead_id, from_stage_id, to_stage_id, trigger_type) VALUES (?, ?, ?, ?)').run(lead.id, prev, stage.id, 'ai_agent')
+        db.prepare('INSERT INTO stage_history (lead_id, from_stage_id, to_stage_id, trigger_type, notes) VALUES (?, ?, ?, ?, ?)').run(
+          lead.id, prev, stage.id,
+          salesEngine ? 'ai_qualified' : 'ai_agent',
+          salesEngine ? 'Movido pela IA - qualificacao completa' : null
+        )
+        lead.stage_id = stage.id
         console.log(`[AI Agent] move_stage lead=${lead.id} -> "${input.stage_name}"`)
       }
     } else if (name === 'transfer_to_human') {
+      if (mode === 'copilot') return { handoff: false, message: 'Ignorado: o vendedor humano ja esta atendendo este lead.' }
       const reason = input.reason || 'other'
+      if (salesEngine && reason === 'qualified') {
+        const fresh = getLead(lead.id)
+        const gate = gateForLead(agent, fresh)
+        if (!gate.allowed) {
+          console.log(`[AI Agent] transfer qualified RECUSADO lead=${lead.id}`)
+          return { handoff: false, message: formatGateRefusal(gate) }
+        }
+        addQualificationNote(agent, fresh)
+      }
       executeHandoff(agent, lead, reason, instanceId)
       return { handoff: true, reason }
     }
@@ -424,6 +494,12 @@ async function executeTool(toolUse, agent, lead, instanceId, availableTags, avai
 export async function processInboundMessage(lead, msgContent, mediaType, instanceId, _opts = {}) {
   try {
     console.log(`[AI Agent DEBUG] processInboundMessage chamado lead=${lead?.id} instance=${instanceId} mediaType=${mediaType} content="${(msgContent||'').substring(0,30)}"`)
+    // 0. Pausa por conversa (le do banco: o objeto lead pode estar velho, ex: timer de 40s)
+    const pauseRow = lead ? db.prepare('SELECT ai_paused_at FROM leads WHERE id = ?').get(lead.id) : null
+    if (pauseRow?.ai_paused_at) {
+      return { ok: false, reason: 'paused_for_lead' }
+    }
+
     // 1. Encontra agente (respeita todos os filtros — bloqueios sao reportados pelo diagnoseForceAi na rota)
     const agent = findAgentForLead(lead, instanceId)
     if (!agent) {
@@ -431,17 +507,32 @@ export async function processInboundMessage(lead, msgContent, mediaType, instanc
     }
     console.log(`[AI Agent DEBUG] agente encontrado: id=${agent.id} name=${agent.name}`)
 
+    // 1b. Modo efetivo neste lead (auto | copilot | sdr) e se usa regras de venda + analise + trava
+    const mode = resolveEffectiveMode(agent, lead, leadHasHumanAttendant(lead))
+    const salesEngine = usesSalesEngine(agent)
+    const delivery = deliveryActionForMode(mode)
+
+    // 1c. Copiloto: sugestao pendente = nenhuma msg nova do lead desde ela (msg nova expira). Nao gasta IA de novo.
+    if (delivery === 'suggest' && getPendingSuggestion(db, lead.account_id, lead.id)) {
+      return { ok: true, mode, reason: 'suggestion_pending' }
+    }
+
     // 2. Reset mensal de tokens se mes virou
     resetMonthlyTokensIfNeeded(agent)
 
     // 3. Checa limite de tokens
     if (agent.tokens_used_this_month >= agent.monthly_token_limit) {
+      if (delivery === 'suggest') {
+        console.log(`[AI Agent] Limite mensal estourado agent=${agent.id} (copiloto: sem sugestao) lead=${lead.id}`)
+        return { ok: false, reason: 'token_limit' }
+      }
       console.log(`[AI Agent] Limite mensal estourado agent=${agent.id}, fazendo handoff silencioso`)
       executeHandoff(agent, lead, 'unknown', instanceId)
       return
     }
 
-    // 4. Audio: flag OFF = recusa + handoff; flag ON = transcreve via Deepgram e segue
+    // 4. Audio: flag OFF = recusa + handoff; flag ON = transcreve via Deepgram e segue.
+    //    No Copiloto nao recusa nem transfere (quem conversa e o vendedor): so fica sem sugestao.
     let sttSec = 0
     let sttCost = 0
     let sttProvider = null
@@ -464,10 +555,17 @@ export async function processInboundMessage(lead, msgContent, mediaType, instanc
         }
         executeHandoff(agent, lead, reason, instanceId)
       }
+      const giveUpOnAudio = async (reason) => {
+        if (delivery === 'suggest') {
+          console.log(`[AI Agent] audio sem transcricao no copiloto lead=${lead.id} (${reason}) — sem sugestao`)
+          return
+        }
+        await declineAndHandoff(reason)
+      }
 
       if (!agent.responds_to_audio) {
-        // Flag OFF — comportamento atual preservado
-        await declineAndHandoff('audio_received')
+        // Flag OFF — comportamento atual preservado (fora do copiloto)
+        await giveUpOnAudio('audio_received')
         return
       }
 
@@ -475,7 +573,7 @@ export async function processInboundMessage(lead, msgContent, mediaType, instanc
       const inst = db.prepare('SELECT * FROM whatsapp_instances WHERE id = ?').get(instanceId)
       if (!inst || inst.status !== 'connected') {
         console.error(`[AI Agent] STT: instancia ${instanceId} indisponivel`)
-        await declineAndHandoff('stt_failed')
+        await giveUpOnAudio('stt_failed')
         return
       }
 
@@ -488,7 +586,7 @@ export async function processInboundMessage(lead, msgContent, mediaType, instanc
 
       if (!lastAudio?.wa_msg_id) {
         console.error(`[AI Agent] STT: wa_msg_id nao encontrado pra lead=${lead.id}`)
-        await declineAndHandoff('stt_failed')
+        await giveUpOnAudio('stt_failed')
         return
       }
 
@@ -499,7 +597,7 @@ export async function processInboundMessage(lead, msgContent, mediaType, instanc
 
         if (!result.transcript.trim()) {
           console.warn(`[AI Agent] STT vazio lead=${lead.id} — handoff`)
-          await declineAndHandoff('audio_received')
+          await giveUpOnAudio('audio_received')
           return
         }
 
@@ -512,17 +610,19 @@ export async function processInboundMessage(lead, msgContent, mediaType, instanc
         msgContent = `[Audio transcrito] ${result.transcript}`
       } catch (e) {
         console.error(`[AI Agent] STT falhou lead=${lead.id}:`, e.message)
-        await declineAndHandoff('stt_failed')
+        await giveUpOnAudio('stt_failed')
         return
       }
     }
 
-    // 5. Checa max_messages
-    const botMsgCount = countBotMessagesInThread(agent, lead.id)
-    if (botMsgCount >= agent.max_messages_before_handoff) {
-      console.log(`[AI Agent] Max messages atingido agent=${agent.id} lead=${lead.id}`)
-      executeHandoff(agent, lead, 'max_messages', instanceId)
-      return
+    // 5. Checa max_messages (so quando a IA envia sozinha)
+    if (delivery === 'send') {
+      const botMsgCount = countBotMessagesInThread(agent, lead.id)
+      if (botMsgCount >= agent.max_messages_before_handoff) {
+        console.log(`[AI Agent] Max messages atingido agent=${agent.id} lead=${lead.id}`)
+        executeHandoff(agent, lead, 'max_messages', instanceId)
+        return
+      }
     }
 
     // 6. Carrega tags e etapas disponiveis (pra tools enum)
@@ -535,7 +635,7 @@ export async function processInboundMessage(lead, msgContent, mediaType, instanc
     `).all(lead.account_id)
 
     // 7. Monta system prompt
-    const systemPrompt = buildSystemPrompt(agent, lead, availableTags, availableStages)
+    const systemPrompt = buildSystemPrompt(agent, lead, availableTags, availableStages, { mode, salesEngine })
 
     // 8. Monta history (ultimas 10 msgs)
     const history = buildConversationHistory(lead.id, 10)
@@ -549,17 +649,34 @@ export async function processInboundMessage(lead, msgContent, mediaType, instanc
     }
 
     // 9. Define tools
-    const tools = getToolsForAgent(availableTags, availableStages)
+    const tools = getToolsForAgent(availableTags, availableStages, { mode, salesEngine })
+    const toolCtx = { mode, salesEngine }
+
+    // Log de uso de cada chamada. STT loga so na primeira chamada pra nao duplicar.
+    let totalTokens = 0
+    let totalCost = 0
+    let sttLogged = false
+    const logUsage = (result) => {
+      const withStt = !sttLogged
+      sttLogged = true
+      db.prepare(`
+        INSERT INTO ai_agent_token_log (agent_id, account_id, lead_id, input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, cost_usd, stt_seconds, stt_cost_usd, stt_provider)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(agent.id, agent.account_id, lead.id, result.usage.input, result.usage.output, result.usage.cacheRead, result.usage.cacheCreation, result.costUsd, withStt ? sttSec : 0, withStt ? sttCost : 0, withStt ? sttProvider : null)
+      const iterTokens = result.usage.input + result.usage.output + result.usage.cacheRead + result.usage.cacheCreation
+      totalTokens += iterTokens
+      totalCost += result.costUsd
+      db.prepare("UPDATE ai_agents SET tokens_used_this_month = tokens_used_this_month + ? WHERE id = ?").run(iterTokens, agent.id)
+    }
 
     // 10-12. Multi-turn loop: chama Haiku, executa tools, se nao houver texto e teve tool, chama de novo com tool_results
     const MAX_ITERATIONS = 4
     let workingMessages = [...history]
     let finalText = ''
     let totalToolsExecuted = 0
-    let totalTokens = 0
-    let totalCost = 0
     let handoffTriggered = false
     let iterationsRun = 0
+    let lastAnalysis = null
 
     for (let i = 0; i < MAX_ITERATIONS; i++) {
       iterationsRun++
@@ -578,18 +695,7 @@ export async function processInboundMessage(lead, msgContent, mediaType, instanc
         break
       }
 
-      // Log de uso (cada chamada). STT loga so na primeira iteracao pra nao duplicar.
-      const logSttSec = i === 0 ? sttSec : 0
-      const logSttCost = i === 0 ? sttCost : 0
-      const logSttProvider = i === 0 ? sttProvider : null
-      db.prepare(`
-        INSERT INTO ai_agent_token_log (agent_id, account_id, lead_id, input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens, cost_usd, stt_seconds, stt_cost_usd, stt_provider)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(agent.id, agent.account_id, lead.id, result.usage.input, result.usage.output, result.usage.cacheRead, result.usage.cacheCreation, result.costUsd, logSttSec, logSttCost, logSttProvider)
-      const iterTokens = result.usage.input + result.usage.output + result.usage.cacheRead + result.usage.cacheCreation
-      totalTokens += iterTokens
-      totalCost += result.costUsd
-      db.prepare("UPDATE ai_agents SET tokens_used_this_month = tokens_used_this_month + ? WHERE id = ?").run(iterTokens, agent.id)
+      logUsage(result)
 
       // Acumula texto
       if (result.content && result.content.trim()) finalText += (finalText ? ' ' : '') + result.content.trim()
@@ -597,21 +703,26 @@ export async function processInboundMessage(lead, msgContent, mediaType, instanc
       // Sem tool_uses -> termina
       if (!result.toolUses || result.toolUses.length === 0) break
 
-      // Executa tools e monta tool_results pra proxima iteracao
+      // Executa tools (analise primeiro, pra trava de etapa ja enxergar a analise desta rodada)
+      const orderedToolUses = [...result.toolUses].sort((a, b) => (a.name === ANALYSIS_TOOL_NAME ? 0 : 1) - (b.name === ANALYSIS_TOOL_NAME ? 0 : 1))
       const toolResults = []
-      for (const tu of result.toolUses) {
+      for (const tu of orderedToolUses) {
         totalToolsExecuted++
-        const tr = await executeTool(tu, agent, lead, instanceId, availableTags, availableStages)
+        const tr = await executeTool(tu, agent, lead, instanceId, availableTags, availableStages, toolCtx)
         if (tr.handoff) handoffTriggered = true
+        if (tr.analysis) lastAnalysis = tr.analysis
         toolResults.push({
           type: 'tool_result',
           tool_use_id: tu.id,
-          content: tr.handoff ? `Handoff executado (reason=${tr.reason}). Termine a conversa.` : 'OK',
+          content: tr.handoff ? `Handoff executado (reason=${tr.reason}). Termine a conversa.` : (tr.message || 'OK'),
         })
       }
 
       // Se handoff foi disparado, nao precisa continuar pedindo mais output
       if (handoffTriggered) break
+
+      // Ja tem texto e a unica tool foi a analise: nao gasta outra volta
+      if (salesEngine && finalText.trim() && result.toolUses.every(tu => tu.name === ANALYSIS_TOOL_NAME)) break
 
       // Monta a proxima rodada: adiciona resposta do assistant (text + tool_uses) e o tool_result
       const assistantContent = []
@@ -624,8 +735,53 @@ export async function processInboundMessage(lead, msgContent, mediaType, instanc
       ]
     }
 
-    // 13. Envia resposta texto (se houver)
-    if (finalText && finalText.trim()) {
+    // 12b. Analise obrigatoria: a IA respondeu sem registrar a analise -> uma chamada forcada
+    if (salesEngine && !lastAnalysis && !handoffTriggered && finalText.trim()) {
+      try {
+        const forced = await callHaiku({
+          systemPrompt,
+          messages: workingMessages,
+          tools,
+          maxTokens: 400,
+          toolChoice: { type: 'tool', name: ANALYSIS_TOOL_NAME },
+          accountId: agent.account_id,
+        })
+        logUsage(forced)
+        const tu = (forced.toolUses || []).find(t => t.name === ANALYSIS_TOOL_NAME)
+        const analysis = tu ? parseAnalysisInput(tu.input) : null
+        if (analysis) {
+          saveLeadAnalysis(db, lead.account_id, lead.id, analysis)
+          lastAnalysis = analysis
+        }
+      } catch (e) {
+        console.error(`[AI Agent] Analise forcada falhou agent=${agent.id} lead=${lead.id}:`, e.message)
+      }
+    }
+    if (lastAnalysis) {
+      try { broadcastSSE(lead.account_id, 'lead:updated', { id: lead.id }) } catch {}
+    }
+
+    const text = finalText.trim()
+
+    // 13a. Copiloto: grava a sugestao e avisa o Chat. Nada e enviado ao lead.
+    if (delivery === 'suggest') {
+      if (text) {
+        const suggestionId = createReplySuggestion(db, {
+          accountId: lead.account_id,
+          leadId: lead.id,
+          agentId: agent.id,
+          content: text,
+          source: 'ai',
+          payload: lastAnalysis ? { analysis: lastAnalysis } : null,
+        })
+        try { broadcastSSE(lead.account_id, 'lead:ai_suggestion', { lead_id: lead.id, suggestion_id: suggestionId }) } catch {}
+      }
+      console.log(`[AI Agent] Processed (copiloto) lead=${lead.id} agent=${agent.id} iters=${iterationsRun} tokens=${totalTokens} cost_usd=${totalCost.toFixed(6)} tools=${totalToolsExecuted} suggestion=${!!text}`)
+      return { ok: true, mode, suggestion: !!text }
+    }
+
+    // 13b. Automatico / SDR: envia resposta texto (se houver)
+    if (text) {
       // Anti-ban: espaca msg do bot se houve outbound recente (<10s) pro mesmo lead.
       // Evita rajada quando lead manda varias inbounds seguidas que disparam respostas em sequencia.
       const lastBotMsg = db.prepare(`
@@ -646,12 +802,12 @@ export async function processInboundMessage(lead, msgContent, mediaType, instanc
       if (inst && inst.status === 'connected') {
         // Anti-ban: marca msg como lida ANTES de responder (humano abre conversa antes)
         try { await markMessageAsRead(inst, lead) } catch {}
-        const sendRes = await sendViaInstance(inst, lead.phone, finalText.trim(), { leadId: lead.id })
+        const sendRes = await sendViaInstance(inst, lead.phone, text, { leadId: lead.id })
         if (sendRes.ok) {
           db.prepare(`
             INSERT INTO messages (lead_id, account_id, direction, content, media_type, sender_name, wa_msg_id, wa_timestamp, instance_id, ai_agent_id, delivery_status)
             VALUES (?, ?, 'outbound', ?, 'text', 'AI', ?, datetime('now'), ?, ?, 'sent')
-          `).run(lead.id, lead.account_id, finalText.trim(), sendRes.wamsgId, instanceId, agent.id)
+          `).run(lead.id, lead.account_id, text, sendRes.wamsgId, instanceId, agent.id)
           try { broadcastSSE(lead.account_id, 'lead:message', { lead_id: lead.id }) } catch {}
         } else {
           console.error(`[AI Agent] Falha envio agent=${agent.id} lead=${lead.id}: ${sendRes.reason}`)
@@ -664,8 +820,27 @@ export async function processInboundMessage(lead, msgContent, mediaType, instanc
       }
     }
 
-    console.log(`[AI Agent] Processed lead=${lead.id} agent=${agent.id} iters=${iterationsRun} tokens=${totalTokens} cost_usd=${totalCost.toFixed(6)} tools=${totalToolsExecuted} handoff=${handoffTriggered} text_len=${finalText.length}`)
-    return { ok: true }
+    // 14. SDR: trava liberou -> passa para o vendedor (regra de handoff 'qualified') com resumo
+    if (mode === 'sdr' && salesEngine && !handoffTriggered) {
+      const fresh = getLead(lead.id)
+      if (fresh && !fresh.ai_handed_off_at) {
+        const sdrReady = shouldSdrHandoff({
+          requiredFields: parseRequiredFields(agent.required_fields),
+          lead: fresh,
+          criteria: readLeadCriteria(fresh),
+          hasQualificationText: !!(agent.qualification_criteria && agent.qualification_criteria.trim()),
+        })
+        if (sdrReady) {
+          addQualificationNote(agent, fresh)
+          executeHandoff(agent, fresh, 'qualified', instanceId)
+          handoffTriggered = true
+          console.log(`[AI Agent] SDR qualificou lead=${lead.id} — passado ao vendedor`)
+        }
+      }
+    }
+
+    console.log(`[AI Agent] Processed lead=${lead.id} agent=${agent.id} mode=${mode} iters=${iterationsRun} tokens=${totalTokens} cost_usd=${totalCost.toFixed(6)} tools=${totalToolsExecuted} handoff=${handoffTriggered} text_len=${finalText.length}`)
+    return { ok: true, mode }
   } catch (err) {
     console.error('[AI Agent] processInboundMessage erro:', err.message)
     return { ok: false, reason: 'exception', detail: err.message }
@@ -701,6 +876,11 @@ export async function sendBotWelcomeForSheetsLead(leadId, instanceId) {
     const agent = findAgentForLead(lead, instanceId)
     if (!agent) {
       console.log(`[Bot Welcome] SKIP lead=${leadId} — sem agente elegivel`)
+      return
+    }
+    // Copiloto nunca envia nada ao lead sem o vendedor
+    if (deliveryActionForMode(resolveEffectiveMode(agent, lead, leadHasHumanAttendant(lead))) === 'suggest') {
+      console.log(`[Bot Welcome] SKIP lead=${leadId} agent=${agent.id} — modo copiloto`)
       return
     }
 
