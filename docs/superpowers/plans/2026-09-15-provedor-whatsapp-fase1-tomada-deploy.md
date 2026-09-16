@@ -8,7 +8,7 @@ Servidor: CentOS 7, Node 16.20.2, repo em `/root/crm`, processo PM2 `dros-crm`.
 
 ## 0. Verificação local já feita (neste worktree, não no servidor)
 
-Rodada em 16/09/2026 antes de escrever este documento, com `git log` mostrando os 12 commits da fase (`57f55d9`..`036326f`) em sequência, sem arquivos de `dist/` misturados:
+Rodada em 16/09/2026 antes de escrever este documento, com `git log` mostrando os 14 commits da fase (`57f55d9`..`036326f`, incluindo o próprio `57f55d9`) em sequência, sem arquivos de `dist/` misturados:
 
 - `npm test` → **118/118 passando, 0 falha** (`# tests 118 / # pass 118 / # fail 0`), cobrindo `normalize`, `whatsappSchema`, `publicUrl`, `evolutionParse`, `evolutionTransport`, `sender`, `mediaResolve`, `leadIntake`, `inboundHandler`, `webhookFlow`, `inboundPolling`, `webhookRegistration`.
 - `npm run build` → build do Vite concluído sem erro (`✓ built in ~20s`), só o aviso padrão de chunk grande (pré-existente, não é regressão desta fase).
@@ -57,13 +57,13 @@ Tem mudança de front (o front chama `/api/integrations/public-config` e mostra 
 source /opt/rh/devtoolset-11/enable && cd /root/crm && git pull && npm install && npm test && npm run build && pm2 restart dros-crm
 ```
 
-**Resultado esperado:** `git pull` traz os 12 commits novos; `npm install` sem erro de compilação nativa (better-sqlite3); `npm test` termina com `# fail 0` (mesmo total de antes, 118, ou mais caso hajam outros testes fora desta fase); `npm run build` termina com `✓ built`; `pm2 restart dros-crm` mostra o processo `online`.
+**Resultado esperado:** `git pull` traz os 14 commits novos; `npm install` sem erro de compilação nativa (better-sqlite3); `npm test` termina com `# fail 0` (mesmo total de antes, 118, ou mais caso hajam outros testes fora desta fase); `npm run build` termina com `✓ built`; `pm2 restart dros-crm` mostra o processo `online`.
 
 **Como saber que falhou:** qualquer uma dessas etapas encerra a cadeia (por causa do `&&`) e as seguintes não rodam — `pm2 restart` não vai executar. Rode `pm2 status dros-crm` para confirmar se reiniciou ou não. Se `npm test` for a etapa que falhou, o comando já parou sozinho **antes do build e do restart** — o processo em produção continua rodando o código antigo. Vá direto para a seção 4 (plano de volta) só para reverter o `git pull` (o `pm2 restart` nem chegou a rodar, então tecnicamente não precisa reiniciar nada, mas rode o checkout mesmo assim para não deixar o working tree do servidor num commit que não passou nos testes) e avise que o deploy não foi feito.
 
 ## 3. Primeiros minutos (acompanhar por ~15 minutos)
 
-O `pm2 restart` já dispara, na subida, a criação das colunas novas e a geração dos tokens de webhook, e a primeira tentativa de reregistro do webhook roda imediatamente no boot (não espera o ciclo de 5 minutos — só as tentativas seguintes é que rodam a cada 5 min).
+O `pm2 restart` já dispara, na subida, a criação das colunas novas e a geração dos tokens de webhook, e a primeira tentativa de reregistro do webhook roda imediatamente no boot (não espera o próximo ciclo — o ciclo principal do scheduler, que faz o reregistro, roda a cada 1 minuto; `server/scheduler.js:16-17` `INTERVAL_MS = 60 * 1000`, chamado por `tick()` em `scheduler.js:512`).
 
 ```bash
 pm2 logs dros-crm --lines 300 --nostream | grep -E "Added column whatsapp_instances|webhook_token gerado|Evolution Webhook\] Set|Webhook re-register|Webhook WhatsApp\]|Webhook Evolution\]|Polling.*error|Tipo de mensagem nao tratado"
@@ -73,12 +73,12 @@ pm2 logs dros-crm --lines 300 --nostream | grep -E "Added column whatsapp_instan
 - `[DB] Added column whatsapp_instances.provider`, `.provider_config`, `.webhook_token` — uma vez só, na primeira subida (migração de schema).
 - `[db] migration: webhook_token gerado para N instancias` — uma vez só, N = quantidade de instâncias existentes.
 - Nenhuma linha `[Webhook re-register] <nome>: <motivo>` — se aparecer, é falha ao reconfigurar o webhook daquela instância no provedor (rede, credencial); ela continua com o webhook antigo e vai depender do polling até ser corrigida.
-- **Atenção com o silêncio**: o reregistro automático (o que roda no boot e a cada 5 min) **não loga sucesso**, só erro. Ou seja, não esperar ver `[Evolution Webhook] Set for ...` sozinho — essa linha só aparece quando alguém clica no botão **"Webhook"** ao lado do número, na tela Integrações (tooltip "Reenvia o webhook pra Evolution..."), ou quando uma instância é conectada/reconectada manualmente. Para ter certeza visível de que uma instância específica já está na URL nova, clique nesse botão para 1-2 números e confira a linha `[Evolution Webhook] Set for <nome> → .../api/webhooks/whatsapp/<token>` no log.
+- **Atenção com o silêncio**: o reregistro automático (o que roda no boot e depois a cada 1 minuto) **não loga sucesso**, só erro. Ou seja, não esperar ver `[Evolution Webhook] Set for ...` sozinho — essa linha só aparece quando alguém clica no botão **"Webhook"** ao lado do número, na tela Integrações (tooltip "Reenvia o webhook pra Evolution..."), ou quando uma instância é conectada/reconectada manualmente. Para ter certeza visível de que uma instância específica já está na URL nova, clique nesse botão para 1-2 números e confira a linha `[Evolution Webhook] Set for <nome> → .../api/webhooks/whatsapp/<token>` no log.
 - `[Webhook WhatsApp] 401 Invalid webhook token ip=...` **repetido** para uma instância real → sinal de token errado ou instância não migrada; isolado e não repetindo, ignorar.
 - `[Webhook Evolution] 401 Unknown instance account=<slug> instance=<nome>` **isolado**, logo após o deploy, é esperado: é a Evolution ainda mandando pela URL antiga por conta até o reregistro (item acima) trocar para a URL por token daquele número. **Se persistir para a mesma instância depois de 10 minutos, é o sinal real do risco descrito no plano** — a rota antiga não tem mais fallback (antes caía na primeira instância da conta; agora responde 401 e a Evolution **não reentrega**). Nesse caso: abrir Integrações, achar o número, clicar em **"Webhook"** para forçar o reregistro na URL nova; se o problema for o nome da instância não bater mesmo com a tolerância de caixa/espaço, o `instance_name` cadastrado no CRM precisa ser corrigido para bater com o nome real da instância na Evolution.
 - Mensagens novas chegando no Chat de **pelo menos 2 contas diferentes** dentro da janela de 15 minutos, com contador de não lidas e ✓✓ atualizando em envios recentes.
 
-**Como saber que falhou de verdade (não só ruído esperado):** `[Webhook Evolution] 401` persistente na mesma instância depois de 10 minutos e sem mensagem nova chegando por ela; ou `[Webhook re-register]` aparecendo em loop a cada 5 minutos para o mesmo número.
+**Como saber que falhou de verdade (não só ruído esperado):** `[Webhook Evolution] 401` persistente na mesma instância depois de 10 minutos e sem mensagem nova chegando por ela; ou `[Webhook re-register]` aparecendo em loop a cada 1 minuto para o mesmo número.
 
 ## 4. Plano de volta
 
@@ -90,9 +90,11 @@ source /opt/rh/devtoolset-11/enable && cd /root/crm && git checkout $(cat /root/
 
 **Resultado esperado:** volta para o commit salvo no passo 1.3, reinstala, builda o front antigo e reinicia. `pm2 status dros-crm` mostra `online`.
 
-**Depois da volta:**
+**Como saber que falhou:** mesma lógica da seção 2 — é uma cadeia de `&&`, então qualquer etapa que falhe (`git checkout`, `npm install`, `npm run build`) interrompe as seguintes e o `pm2 restart` não roda. Rode `pm2 status dros-crm` para confirmar: se o processo não reiniciou (uptime não zerou), **o processo antigo continua rodando o código de antes deste rollback** — ou seja, nem o código novo (que você estava tentando reverter) nem o commit de volta estão de fato no ar. Não tente rodar o comando de novo sozinho: pare e peça ajuda, porque a essa altura já são dois deploys seguidos com problema.
+
+**Depois da volta (quando o `pm2 restart` deu certo):**
 - As colunas novas (`provider`, `provider_config`, `webhook_token`) ficam no banco, mas o código antigo não as lê nem as usa — não fazem diferença.
-- O reregistro de webhook do código antigo (mesmo esquema de 5 em 5 minutos) recoloca a URL antiga (`/api/webhooks/evolution/<slug>`) sozinho; para acelerar, clicar em "Webhook" em cada número.
+- O reregistro de webhook do código antigo (mesmo ciclo de 1 em 1 minuto do scheduler, que já existia antes desta fase) recoloca a URL antiga (`/api/webhooks/evolution/<slug>`) sozinho; para acelerar, clicar em "Webhook" em cada número.
 - Mensagens recebidas durante o intervalo sem webhook certo não se perdem: o polling (a cada 30s) as recupera quando reconecta com a URL/lógica certa.
 - **Não precisa reverter o banco.** Nenhuma coluna ou dado desta fase quebra o código antigo.
 
