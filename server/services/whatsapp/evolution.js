@@ -378,7 +378,9 @@ export function createEvolutionAdapter({ fetch }) {
       return Array.isArray(messages) ? messages : null
     },
 
-    parseWebhook(instance, body) {
+    // headers: nao usado hoje; faz parte do contrato do provedor para a validacao de
+    // assinatura da fase 3 (webhookFlow.js ja passa req.headers).
+    parseWebhook(instance, body, headers) {
       const event = body?.event
       const data = body?.data
       if (event === 'messages.update' || event === 'MESSAGES_UPDATE') {

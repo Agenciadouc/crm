@@ -712,7 +712,7 @@ function revertFalseFailures() {
 }
 
 export function startScheduler() {
-  console.log('[Scheduler] Started — main every 5 min, polling every 30s, revert-false every 10s, daily health 05h BRT')
+  console.log('[Scheduler] Started — main every 1 min, polling every 30s, revert-false every 10s, daily health 05h BRT')
   try { revertFalseFailures() } catch (e) { console.error('[RevertFalseFailures startup]', e.message) }
   tick()
   setInterval(tick, INTERVAL_MS)

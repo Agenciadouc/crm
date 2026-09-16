@@ -77,7 +77,8 @@ export function createInboundHandler(deps) {
     const msgId = normalized.messageId
     if (!msgId) return { ok: true, skipped: 'no_id' }
     if (!POLLING_IMPORTED_TYPES.has(normalized.type)) return { ok: true, skipped: `type_${normalized.type}` }
-    const exists = db.prepare('SELECT id FROM messages WHERE wa_msg_id = ?').get(msgId)
+    // Filtra por conta: o mesmo numero fisico em duas contas nao pode fazer a segunda perder a mensagem.
+    const exists = db.prepare('SELECT id FROM messages WHERE wa_msg_id = ? AND account_id = ?').get(msgId, account.id)
     if (exists) return { ok: true, skipped: 'exists' }
 
     const phone = normalized.phone
@@ -349,7 +350,8 @@ export function createInboundHandler(deps) {
     }
 
     // Store message (dedup by wa_msg_id) + track instance
-    const existing = msgId ? db.prepare('SELECT id FROM messages WHERE wa_msg_id = ?').get(msgId) : null
+    // Filtra por conta: o mesmo numero fisico em duas contas nao pode fazer a segunda perder a mensagem.
+    const existing = msgId ? db.prepare('SELECT id FROM messages WHERE wa_msg_id = ? AND account_id = ?').get(msgId, account.id) : null
     if (!existing) {
       db.prepare(`
         INSERT INTO messages (lead_id, account_id, direction, content, media_type, media_url, sender_name, wa_msg_id, wa_timestamp, instance_id)
