@@ -3,7 +3,7 @@ import bcrypt from 'bcryptjs'
 import db from '../db.js'
 import { requireRole } from '../middleware/auth.js'
 import { callHaiku } from '../services/anthropicClient.js'
-import { replayLastMessagesForAgent } from '../services/aiAgent.js'
+import { replayLastMessagesForAgent, releaseLeadsFromAgent } from '../services/aiAgent.js'
 import { pickAnthropicKey } from '../services/anthropicKeyPicker.js'
 import { AGENT_MODES, normalizeAgentMode } from '../services/copilotMode.js'
 import { expirePendingForAgent } from '../services/aiSuggestions.js'
@@ -68,6 +68,13 @@ function expireAgentSuggestions(accountId, agentId) {
     try { broadcastSSE(accountId, 'lead:ai_suggestion', { lead_id: leadId }) } catch {}
   }
   return leadIds.length
+}
+
+// Desligar o atendimento: expira sugestoes, cancela timers e passa os leads da IA para o vendedor
+function shutdownAgentAttendance(agent) {
+  const expired = expireAgentSuggestions(agent.account_id, agent.id)
+  const release = releaseLeadsFromAgent(agent)
+  return { expired_suggestions: expired, released_leads: release.released }
 }
 
 // ─── Routes ───────────────────────────────────────────────────────────
@@ -293,7 +300,8 @@ router.put('/:id', requireRole('super_admin', 'gerente'), (req, res) => {
     const newMode = b.mode !== undefined ? normalizeAgentMode(b.mode) : normalizeAgentMode(existing.mode)
     const modeChanged = normalizeAgentMode(existing.mode) !== newMode
     const turnedOff = b.is_active !== undefined && !b.is_active && existing.is_active === 1
-    if (modeChanged || turnedOff) expireAgentSuggestions(req.accountId, existing.id)
+    if (turnedOff) shutdownAgentAttendance(existing)
+    else if (modeChanged) expireAgentSuggestions(req.accountId, existing.id)
 
     res.json({ agent: loadAgentFull(req.params.id) })
   } catch (e) {
@@ -320,9 +328,9 @@ router.patch('/:id/toggle-active', requireRole('super_admin', 'gerente'), (req, 
     if (agent.user_id) {
       db.prepare("UPDATE users SET is_active = 0 WHERE id = ?").run(agent.user_id)
     }
-    expireAgentSuggestions(agent.account_id, agent.id)
-    console.log(`[Bot Toggle] PAUSED agent=${agent.id} by user=${req.user.id}`)
-    return res.json({ ok: true, is_active: 0 })
+    const shutdown = shutdownAgentAttendance(agent)
+    console.log(`[Bot Toggle] PAUSED agent=${agent.id} by user=${req.user.id} released_leads=${shutdown.released_leads}`)
+    return res.json({ ok: true, is_active: 0, released_leads: shutdown.released_leads })
   }
 
   // Reativando — guarda paused_at antes de zerar pro replay usar
@@ -372,7 +380,7 @@ router.delete('/:id', requireRole('super_admin', 'gerente'), (req, res) => {
   // Soft delete: desativa agente E inativa user shadow (some do dropdown de atendentes)
   db.prepare("UPDATE ai_agents SET is_active = 0, updated_at = datetime('now') WHERE id = ?").run(req.params.id)
   db.prepare('UPDATE users SET is_active = 0 WHERE id = ?').run(existing.user_id)
-  expireAgentSuggestions(req.accountId, existing.id)
+  shutdownAgentAttendance(existing)
   res.json({ ok: true })
 })
 
