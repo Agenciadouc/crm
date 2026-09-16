@@ -43,7 +43,13 @@ export function scheduleAiForInbound(lead, content, mediaType, instanceId) {
       return
     }
 
-    setImmediate(() => { runNow(lead.id, content, mediaType, instanceId) })
+    setImmediate(() => {
+      try {
+        runNow(lead.id, content, mediaType, instanceId)
+      } catch (e) {
+        console.error('[AI Agent] webhook plug error:', e.message)
+      }
+    })
   } catch (e) {
     console.error('[Copilot] scheduleAiForInbound erro:', e.message)
   }
