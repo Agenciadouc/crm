@@ -6,6 +6,8 @@ import { sendFollowUpMessage, resumeFollowUpsIfPaused, resumeFollowUpsIfAttendan
 import { processInactivityFollowUps } from './services/inactivityScanner.js'
 import { getProvider } from './services/whatsapp/index.js'
 import { handleInboundMessage } from './services/inboundRuntime.js'
+import { createWebhookRegistrar } from './services/whatsapp/webhookRegistration.js'
+import { apiUrlKey, checkApiUrlsAlive } from './services/whatsapp/evolutionHealth.js'
 import { aggregateAllAccounts } from './services/attendantMetrics.js'
 import { analyzeAllAccounts } from './services/conversationAnalyzer.js'
 import { generateAllCoachings, isoMonday } from './services/coachingAnalyzer.js'
@@ -16,20 +18,16 @@ const INTERVAL_MS = 60 * 1000
 
 // ─── Check WhatsApp instances + auto-reconnect ─────────────────
 async function checkWhatsAppInstances() {
-  // First check if Evolution API is alive. Usa EVOLUTION_API_URL do env (setup Docker do fork
-  // Sheraos aponta pra http://evolution:8080), com fallback pro localhost do setup Dros nativo.
-  let evolutionAlive = false
-  const healthUrl = (process.env.EVOLUTION_API_URL || 'http://127.0.0.1:8080').replace(/\/+$/, '') + '/'
-  try {
-    const r = await fetch(healthUrl, { timeout: 5000 })
-    evolutionAlive = r.ok || r.status === 401 || r.status === 404
-  } catch {
-    console.error(`[Health] Evolution API is DOWN at ${healthUrl} — cannot check instances`)
-    return
+  // Health por URL de cada instancia (antes: so process.env.EVOLUTION_API_URL). Gestao de sessao so existe na Evolution.
+  const instances = db.prepare("SELECT * FROM whatsapp_instances WHERE status IN ('connected', 'connecting')").all()
+    .filter(i => (i.provider || 'evolution') === 'evolution')
+  const aliveByUrl = await checkApiUrlsAlive(instances, fetch)
+  for (const [url, alive] of aliveByUrl) {
+    if (!alive) console.error(`[Health] Evolution API is DOWN at ${url}/ — cannot check instances`)
   }
 
-  const instances = db.prepare("SELECT * FROM whatsapp_instances WHERE status IN ('connected', 'connecting')").all()
   for (const inst of instances) {
+    if (!aliveByUrl.get(apiUrlKey(inst.api_url))) continue
     try {
       const r = await fetch(`${inst.api_url}/instance/connectionState/${encodeURIComponent(inst.instance_name)}`, {
         headers: { apikey: inst.api_key },
@@ -180,17 +178,16 @@ async function pollMissedMessages() {
   }
 }
 
-// ─── Re-register webhooks on every health check ─────────────────
+// ─── Re-register webhooks on every health check (URL por token + MESSAGES_UPSERT/MESSAGES_UPDATE) ─────
+const webhookRegistrar = createWebhookRegistrar({ db, getProvider })
 async function reRegisterWebhooks() {
-  const instances = db.prepare("SELECT wi.*, a.slug FROM whatsapp_instances wi JOIN accounts a ON a.id = wi.account_id WHERE wi.status = 'connected'").all()
+  const instances = db.prepare("SELECT * FROM whatsapp_instances WHERE status = 'connected'").all()
   for (const inst of instances) {
     try {
-      const webhookUrl = `https://drosagencia.com.br/crm/api/webhooks/evolution/${inst.slug}`
-      await fetch(`${inst.api_url}/webhook/set/${encodeURIComponent(inst.instance_name)}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', apikey: inst.api_key },
-        body: JSON.stringify({ webhook: { url: webhookUrl, enabled: true, events: ['MESSAGES_UPSERT'] } }),
-      })
+      const r = await webhookRegistrar.registerInstanceWebhook(inst)
+      if (!r.ok && r.reason !== 'provider_without_webhook_registration') {
+        console.error(`[Webhook re-register] ${inst.instance_name}: ${r.reason}`)
+      }
     } catch {}
   }
 }
