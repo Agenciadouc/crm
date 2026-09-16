@@ -7,6 +7,8 @@ import { getInstanceConfig, wasAutoMsgSentRecently, sendAutoMessage, shouldSendA
 import { processInboundMessage, sendBotWelcomeForSheetsLead } from '../services/aiAgent.js'
 import { pickFromRoulette } from '../services/roulette.js'
 import { notifyAndOpenLead } from '../services/leadHandoff.js'
+import { normalizePhone } from '../services/whatsapp/normalize.js'
+import { leadIntake } from '../services/inboundRuntime.js'
 
 const router = Router()
 
@@ -26,146 +28,7 @@ async function fetchAndSaveProfilePic(instance, phone, leadId) {
   } catch {}
 }
 
-// Helper: get or create lead from phone
-function normalizePhone(p) {
-  if (!p) return p
-  p = p.replace(/[^\d]/g, '')
-  if (p.startsWith('55') && p.length === 13) return p
-  if (p.startsWith('55') && p.length === 12) return p.slice(0, 4) + '9' + p.slice(4)
-  if (!p.startsWith('55') && p.length === 11) return '55' + p
-  if (!p.startsWith('55') && p.length === 10) return '55' + p.slice(0, 2) + '9' + p.slice(2)
-  return p // can't normalize safely — return as-is
-}
-
-// Gera chave canonica de comparacao: DDD + 8 digitos finais (sem 55, sem 9 inicial de celular)
-// Cobre todos formatos: "5547991351835", "47991351835", "4791351835" -> "4791351835"
-function phoneCompareKey(p) {
-  let d = String(p || '').replace(/[^\d]/g, '')
-  if (!d) return ''
-  if (d.startsWith('55') && (d.length === 12 || d.length === 13)) d = d.slice(2)
-  if (d.length === 11 && d[2] === '9') d = d.slice(0, 2) + d.slice(3)
-  return d.length === 10 ? d : d.slice(-10) // fallback: ultimos 10 se formato desconhecido
-}
-
-function getOrCreateLead(accountId, phone, name, source, waJid, instanceId, opts = {}) {
-  phone = normalizePhone(phone)
-
-  // ─── GATE: phone bloqueado nesta conta? Ignora silenciosamente. ───
-  // Match por phone exato OU sufixo 8d (mesma logica de dedup). Se houver QUALQUER lead bloqueado
-  // pra esse numero, retorna blocked=true e nao processa msg.
-  if (phone) {
-    const blockedExact = db.prepare("SELECT id FROM leads WHERE account_id = ? AND phone = ? AND is_blocked = 1 LIMIT 1").get(accountId, phone)
-    if (blockedExact) return { lead: null, isNew: false, blocked: true }
-    const key = phoneCompareKey(phone)
-    if (key) {
-      const last8 = key.slice(-8)
-      const candidates = db.prepare("SELECT phone FROM leads WHERE account_id = ? AND is_blocked = 1 AND phone LIKE ?").all(accountId, '%' + last8)
-      if (candidates.some(c => phoneCompareKey(c.phone) === key)) {
-        return { lead: null, isNew: false, blocked: true }
-      }
-    }
-  }
-
-  let lead = null
-  if (waJid) lead = db.prepare('SELECT * FROM leads WHERE account_id = ? AND wa_remote_jid = ? ORDER BY is_archived ASC, created_at DESC LIMIT 1').get(accountId, waJid)
-  if (!lead && phone) {
-    // 1) match exato (rapido, usa index)
-    lead = db.prepare('SELECT * FROM leads WHERE account_id = ? AND phone = ? ORDER BY is_archived ASC, created_at DESC LIMIT 1').get(accountId, phone)
-    // 2) fallback: busca candidatos por sufixo 8d e compara via phoneCompareKey
-    if (!lead) {
-      const key = phoneCompareKey(phone)
-      if (key) {
-        const last8 = key.slice(-8)
-        const candidates = db.prepare(`SELECT * FROM leads WHERE account_id = ? AND phone LIKE ? ORDER BY is_archived ASC, created_at DESC`).all(accountId, '%' + last8)
-        lead = candidates.find(c => phoneCompareKey(c.phone) === key) || null
-      }
-    }
-  }
-
-  if (lead) {
-    // Update instance_id if not set
-    if (instanceId && !lead.instance_id) {
-      db.prepare('UPDATE leads SET instance_id = ? WHERE id = ?').run(instanceId, lead.id)
-    }
-    // Se esta arquivado: NAO desarquiva (so manual). Apenas marca has_new_after_archive
-    // pra atendente saber que tem msg nova no lead arquivado (badge no /archived)
-    if (lead.is_archived) {
-      db.prepare("UPDATE leads SET has_new_after_archive = 1, updated_at = datetime('now') WHERE id = ?").run(lead.id)
-    }
-    return { lead, isNew: false }
-  }
-
-  // ─── GATE: instancia em modo RESTRITO so processa leads ja cadastrados (form/sheets/Novo chat).
-  // Se chegou aqui (lead nao existe ainda) E veio do Evolution webhook (instanceId presente) E instancia eh restrita,
-  // ignora silenciosamente. Form/site/sheets passam instanceId=null entao bypassam esse gate.
-  if (instanceId) {
-    const inst = db.prepare('SELECT lead_intake_mode FROM whatsapp_instances WHERE id = ?').get(instanceId)
-    if (inst?.lead_intake_mode === 'restricted') {
-      return { lead: null, isNew: false, restricted: true }
-    }
-  }
-
-  // Get default funnel + first stage
-  const funnel = db.prepare('SELECT id FROM funnels WHERE account_id = ? AND is_default = 1 AND is_active = 1').get(accountId)
-  if (!funnel) return { lead: null, isNew: false }
-  const firstStage = db.prepare('SELECT id FROM funnel_stages WHERE funnel_id = ? ORDER BY position LIMIT 1').get(funnel.id)
-  if (!firstStage) return { lead: null, isNew: false }
-
-  // Distribution: prefer instance.default_attendant_id, fallback to round-robin/manual
-  const attendantId = pickFromRoulette(accountId, instanceId)
-
-  const result = db.prepare(`
-    INSERT INTO leads (account_id, funnel_id, stage_id, attendant_id, name, phone, source, wa_remote_jid, instance_id, opted_in_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
-  `).run(accountId, funnel.id, firstStage.id, attendantId, name || phone || 'Sem nome', phone || null, source, waJid || null, instanceId || null)
-
-  // Log stage history
-  db.prepare('INSERT INTO stage_history (lead_id, to_stage_id, trigger_type) VALUES (?, ?, ?)').run(result.lastInsertRowid, firstStage.id, 'webhook')
-
-  lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(result.lastInsertRowid)
-
-  // Lead handoff: se atribuiu via roleta/default, dispara 1a msg + notif (fire-and-forget).
-  // Skipa se opts.noAutoHandoff (caller faz manualmente apos aplicar tags/mapping — caso /sheets).
-  if (attendantId && !opts.noAutoHandoff) {
-    setImmediate(() => {
-      notifyAndOpenLead(lead.id, attendantId, { source: 'webhook' })
-        .catch(e => console.error('[Handoff webhook]', e.message))
-    })
-  }
-
-  return { lead, isNew: true }
-}
-
-// Helper: auto-detect stage from message keywords
-function autoDetectStage(lead, messageText) {
-  if (!messageText) return
-  const text = messageText.toLowerCase()
-
-  // Get all stages ahead of current
-  const currentStage = db.prepare('SELECT position FROM funnel_stages WHERE id = ?').get(lead.stage_id)
-  if (!currentStage) return
-
-  const aheadStages = db.prepare('SELECT * FROM funnel_stages WHERE funnel_id = ? AND position > ? ORDER BY position').all(lead.funnel_id, currentStage.position)
-
-  for (const stage of aheadStages) {
-    if (!stage.auto_keywords) continue
-    let keywords
-    try { keywords = JSON.parse(stage.auto_keywords) } catch { continue }
-    if (!Array.isArray(keywords)) continue
-
-    const matched = keywords.some(kw => text.includes(kw.toLowerCase()))
-    if (matched) {
-      const oldStageId = lead.stage_id
-      db.prepare("UPDATE leads SET stage_id = ?, updated_at = datetime('now') WHERE id = ?").run(stage.id, lead.id)
-      const histRes = db.prepare('INSERT INTO stage_history (lead_id, from_stage_id, to_stage_id, trigger_type) VALUES (?, ?, ?, ?)').run(
-        lead.id, oldStageId, stage.id, 'auto_keyword'
-      )
-      // Dispara CAPI se a etapa tem evento Meta mapeado
-      triggerCapiForStageChange(lead.id, stage.id, histRes.lastInsertRowid)
-      break // Only advance to first match
-    }
-  }
-}
+const { getOrCreateLead, autoDetectStage } = leadIntake
 
 // Evolution API webhook
 router.post('/evolution/:accountSlug', (req, res) => {
