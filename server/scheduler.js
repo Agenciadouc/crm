@@ -4,7 +4,8 @@ import { broadcastSSE } from './sse.js'
 import { resumeBroadcastIfPaused, runBroadcastLoop } from './routes/broadcasts.js'
 import { sendFollowUpMessage, resumeFollowUpsIfPaused, resumeFollowUpsIfAttendantNowAssigned } from './services/followUpSender.js'
 import { processInactivityFollowUps } from './services/inactivityScanner.js'
-import { triggerCapiForStageChange } from './services/metaCapi.js'
+import { getProvider } from './services/whatsapp/index.js'
+import { handleInboundMessage } from './services/inboundRuntime.js'
 import { aggregateAllAccounts } from './services/attendantMetrics.js'
 import { analyzeAllAccounts } from './services/conversationAnalyzer.js'
 import { generateAllCoachings, isoMonday } from './services/coachingAnalyzer.js'
@@ -147,160 +148,28 @@ async function processScheduledBroadcasts() {
   }
 }
 
-// ─── Polling backup: fetch missed messages from Evolution ────────
+// ─── Polling backup: busca mensagens perdidas nos provedores que suportam (Evolution) ────────
+// Mesmo parse do webhook + handleInboundMessage com source 'polling' (logica do polling preservada no handler).
 async function pollMissedMessages() {
   const instances = db.prepare("SELECT wi.*, a.id as acc_id, a.slug FROM whatsapp_instances wi JOIN accounts a ON a.id = wi.account_id WHERE wi.status = 'connected'").all()
   if (!instances.length) return
 
-  // Import getOrCreateLead from webhooks logic inline
-  function normalizePhone(p) {
-    if (!p) return p
-    p = p.replace(/[^\d]/g, '')
-    if (p.startsWith('55') && p.length === 13) return p
-    if (p.startsWith('55') && p.length === 12) return p.slice(0, 4) + '9' + p.slice(4)
-    if (!p.startsWith('55') && p.length === 11) return '55' + p
-    if (!p.startsWith('55') && p.length === 10) return '55' + p.slice(0, 2) + '9' + p.slice(2)
-    return p // can't normalize safely — return as-is
-  }
-
   for (const inst of instances) {
     try {
-      // Fetch recent messages from Evolution
-      const r = await fetch(`${inst.api_url}/chat/findMessages/${encodeURIComponent(inst.instance_name)}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', apikey: inst.api_key },
-        body: JSON.stringify({ where: {}, limit: 200 }),
-      })
-      if (!r.ok) continue
-      const data = await r.json()
-      const messages = data?.messages?.records || data?.messages || data || []
+      let provider
+      try { provider = getProvider(inst) } catch { continue }
+      if (!provider.capabilities?.polling || !provider.fetchRecentMessages || !provider.parsePolledRecord) continue
+
+      const messages = await provider.fetchRecentMessages(inst, { limit: 200 })
       if (!Array.isArray(messages)) continue
 
+      const account = { id: inst.acc_id, slug: inst.slug }
       let imported = 0
       for (const m of messages) {
-        const key = m.key
-        if (!key || !key.id || !key.remoteJid) continue
-        // Skip groups, broadcasts, status
-        if (key.remoteJid.includes('@g.us') || key.remoteJid.includes('@broadcast') || key.remoteJid.includes('status@')) continue
-        // Skip if already in DB
-        const exists = db.prepare('SELECT id FROM messages WHERE wa_msg_id = ?').get(key.id)
-        if (exists) continue
-
-        // Handle @lid (Legacy ID from WhatsApp) — accept if has pushName (real contact), skip if no identity
-        const jid = m.senderPn || key.remoteJid
-        let phone = ''
-        let isLid = false
-
-        if (m.senderPn) {
-          // Has real phone via senderPn
-          phone = normalizePhone(m.senderPn.replace('@s.whatsapp.net', '').replace('@c.us', ''))
-        } else if (jid.endsWith('@lid')) {
-          // LID without real phone — only accept if has pushName (real person, not group artifact)
-          if (!m.pushName) continue
-          isLid = true
-          phone = jid.replace('@lid', '') // use LID as identifier
-        } else {
-          phone = normalizePhone(jid.replace('@s.whatsapp.net', '').replace('@c.us', ''))
+        for (const normalized of provider.parsePolledRecord(inst, m)) {
+          const r = handleInboundMessage(account, inst, normalized, { source: 'polling' })
+          if (r && r.imported) imported++
         }
-        if (!phone) continue
-
-        const fromMe = !!key.fromMe
-        const pushName = m.pushName || ''
-        const timestamp = m.messageTimestamp || null
-
-        // Parse content
-        const msg = m.message || {}
-        let content = msg.conversation || msg.extendedTextMessage?.text || ''
-        let mediaType = 'text'
-        if (msg.imageMessage) { mediaType = 'image'; content = content || '[Imagem]' }
-        else if (msg.videoMessage) { mediaType = 'video'; content = content || '[Video]' }
-        else if (msg.audioMessage) { mediaType = 'audio'; content = content || '[Audio]' }
-        else if (msg.documentMessage) { mediaType = 'document'; content = content || '[Documento]' }
-        else if (msg.stickerMessage) { mediaType = 'sticker'; content = '[Sticker]' }
-        else if (msg.reactionMessage) continue // skip reactions
-
-        if (!content && mediaType === 'text') continue
-
-        // Get or create lead
-        const dedupJid = isLid ? `${phone}@lid` : `${phone}@s.whatsapp.net`
-        let lead = db.prepare('SELECT * FROM leads WHERE account_id = ? AND (wa_remote_jid = ? OR phone = ?) ORDER BY is_archived ASC, created_at DESC LIMIT 1').get(inst.acc_id, dedupJid, phone)
-
-        // Gate: se ja achou lead bloqueado, ignora msg
-        if (lead && lead.is_blocked) {
-          console.log(`[Polling] Msg ignorada — lead ${lead.id} bloqueado`)
-          continue
-        }
-
-        // For @lid: also try matching by pushName (same person, different ID)
-        if (!lead && isLid && pushName) {
-          lead = db.prepare('SELECT * FROM leads WHERE account_id = ? AND name = ? AND is_blocked = 0 ORDER BY is_archived ASC, created_at DESC LIMIT 1').get(inst.acc_id, pushName)
-          if (lead) {
-            db.prepare("UPDATE leads SET wa_remote_jid = ?, updated_at = datetime('now') WHERE id = ?").run(dedupJid, lead.id)
-          }
-        }
-
-        // If lead is archived, unarchive it (client sent a new message — relevant again)
-        if (lead && lead.is_archived) {
-          db.prepare("UPDATE leads SET is_archived = 0, archived_at = NULL, has_new_after_archive = 1, updated_at = datetime('now') WHERE id = ?").run(lead.id)
-          lead.is_archived = 0
-          console.log(`[Polling] Desarquivado lead ${lead.id} (${lead.name}) — recebeu mensagem nova`)
-        }
-
-        if (!lead) {
-          // ─── GATE: instancia em modo RESTRITO so processa leads ja cadastrados (form/sheets/Novo chat).
-          // Mesmo gate do webhook (server/routes/webhooks.js getOrCreateLead). Polling tb precisa respeitar.
-          if (inst.lead_intake_mode === 'restricted') {
-            console.log(`[Polling] Msg ignorada — instancia ${inst.instance_name} em modo restrito (lead novo nao criado)`)
-            continue
-          }
-
-          // Create new lead
-          const funnel = db.prepare('SELECT id FROM funnels WHERE account_id = ? AND is_default = 1 AND is_active = 1').get(inst.acc_id)
-          if (!funnel) continue
-          const stage = db.prepare('SELECT id FROM funnel_stages WHERE funnel_id = ? ORDER BY position LIMIT 1').get(funnel.id)
-          if (!stage) continue
-          const leadPhone = isLid ? null : phone // LID leads have no real phone
-
-          // Distribution: prefer instance.default_attendant_id, fallback to round-robin
-          let attendantId = inst.default_attendant_id || null
-          if (!attendantId) {
-            const rule = db.prepare('SELECT * FROM distribution_rules WHERE account_id = ? AND funnel_id = ?').get(inst.acc_id, funnel.id)
-            if (rule && rule.type === 'round_robin' && rule.active_attendants) {
-              try {
-                const attendants = JSON.parse(rule.active_attendants)
-                if (attendants.length > 0) {
-                  const idx = rule.last_assigned_index % attendants.length
-                  attendantId = attendants[idx]
-                  db.prepare("UPDATE distribution_rules SET last_assigned_index = ?, updated_at = datetime('now') WHERE id = ?").run(rule.last_assigned_index + 1, rule.id)
-                }
-              } catch {}
-            }
-          }
-
-          const result = db.prepare("INSERT INTO leads (account_id, funnel_id, stage_id, attendant_id, name, phone, source, wa_remote_jid, instance_id, opted_in_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))").run(
-            inst.acc_id, funnel.id, stage.id, attendantId, pushName || phone || 'Sem nome', leadPhone, 'whatsapp', dedupJid, inst.id
-          )
-          lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(result.lastInsertRowid)
-          const histRes = db.prepare('INSERT INTO stage_history (lead_id, to_stage_id, trigger_type) VALUES (?, ?, ?)').run(lead.id, stage.id, 'polling')
-          broadcastSSE(inst.acc_id, 'lead:created', lead)
-          triggerCapiForStageChange(lead.id, stage.id, histRes.lastInsertRowid)
-        }
-
-        // Store message + track instance
-        db.prepare('INSERT INTO messages (lead_id, account_id, direction, content, media_type, sender_name, wa_msg_id, wa_timestamp, instance_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').run(
-          lead.id, inst.acc_id, fromMe ? 'outbound' : 'inbound', content, mediaType, fromMe ? '' : pushName, key.id, timestamp, inst.id
-        )
-        // Update lead's last_instance_id (so future sends remember this number)
-        db.prepare("UPDATE leads SET last_instance_id = ?, updated_at = datetime('now') WHERE id = ?").run(inst.id, lead.id)
-        // Ensure assignment exists for (lead, instance). Default attendant = instance.default_attendant_id
-        db.prepare(`
-          INSERT OR IGNORE INTO lead_instance_assignments (lead_id, instance_id, attendant_id)
-          VALUES (?, ?, (SELECT default_attendant_id FROM whatsapp_instances WHERE id = ?))
-        `).run(lead.id, inst.id, inst.id)
-        imported++
-
-        // SSE notify
-        broadcastSSE(inst.acc_id, 'lead:message', { lead_id: lead.id })
       }
 
       if (imported > 0) console.log(`[Polling] ${inst.instance_name}: imported ${imported} missed messages`)

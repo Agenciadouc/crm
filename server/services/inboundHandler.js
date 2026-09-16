@@ -4,6 +4,9 @@
 
 const STATUS_RANK = { sent: 1, delivered: 2, read: 3 }
 
+// Tipos que o polling ja importava (scheduler.js:213-222). Demais tipos continuam so pelo webhook.
+const POLLING_IMPORTED_TYPES = new Set(['text', 'image', 'video', 'audio', 'document', 'sticker'])
+
 // Copia de webhooks.js (detectAdSource do handler do Evolution)
 export function detectAdSource(ad) {
   if (!ad) return null
@@ -67,9 +70,98 @@ export function createInboundHandler(deps) {
     return changed
   }
 
+  // Logica do polling movida de scheduler.js:180-303, preservada de proposito:
+  // nao dispara IA, auto-mensagem, parada de follow-up, handoff, foto, avanco de etapa nem unread_count;
+  // desarquiva o lead; distribui por default_attendant_id ou round-robin.
+  function handlePolledMessage(account, inst, normalized) {
+    const msgId = normalized.messageId
+    if (!msgId) return { ok: true, skipped: 'no_id' }
+    if (!POLLING_IMPORTED_TYPES.has(normalized.type)) return { ok: true, skipped: `type_${normalized.type}` }
+    const exists = db.prepare('SELECT id FROM messages WHERE wa_msg_id = ?').get(msgId)
+    if (exists) return { ok: true, skipped: 'exists' }
+
+    const phone = normalized.phone
+    const dedupJid = normalized.remoteId
+    const isLid = String(dedupJid || '').endsWith('@lid')
+    const fromMe = !!normalized.fromMe
+    const pushName = normalized.pushName || ''
+    const timestamp = normalized.timestamp || null
+    const content = normalized.text || ''
+    const mediaType = normalized.type
+    if (!content && mediaType === 'text') return { ok: true, skipped: 'empty' }
+
+    let lead = db.prepare('SELECT * FROM leads WHERE account_id = ? AND (wa_remote_jid = ? OR phone = ?) ORDER BY is_archived ASC, created_at DESC LIMIT 1').get(account.id, dedupJid, phone)
+
+    if (lead && lead.is_blocked) {
+      console.log(`[Polling] Msg ignorada — lead ${lead.id} bloqueado`)
+      return { ok: true, blocked: true }
+    }
+
+    if (!lead && isLid && pushName) {
+      lead = db.prepare('SELECT * FROM leads WHERE account_id = ? AND name = ? AND is_blocked = 0 ORDER BY is_archived ASC, created_at DESC LIMIT 1').get(account.id, pushName)
+      if (lead) {
+        db.prepare("UPDATE leads SET wa_remote_jid = ?, updated_at = datetime('now') WHERE id = ?").run(dedupJid, lead.id)
+      }
+    }
+
+    if (lead && lead.is_archived) {
+      db.prepare("UPDATE leads SET is_archived = 0, archived_at = NULL, has_new_after_archive = 1, updated_at = datetime('now') WHERE id = ?").run(lead.id)
+      lead.is_archived = 0
+      console.log(`[Polling] Desarquivado lead ${lead.id} (${lead.name}) — recebeu mensagem nova`)
+    }
+
+    if (!lead) {
+      if (inst.lead_intake_mode === 'restricted') {
+        console.log(`[Polling] Msg ignorada — instancia ${inst.instance_name} em modo restrito (lead novo nao criado)`)
+        return { ok: true, restricted: true }
+      }
+      const funnel = db.prepare('SELECT id FROM funnels WHERE account_id = ? AND is_default = 1 AND is_active = 1').get(account.id)
+      if (!funnel) return { ok: true, skipped: 'no_funnel' }
+      const stage = db.prepare('SELECT id FROM funnel_stages WHERE funnel_id = ? ORDER BY position LIMIT 1').get(funnel.id)
+      if (!stage) return { ok: true, skipped: 'no_stage' }
+      const leadPhone = isLid ? null : phone
+
+      let attendantId = inst.default_attendant_id || null
+      if (!attendantId) {
+        const rule = db.prepare('SELECT * FROM distribution_rules WHERE account_id = ? AND funnel_id = ?').get(account.id, funnel.id)
+        if (rule && rule.type === 'round_robin' && rule.active_attendants) {
+          try {
+            const attendants = JSON.parse(rule.active_attendants)
+            if (attendants.length > 0) {
+              const idx = rule.last_assigned_index % attendants.length
+              attendantId = attendants[idx]
+              db.prepare("UPDATE distribution_rules SET last_assigned_index = ?, updated_at = datetime('now') WHERE id = ?").run(rule.last_assigned_index + 1, rule.id)
+            }
+          } catch {}
+        }
+      }
+
+      const result = db.prepare("INSERT INTO leads (account_id, funnel_id, stage_id, attendant_id, name, phone, source, wa_remote_jid, instance_id, opted_in_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))").run(
+        account.id, funnel.id, stage.id, attendantId, pushName || phone || 'Sem nome', leadPhone, 'whatsapp', dedupJid, inst.id
+      )
+      lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(result.lastInsertRowid)
+      const histRes = db.prepare('INSERT INTO stage_history (lead_id, to_stage_id, trigger_type) VALUES (?, ?, ?)').run(lead.id, stage.id, 'polling')
+      broadcastSSE(account.id, 'lead:created', lead)
+      triggerCapiForStageChange(lead.id, stage.id, histRes.lastInsertRowid)
+    }
+
+    db.prepare('INSERT INTO messages (lead_id, account_id, direction, content, media_type, sender_name, wa_msg_id, wa_timestamp, instance_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)').run(
+      lead.id, account.id, fromMe ? 'outbound' : 'inbound', content, mediaType, fromMe ? '' : pushName, msgId, timestamp, inst.id
+    )
+    db.prepare("UPDATE leads SET last_instance_id = ?, updated_at = datetime('now') WHERE id = ?").run(inst.id, lead.id)
+    db.prepare(`
+      INSERT OR IGNORE INTO lead_instance_assignments (lead_id, instance_id, attendant_id)
+      VALUES (?, ?, (SELECT default_attendant_id FROM whatsapp_instances WHERE id = ?))
+    `).run(lead.id, inst.id, inst.id)
+
+    broadcastSSE(account.id, 'lead:message', { lead_id: lead.id })
+    return { ok: true, imported: true }
+  }
+
   // Uma NormalizedMessage -> efeitos no banco (lead, mensagem, etapas, follow-up, SSE, IA).
   // Sincrono, como o handler original do webhook.
   function handleInboundMessage(account, waInstance, normalized, opts = {}) {
+    if (opts.source === 'polling') return handlePolledMessage(account, waInstance, normalized)
     // Variaveis com os mesmos nomes usados pelo bloco movido
     const req = opts.req || { headers: {}, ip: undefined }
     const fromMe = !!normalized.fromMe
