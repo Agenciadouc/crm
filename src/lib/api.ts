@@ -20,7 +20,7 @@ export function pctChange(c: number, p: number) { if (p === 0) return c > 0 ? 10
 // Types
 // =============================================
 
-export interface Account { id: number; name: string; slug: string; logo_url: string | null; is_active: number; created_at: string; lead_count?: number; user_count?: number; cnpj?: string | null; razao_social?: string | null; segmento?: string | null; website?: string | null; instagram?: string | null; whatsapp_comercial?: string | null; valor_mensal?: number | null; contrato_inicio?: string | null; cidade?: string | null; estado?: string | null; observacoes?: string | null; trabalha_anuncio?: number; investimento_anuncios?: number | null; avg_ticket?: number | null; meta_pixel_id?: string | null; meta_capi_token?: string | null; meta_capi_test_event_code?: string | null; meta_capi_enabled?: number; meta_page_id?: string | null; ai_agents_enabled?: number; attendant_analytics_enabled?: number; admin_marks_as_read?: number; anthropic_api_key?: string | null; analysis_token_limit?: number }
+export interface Account { id: number; name: string; slug: string; logo_url: string | null; is_active: number; created_at: string; lead_count?: number; user_count?: number; cnpj?: string | null; razao_social?: string | null; segmento?: string | null; website?: string | null; instagram?: string | null; whatsapp_comercial?: string | null; valor_mensal?: number | null; contrato_inicio?: string | null; cidade?: string | null; estado?: string | null; observacoes?: string | null; trabalha_anuncio?: number; investimento_anuncios?: number | null; avg_ticket?: number | null; meta_pixel_id?: string | null; meta_capi_token?: string | null; meta_capi_test_event_code?: string | null; meta_capi_enabled?: number; meta_page_id?: string | null; ai_agents_enabled?: number; attendant_analytics_enabled?: number; admin_marks_as_read?: number; anthropic_api_key?: string | null; analysis_token_limit?: number; ai_key_source?: 'client' | 'dros' }
 export interface User { id: number; account_id: number | null; account_name?: string | null; name: string; email: string; role: string; is_active: number; is_bot?: number; primary_instance_id?: number | null; notification_instance_id?: number | null; can_manage_proposals?: number; can_manage_contracts?: number; can_grab_leads?: number; created_at: string }
 export interface FunnelStage { id: number; funnel_id: number; name: string; position: number; color: string; is_conversion: number; is_terminal: number; is_qualified?: number; is_meeting?: number; auto_keywords: string | null; meta_event_name?: string | null }
 export interface Funnel { id: number; account_id: number; name: string; is_default: number; is_active: number; first_msg_template?: string | null; stages: FunnelStage[] }
@@ -39,6 +39,8 @@ export interface Lead {
   ctwa_clid?: string | null; fbp?: string | null; fbc?: string | null
   meta_ad_id?: string | null; meta_campaign_id?: string | null; meta_form_id?: string | null; lead_form_lead_id?: string | null
   client_ip_address?: string | null; client_user_agent?: string | null
+  ai_close_chance?: number | null; ai_main_blocker?: string | null; ai_moment?: string | null; ai_criteria_json?: string | null
+  ai_paused_at?: string | null; ai_paused_by?: number | null; ai_handed_off_at?: string | null
   stage_name?: string; stage_color?: string; attendant_name?: string; instance_name?: string
   last_message?: string; message_count?: number; tags?: Tag[]
 }
@@ -700,6 +702,7 @@ export interface AgentHandoffRule {
   tag_name?: string
 }
 
+export type AgentMode = 'auto' | 'copilot' | 'sdr'
 export interface AgentStage { id: number; name: string; color: string; funnel_id: number; funnel_name: string }
 export interface AgentInstance { id: number; instance_name: string; status: string }
 
@@ -723,6 +726,7 @@ export interface Agent {
   max_messages_before_handoff: number
   handoff_keywords: string
   activation_mode: AgentActivationMode
+  mode: AgentMode
   required_tag_id: number | null
   monthly_token_limit: number
   tokens_used_this_month: number
@@ -752,6 +756,7 @@ export interface AgentInput {
   max_messages_before_handoff?: number
   handoff_keywords?: string
   activation_mode?: AgentActivationMode
+  mode?: AgentMode
   required_tag_id?: number | null
   monthly_token_limit?: number
   identifies_as_bot?: boolean
@@ -818,6 +823,30 @@ export const saveAgentInactivityFollowUp = (agentId: number, accountId: number, 
 
 export const testAgent = (id: number, accountId: number, message: string, history: Array<{ role: 'user' | 'assistant'; content: string }> = []) =>
   apiFetch<{ response: string; usage: { input: number; output: number; cacheRead: number; cacheCreation: number; total: number }; cost_usd: number; stop_reason: string }>(`/api/agents/${id}/test?account_id=${accountId}`, { method: 'POST', body: JSON.stringify({ message, history }) })
+
+// Copiloto: sugestao da IA na caixa do Chat + pausa da IA por conversa
+export interface AiSuggestion {
+  id: number
+  account_id: number
+  lead_id: number
+  agent_id: number | null
+  kind: 'reply' | 'follow_up'
+  source: 'ai' | 'base'
+  content: string
+  status: 'pending' | 'sent' | 'edited' | 'discarded' | 'expired'
+  final_content: string | null
+  created_at: string
+  resolved_at: string | null
+  resolved_by: number | null
+}
+export const fetchPendingAiSuggestion = (leadId: number, accountId: number) =>
+  apiFetch<{ suggestion: AiSuggestion | null }>(`/api/copilot/leads/${leadId}/suggestion?account_id=${accountId}`).then(d => d.suggestion)
+export const resolveAiSuggestion = (id: number, accountId: number, action: 'sent' | 'discarded', finalContent?: string) =>
+  apiFetch<{ suggestion: AiSuggestion }>(`/api/copilot/suggestions/${id}/resolve?account_id=${accountId}`, { method: 'POST', body: JSON.stringify({ action, final_content: finalContent }) })
+export const pauseLeadAi = (leadId: number, accountId: number) =>
+  apiFetch<{ lead_id: number; ai_paused_at: string | null }>(`/api/copilot/leads/${leadId}/pause?account_id=${accountId}`, { method: 'POST' })
+export const resumeLeadAi = (leadId: number, accountId: number) =>
+  apiFetch<{ lead_id: number; ai_paused_at: string | null }>(`/api/copilot/leads/${leadId}/resume?account_id=${accountId}`, { method: 'POST' })
 
 // =============================================
 // Tasks (cadence steps that need execution)
