@@ -8,7 +8,7 @@ Servidor: CentOS 7, Node 16.20.2, repo em `/root/crm`, processo PM2 `dros-crm`.
 
 ## 0. Verificação local já feita (neste worktree, não no servidor)
 
-Rodada em 16/09/2026 antes de escrever este documento, com `git log` mostrando os 14 commits da fase (`57f55d9`..`036326f`, incluindo o próprio `57f55d9`) em sequência, sem arquivos de `dist/` misturados:
+Rodada em 16/09/2026 antes de escrever este documento, com `git log --oneline 57f55d9..036326f` mostrando os 13 commits da fase em sequência (não conta o próprio `57f55d9`, que é o primeiro commit da fase), sem arquivos de `dist/` misturados:
 
 - `npm test` → **118/118 passando, 0 falha** (`# tests 118 / # pass 118 / # fail 0`), cobrindo `normalize`, `whatsappSchema`, `publicUrl`, `evolutionParse`, `evolutionTransport`, `sender`, `mediaResolve`, `leadIntake`, `inboundHandler`, `webhookFlow`, `inboundPolling`, `webhookRegistration`.
 - `npm run build` → build do Vite concluído sem erro (`✓ built in ~20s`), só o aviso padrão de chunk grande (pré-existente, não é regressão desta fase).
