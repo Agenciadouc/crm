@@ -217,6 +217,20 @@ export default function Chat() {
       leadCity: lead?.city,
       attendantName: user?.name,
     })
+    // Escolher uma mensagem pronta substitui o texto inteiro da caixa. Se a sugestao da IA
+    // estava la, ela precisa ser SOLTA antes: senao o envio resolveria a sugestao como
+    // 'sent' com o texto da mensagem pronta e o backend gravaria 'edited' — a mensagem
+    // pronta entraria no relatorio do dono como "sugestao da IA editada".
+    // Registra 'discarded' (e nao so desanexa) porque o vendedor viu a sugestao e escolheu
+    // outra coisa no lugar dela: e o mesmo gesto de apagar o texto da sugestao, que ja
+    // registra 'discarded'. Deixar 'pending' mentiria no relatorio ("sugestao sem resposta").
+    const inBox = suggestionInBoxRef.current
+    if (inBox) {
+      suggestionInBoxRef.current = null
+      setSuggestionInBox(null)
+      setAiSuggestion(null)
+      if (accountId) resolveAiSuggestion(inBox.id, accountId, 'discarded').catch(() => {})
+    }
     setMsgText(filled)
     setShowReadyMsgs(false)
     setReadyMsgFilter('')
