@@ -5,6 +5,7 @@
 // retorna { ok: false, reason } sem quebrar — aiAgent.js trata o fallback.
 
 import fetch from 'node-fetch'
+import { getProvider as defaultGetProvider } from './whatsapp/index.js'
 
 const ENDPOINT = 'https://api.deepgram.com/v1/listen'
 const NOVA3_PRICE_PER_MIN = 0.0043
@@ -62,31 +63,21 @@ export async function transcribeAudio(audio, opts = {}) {
 }
 
 /**
- * Baixa audio (base64) da Evolution API e retorna como Buffer.
- * Reusa exatamente o mesmo endpoint que messages.js usa pro front renderizar o player.
+ * Baixa o audio de uma mensagem pelo provedor da instancia e retorna como Buffer.
+ * Mesmo download usado pelo player do Chat (GET /api/messages/:leadId/media/:msgId).
  *
- * @param {Object} instance - row de whatsapp_instances (precisa api_url, api_key, instance_name)
+ * @param {Object} instance - row de whatsapp_instances
  * @param {string} waMsgId - wa_msg_id da mensagem
+ * @param {Object} [deps] - { getProvider } injetavel para teste
  * @returns {Promise<{ buffer: Buffer, mimetype: string }>}
  */
-export async function fetchAudioBuffer(instance, waMsgId) {
-  if (!instance?.api_url || !instance?.api_key || !instance?.instance_name) {
+export async function fetchAudioBuffer(instance, waMsgId, deps = {}) {
+  const getProvider = deps.getProvider || defaultGetProvider
+  const isEvolution = !!instance && (instance.provider || 'evolution') === 'evolution'
+  if (!instance || (isEvolution && (!instance.api_url || !instance.api_key || !instance.instance_name))) {
     throw new Error('instance_missing_credentials')
   }
   if (!waMsgId) throw new Error('wa_msg_id_required')
-
-  const res = await fetch(`${instance.api_url}/chat/getBase64FromMediaMessage/${instance.instance_name}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'apikey': instance.api_key },
-    body: JSON.stringify({ message: { key: { id: waMsgId } }, convertToMp4: false }),
-    timeout: 20000,
-  })
-  const data = await res.json().catch(() => ({}))
-  if (!data.base64) {
-    throw new Error(`evolution_no_base64 (status=${res.status})`)
-  }
-  return {
-    buffer: Buffer.from(data.base64, 'base64'),
-    mimetype: data.mimetype || 'audio/ogg',
-  }
+  const media = await getProvider(instance).fetchMedia(instance, { wa_msg_id: waMsgId })
+  return { buffer: media.buffer, mimetype: media.mimetype || 'audio/ogg' }
 }
