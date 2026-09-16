@@ -1,4 +1,6 @@
 // Desligamento do atendimento da IA (spec 3.10). Recebe o db por parametro. Toda query filtra por conta.
+// executeHandoff/notifyAndOpenLead/broadcastSSE sao injetados por quem chama (aiAgent.js passa as
+// versoes reais) para manter este modulo testavel sem importar server/db.js.
 
 export const AGENT_OFF_NOTE = 'IA desligada — assuma a conversa'
 
@@ -44,4 +46,44 @@ export function findResponsibleHumanId(db, { accountId, leadId, instanceId }) {
       AND u.is_bot = 0 AND u.is_active = 1
   `).get(instanceId, accountId)
   return byDefault ? byDefault.id : null
+}
+
+// Atendimento desligado (spec 3.10): cada lead que estava com a IA vai para o vendedor
+// responsavel (ou roleta, via executeHandoff sem regra 'agent_off'), com aviso e nota.
+// Se nem a roleta (dentro de executeHandoff) achar humano, o lead NAO pode continuar
+// apontando pro robo desligado: fica sem atendente (attendant_id = NULL), como um lead
+// novo esperando a roleta pegar — apontar pro robo desligado seria estritamente pior.
+export function releaseLeadsFromAgent(db, agent, { executeHandoff, notifyAndOpenLead, broadcastSSE = () => {} }) {
+  if (!agent) return { total: 0, released: 0 }
+  const leads = findLeadsHeldByAgent(db, { accountId: agent.account_id, agentId: agent.id, agentUserId: agent.user_id })
+  let released = 0
+  for (const lead of leads) {
+    try {
+      const instanceId = lead.last_instance_id || lead.instance_id || null
+      const responsibleId = findResponsibleHumanId(db, { accountId: lead.account_id, leadId: lead.id, instanceId })
+      if (responsibleId) {
+        db.prepare("UPDATE leads SET attendant_id = ?, ai_handed_off_at = datetime('now'), updated_at = datetime('now') WHERE id = ? AND account_id = ?")
+          .run(responsibleId, lead.id, lead.account_id)
+        try { broadcastSSE(lead.account_id, 'lead:updated', { id: lead.id }) } catch {}
+        setImmediate(() => {
+          notifyAndOpenLead(lead.id, responsibleId, { source: 'bot_handoff' })
+            .catch(e => console.error('[Agent off handoff]', e.message))
+        })
+      } else {
+        executeHandoff(agent, lead, 'agent_off', instanceId)
+        // Roleta (dentro do executeHandoff) tambem pode nao achar ninguem humano: confere
+        // se o lead continua com o usuario-robo do agente e, se sim, zera o atendente.
+        const fresh = db.prepare('SELECT attendant_id FROM leads WHERE id = ? AND account_id = ?').get(lead.id, lead.account_id)
+        if (fresh && fresh.attendant_id === agent.user_id) {
+          db.prepare("UPDATE leads SET attendant_id = NULL, updated_at = datetime('now') WHERE id = ? AND account_id = ?").run(lead.id, lead.account_id)
+        }
+      }
+      db.prepare('INSERT INTO lead_notes (lead_id, user_id, content) VALUES (?, ?, ?)').run(lead.id, agent.user_id, AGENT_OFF_NOTE)
+      released++
+    } catch (e) {
+      console.error(`[AI Agent] releaseLeadsFromAgent lead=${lead.id}:`, e.message)
+    }
+  }
+  console.log(`[AI Agent] Atendimento desligado agent=${agent.id} leads=${leads.length} passados=${released}`)
+  return { total: leads.length, released }
 }

@@ -16,7 +16,7 @@ import {
   shouldSdrHandoff, parseRequiredFields,
 } from './salesAnalysis.js'
 import { createReplySuggestion, getPendingSuggestion } from './aiSuggestions.js'
-import { AGENT_OFF_NOTE, findLeadsHeldByAgent, findResponsibleHumanId } from './agentShutdown.js'
+import { releaseLeadsFromAgent as releaseHeldLeads } from './agentShutdown.js'
 
 // ─── Helpers ──────────────────────────────────────────────────────────
 
@@ -1055,31 +1055,8 @@ export async function replayLastMessagesForAgent(agentId, pausedAt) {
 // ─── releaseLeadsFromAgent ───────────────────────────────────────────────
 // Atendimento desligado (spec 3.10): cada lead que estava com a IA vai para o vendedor
 // responsavel (ou roleta, via executeHandoff sem regra 'agent_off'), com aviso e nota.
+// Fiacao fina: a escrita de verdade mora em agentShutdown.js (testavel, sem importar
+// server/db.js); aqui so passamos as dependencias reais (db, executeHandoff, notifyAndOpenLead).
 export function releaseLeadsFromAgent(agent) {
-  if (!agent) return { total: 0, released: 0 }
-  const leads = findLeadsHeldByAgent(db, { accountId: agent.account_id, agentId: agent.id, agentUserId: agent.user_id })
-  let released = 0
-  for (const lead of leads) {
-    try {
-      const instanceId = lead.last_instance_id || lead.instance_id || null
-      const responsibleId = findResponsibleHumanId(db, { accountId: lead.account_id, leadId: lead.id, instanceId })
-      if (responsibleId) {
-        db.prepare("UPDATE leads SET attendant_id = ?, ai_handed_off_at = datetime('now'), updated_at = datetime('now') WHERE id = ? AND account_id = ?")
-          .run(responsibleId, lead.id, lead.account_id)
-        try { broadcastSSE(lead.account_id, 'lead:updated', { id: lead.id }) } catch {}
-        setImmediate(() => {
-          notifyAndOpenLead(lead.id, responsibleId, { source: 'bot_handoff' })
-            .catch(e => console.error('[Agent off handoff]', e.message))
-        })
-      } else {
-        executeHandoff(agent, lead, 'agent_off', instanceId)
-      }
-      db.prepare('INSERT INTO lead_notes (lead_id, user_id, content) VALUES (?, ?, ?)').run(lead.id, agent.user_id, AGENT_OFF_NOTE)
-      released++
-    } catch (e) {
-      console.error(`[AI Agent] releaseLeadsFromAgent lead=${lead.id}:`, e.message)
-    }
-  }
-  console.log(`[AI Agent] Atendimento desligado agent=${agent.id} leads=${leads.length} passados=${released}`)
-  return { total: leads.length, released }
+  return releaseHeldLeads(db, agent, { executeHandoff, notifyAndOpenLead, broadcastSSE })
 }
