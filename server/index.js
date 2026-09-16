@@ -29,6 +29,7 @@ import proposalRoutes, { publicProposalHandler } from './routes/proposals.js'
 import contractRoutes from './routes/contracts.js'
 import followUpRoutes from './routes/follow-ups.js'
 import agentRoutes from './routes/agents.js'
+import copilotRoutes from './routes/copilot.js'
 import adminRoutes from './routes/admin.js'
 import appSettingsRoutes from './routes/app-settings.js'
 import globalTemplatesRoutes from './routes/globalTemplates.js'
@@ -79,6 +80,7 @@ app.use('/api/proposals', authenticate, proposalRoutes)
 app.use('/api/contracts', authenticate, contractRoutes)
 app.use('/api/follow-ups', authenticate, scopeToAccount, followUpRoutes)
 app.use('/api/agents', authenticate, scopeToAccount, agentRoutes)
+app.use('/api/copilot', authenticate, scopeToAccount, copilotRoutes)
 app.use('/api/admin', authenticate, adminRoutes)
 app.use('/api/app-settings', authenticate, appSettingsRoutes)
 // Templates globais (super_admin only) — sem scopeToAccount pq nao sao presos a conta

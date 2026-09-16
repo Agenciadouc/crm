@@ -884,6 +884,8 @@ router.post('/:id/force-ai-respond', requireRole('super_admin'), async (req, res
       if (reason === 'no_matching_agent') humanMsg = 'Nenhum agente compativel com o lead'
       else if (reason === 'instance_disconnected') humanMsg = 'Instancia esta desconectada'
       else if (reason === 'instance_not_found') humanMsg = 'Instancia nao encontrada'
+      else if (reason === 'paused_for_lead') humanMsg = 'IA esta pausada nessa conversa (copiloto). Retome a IA no chat do lead pra disparar de novo.'
+      else if (reason === 'token_limit') humanMsg = 'Limite mensal de tokens do agente estourado. Aumente o limite ou aguarde a virada do mes.'
       else if (reason === 'send_blocked') {
         if (sendReason.startsWith('lead_daily_cap_')) {
           const cap = sendReason.replace('lead_daily_cap_', '')
@@ -897,6 +899,17 @@ router.post('/:id/force-ai-respond', requireRole('super_admin'), async (req, res
         else humanMsg = `Envio bloqueado: ${sendReason}`
       } else if (reason === 'exception') humanMsg = `Erro interno: ${result.detail || 'sem detalhes'}`
       return res.status(400).json({ error: humanMsg, blockers: [humanMsg], message: humanMsg, reason, sendReason })
+    }
+
+    // Copiloto: nao envia nada ao lead por design — sugestao criada (ou ja pendente) e SUCESSO, nao erro.
+    if (result && result.ok === true && result.mode === 'copilot') {
+      const already = result.reason === 'suggestion_pending'
+      const msg = already
+        ? 'Ja existe uma sugestao pendente pra esse lead — confira no chat.'
+        : (result.suggestion
+            ? 'Sugestao da IA criada — confira no chat do lead (modo copiloto).'
+            : 'IA processou mas nao gerou sugestao (resposta vazia).')
+      return res.json({ ok: true, message: msg, mode: 'copilot', suggestion_pending: already || !!result.suggestion })
     }
 
     // Verifica se houve realmente envio de msg pelo bot
