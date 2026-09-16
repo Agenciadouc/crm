@@ -7,6 +7,9 @@ import { findAgentForLead, processInboundMessage, leadHasHumanAttendant } from '
 import { resolveEffectiveMode } from './copilotMode.js'
 import { createDebouncer } from './leadDebouncer.js'
 import { expirePendingForLead } from './aiSuggestions.js'
+import { transcribeAudio, fetchAudioBuffer } from './deepgramClient.js'
+import { lastInboundMessageId } from './blockTranscriber.js'
+import { runBlock, resolveBlockMeta } from './copilotBlock.js'
 
 export const COPILOT_GROUP_DELAY_MS = 40 * 1000
 
@@ -18,6 +21,26 @@ function runNow(leadId, content, mediaType, instanceId) {
   if (!fresh) return Promise.resolve()
   return processInboundMessage(fresh, content, mediaType, instanceId)
     .catch(e => console.error('[AI Agent] webhook plug error:', e.message))
+}
+
+// Copiloto: ao disparar, analisa TUDO que o lead mandou na janela de 40s — audios
+// transcritos + textos, na ordem — em uma unica analise (mediaType 'text', ja e texto).
+// A logica fica em copilotBlock.js (testavel); aqui so injetamos as dependencias reais.
+function runBlockNow(leadId, instanceId, blockStartMessageId, fallback) {
+  return runBlock(db, {
+    leadId,
+    instanceId,
+    blockStartMessageId,
+    fallback,
+    findAgent: findAgentForLead,
+    fetchAudio: fetchAudioBuffer,
+    transcribe: transcribeAudio,
+    process: processInboundMessage,
+    broadcast: (accountId, id) => {
+      // leadId (camelCase) e o que o Chat escuta; lead_id mantem os outros ouvintes
+      try { broadcastSSE(accountId, 'lead:message', { leadId: id, lead_id: id }) } catch {}
+    },
+  })
 }
 
 export function scheduleAiForInbound(lead, content, mediaType, instanceId) {
@@ -39,7 +62,20 @@ export function scheduleAiForInbound(lead, content, mediaType, instanceId) {
     const agent = findAgentForLead(lead, instanceId)
     const mode = agent ? resolveEffectiveMode(agent, lead, leadHasHumanAttendant(lead)) : 'auto'
     if (mode === 'copilot') {
-      debouncer.schedule(lead.id, () => runNow(lead.id, content, mediaType, instanceId), { agentId: agent.id, accountId: lead.account_id })
+      // O meta guarda o inicio do bloco: so e criado quando o bloco comeca (prevMeta null)
+      // e sobrevive aos reagendamentos das mensagens seguintes.
+      const fallback = { content, mediaType }
+      debouncer.schedule(
+        lead.id,
+        meta => runBlockNow(lead.id, instanceId, meta && meta.blockStartMessageId, fallback)
+          .catch(e => console.error('[AI Agent] webhook plug error:', e.message)),
+        prevMeta => resolveBlockMeta(
+          prevMeta,
+          { agentId: agent.id, accountId: lead.account_id },
+          // So na 1a mensagem do bloco: a que o webhook acabou de inserir
+          () => lastInboundMessageId(db, { accountId: lead.account_id, leadId: lead.id })
+        )
+      )
       return
     }
 

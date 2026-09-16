@@ -13,7 +13,7 @@ function addAttendanceTables(db) {
     ALTER TABLE leads ADD COLUMN is_archived INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE leads ADD COLUMN is_blocked INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE leads ADD COLUMN last_rescue_attempt_at TEXT;
-    CREATE TABLE messages (
+    CREATE TABLE IF NOT EXISTS messages (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       lead_id INTEGER NOT NULL,
       account_id INTEGER NOT NULL,

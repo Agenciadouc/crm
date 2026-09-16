@@ -281,8 +281,9 @@ function buildSystemPrompt(agent, lead, availableTags, availableStages, opts = {
 
 function buildConversationHistory(leadId, limit = 10) {
   // Pega ultimas N msgs (excluindo as do bot pra historico mais limpo? Nao, inclui ambas)
+  // Audio transcrito entra no historico como texto (senao a IA so ve '[Audio]')
   const msgs = db.prepare(`
-    SELECT direction, content, ai_agent_id
+    SELECT direction, COALESCE(NULLIF(transcription, ''), content) AS content, ai_agent_id
     FROM messages
     WHERE lead_id = ? AND content IS NOT NULL AND content != ''
     ORDER BY id DESC LIMIT ?
@@ -541,9 +542,12 @@ export async function processInboundMessage(lead, msgContent, mediaType, instanc
 
     // 4. Audio: flag OFF = recusa + handoff; flag ON = transcreve via Deepgram e segue.
     //    No Copiloto nao recusa nem transfere (quem conversa e o vendedor): so fica sem sugestao.
-    let sttSec = 0
-    let sttCost = 0
-    let sttProvider = null
+    // _opts.stt: STT ja feito por quem chamou (bloco do Copiloto, que transcreve os audios
+    // da janela antes de analisar). O custo entra no ai_agent_token_log como qualquer outro.
+    const sttFromCaller = _opts && _opts.stt ? _opts.stt : null
+    let sttSec = sttFromCaller ? Number(sttFromCaller.seconds || 0) : 0
+    let sttCost = sttFromCaller ? Number(sttFromCaller.costUsd || 0) : 0
+    let sttProvider = sttFromCaller ? (sttFromCaller.provider || null) : null
 
     if (mediaType === 'audio') {
       const declineAndHandoff = async (reason) => {

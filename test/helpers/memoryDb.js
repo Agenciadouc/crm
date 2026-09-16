@@ -28,6 +28,22 @@ export function createTestDb() {
       name TEXT, email TEXT, phone TEXT, city TEXT, empresa TEXT, instagram TEXT,
       ai_handed_off_at TEXT
     );
+    CREATE TABLE messages (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      lead_id INTEGER NOT NULL,
+      account_id INTEGER NOT NULL,
+      direction TEXT NOT NULL CHECK (direction IN ('inbound', 'outbound')),
+      content TEXT,
+      media_type TEXT DEFAULT 'text',
+      media_url TEXT,
+      wa_msg_id TEXT,
+      sender_name TEXT,
+      instance_id INTEGER,
+      ai_agent_id INTEGER,
+      sent_by_user_id INTEGER,
+      follow_up_id INTEGER,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
     CREATE TABLE lead_notes (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       lead_id INTEGER NOT NULL,

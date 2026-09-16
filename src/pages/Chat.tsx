@@ -1271,6 +1271,12 @@ export default function Chat() {
                           {m.media_type && m.media_type !== 'text'
                             ? <MessageMedia message={m} leadId={lead.id} />
                             : (m.content || <em style={{ opacity: 0.5 }}>Sem conteudo</em>)}
+                          {m.media_type === 'audio' && m.transcription && (
+                            <div style={{ marginTop: 6, paddingTop: 6, borderTop: '1px solid rgba(255,255,255,0.1)', fontSize: 12, lineHeight: 1.45, opacity: 0.85, whiteSpace: 'pre-wrap' }}>
+                              <span style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: 0.4, opacity: 0.6, display: 'block', marginBottom: 2 }}>Transcricao</span>
+                              {m.transcription}
+                            </div>
+                          )}
                         </div>
                         <div className="chat-bubble-time">
                           {m.sender_name && <span>{m.sender_name} · </span>}

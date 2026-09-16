@@ -45,7 +45,7 @@ export interface Lead {
   last_message?: string; message_count?: number; tags?: Tag[]
 }
 export type MessageDeliveryStatus = 'sent' | 'delivered' | 'read'
-export interface Message { id: number; lead_id: number; direction: 'inbound' | 'outbound'; content: string | null; media_type: string; media_url: string | null; sender_name: string | null; wa_msg_id: string | null; instance_id?: number | null; created_at: string; delivery_status?: MessageDeliveryStatus; delivered_at?: string | null; read_at?: string | null }
+export interface Message { id: number; lead_id: number; direction: 'inbound' | 'outbound'; content: string | null; media_type: string; media_url: string | null; transcription?: string | null; sender_name: string | null; wa_msg_id: string | null; instance_id?: number | null; created_at: string; delivery_status?: MessageDeliveryStatus; delivered_at?: string | null; read_at?: string | null }
 export const fetchMessageMedia = (leadId: number, msgId: number) => apiFetch<{ dataUrl: string; mime: string; type: string }>(`/api/messages/${leadId}/media/${msgId}`)
 export const markLeadAsRead = (leadId: number) => apiFetch<{ ok: boolean; lead_id: number; unread_count: number }>(`/api/leads/${leadId}/read`, { method: 'PATCH' })
 export interface StageHistoryEntry { id: number; lead_id: number; from_stage_name: string | null; to_stage_name: string; trigger_type: string; user_name: string | null; created_at: string }

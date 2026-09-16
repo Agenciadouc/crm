@@ -60,3 +60,29 @@ test('erro na funcao agendada nao derruba o processo', () => {
   d.schedule(2, () => Promise.reject(new Error('falhou async')))
   assert.doesNotThrow(() => clock.runAll())
 })
+
+test('meta do bloco sobrevive ao reagendamento e chega na funcao agendada', () => {
+  const clock = fakeClock()
+  const d = createDebouncer({ delayMs: 40000, setTimer: clock.setTimer, clearTimer: clock.clearTimer })
+  const vistos = []
+  // 1a msg do bloco: nao ha meta anterior, cria o id de inicio
+  d.schedule(10, meta => vistos.push(meta), prev => ({ agentId: 3, blockStartMessageId: (prev && prev.blockStartMessageId) || 100 }))
+  // 2a msg do bloco: o resolvedor ve o meta anterior e preserva o id de inicio
+  d.schedule(10, meta => vistos.push(meta), prev => ({ agentId: 3, blockStartMessageId: (prev && prev.blockStartMessageId) || 200 }))
+  assert.equal(d.getMeta(10).blockStartMessageId, 100)
+  clock.runAll()
+  assert.equal(vistos.length, 1)
+  assert.deepEqual(vistos[0], { agentId: 3, blockStartMessageId: 100 })
+})
+
+test('meta em objeto e mesclado com o anterior (o que ja estava nao se perde)', () => {
+  const clock = fakeClock()
+  const d = createDebouncer({ delayMs: 40000, setTimer: clock.setTimer, clearTimer: clock.clearTimer })
+  d.schedule(10, () => {}, { agentId: 3, blockStartMessageId: 100 })
+  d.schedule(10, () => {}, { agentId: 3 })
+  assert.deepEqual(d.getMeta(10), { agentId: 3, blockStartMessageId: 100 })
+  assert.equal(d.getMeta(99), null)
+  // cancelWhere continua enxergando o meta mesclado
+  assert.equal(d.cancelWhere(meta => meta.agentId === 3), 1)
+  assert.equal(clock.count(), 0)
+})

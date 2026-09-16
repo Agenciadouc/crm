@@ -20,6 +20,8 @@ export function applyCopilotSchema(db) {
   addColumnIfNotExists(db, 'leads', 'ai_criteria_json', 'TEXT')
   addColumnIfNotExists(db, 'leads', 'ai_moment', 'TEXT')
   addColumnIfNotExists(db, 'leads', 'ai_msgs_since_analysis', 'INTEGER DEFAULT 0')
+  // Texto transcrito do audio (cache: audio ja transcrito nao e transcrito de novo)
+  addColumnIfNotExists(db, 'messages', 'transcription', 'TEXT')
   // Pausa da IA nesta conversa
   addColumnIfNotExists(db, 'leads', 'ai_paused_at', 'TEXT')
   addColumnIfNotExists(db, 'leads', 'ai_paused_by', 'INTEGER REFERENCES users(id) ON DELETE SET NULL')

@@ -14,6 +14,16 @@ test('schema cria colunas novas em ai_agents, accounts e leads', () => {
   for (const col of ['ai_close_chance', 'ai_main_blocker', 'ai_criteria_json', 'ai_moment', 'ai_msgs_since_analysis', 'ai_paused_at', 'ai_paused_by']) {
     assert.ok(columns(db, 'leads').includes(col), `faltou leads.${col}`)
   }
+  assert.ok(columns(db, 'messages').includes('transcription'), 'faltou messages.transcription')
+})
+
+test('messages.transcription nasce vazia e guarda o texto do audio', () => {
+  const db = createTestDb()
+  const { accountId, leadId } = seedAccountAndLead(db)
+  const id = db.prepare("INSERT INTO messages (lead_id, account_id, direction, content, media_type) VALUES (?, ?, 'inbound', '[Audio]', 'audio')").run(leadId, accountId).lastInsertRowid
+  assert.equal(db.prepare('SELECT transcription FROM messages WHERE id = ?').get(id).transcription, null)
+  db.prepare('UPDATE messages SET transcription = ? WHERE id = ? AND account_id = ?').run('bom dia', id, accountId)
+  assert.equal(db.prepare('SELECT transcription FROM messages WHERE id = ?').get(id).transcription, 'bom dia')
 })
 
 test('defaults nao mudam comportamento: mode auto, ai_key_source client, contador 0', () => {
