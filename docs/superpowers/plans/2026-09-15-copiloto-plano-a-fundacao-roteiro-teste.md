@@ -32,6 +32,15 @@ Entenda o que isso significa na prática, para não levar susto no dia 1:
 
 Isso é **comportamento decidido e correto** (é assim que o funil fica confiável sem depender do vendedor lembrar de arrastar o card). Mas é a primeira coisa que assusta. Se você não quiser esse movimento automático em algum agente, a saída é não configurar critério de qualificação/campos obrigatórios nele — não existe botão "desligar só a mudança de etapa".
 
+### Aviso 3 — se áudio e texto chegarem colados (mesmo bloco de ~40s), só o ÚLTIMO é levado em conta
+
+O agrupamento de ~40s do Aviso 2 processa o bloco inteiro, mas o tipo da mensagem que decide se rola transcrição de áudio é sempre o da ÚLTIMA mensagem do bloco.
+
+- Se o lead manda um **ÁUDIO** e, ainda dentro da mesma janela de ~40s, manda um **TEXTO** em seguida: o áudio **NÃO é transcrito**. Ele fica registrado na conversa só como `[Audio]` (sem o conteúdo), e é isso que a IA vai considerar dali pra frente nesse ponto da conversa — o que foi dito no áudio se perde para a análise.
+- Se for o contrário (texto primeiro, áudio por último no bloco): o áudio é transcrito normalmente e entra na análise junto com o texto anterior.
+
+Na prática: se o lead manda um áudio explicando o que quer e, alguns segundos depois (ainda dentro da janela), manda um "oi, tudo bem?" de texto, a sugestão da IA vai ignorar o que foi dito no áudio — porque o texto "atropelou" o áudio no agrupamento. Isso é um comportamento conhecido e documentado do projeto (não é bug a corrigir agora); se acontecer no teste do Passo 4.3, não estranhe.
+
 ---
 
 ## O que você precisa separado antes de começar
@@ -72,6 +81,18 @@ Ainda na tela **Agentes**, olhe o topo da página.
 
 **Esperado:** se aparecer o aviso amarelo **"Falta cadastrar a API Anthropic"**, é porque a conta Dros hoje não tem chave nenhuma configurada — isso é o motivo do "AGENTE IA — OXI QUÍMICA" estar inofensivo agora (bloqueado). Anote isso: você vai decidir a chave só na Parte 3.
 
+### Passo 1.4 — Conferir se a transcrição de áudio (Deepgram) está configurada
+
+No terminal da VPS, sem mostrar o valor da chave (só confirma que ela existe):
+
+```
+grep -q '^DEEPGRAM_API_KEY=' /root/.env && echo 'OK: DEEPGRAM_API_KEY configurada' || echo 'FALTA: DEEPGRAM_API_KEY nao esta no .env'
+```
+
+**Esperado:** aparece `OK: DEEPGRAM_API_KEY configurada`.
+
+**Como saber que deu errado:** aparece `FALTA: DEEPGRAM_API_KEY nao esta no .env` — sem essa chave, a IA nunca transcreve áudio (a transcrição falha em silêncio, sem travar o resto do sistema) e o Passo 4.3 (teste de áudio) não vai funcionar. Peça pra quem cuida do servidor configurar a chave antes de continuar.
+
 ---
 
 ## Parte 2 — Preparar o agente de teste (Copiloto) ANTES de qualquer chave
@@ -95,6 +116,14 @@ Clique em **"Salvar Alterações"** (botão no rodapé do modal).
 **Esperado:** o modal fecha sem erro. Reabra o mesmo agente e confira: a aba Identidade mostra **Copiloto** marcado. Só depois de ver isso confirmado, siga para a Parte 3.
 
 **Como saber que deu errado:** se ao reabrir o agente o modo voltou para Automático ou deu erro ao salvar, PARE — não configure a chave enquanto isso não estiver corrigido.
+
+### Passo 2.4 — Ligar "Responde áudio" (senão a IA nunca vai ouvir os áudios de teste)
+
+Abra de novo o agente → aba **Áudio** → marque a caixa **"Responde áudio"**. O texto de recusa logo abaixo pode ficar como está (só é usado quando a transcrição falhar ou quando esta caixa estiver desmarcada). Clique em **"Salvar Alterações"**.
+
+**Esperado:** ao reabrir o agente, aba Áudio, a caixa "Responde áudio" continua marcada.
+
+**Como saber que deu errado:** se ao reabrir a caixa aparecer desmarcada de novo, o Passo 4.3 (teste de áudio) não vai funcionar — a IA vai tratar qualquer áudio como se a função estivesse desligada (sem transcrever, sem sugestão).
 
 ---
 
@@ -138,6 +167,21 @@ Espere cerca de **40 segundos** depois da ÚLTIMA mensagem que você mandou. Abr
 **Como saber que deu errado:** se depois de 1-2 minutos nada aparece na caixa nem no selo, confira o log — se não aparecer `record_analysis` nem `Processed`, confira se a IA está pausada nesse lead (Parte 8) ou se falta chave (Parte 3).
 
 Neste momento você confirmou o mais importante: **a IA participa da conversa, mas quem manda a mensagem é você.**
+
+### Passo 4.3 — Testar o fluxo de áudio (a IA ouve e qualifica pelo áudio)
+
+Do celular de teste, mande um **ÁUDIO** de WhatsApp para o número da conta (por exemplo, gravando "oi, meu nome é Fulano e sou de São Paulo" — ou algo que bata com o critério de qualificação que você escreveu no Passo 2.2). Espere os mesmos ~40 segundos do Passo 4.2.
+
+**Esperado:**
+- Na caixa do Chat aparece uma sugestão nova que leva em conta o que foi dito no áudio (não uma pergunta genérica ignorando o que você falou).
+- No log da VPS (`pm2 logs dros-crm --lines 80`) aparece uma linha no formato `[AI Agent] STT lead=<id> dur=<segundos>s cost=$<valor> txt="<começo da transcrição>"`.
+
+**Como saber que deu errado — três causas possíveis, veja qual bate:**
+1. **"Responde áudio" está desligado no agente** (confira o Passo 2.4).
+2. **A transcrição veio vazia** (áudio incompreensível, ruído, mudo).
+3. **Falta a chave Deepgram no servidor, ou a Deepgram caiu** (confira o Passo 1.4).
+
+Nos três casos, o sintoma no Copiloto é **sempre o mesmo: não aparece nada na caixa** — sem linha de STT no log, sem sugestão nova, sem aviso de erro em lugar nenhum. É fácil confundir isso com "a IA não funcionou" quando na verdade é um desses três motivos específicos do áudio. Se não aparecer nada, confira nesta ordem: Passo 1.4 (chave existe?) → Passo 2.4 (flag ligada?) → grave um áudio mais claro e tente de novo.
 
 ---
 
