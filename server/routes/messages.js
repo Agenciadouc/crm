@@ -1,7 +1,9 @@
 import { Router, json as jsonBodyParser } from 'express'
-import fetch from 'node-fetch'
 import db from '../db.js'
-import { sendViaInstance, checkWhatsAppNumber } from '../services/leadHandoff.js'
+import { sendViaInstance, sendMediaViaInstance } from '../services/leadHandoff.js'
+import { getProvider } from '../services/whatsapp/index.js'
+import { resolveMediaInstance } from '../services/whatsapp/resolveInstance.js'
+import { jidToSendNumber } from '../services/whatsapp/normalize.js'
 import { canAtendenteAccessLead, getUserPrimaryInstanceId } from '../services/leadAccess.js'
 
 const router = Router()
@@ -107,11 +109,8 @@ router.post('/:leadId', async (req, res) => {
     // Check if it's a @lid without real phone
     if (jid.endsWith('@lid') && !lead.phone) return res.status(400).json({ error: 'Lead sem telefone real (ID temporario do WhatsApp). Edite o lead e adicione o telefone manualmente.' })
 
-    // Normalize number for Evolution API
-    let number = jid.replace('@s.whatsapp.net', '').replace('@c.us', '').replace('@lid', '').replace(/[^\d]/g, '')
-    if (number.startsWith('55') && number.length === 12) number = number.slice(0, 4) + '9' + number.slice(4)
-    else if (!number.startsWith('55') && number.length === 11) number = '55' + number
-    else if (!number.startsWith('55') && number.length === 10) number = '55' + number.slice(0, 2) + '9' + number.slice(2)
+    // Normalize number for sending
+    const number = jidToSendNumber(jid)
 
     // Envia via sendViaInstance (com pre-flight + helper centralizado).
     // Chat manual humano: skip TODAS as protecoes anti-ban (atendente controla volume real e digita de verdade).
@@ -165,7 +164,7 @@ router.post('/:leadId', async (req, res) => {
   }
 })
 
-// Fetch media on-demand from Evolution API (returns base64 data URL)
+// Fetch media on-demand from the WhatsApp provider (returns base64 data URL)
 router.get('/:leadId/media/:msgId', async (req, res) => {
   try {
     const message = db.prepare('SELECT * FROM messages WHERE id = ? AND lead_id = ?').get(req.params.msgId, req.params.leadId)
@@ -173,22 +172,23 @@ router.get('/:leadId/media/:msgId', async (req, res) => {
     if (message.media_type === 'text') return res.status(400).json({ error: 'Sem midia' })
 
     const lead = db.prepare('SELECT account_id, instance_id FROM leads WHERE id = ?').get(message.lead_id)
-    const instance = lead?.instance_id
-      ? db.prepare('SELECT * FROM whatsapp_instances WHERE id = ?').get(lead.instance_id)
-      : db.prepare('SELECT * FROM whatsapp_instances WHERE account_id = ? AND status = ? LIMIT 1').get(lead?.account_id, 'connected')
+    if (!lead) return res.status(404).json({ error: 'Lead nao encontrado' })
+    if (req.accountId && lead.account_id !== req.accountId) return res.status(403).json({ error: 'Sem permissao' })
+
+    const instance = resolveMediaInstance(db, message, lead)
     if (!instance) return res.status(400).json({ error: 'Sem instancia WhatsApp' })
 
-    const r = await fetch(`${instance.api_url}/chat/getBase64FromMediaMessage/${instance.instance_name}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', apikey: instance.api_key },
-      body: JSON.stringify({ message: { key: { id: message.wa_msg_id } }, convertToMp4: false }),
-    })
-    const data = await r.json()
-    if (!data.base64) return res.status(404).json({ error: 'Midia nao encontrada na Evolution' })
+    let media
+    try {
+      media = await getProvider(instance).fetchMedia(instance, message)
+    } catch (e) {
+      if (e.code === 'media_not_found') return res.status(404).json({ error: 'Midia nao encontrada na Evolution' })
+      throw e
+    }
 
     const mimeMap = { image: 'image/jpeg', video: 'video/mp4', audio: 'audio/ogg', document: 'application/pdf', sticker: 'image/webp' }
-    const mime = data.mimetype || mimeMap[message.media_type] || 'application/octet-stream'
-    res.json({ dataUrl: `data:${mime};base64,${data.base64}`, mime, type: message.media_type })
+    const mime = media.mimetype || mimeMap[message.media_type] || 'application/octet-stream'
+    res.json({ dataUrl: `data:${mime};base64,${media.buffer.toString('base64')}`, mime, type: message.media_type })
   } catch (err) {
     res.status(500).json({ error: err.message })
   }
@@ -221,16 +221,17 @@ router.post('/:leadId/media', jsonBodyParser({ limit: '150mb' }), async (req, re
     if (!jid) return res.status(400).json({ error: 'Lead sem telefone' })
     if (jid.endsWith('@lid') && !lead.phone) return res.status(400).json({ error: 'Lead sem telefone real' })
 
-    let number = jid.replace('@s.whatsapp.net', '').replace('@c.us', '').replace('@lid', '').replace(/[^\d]/g, '')
-    if (number.startsWith('55') && number.length === 12) number = number.slice(0, 4) + '9' + number.slice(4)
-    else if (!number.startsWith('55') && number.length === 11) number = '55' + number
-    else if (!number.startsWith('55') && number.length === 10) number = '55' + number.slice(0, 2) + '9' + number.slice(2)
+    const number = jidToSendNumber(jid)
+    const fileName = file_name || `arquivo.${mime.split('/')[1] || 'bin'}`
+    const content = caption || file_name || `[${mediaType}]`
 
-    // Pre-flight: valida numero antes de upload da midia (evita transferir base64 inutil)
-    const exists = await checkWhatsAppNumber(instance, number)
-    if (exists === false) {
+    // Mesmas checagens do texto do Chat (humano): skip anti-ban de volume; pre-flight de numero continua.
+    const sendRes = await sendMediaViaInstance(instance, number, { type: mediaType, base64, mimetype: mime, fileName, caption }, {
+      skipTyping: true, skipQuota: true, skipBusinessHours: true, skipLeadCap: true, skipHealthCheck: true,
+    })
+
+    if (sendRes.validationFailed) {
       console.log(`[Messages/Media] phone=${number} inst=${instance.instance_name} exists=false — bloqueando envio`)
-      const content = caption || file_name || `[${mediaType}]`
       const result = db.prepare(`
         INSERT INTO messages (lead_id, account_id, direction, content, sender_name, wa_msg_id, media_type, instance_id, sent_by_user_id, delivery_status)
         VALUES (?, ?, 'outbound', ?, ?, NULL, ?, ?, ?, 'failed')
@@ -239,41 +240,17 @@ router.post('/:leadId/media', jsonBodyParser({ limit: '150mb' }), async (req, re
       return res.status(200).json({ message, delivered: false, instance: { id: instance.id, name: instance.instance_name }, error: 'Numero nao tem WhatsApp. Midia nao foi enviada.' })
     }
 
-    let endpoint, payload
-    if (mediaType === 'audio') {
-      endpoint = `${instance.api_url}/message/sendWhatsAppAudio/${encodeURIComponent(instance.instance_name)}`
-      payload = { number, audio: base64, encoding: true }
-    } else {
-      endpoint = `${instance.api_url}/message/sendMedia/${encodeURIComponent(instance.instance_name)}`
-      payload = {
-        number,
-        mediatype: mediaType,
-        media: base64,
-        mimetype: mime,
-        fileName: file_name || `arquivo.${mime.split('/')[1] || 'bin'}`,
-        caption: caption || undefined,
-      }
-    }
-
-    const sendRes = await fetch(endpoint, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', apikey: instance.api_key },
-      body: JSON.stringify(payload),
-    })
-    const sendData = await sendRes.json()
-    const delivered = !!sendData?.key?.id
-
+    const delivered = !!sendRes.ok
     if (!delivered) {
-      console.error(`[Messages/Media] Failed for ${jid} via ${instance.instance_name}:`, JSON.stringify(sendData)?.substring(0, 300))
+      console.error(`[Messages/Media] Failed for ${jid} via ${instance.instance_name}: ${sendRes.reason}`, JSON.stringify(sendRes.raw || {}).substring(0, 300))
     }
 
-    const content = caption || file_name || `[${mediaType}]`
     const deliveryStatus = delivered ? 'sent' : 'failed'
     // sent_by_user_id: V2 analytics — atribui mídia ao humano específico.
     const result = db.prepare(`
       INSERT INTO messages (lead_id, account_id, direction, content, sender_name, wa_msg_id, media_type, instance_id, sent_by_user_id, delivery_status)
       VALUES (?, ?, 'outbound', ?, ?, ?, ?, ?, ?, ?)
-    `).run(lead.id, lead.account_id, content, req.user.name, sendData?.key?.id || null, mediaType, instance.id, req.user.id, deliveryStatus)
+    `).run(lead.id, lead.account_id, content, req.user.name, sendRes.wamsgId || null, mediaType, instance.id, req.user.id, deliveryStatus)
 
     if (delivered) {
       db.prepare("UPDATE leads SET last_instance_id = ?, updated_at = datetime('now') WHERE id = ?").run(instance.id, lead.id)

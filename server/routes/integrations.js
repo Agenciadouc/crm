@@ -3,6 +3,10 @@ import fetch from 'node-fetch'
 import db, { DEFAULT_EVOLUTION_API_URL, DEFAULT_EVOLUTION_API_KEY } from '../db.js'
 import { requireRole } from '../middleware/auth.js'
 import { runPollNow } from '../scheduler.js'
+import { getPublicBaseUrl } from '../services/publicUrl.js'
+import { getProvider } from '../services/whatsapp/index.js'
+import { generateWebhookToken } from '../services/whatsapp/schema.js'
+import { createWebhookRegistrar } from '../services/whatsapp/webhookRegistration.js'
 
 const router = Router()
 
@@ -41,6 +45,11 @@ router.put('/evolution-config', requireRole('super_admin', 'gerente'), (req, res
   res.json({ ok: true, api_url: baseUrl })
 })
 
+// ─── Dominio publico do CRM (usado pelo front para montar URLs de webhook) ───
+router.get('/public-config', (req, res) => {
+  res.json({ public_base_url: getPublicBaseUrl() })
+})
+
 // ─── List WhatsApp instances ─────────────────────────────────────
 // Gerente/super_admin ve todas da conta.
 // Atendente ve SO a instancia atribuida a ele (users.primary_instance_id) e
@@ -63,19 +72,13 @@ router.get('/whatsapp', requireRole('super_admin', 'gerente', 'atendente'), (req
   res.json({ instances: rows })
 })
 
-// Helper: register webhook on Evolution for a given instance
-async function registerEvolutionWebhook(baseUrl, apiKey, instanceName, accountSlug) {
-  const webhookUrl = `https://drosagencia.com.br/crm/api/webhooks/evolution/${accountSlug}`
-  try {
-    await fetch(`${baseUrl}/webhook/set/${encodeURIComponent(instanceName)}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', apikey: apiKey },
-      body: JSON.stringify({ webhook: { url: webhookUrl, enabled: true, events: ['MESSAGES_UPSERT'] } }),
-    })
-    console.log(`[Evolution Webhook] Set for ${instanceName} → ${webhookUrl}`)
-  } catch (err) {
-    console.error('[Evolution Webhook Setup]', err.message)
-  }
+// Helper: registra no provedor o webhook exclusivo da instancia (URL por token, MESSAGES_UPSERT + MESSAGES_UPDATE)
+const webhookRegistrar = createWebhookRegistrar({ db, getProvider })
+async function registerInstanceWebhook(instance) {
+  const r = await webhookRegistrar.registerInstanceWebhook(instance)
+  if (r.ok) console.log(`[Evolution Webhook] Set for ${instance.instance_name} → ${r.url}`)
+  else console.error('[Evolution Webhook Setup]', instance.instance_name, r.reason)
+  return r
 }
 
 // ─── Create instance on Evolution API + get QR code ──────────────
@@ -98,9 +101,9 @@ router.post('/whatsapp', requireRole('super_admin', 'gerente', 'atendente'), asy
   const existing = db.prepare('SELECT id FROM whatsapp_instances WHERE account_id = ? AND instance_name = ?').get(req.accountId, instance_name)
   if (existing) {
     db.prepare("UPDATE whatsapp_instances SET api_url = ?, api_key = ?, updated_at = datetime('now') WHERE id = ?").run(baseUrl, api_key, existing.id)
-    await registerEvolutionWebhook(baseUrl, api_key, instance_name, account.slug)
     const instance = db.prepare('SELECT * FROM whatsapp_instances WHERE id = ?').get(existing.id)
-    return res.json({ instance })
+    await registerInstanceWebhook(instance)
+    return res.json({ instance: db.prepare('SELECT * FROM whatsapp_instances WHERE id = ?').get(existing.id) })
   }
 
   // Create instance on Evolution API
@@ -119,8 +122,8 @@ router.post('/whatsapp', requireRole('super_admin', 'gerente', 'atendente'), asy
 
   // Save to DB. Anti-ban: nova instancia entra em warm-up de 3 dias (volume gradual).
   const result = db.prepare(
-    "INSERT INTO whatsapp_instances (account_id, instance_name, api_url, api_key, status, qr_code, lead_intake_mode, warmup_until) VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now', '+3 days'))"
-  ).run(req.accountId, instance_name, baseUrl, api_key, qrCode ? 'connecting' : 'disconnected', qrCode, lead_intake_mode)
+    "INSERT INTO whatsapp_instances (account_id, instance_name, api_url, api_key, status, qr_code, lead_intake_mode, warmup_until, provider, webhook_token) VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now', '+3 days'), 'evolution', ?)"
+  ).run(req.accountId, instance_name, baseUrl, api_key, qrCode ? 'connecting' : 'disconnected', qrCode, lead_intake_mode, generateWebhookToken())
   const instance = db.prepare('SELECT * FROM whatsapp_instances WHERE id = ?').get(result.lastInsertRowid)
 
   // Se atendente criou, vira dono automatico (seta primary_instance_id + default_attendant_id).
@@ -132,7 +135,7 @@ router.post('/whatsapp', requireRole('super_admin', 'gerente', 'atendente'), asy
   }
 
   // Setup webhook automatically (Evolution v2.3 format)
-  await registerEvolutionWebhook(baseUrl, api_key, instance_name, account.slug)
+  await registerInstanceWebhook(instance)
 
   res.json({ instance })
 })
@@ -173,8 +176,7 @@ router.post('/whatsapp/:id/connect', allowInstanceOwner, async (req, res) => {
     db.prepare("UPDATE whatsapp_instances SET qr_code = ?, status = 'connecting', updated_at = datetime('now') WHERE id = ?").run(qrCode, instance.id)
 
     // Re-register webhook on every connect to recover from any past Evolution-side resets
-    const account = db.prepare('SELECT slug FROM accounts WHERE id = ?').get(instance.account_id)
-    if (account?.slug) await registerEvolutionWebhook(instance.api_url, instance.api_key, instance.instance_name, account.slug)
+    await registerInstanceWebhook(instance)
 
     const updated = db.prepare('SELECT * FROM whatsapp_instances WHERE id = ?').get(instance.id)
     res.json({ instance: updated })
@@ -389,15 +391,9 @@ router.delete('/whatsapp/:id', requireRole('super_admin', 'gerente', 'atendente'
 router.post('/whatsapp/:id/setup-webhook', requireRole('super_admin', 'gerente', 'atendente'), async (req, res) => {
   const instance = getOwnedInstance(req, res)
   if (!instance) return
-  const account = db.prepare('SELECT slug FROM accounts WHERE id = ?').get(instance.account_id)
-  if (!account?.slug) return res.status(404).json({ error: 'Conta nao encontrada' })
-  const webhookUrl = `https://drosagencia.com.br/crm/api/webhooks/evolution/${account.slug}`
-  try {
-    await registerEvolutionWebhook(instance.api_url, instance.api_key, instance.instance_name, account.slug)
-    res.json({ ok: true, webhookUrl })
-  } catch (err) {
-    res.status(500).json({ error: err.message })
-  }
+  const r = await registerInstanceWebhook(instance)
+  if (!r.ok) return res.status(500).json({ error: r.reason || 'Falha ao registrar webhook', webhookUrl: r.url })
+  res.json({ ok: true, webhookUrl: r.url })
 })
 
 // ─── Update lead intake mode (open vs restricted) ─────────────────

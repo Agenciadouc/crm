@@ -2,6 +2,7 @@ import Database from 'better-sqlite3'
 import bcrypt from 'bcryptjs'
 import { fileURLToPath } from 'url'
 import { dirname, resolve } from 'path'
+import { migrateWhatsappProviderSchema } from './services/whatsapp/schema.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const dbPath = resolve(__dirname, 'data', 'crm.db')
@@ -370,6 +371,8 @@ try {
   `).run()
   if (r.changes > 0) console.log(`[db] migration: warmup_until set for ${r.changes} recent instances`)
 } catch (e) { console.warn('[db] warmup backfill:', e.message) }
+// Provedor de WhatsApp por numero: provider (default evolution), provider_config e webhook_token por instancia
+migrateWhatsappProviderSchema(db)
 // leads: instance_id to track which WhatsApp number received this lead
 addColumnIfNotExists('leads', 'instance_id', 'INTEGER REFERENCES whatsapp_instances(id) ON DELETE SET NULL')
 // accounts: Evolution API credentials (shared across all instances)
