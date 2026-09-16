@@ -800,6 +800,7 @@ export const toggleAgentActive = (id: number, accountId: number) =>
     ok: boolean
     is_active: number
     replay?: { total: number; will_replay: number }
+    released_leads?: number
   }>(`/api/agents/${id}/toggle-active?account_id=${accountId}`, { method: 'PATCH' })
 
 export const fetchAgentUsage = (id: number, accountId: number) =>
