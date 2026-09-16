@@ -44,22 +44,45 @@ test('apiUrlKey tira barras finais', () => {
   assert.equal(apiUrlKey(null), '')
 })
 
-test('checkApiUrlsAlive: uma chamada por URL; so excecao marca como fora do ar', async () => {
+test('checkApiUrlsAlive: uma chamada por URL; 2xx/401/404 no ar, excecao fora do ar', async () => {
   const calls = []
   const fakeFetch = async (url) => {
     calls.push(url)
     if (url.startsWith('http://caiu')) throw new Error('ECONNREFUSED')
-    return { ok: false, status: 500 }
+    if (url.startsWith('http://sem-chave')) return { ok: false, status: 401 }
+    if (url.startsWith('http://sem-rota')) return { ok: false, status: 404 }
+    return { ok: true, status: 200 }
   }
   const instances = [
     { api_url: 'http://evo-a:8080/' },
     { api_url: 'http://evo-a:8080' },
+    { api_url: 'http://sem-chave:8080' },
+    { api_url: 'http://sem-rota:8080' },
     { api_url: 'http://caiu:8080' },
     { api_url: '' },
   ]
   const alive = await checkApiUrlsAlive(instances, fakeFetch)
-  assert.deepEqual(calls, ['http://evo-a:8080/', 'http://caiu:8080/'])
+  assert.deepEqual(calls, ['http://evo-a:8080/', 'http://sem-chave:8080/', 'http://sem-rota:8080/', 'http://caiu:8080/'])
   assert.equal(alive.get('http://evo-a:8080'), true)
+  assert.equal(alive.get('http://sem-chave:8080'), true)
+  assert.equal(alive.get('http://sem-rota:8080'), true)
   assert.equal(alive.get('http://caiu:8080'), false)
   assert.equal(alive.has(''), false)
+})
+
+// Evolution reiniciando responde 502/503 em GET /. Se isso contar como "no ar", o tick segue,
+// o r.json() do connectionState lanca e o catch marca toda instancia connected como disconnected
+// (estado terminal: polling e reregistro so olham 'connected').
+test('checkApiUrlsAlive: 5xx de restart da Evolution conta como fora do ar', async () => {
+  const porUrl = { 'http://evo-502:8080/': 502, 'http://evo-503:8080/': 503, 'http://evo-500:8080/': 500 }
+  const fakeFetch = async (url) => ({ ok: false, status: porUrl[url] })
+  const instances = [
+    { api_url: 'http://evo-502:8080' },
+    { api_url: 'http://evo-503:8080' },
+    { api_url: 'http://evo-500:8080' },
+  ]
+  const alive = await checkApiUrlsAlive(instances, fakeFetch)
+  assert.equal(alive.get('http://evo-502:8080'), false)
+  assert.equal(alive.get('http://evo-503:8080'), false)
+  assert.equal(alive.get('http://evo-500:8080'), false)
 })
