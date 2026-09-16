@@ -238,3 +238,28 @@ test('handleStatusUpdate: promove, nunca regride e respeita a conta', () => {
   assert.equal(handler.handleStatusUpdate(seed.account, seed.instance, [{ messageId: 'BAE5OUTBOUND0009', status: 'read', timestamp: 'x' }]), 0)
   assert.equal(db.prepare('SELECT delivery_status FROM messages WHERE id = ?').get(alheia).delivery_status, 'sent')
 })
+
+test('handleStatusUpdate: erro dentro do loop e engolido (rota segue respondendo 200)', () => {
+  const { db, seed, handler } = setup()
+  const lead = insertLead(db, { account_id: seed.account.id, funnel_id: seed.funnelId, stage_id: seed.stage1, phone: '5547991351835' })
+  const own = db.prepare("INSERT INTO messages (lead_id, account_id, direction, content, wa_msg_id, delivery_status) VALUES (?, ?, 'outbound', 'x', ?, 'sent')")
+    .run(lead.id, seed.account.id, 'BAE5OUTBOUND0001').lastInsertRowid
+
+  // messageId malformado (objeto no lugar de string) faz o bind do better-sqlite3 lancar
+  // no meio do loop. Como no webhook de hoje, o erro e logado e nao propaga.
+  let changed
+  assert.doesNotThrow(() => {
+    changed = handler.handleStatusUpdate(seed.account, seed.instance, [
+      { messageId: 'BAE5OUTBOUND0001', status: 'delivered', timestamp: 'x' },
+      { messageId: { id: 'BAE5OUTBOUND0002' }, status: 'read', timestamp: 'x' },
+    ])
+  })
+  // o que ja tinha sido aplicado antes do erro permanece gravado
+  assert.equal(changed, 1)
+  assert.equal(db.prepare('SELECT delivery_status FROM messages WHERE id = ?').get(own).delivery_status, 'delivered')
+
+  // lista nao iteravel (provedor devolvendo formato inesperado) tambem nao derruba a rota
+  let semLista
+  assert.doesNotThrow(() => { semLista = handler.handleStatusUpdate(seed.account, seed.instance, {}) })
+  assert.equal(semLista, 0)
+})

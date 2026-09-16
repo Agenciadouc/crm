@@ -41,22 +41,28 @@ export function createInboundHandler(deps) {
   // Filtra por conta: um wa_msg_id so atualiza mensagem da conta que recebeu o webhook.
   function handleStatusUpdate(account, waInstance, statuses) {
     let changed = 0
-    for (const s of statuses || []) {
-      const newStatus = s.status
-      let timestampCol = null
-      if (newStatus === 'delivered') timestampCol = 'delivered_at'
-      else if (newStatus === 'read') timestampCol = 'read_at'
-      else if (newStatus !== 'sent') continue
-      const msg = db.prepare('SELECT id, lead_id, account_id, delivery_status FROM messages WHERE wa_msg_id = ? AND account_id = ?').get(s.messageId, account.id)
-      if (!msg) continue
-      if ((STATUS_RANK[newStatus] || 0) <= (STATUS_RANK[msg.delivery_status] || 0)) continue
-      const sets = ['delivery_status = ?']
-      const params = [newStatus]
-      if (timestampCol) sets.push(`${timestampCol} = COALESCE(${timestampCol}, datetime('now'))`)
-      params.push(msg.id)
-      db.prepare(`UPDATE messages SET ${sets.join(', ')} WHERE id = ?`).run(...params)
-      changed++
-      try { broadcastSSE(msg.account_id, 'message:status', { message_id: msg.id, lead_id: msg.lead_id, status: newStatus }) } catch {}
+    // try/catch do bloco original (webhooks.js): erro no loop e logado e engolido para a rota
+    // seguir respondendo 200 ao provedor (um 500 faria a Evolution re-tentar o webhook).
+    try {
+      for (const s of statuses || []) {
+        const newStatus = s.status
+        let timestampCol = null
+        if (newStatus === 'delivered') timestampCol = 'delivered_at'
+        else if (newStatus === 'read') timestampCol = 'read_at'
+        else if (newStatus !== 'sent') continue
+        const msg = db.prepare('SELECT id, lead_id, account_id, delivery_status FROM messages WHERE wa_msg_id = ? AND account_id = ?').get(s.messageId, account.id)
+        if (!msg) continue
+        if ((STATUS_RANK[newStatus] || 0) <= (STATUS_RANK[msg.delivery_status] || 0)) continue
+        const sets = ['delivery_status = ?']
+        const params = [newStatus]
+        if (timestampCol) sets.push(`${timestampCol} = COALESCE(${timestampCol}, datetime('now'))`)
+        params.push(msg.id)
+        db.prepare(`UPDATE messages SET ${sets.join(', ')} WHERE id = ?`).run(...params)
+        changed++
+        try { broadcastSSE(msg.account_id, 'message:status', { message_id: msg.id, lead_id: msg.lead_id, status: newStatus }) } catch {}
+      }
+    } catch (e) {
+      console.error('[Webhook messages.update]', e.message)
     }
     return changed
   }
