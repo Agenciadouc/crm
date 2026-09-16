@@ -12,8 +12,8 @@ import { pickAnthropicKey } from './anthropicKeyPicker.js'
 import { resolveEffectiveMode, usesSalesEngine, deliveryActionForMode, agentAcceptsLead } from './copilotMode.js'
 import {
   ANALYSIS_TOOL, ANALYSIS_TOOL_NAME, parseAnalysisInput, saveLeadAnalysis, readLeadCriteria,
-  checkStageGate, formatGateRefusal, buildSalesRulesLines, buildQualificationSummary,
-  shouldSdrHandoff, parseRequiredFields,
+  formatGateRefusal, buildSalesRulesLines, buildQualificationSummary,
+  shouldSdrHandoff, parseRequiredFields, gateForLead, handoffStageMoveAllowed,
 } from './salesAnalysis.js'
 import { createReplySuggestion, getPendingSuggestion } from './aiSuggestions.js'
 import { releaseLeadsFromAgent as releaseHeldLeads } from './agentShutdown.js'
@@ -54,15 +54,6 @@ export function leadHasHumanAttendant(lead) {
 }
 
 // Trava de qualificacao (spec 3.4), sempre com o lead lido do banco
-function gateForLead(agent, freshLead) {
-  return checkStageGate({
-    requiredFields: parseRequiredFields(agent.required_fields),
-    lead: freshLead,
-    criteria: readLeadCriteria(freshLead),
-    hasQualificationText: !!(agent.qualification_criteria && agent.qualification_criteria.trim()),
-  })
-}
-
 // Resumo da qualificacao para o vendedor, como nota do lead (autor = usuario-robo do agente)
 function addQualificationNote(agent, freshLead) {
   const text = buildQualificationSummary(freshLead, readLeadCriteria(freshLead))
@@ -319,7 +310,10 @@ function pickFromRoulette(accountId, instanceId, excludeUserId) {
 
 // ─── executeHandoff ───────────────────────────────────────────────────
 
-function executeHandoff(agent, lead, reason, instanceId) {
+// opts (todos opcionais, default = comportamento historico):
+//   skipFirstMsg   - nao manda a mensagem-template de primeira abordagem PRO LEAD (desligamento do atendimento)
+//   notifyDelayMs  - atrasa a notificacao do vendedor (escalonamento em lote); 0/ausente = setImmediate, como antes
+function executeHandoff(agent, lead, reason, instanceId, opts = {}) {
   const rule = db.prepare('SELECT * FROM ai_agent_handoff_rules WHERE agent_id = ? AND reason = ?').get(agent.id, reason)
 
   // Resolve target user
@@ -341,11 +335,20 @@ function executeHandoff(agent, lead, reason, instanceId) {
   // Marca como handoff'ed pra bot nao voltar
   db.prepare("UPDATE leads SET ai_handed_off_at = datetime('now') WHERE id = ?").run(lead.id)
 
-  // Move etapa (se configurado)
+  // Move etapa (se configurado). A trava de etapa (spec: so muda com qualificacao completa)
+  // vale tambem aqui: sem isso uma regra "keyword -> Qualificado" furava o gate, porque
+  // quem escolhe o reason do handoff e a propria IA. O handoff em si continua acontecendo;
+  // so o movimento de etapa fica bloqueado.
   if (rule?.move_to_stage_id) {
-    const prev = lead.stage_id
-    db.prepare("UPDATE leads SET stage_id = ?, updated_at = datetime('now') WHERE id = ?").run(rule.move_to_stage_id, lead.id)
-    db.prepare('INSERT INTO stage_history (lead_id, from_stage_id, to_stage_id, trigger_type) VALUES (?, ?, ?, ?)').run(lead.id, prev, rule.move_to_stage_id, 'ai_handoff')
+    const freshForGate = getLead(lead.id) || lead
+    const gate = gateForLead(agent, freshForGate)
+    if (handoffStageMoveAllowed({ salesEngine: usesSalesEngine(agent), rule, gate })) {
+      const prev = freshForGate.stage_id
+      db.prepare("UPDATE leads SET stage_id = ?, updated_at = datetime('now') WHERE id = ?").run(rule.move_to_stage_id, lead.id)
+      db.prepare('INSERT INTO stage_history (lead_id, from_stage_id, to_stage_id, trigger_type) VALUES (?, ?, ?, ?)').run(lead.id, prev, rule.move_to_stage_id, 'ai_handoff')
+    } else {
+      console.log(`[AI Agent] handoff move_to_stage RECUSADO lead=${lead.id} reason=${reason} faltando=${JSON.stringify(gate)}`)
+    }
   }
 
   // Add tag (se configurado)
@@ -358,10 +361,14 @@ function executeHandoff(agent, lead, reason, instanceId) {
 
   // Dispara handoff de primeira msg + notif (se target eh humano valido)
   if (targetUserId) {
-    setImmediate(() => {
-      notifyAndOpenLead(lead.id, targetUserId, { source: 'bot_handoff' })
+    const notifyOpts = { source: 'bot_handoff' }
+    if (opts.skipFirstMsg) notifyOpts.skipFirstMsg = true
+    const fire = () => {
+      notifyAndOpenLead(lead.id, targetUserId, notifyOpts)
         .catch(e => console.error('[Handoff bot]', e.message))
-    })
+    }
+    if (opts.notifyDelayMs > 0) setTimeout(fire, opts.notifyDelayMs)
+    else setImmediate(fire)
   }
 }
 

@@ -4,7 +4,7 @@ import { createTestDb, seedAccountAndLead } from './helpers/memoryDb.js'
 import {
   ANALYSIS_TOOL, ANALYSIS_TOOL_NAME, parseAnalysisInput, parseRequiredFields, readLeadCriteria,
   checkStageGate, formatGateRefusal, shouldSdrHandoff, buildQualificationSummary,
-  buildSalesRulesLines, saveLeadAnalysis,
+  buildSalesRulesLines, saveLeadAnalysis, gateForLead, handoffStageMoveAllowed,
 } from '../server/services/salesAnalysis.js'
 
 test('ANALYSIS_TOOL tem nome e campos obrigatorios do spec', () => {
@@ -148,4 +148,69 @@ test('saveLeadAnalysis nao grava em lead de outra conta', () => {
   const outra = seedAccountAndLead(db, { accountName: 'Outra' })
   saveLeadAnalysis(db, outra.accountId, leadId, { moment: 'x', closeChance: 10, mainBlocker: null, criteria: [] })
   assert.equal(db.prepare('SELECT ai_moment FROM leads WHERE id = ?').get(leadId).ai_moment, null)
+})
+
+
+// ─── Trava de etapa no handoff (item 3): a regra de handoff nao pode furar o gate ───
+// Quem escolhe o reason do handoff e a propria IA, entao uma regra "keyword -> Qualificado"
+// movia o lead para Qualificado sem nenhum criterio atendido.
+
+const agenteQualifica = { required_fields: '["name","city"]', qualification_criteria: 'tem orcamento?' }
+const leadCompleto = {
+  name: 'Ana', city: 'Sao Paulo',
+  ai_criteria_json: JSON.stringify([{ name: 'tem orcamento?', status: 'atendido', evidence: 'tenho 5k' }]),
+}
+const leadIncompleto = { name: 'Ana', city: null, ai_criteria_json: null }
+
+test('gateForLead: lead completo passa, lead sem campo/analise nao passa', () => {
+  assert.equal(gateForLead(agenteQualifica, leadCompleto).allowed, true)
+  const gate = gateForLead(agenteQualifica, leadIncompleto)
+  assert.equal(gate.allowed, false)
+  assert.deepEqual(gate.missingFields, ['city'])
+  assert.equal(gate.noAnalysis, true)
+})
+
+test('handoff com move_to_stage_id: bloqueado quando a qualificacao nao esta completa', () => {
+  const rule = { reason: 'keyword', move_to_stage_id: 7 }
+  const gate = gateForLead(agenteQualifica, leadIncompleto)
+  assert.equal(handoffStageMoveAllowed({ salesEngine: true, rule, gate }), false)
+})
+
+test('handoff com move_to_stage_id: liberado quando a qualificacao esta completa', () => {
+  const rule = { reason: 'keyword', move_to_stage_id: 7 }
+  const gate = gateForLead(agenteQualifica, leadCompleto)
+  assert.equal(handoffStageMoveAllowed({ salesEngine: true, rule, gate }), true)
+})
+
+test('a trava vale para todo reason escolhido pela IA, nao so qualified', () => {
+  const gate = gateForLead(agenteQualifica, leadIncompleto)
+  for (const reason of ['keyword', 'unknown', 'max_messages', 'other', 'audio_received']) {
+    assert.equal(
+      handoffStageMoveAllowed({ salesEngine: true, rule: { reason, move_to_stage_id: 7 }, gate }),
+      false,
+      `reason=${reason} nao pode furar a trava`
+    )
+  }
+})
+
+test('regra sem move_to_stage_id nunca move etapa (handoff em si continua acontecendo)', () => {
+  const gate = gateForLead(agenteQualifica, leadCompleto)
+  assert.equal(handoffStageMoveAllowed({ salesEngine: true, rule: { reason: 'keyword' }, gate }), false)
+  assert.equal(handoffStageMoveAllowed({ salesEngine: true, rule: null, gate }), false)
+  assert.equal(handoffStageMoveAllowed({ salesEngine: true, gate }), false)
+})
+
+test('sem salesEngine o comportamento antigo volta (move sem gate)', () => {
+  const gate = gateForLead(agenteQualifica, leadIncompleto)
+  assert.equal(handoffStageMoveAllowed({ salesEngine: false, rule: { move_to_stage_id: 7 }, gate }), true)
+})
+
+test('agente sem criterios nem campos obrigatorios: gate nao trava por falta de analise avaliada', () => {
+  // agente 'auto' simples, sem qualificacao configurada: exige so a analise da conversa
+  const agenteSimples = { required_fields: null, qualification_criteria: null }
+  const semAnalise = gateForLead(agenteSimples, { name: 'Ana' })
+  assert.equal(semAnalise.allowed, false, 'sem record_analysis a IA ainda nao pode mover a etapa')
+  const comAnalise = gateForLead(agenteSimples, { name: 'Ana', ai_criteria_json: '[]' })
+  assert.equal(comAnalise.allowed, true)
+  assert.equal(handoffStageMoveAllowed({ salesEngine: true, rule: { move_to_stage_id: 7 }, gate: comAnalise }), true)
 })

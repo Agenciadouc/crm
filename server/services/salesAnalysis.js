@@ -96,6 +96,28 @@ export function formatGateRefusal(gate) {
   return `Mudanca recusada: a qualificacao nao esta completa. Falta: ${parts.join('; ')}. Continue a conversa e faca a proxima pergunta de qualificacao.`
 }
 
+// Trava de etapa aplicada a um lead concreto. Pura: recebe o agente e o lead ja lidos
+// do banco (vivia em aiAgent.js; movida para ca para poder ser testada sem server/db.js).
+export function gateForLead(agent, freshLead) {
+  return checkStageGate({
+    requiredFields: parseRequiredFields(agent && agent.required_fields),
+    lead: freshLead,
+    criteria: readLeadCriteria(freshLead),
+    hasQualificationText: !!(agent && agent.qualification_criteria && agent.qualification_criteria.trim()),
+  })
+}
+
+// Regra de handoff com move_to_stage_id nao pode furar a trava de etapa.
+// O handoff (atribuir ao humano) acontece de qualquer jeito; o que esta decisao controla
+// e apenas se a etapa do lead pode ser movida pela regra.
+// Decisao do CEO: as regras de venda valem em TODOS os modos, entao com salesEngine ativo
+// (hoje sempre) a trava vale inclusive para agentes 'auto'.
+export function handoffStageMoveAllowed({ salesEngine = true, rule, gate } = {}) {
+  if (!rule || !rule.move_to_stage_id) return false
+  if (!salesEngine) return true
+  return !!(gate && gate.allowed)
+}
+
 export function shouldSdrHandoff({ requiredFields = [], lead, criteria, hasQualificationText = false }) {
   const gate = checkStageGate({ requiredFields, lead, criteria, hasQualificationText })
   const hasSomethingToQualify = requiredFields.length > 0 || (Array.isArray(criteria) && criteria.length > 0)

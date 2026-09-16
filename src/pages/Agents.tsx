@@ -43,7 +43,7 @@ export default function Agents() {
   const handleToggle = async (a: Agent) => {
     if (!accountId || togglingId === a.id) return
     if (a.is_active) {
-      if (!confirm(`Desligar o atendimento de "${a.name}"?\n\nA IA para de responder e de sugerir na hora. Os leads que estavam com ela vão para o vendedor responsável (ou roleta) com o aviso "IA desligada — assuma a conversa".`)) return
+      if (!confirm(`Desligar o atendimento de "${a.name}"?\n\nA IA para de responder e de sugerir na hora. Os leads que estavam com ela vão para o vendedor responsável (ou roleta) com o aviso "IA desligada — assuma a conversa". Nenhuma mensagem é enviada aos leads.`)) return
     }
     setTogglingId(a.id)
     try {

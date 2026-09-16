@@ -1,11 +1,11 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createTestDb, seedAccountAndLead } from './helpers/memoryDb.js'
-import { AGENT_OFF_NOTE, findLeadsHeldByAgent, findResponsibleHumanId, releaseLeadsFromAgent } from '../server/services/agentShutdown.js'
+import { AGENT_OFF_NOTE, RELEASE_STAGGER_MS, findLeadsHeldByAgent, findResponsibleHumanId, releaseLeadsFromAgent } from '../server/services/agentShutdown.js'
 
-// Espera a fila de microtasks/setImmediate esvaziar (releaseLeadsFromAgent dispara
-// notifyAndOpenLead via setImmediate, fire-and-forget, pra nao bloquear o caller).
-const flush = () => new Promise((resolve) => setImmediate(resolve))
+// Espera os timers curtos rodarem: releaseLeadsFromAgent dispara notifyAndOpenLead via
+// setTimeout escalonado (fire-and-forget), pra nao bloquear o caller nem sair em rajada.
+const flush = (ms = 25) => new Promise((resolve) => setTimeout(resolve, ms))
 
 // Colunas e tabelas de atendimento que o helper da Task 1 nao cria
 function addAttendanceTables(db) {
@@ -64,8 +64,8 @@ const held = (s) => findLeadsHeldByAgent(s.db, { accountId: s.accountId, agentId
 // executeHandoff real (que mora em aiAgent.js e importa server/db.js).
 function fakeExecuteHandoff(db, { assignsTo = null } = {}) {
   const calls = []
-  const fn = (agent, lead, reason, instanceId) => {
-    calls.push({ agentId: agent.id, leadId: lead.id, reason, instanceId })
+  const fn = (agent, lead, reason, instanceId, opts = {}) => {
+    calls.push({ agentId: agent.id, leadId: lead.id, reason, instanceId, opts })
     if (assignsTo) {
       db.prepare("UPDATE leads SET attendant_id = ?, ai_handed_off_at = datetime('now') WHERE id = ?").run(assignsTo, lead.id)
     } else {
@@ -183,6 +183,49 @@ test('libera para o vendedor responsavel: atualiza attendant_id e ai_handed_off_
   assert.equal(notify.calls[0].leadId, leadId)
   assert.equal(notify.calls[0].userId, s.humanId)
   assert.equal(notify.calls[0].opts.source, 'bot_handoff')
+  assert.equal(notify.calls[0].opts.skipFirstMsg, true, 'desligar ATRIBUI o lead ao humano, nao REABORDA o lead')
+})
+
+// ─── Desligar nao pode disparar mensagem pro lead nem rajada na instancia ───
+
+test('desligamento passa skipFirstMsg tambem pelo ramo da roleta (executeHandoff)', () => {
+  const s = setup()
+  s.newLead({ attendant_id: s.userId })
+  const handoff = fakeExecuteHandoff(s.db, { assignsTo: s.humanId })
+
+  releaseLeadsFromAgent(s.db, s.agent, { executeHandoff: handoff.fn, notifyAndOpenLead: fakeNotify().fn })
+
+  assert.equal(handoff.calls.length, 1)
+  assert.equal(handoff.calls[0].opts.skipFirstMsg, true)
+})
+
+test('lote de leads sai escalonado: delay cresce a cada lead liberado', async () => {
+  const s = setup()
+  for (let i = 0; i < 3; i++) s.newLead({ attendant_id: s.userId })
+  const handoff = fakeExecuteHandoff(s.db, { assignsTo: s.humanId })
+
+  const result = releaseLeadsFromAgent(s.db, s.agent, { executeHandoff: handoff.fn, notifyAndOpenLead: fakeNotify().fn })
+
+  assert.equal(result.total, 3)
+  assert.deepEqual(handoff.calls.map(c => c.opts.notifyDelayMs), [0, RELEASE_STAGGER_MS, RELEASE_STAGGER_MS * 2])
+})
+
+test('notificacao do 2o lead nao sai junto com a do 1o (nao eh rajada)', async () => {
+  const s = setup()
+  const inst = Number(s.db.prepare('INSERT INTO whatsapp_instances (account_id, default_attendant_id) VALUES (?, ?)').run(s.accountId, s.humanId).lastInsertRowid)
+  s.newLead({ attendant_id: s.userId, last_instance_id: inst })
+  s.newLead({ attendant_id: s.userId, last_instance_id: inst })
+  const notify = fakeNotify()
+
+  releaseLeadsFromAgent(s.db, s.agent, {
+    executeHandoff: fakeExecuteHandoff(s.db).fn,
+    notifyAndOpenLead: notify.fn,
+    staggerMs: 1000,
+  })
+
+  await flush(25)
+  assert.equal(notify.calls.length, 1, 'so o primeiro lead notifica de imediato; o resto espera o stagger')
+  assert.equal(notify.calls[0].opts.skipFirstMsg, true)
 })
 
 test('ninguem humano disponivel (nem responsavel nem roleta): lead fica sem atendente, nao no robo desligado', async () => {

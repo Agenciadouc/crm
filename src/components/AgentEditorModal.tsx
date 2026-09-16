@@ -357,7 +357,7 @@ export default function AgentEditorModal({ agentId, accountId, onClose, onSaved 
                 <strong>{isActive ? 'Atendimento ligado' : 'Atendimento desligado'}</strong>
               </label>
               <small style={{ color: 'var(--text-muted)', fontSize: 11, marginLeft: 24, display: 'block' }}>
-                Desligado, a IA não responde nem sugere em nenhum lead. Ao salvar, as sugestões pendentes expiram e os leads que estavam com a IA vão para o vendedor responsável (ou roleta) com o aviso "IA desligada — assuma a conversa".
+                Desligado, a IA não responde nem sugere em nenhum lead. Ao salvar, as sugestões pendentes expiram e os leads que estavam com a IA vão para o vendedor responsável (ou roleta) com o aviso "IA desligada — assuma a conversa". Nenhuma mensagem é enviada ao lead: desligar só entrega a conversa ao vendedor.
               </small>
             </div>
             <div className="form-group">
