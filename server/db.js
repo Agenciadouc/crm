@@ -1328,6 +1328,9 @@ db.exec(`
     frente_estruturacao   INTEGER NOT NULL DEFAULT 1,
     frente_aquisicao      INTEGER NOT NULL DEFAULT 1,
     frente_editorial      INTEGER NOT NULL DEFAULT 1,
+    frente_site           INTEGER NOT NULL DEFAULT 0,
+    site_dominio_valor    REAL NOT NULL DEFAULT 40,
+    site_hospedagem_valor REAL NOT NULL DEFAULT 450,
     exclusoes_extras      TEXT,
     fat_mes1_ref          TEXT,
     fat_mes1_valor        REAL,
@@ -1345,6 +1348,11 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_contracts_created_at ON contracts(created_at DESC);
 `)
+
+// Migrations idempotentes contracts — bancos antigos sem essas colunas ganham defaults
+addColumnIfNotExists('contracts', 'frente_site', 'INTEGER NOT NULL DEFAULT 0')
+addColumnIfNotExists('contracts', 'site_dominio_valor', 'REAL NOT NULL DEFAULT 40')
+addColumnIfNotExists('contracts', 'site_hospedagem_valor', 'REAL NOT NULL DEFAULT 450')
 
 // ─── Global templates (Plano C) ─────────────────────────────────────────
 // Templates de cadences e follow-ups criados pelo super_admin, sem account_id.

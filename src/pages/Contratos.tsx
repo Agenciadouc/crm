@@ -24,6 +24,9 @@ const BLANK: ContractInput = {
   frente_estruturacao: true,
   frente_aquisicao: true,
   frente_editorial: true,
+  frente_site: false,
+  site_dominio_valor: 40,
+  site_hospedagem_valor: 450,
   exclusoes_extras: '',
   videos_por_mes: 4,
   imagens_por_mes: 8,
@@ -110,6 +113,9 @@ export default function Contratos() {
       frente_estruturacao: c.frente_estruturacao === 1,
       frente_aquisicao: c.frente_aquisicao === 1,
       frente_editorial: c.frente_editorial === 1,
+      frente_site: c.frente_site === 1,
+      site_dominio_valor: c.site_dominio_valor != null ? c.site_dominio_valor : 40,
+      site_hospedagem_valor: c.site_hospedagem_valor != null ? c.site_hospedagem_valor : 450,
       exclusoes_extras: c.exclusoes_extras || '',
       videos_por_mes: c.videos_por_mes || 0,
       imagens_por_mes: c.imagens_por_mes || 0,
@@ -434,7 +440,30 @@ export default function Contratos() {
                 <input type="checkbox" checked={form.frente_editorial} onChange={e => setForm({ ...form, frente_editorial: e.target.checked })} />
                 <span>Frente 4 — Linha Editorial e Conteudo</span>
               </label>
+              <label style={{ display: 'flex', gap: 8, alignItems: 'center', cursor: 'pointer' }}>
+                <input type="checkbox" checked={form.frente_site} onChange={e => setForm({ ...form, frente_site: e.target.checked })} />
+                <span>Frente 5 — Criação de Site</span>
+              </label>
             </div>
+            {form.frente_site && (
+              <div style={{ marginTop: 8, padding: 12, background: 'rgba(255,179,0,0.05)', border: '1px solid rgba(255,179,0,0.2)', borderRadius: 6 }}>
+                <p style={{ fontSize: 11, color: '#FFCB45', marginBottom: 8 }}>
+                  Sera adicionado no contrato: escopo de criação do site + cláusula de custos externos (domínio e hospedagem) por conta do CONTRATANTE. Também remove a exclusão de "criação de website institucional" da lista de exclusões.
+                </p>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                  <div className="form-group">
+                    <label>Custo domínio (R$/ano)</label>
+                    <input className="input" type="number" step="0.01" min={0} value={form.site_dominio_valor ?? 40} onChange={e => setForm({ ...form, site_dominio_valor: parseFloat(e.target.value) || 0 })} />
+                    <small style={{ fontSize: 10, color: 'var(--text-muted)' }}>Pago ao provedor externo (Registro.br, etc)</small>
+                  </div>
+                  <div className="form-group">
+                    <label>Hospedagem anual (R$/ano)</label>
+                    <input className="input" type="number" step="0.01" min={0} value={form.site_hospedagem_valor ?? 450} onChange={e => setForm({ ...form, site_hospedagem_valor: parseFloat(e.target.value) || 0 })} />
+                    <small style={{ fontSize: 10, color: 'var(--text-muted)' }}>Pago à Dros (servidor próprio)</small>
+                  </div>
+                </div>
+              </div>
+            )}
             {form.frente_editorial && (
               <div style={{ marginTop: 8, padding: 12, background: 'rgba(255,179,0,0.05)', border: '1px solid rgba(255,179,0,0.2)', borderRadius: 6 }}>
                 <p style={{ fontSize: 11, color: '#FFCB45', marginBottom: 8 }}>

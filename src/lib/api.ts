@@ -202,6 +202,8 @@ export interface Contract {
   vigencia_meses: number; data_inicio: string; data_fim: string;
   renovacao_meses: number; aviso_previo_dias: number; reajuste_indice: string;
   frente_diagnostico: number; frente_estruturacao: number; frente_aquisicao: number; frente_editorial: number;
+  frente_site: number;
+  site_dominio_valor: number; site_hospedagem_valor: number;
   exclusoes_extras: string | null;
   videos_por_mes: number; imagens_por_mes: number;
   fat_mes1_ref: string | null; fat_mes1_valor: number | null;
@@ -226,6 +228,8 @@ export interface ContractInput {
   vigencia_meses: number; data_inicio: string; data_fim?: string;
   renovacao_meses: number; aviso_previo_dias: number; reajuste_indice: string;
   frente_diagnostico: boolean; frente_estruturacao: boolean; frente_aquisicao: boolean; frente_editorial: boolean;
+  frente_site?: boolean;
+  site_dominio_valor?: number; site_hospedagem_valor?: number;
   exclusoes_extras?: string;
   videos_por_mes?: number; imagens_por_mes?: number;
   fat_mes1_ref?: string; fat_mes1_valor?: number | null;
