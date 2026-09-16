@@ -7,7 +7,9 @@
 
 ---
 
-## Aviso importante — leia antes de mexer em qualquer coisa
+## Avisos importantes — leia antes de mexer em qualquer coisa
+
+### Aviso 1 — o agente que já existe na conta acorda quando a chave for configurada
 
 A conta Dros já tem um agente chamado **"AGENTE IA — OXI QUÍMICA"**, ativo, mas com a base de conhecimento **de outro cliente** (errada para a Dros) e **sem chave Anthropic própria** — por isso hoje ele não responde nada (fica bloqueado).
 
@@ -16,6 +18,19 @@ A conta Dros já tem um agente chamado **"AGENTE IA — OXI QUÍMICA"**, ativo, 
 **Regra de ouro deste roteiro:** decida e salve o modo (Copiloto, para este teste) **antes** de configurar qualquer chave. Nunca inverta essa ordem. Os passos abaixo já seguem essa ordem — não pule a Parte 2.
 
 Se em algum momento você perceber que o robô respondeu algo errado sozinho para um número real: veja a seção **"Se algo der errado"** no fim deste documento AGORA.
+
+### Aviso 2 — no Copiloto o lead PODE mudar de etapa sozinho (é esperado)
+
+No modo Copiloto a IA **nunca manda mensagem** sem o vendedor — mas ela **continua analisando a conversa** a cada bloco de mensagens (aproximadamente a cada 40 segundos) e, quando a qualificação fecha, **move o lead de etapa no funil sozinha**.
+
+Entenda o que isso significa na prática, para não levar susto no dia 1:
+
+- Você vai ver leads andando no funil **sem ninguém clicar em nada**. O CRM não está com defeito: isso é a IA lendo a conversa.
+- A mudança de etapa reflete o que o **LEAD** disse na conversa — não a sugestão que a IA escreveu para o vendedor. Ou seja: a etapa pode mudar mesmo que a sugestão nunca tenha sido enviada.
+- **O vendedor que descarta a sugestão não fica sabendo** que a etapa mudou. Não existe aviso para ele; quem vê o movimento é quem olha o funil.
+- A etapa só muda com a qualificação completa (todos os campos obrigatórios preenchidos e todos os critérios atendidos). Se faltar alguma coisa, a IA tenta e o sistema recusa — veja a Parte 7.
+
+Isso é **comportamento decidido e correto** (é assim que o funil fica confiável sem depender do vendedor lembrar de arrastar o card). Mas é a primeira coisa que assusta. Se você não quiser esse movimento automático em algum agente, a saída é não configurar critério de qualificação/campos obrigatórios nele — não existe botão "desligar só a mudança de etapa".
 
 ---
 
@@ -164,9 +179,11 @@ Do celular de teste, pergunte o preço logo de cara, sem responder nome/cidade (
 
 **Esperado:** a sugestão que aparece contorna o preço com uma resposta educada e faz a PRÓXIMA pergunta de qualificação (não entrega valor).
 
-### Passo 7.2 — Conferir que a etapa não muda sozinha
+### Passo 7.2 — Conferir que a etapa não muda ANTES DA HORA
 
-Se, nessa troca, a IA tentar mudar a etapa do lead antes da hora, o log mostra `[AI Agent] move_stage RECUSADO lead=...` e a etapa do lead **não muda** no CRM.
+> Lembre do **Aviso 2** lá em cima: depois que a qualificação fecha, a etapa **vai** mudar sozinha, e isso é o certo. O que este passo testa é o contrário: que ela **não** muda **enquanto** falta qualificação.
+
+Se, nessa troca, a IA tentar mudar a etapa do lead antes da hora, o log mostra `[AI Agent] move_stage RECUSADO lead=...` (ou `[AI Agent] handoff move_to_stage RECUSADO lead=...`, quando a tentativa veio de uma regra de transferência) e a etapa do lead **não muda** no CRM.
 
 **Como saber que deu errado:** a etapa do lead mudou mesmo sem os critérios preenchidos — a trava não está funcionando; não confie na qualificação automática até isso ser corrigido.
 
