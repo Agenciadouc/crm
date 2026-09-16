@@ -4,7 +4,8 @@ import db from '../db.js'
 import { broadcastSSE } from '../sse.js'
 import { triggerCapiForStageChange } from '../services/metaCapi.js'
 import { getInstanceConfig, wasAutoMsgSentRecently, sendAutoMessage, shouldSendAway } from '../services/autoMessages.js'
-import { processInboundMessage, sendBotWelcomeForSheetsLead } from '../services/aiAgent.js'
+import { sendBotWelcomeForSheetsLead } from '../services/aiAgent.js'
+import { scheduleAiForInbound } from '../services/copilotScheduler.js'
 import { pickFromRoulette } from '../services/roulette.js'
 import { notifyAndOpenLead } from '../services/leadHandoff.js'
 
@@ -682,14 +683,10 @@ router.post('/evolution/:accountSlug', (req, res) => {
       db.prepare('UPDATE leads SET name = ? WHERE id = ?').run(leadName, lead.id)
     }
 
-    // AI Agent: plug fire-and-forget pra bot responder leads inbound (se conta tiver feature)
-    // Skip outbound, sem content, sem lead, ou se ja teve handoff pra humano
+    // AI Agent: agenda a IA (na hora no automatico/SDR; 40s de agrupamento no Copiloto)
     if (!fromMe && lead && (content || mediaType === 'audio')) {
       const freshLead = db.prepare('SELECT * FROM leads WHERE id = ?').get(lead.id)
-      setImmediate(() => {
-        processInboundMessage(freshLead, content || '', mediaType, waInstance?.id || null)
-          .catch(e => console.error('[AI Agent] webhook plug error:', e.message))
-      })
+      scheduleAiForInbound(freshLead, content || '', mediaType, waInstance?.id || null)
     }
 
     // Broadcast SSE — archived leads mark activity silently, don't show up in pipeline/chat
