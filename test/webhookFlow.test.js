@@ -43,6 +43,33 @@ test('rota antiga: sem fallback para a primeira instancia da conta', () => {
   assert.deepEqual(resolveLegacyEvolutionInstance(db, 'outra-conta', { instance: 'inst-teste' }, {}), { status: 404, error: 'Account not found' })
 })
 
+test('rota antiga: nome casa com caixa diferente e com espaco nas pontas', () => {
+  const db = createTestDb()
+  const { instance } = seedBasic(db)
+  assert.equal(resolveLegacyEvolutionInstance(db, 'conta-teste', { instance: 'INST-TESTE' }, {}).instance.id, instance.id)
+  assert.equal(resolveLegacyEvolutionInstance(db, 'conta-teste', { instance: 'Inst-Teste' }, {}).instance.id, instance.id)
+  assert.equal(resolveLegacyEvolutionInstance(db, 'conta-teste', { instance: '  inst-teste  ' }, {}).instance.id, instance.id)
+  assert.equal(resolveLegacyEvolutionInstance(db, 'conta-teste', { instanceName: ' INST-Teste ' }, {}).instance.id, instance.id)
+  // nome realmente diferente continua 401
+  assert.deepEqual(resolveLegacyEvolutionInstance(db, 'conta-teste', { instance: 'inst-teste-2' }, {}), { status: 401, error: 'Unknown instance' })
+})
+
+test('rota antiga: nome ambiguo na conta devolve 401 em vez de adivinhar', () => {
+  const db = createTestDb()
+  const { account } = seedBasic(db)
+  db.prepare("INSERT INTO whatsapp_instances (account_id, instance_name, api_url, api_key) VALUES (?, 'INST-TESTE', 'http://evo.local', 'KEY')").run(account.id)
+  assert.deepEqual(resolveLegacyEvolutionInstance(db, 'conta-teste', { instance: 'inst-teste' }, {}), { status: 401, error: 'Unknown instance' })
+  assert.deepEqual(resolveLegacyEvolutionInstance(db, 'conta-teste', { instance: 'INST-TESTE' }, {}), { status: 401, error: 'Unknown instance' })
+})
+
+test('rota antiga: nome tolerante nao vaza para outra conta', () => {
+  const db = createTestDb()
+  seedBasic(db)
+  const other = db.prepare("INSERT INTO accounts (name, slug) VALUES ('Outra', 'outra-conta')").run().lastInsertRowid
+  db.prepare("INSERT INTO whatsapp_instances (account_id, instance_name, api_url, api_key) VALUES (?, 'inst-outra', 'http://evo.local', 'KEY')").run(other)
+  assert.deepEqual(resolveLegacyEvolutionInstance(db, 'conta-teste', { instance: 'INST-OUTRA' }, {}), { status: 401, error: 'Unknown instance' })
+})
+
 test('rota antiga: webhook_secret e provedor', () => {
   const db = createTestDb()
   seedBasic(db)

@@ -16,10 +16,16 @@ export function resolveLegacyEvolutionInstance(db, accountSlug, body, headers) {
   const account = db.prepare('SELECT * FROM accounts WHERE slug = ? AND is_active = 1').get(accountSlug)
   if (!account) return { status: 404, error: 'Account not found' }
   const name = body?.instance || body?.instanceName || null
-  const instance = name
-    ? db.prepare('SELECT * FROM whatsapp_instances WHERE account_id = ? AND instance_name = ?').get(account.id, name)
-    : null
-  if (!instance || (instance.provider || 'evolution') !== 'evolution') return { status: 401, error: 'Unknown instance' }
+  // Casamento tolerante a caixa e a espaco nas pontas: continua sendo a instancia exata DENTRO da conta
+  // (nao reabre o fallback para a primeira instancia), mas nao derruba o recebimento da conta inteira
+  // por um "Inst-Teste" ou " inst-teste " vindo do provedor.
+  const matches = name
+    ? db.prepare('SELECT * FROM whatsapp_instances WHERE account_id = ? AND lower(trim(instance_name)) = lower(trim(?))').all(account.id, name)
+    : []
+  // Zero casamentos, ou mais de um (nomes que so diferem por caixa/espaco): recusa em vez de adivinhar.
+  if (matches.length !== 1) return { status: 401, error: 'Unknown instance' }
+  const instance = matches[0]
+  if ((instance.provider || 'evolution') !== 'evolution') return { status: 401, error: 'Unknown instance' }
   if (instance.webhook_secret && headers?.['x-webhook-secret'] !== instance.webhook_secret) {
     return { status: 401, error: 'Invalid webhook secret' }
   }
