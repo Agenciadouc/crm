@@ -3,7 +3,12 @@ import bcrypt from 'bcryptjs'
 import db from '../db.js'
 import { requireRole } from '../middleware/auth.js'
 import { callHaiku } from '../services/anthropicClient.js'
-import { replayLastMessagesForAgent } from '../services/aiAgent.js'
+import { replayLastMessagesForAgent, releaseLeadsFromAgent } from '../services/aiAgent.js'
+import { pickAnthropicKey } from '../services/anthropicKeyPicker.js'
+import { AGENT_MODES, normalizeAgentMode } from '../services/copilotMode.js'
+import { expirePendingForAgent } from '../services/aiSuggestions.js'
+import { cancelAiTimersForAgent } from '../services/copilotScheduler.js'
+import { broadcastSSE } from '../sse.js'
 
 const router = Router()
 
@@ -55,6 +60,23 @@ function resetMonthlyTokensIfNeeded(agent) {
   }
 }
 
+// Troca de modo / desligar / apagar: sugestoes pendentes expiram e timers de agrupamento sao cancelados
+function expireAgentSuggestions(accountId, agentId) {
+  const leadIds = expirePendingForAgent(db, accountId, agentId)
+  cancelAiTimersForAgent(Number(agentId))
+  for (const leadId of leadIds) {
+    try { broadcastSSE(accountId, 'lead:ai_suggestion', { lead_id: leadId }) } catch {}
+  }
+  return leadIds.length
+}
+
+// Desligar o atendimento: expira sugestoes, cancela timers e passa os leads da IA para o vendedor
+function shutdownAgentAttendance(agent) {
+  const expired = expireAgentSuggestions(agent.account_id, agent.id)
+  const release = releaseLeadsFromAgent(agent)
+  return { expired_suggestions: expired, released_leads: release.released }
+}
+
 // ─── Routes ───────────────────────────────────────────────────────────
 
 // Lista agentes da conta
@@ -72,8 +94,8 @@ router.get('/', (req, res) => {
     ORDER BY a.created_at DESC
   `).all(req.accountId)
   // has_api_key: conta tem chave Anthropic propria? (sem ela os agentes nao respondem)
-  const acc = db.prepare('SELECT anthropic_api_key FROM accounts WHERE id = ?').get(req.accountId)
-  const has_api_key = !!acc?.anthropic_api_key?.trim()
+  const acc = db.prepare('SELECT anthropic_api_key, ai_key_source FROM accounts WHERE id = ?').get(req.accountId)
+  const has_api_key = !!pickAnthropicKey(acc)
   res.json({ feature_enabled: true, has_api_key, agents })
 })
 
@@ -115,6 +137,8 @@ router.post('/', requireRole('super_admin', 'gerente'), (req, res) => {
     if (!['roulette', 'specific_user'].includes(r.target_type)) return res.status(400).json({ error: `target_type invalido: ${r.target_type}` })
   }
 
+  if (b.mode !== undefined && !AGENT_MODES.includes(b.mode)) return res.status(400).json({ error: `mode invalido: ${b.mode}` })
+
   try {
     const newAgentId = db.transaction(() => {
       // 1. Cria user shadow (is_bot=1)
@@ -132,8 +156,8 @@ router.post('/', requireRole('super_admin', 'gerente'), (req, res) => {
           persona, knowledge_base, never_mention, qualification_criteria, required_fields,
           responds_to_audio, audio_decline_message,
           max_messages_before_handoff, handoff_keywords,
-          activation_mode, required_tag_id, monthly_token_limit, current_month
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          activation_mode, required_tag_id, monthly_token_limit, current_month, mode
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         req.accountId,
         userRes.lastInsertRowid,
@@ -152,7 +176,8 @@ router.post('/', requireRole('super_admin', 'gerente'), (req, res) => {
         ['default_attendant', 'roulette', 'conditional', 'manual'].includes(b.activation_mode) ? b.activation_mode : 'conditional',
         b.required_tag_id || null,
         parseInt(b.monthly_token_limit) || 500000,
-        new Date().toISOString().slice(0, 7)
+        new Date().toISOString().slice(0, 7),
+        normalizeAgentMode(b.mode)
       )
       const agentId = agentRes.lastInsertRowid
 
@@ -208,6 +233,8 @@ router.put('/:id', requireRole('super_admin', 'gerente'), (req, res) => {
     }
   }
 
+  if (b.mode !== undefined && !AGENT_MODES.includes(b.mode)) return res.status(400).json({ error: `mode invalido: ${b.mode}` })
+
   try {
     db.transaction(() => {
       // Update campos do agente
@@ -231,6 +258,7 @@ router.put('/:id', requireRole('super_admin', 'gerente'), (req, res) => {
         monthly_token_limit: b.monthly_token_limit !== undefined ? (parseInt(b.monthly_token_limit) || 500000) : undefined,
         send_welcome_for_sheets_leads: b.send_welcome_for_sheets_leads !== undefined ? (b.send_welcome_for_sheets_leads ? 1 : 0) : undefined,
         welcome_extra_instructions: b.welcome_extra_instructions !== undefined ? (b.welcome_extra_instructions || null) : undefined,
+        mode: b.mode !== undefined ? normalizeAgentMode(b.mode) : undefined,
       }
       for (const [k, v] of Object.entries(fields)) {
         if (v !== undefined) { sets.push(`${k} = ?`); params.push(v) }
@@ -269,6 +297,12 @@ router.put('/:id', requireRole('super_admin', 'gerente'), (req, res) => {
       }
     })()
 
+    const newMode = b.mode !== undefined ? normalizeAgentMode(b.mode) : normalizeAgentMode(existing.mode)
+    const modeChanged = normalizeAgentMode(existing.mode) !== newMode
+    const turnedOff = b.is_active !== undefined && !b.is_active && existing.is_active === 1
+    if (turnedOff) shutdownAgentAttendance(existing)
+    else if (modeChanged) expireAgentSuggestions(req.accountId, existing.id)
+
     res.json({ agent: loadAgentFull(req.params.id) })
   } catch (e) {
     console.error('[PUT /agents/:id] error:', e.message)
@@ -294,8 +328,9 @@ router.patch('/:id/toggle-active', requireRole('super_admin', 'gerente'), (req, 
     if (agent.user_id) {
       db.prepare("UPDATE users SET is_active = 0 WHERE id = ?").run(agent.user_id)
     }
-    console.log(`[Bot Toggle] PAUSED agent=${agent.id} by user=${req.user.id}`)
-    return res.json({ ok: true, is_active: 0 })
+    const shutdown = shutdownAgentAttendance(agent)
+    console.log(`[Bot Toggle] PAUSED agent=${agent.id} by user=${req.user.id} released_leads=${shutdown.released_leads}`)
+    return res.json({ ok: true, is_active: 0, released_leads: shutdown.released_leads })
   }
 
   // Reativando — guarda paused_at antes de zerar pro replay usar
@@ -345,6 +380,7 @@ router.delete('/:id', requireRole('super_admin', 'gerente'), (req, res) => {
   // Soft delete: desativa agente E inativa user shadow (some do dropdown de atendentes)
   db.prepare("UPDATE ai_agents SET is_active = 0, updated_at = datetime('now') WHERE id = ?").run(req.params.id)
   db.prepare('UPDATE users SET is_active = 0 WHERE id = ?').run(existing.user_id)
+  shutdownAgentAttendance(existing)
   res.json({ ok: true })
 })
 

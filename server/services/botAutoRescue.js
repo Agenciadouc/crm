@@ -4,6 +4,7 @@
 
 import db from '../db.js'
 import { processInboundMessage, diagnoseForceAi } from './aiAgent.js'
+import { findAutoRescueCandidates } from './copilotGuards.js'
 
 const RESCUE_COOLDOWN_MIN = 25       // nao tenta de novo mesmo lead dentro de N min
 const RESCUE_MAX_PER_TICK = 100      // cap por tick — evita rajada se backlog grande
@@ -11,30 +12,10 @@ const RESCUE_MAX_PER_TICK = 100      // cap por tick — evita rajada se backlog
 export async function runAutoRescue() {
   const startedAt = Date.now()
 
-  // Candidatos: leads com bot como atendente, inbound sem resposta, cooldown OK
-  const candidates = db.prepare(`
-    SELECT l.id, l.account_id
-    FROM leads l
-    JOIN users u ON u.id = l.attendant_id AND u.is_bot = 1 AND u.is_active = 1
-    WHERE l.is_active = 1
-      AND COALESCE(l.is_archived, 0) = 0
-      AND COALESCE(l.is_blocked, 0) = 0
-      AND l.ai_handed_off_at IS NULL
-      AND (l.last_rescue_attempt_at IS NULL
-           OR l.last_rescue_attempt_at < datetime('now', '-${RESCUE_COOLDOWN_MIN} minutes'))
-      AND EXISTS (
-        SELECT 1 FROM messages m_in
-        WHERE m_in.lead_id = l.id AND m_in.direction = 'inbound'
-          AND m_in.created_at > COALESCE(
-            (SELECT MAX(created_at) FROM messages m_out
-              WHERE m_out.lead_id = l.id AND m_out.direction = 'outbound'
-                AND m_out.ai_agent_id IS NOT NULL),
-            '1970-01-01'
-          )
-      )
-    ORDER BY l.id
-    LIMIT ${RESCUE_MAX_PER_TICK}
-  `).all()
+  // Candidatos: leads com bot como atendente, inbound sem resposta, cooldown OK.
+  // A query mora em copilotGuards.js (testavel, recebe db) e ja exclui leads de agente
+  // em modo copilot — la o "sem resposta da IA" e o estado normal, nao uma falha a resgatar.
+  const candidates = findAutoRescueCandidates(db, { cooldownMin: RESCUE_COOLDOWN_MIN, limit: RESCUE_MAX_PER_TICK })
 
   if (candidates.length === 0) return
 

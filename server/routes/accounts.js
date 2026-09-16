@@ -64,7 +64,7 @@ router.get('/:id', (req, res) => {
 
 // Update account
 router.put('/:id', requireRole('super_admin'), (req, res) => {
-  const { name, logo_url, is_active, evolution_api_url, evolution_api_key, cnpj, razao_social, segmento, website, instagram, whatsapp_comercial, valor_mensal, contrato_inicio, cidade, estado, observacoes, trabalha_anuncio, investimento_anuncios, meta_pixel_id, meta_capi_token, meta_capi_test_event_code, meta_capi_enabled, meta_page_id, ai_agents_enabled, attendant_analytics_enabled, admin_marks_as_read, anthropic_api_key, analysis_token_limit } = req.body
+  const { name, logo_url, is_active, evolution_api_url, evolution_api_key, cnpj, razao_social, segmento, website, instagram, whatsapp_comercial, valor_mensal, contrato_inicio, cidade, estado, observacoes, trabalha_anuncio, investimento_anuncios, meta_pixel_id, meta_capi_token, meta_capi_test_event_code, meta_capi_enabled, meta_page_id, ai_agents_enabled, attendant_analytics_enabled, admin_marks_as_read, anthropic_api_key, analysis_token_limit, ai_key_source } = req.body
   const sets = []
   const params = []
   if (name !== undefined) { sets.push('name = ?'); params.push(name) }
@@ -95,6 +95,10 @@ router.put('/:id', requireRole('super_admin'), (req, res) => {
   if (admin_marks_as_read !== undefined) { sets.push('admin_marks_as_read = ?'); params.push(admin_marks_as_read ? 1 : 0) }
   if (anthropic_api_key !== undefined) { sets.push('anthropic_api_key = ?'); params.push(anthropic_api_key || null) }
   if (analysis_token_limit !== undefined) { sets.push('analysis_token_limit = ?'); params.push(analysis_token_limit || 200000) }
+  if (ai_key_source !== undefined) {
+    if (!['client', 'dros'].includes(ai_key_source)) return res.status(400).json({ error: 'ai_key_source invalido' })
+    sets.push('ai_key_source = ?'); params.push(ai_key_source)
+  }
   if (sets.length === 0) return res.status(400).json({ error: 'Nada pra atualizar' })
   sets.push("updated_at = datetime('now')")
   params.push(req.params.id)

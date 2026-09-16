@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react'
+import { useAuth } from '../context/AuthContext'
 import {
   fetchAgent, createAgent, updateAgent, testAgent, fetchAgentUsage,
   fetchWhatsAppInstances, fetchFunnels, fetchUsers, fetchTags,
   fetchAgentInactivityFollowUp, saveAgentInactivityFollowUp,
+  fetchAccount, updateAccount, type AgentMode,
   type Agent, type AgentInput, type AgentHandoffReason, type AgentActivationMode,
   type AgentHandoffRule,
   type WhatsAppInstance, type Funnel, type User, type Tag,
@@ -33,6 +35,12 @@ const ACTIVATION_MODES: { value: AgentActivationMode; label: string; desc: strin
   { value: 'manual', label: '✋ Manual', desc: 'Só atende se gerente atribuir manualmente' },
 ]
 
+const AGENT_MODE_OPTS: { value: AgentMode; label: string; desc: string }[] = [
+  { value: 'auto', label: 'Automático', desc: 'A IA atende e responde sozinha o tempo todo.' },
+  { value: 'copilot', label: 'Copiloto', desc: 'A IA só sugere a resposta na caixa do Chat; o vendedor revisa e envia.' },
+  { value: 'sdr', label: 'SDR', desc: 'A IA atende sozinha até o lead estar qualificado, passa para o vendedor e continua como Copiloto.' },
+]
+
 type Tab = 'identity' | 'when' | 'training' | 'qualification' | 'handoff' | 'audio' | 'followup' | 'cost'
 
 interface Props {
@@ -43,6 +51,7 @@ interface Props {
 }
 
 export default function AgentEditorModal({ agentId, accountId, onClose, onSaved }: Props) {
+  const { user } = useAuth()
   const isNew = agentId === 'new'
   const [tab, setTab] = useState<Tab>('identity')
   const [loading, setLoading] = useState(!isNew)
@@ -52,6 +61,9 @@ export default function AgentEditorModal({ agentId, accountId, onClose, onSaved 
   const [name, setName] = useState('')
   const [identifiesAsBot, setIdentifiesAsBot] = useState(true)
   const [isActive, setIsActive] = useState(true)
+  const [mode, setMode] = useState<AgentMode>('auto')
+  const [keySource, setKeySource] = useState<'client' | 'dros'>('client')
+  const [savingKeySource, setSavingKeySource] = useState(false)
   // When
   const [activationMode, setActivationMode] = useState<AgentActivationMode>('conditional')
   const [stageIds, setStageIds] = useState<number[]>([])
@@ -117,6 +129,7 @@ export default function AgentEditorModal({ agentId, accountId, onClose, onSaved 
       fetchAgent(agentId, accountId).then(a => {
         setName(a.name); setIdentifiesAsBot(a.identifies_as_bot === 1); setIsActive(a.is_active === 1)
         setActivationMode(a.activation_mode)
+        setMode(a.mode || 'auto')
         setStageIds((a.stages || []).map(s => s.id))
         setInstanceIds((a.instances || []).map(i => i.id))
         setRequiredTagId(a.required_tag_id)
@@ -167,6 +180,14 @@ export default function AgentEditorModal({ agentId, accountId, onClose, onSaved 
     }
   }, [agentId, accountId, isNew])
 
+  // Fonte da chave da IA (so admin da Dros ve e troca)
+  useEffect(() => {
+    if (user?.role !== 'super_admin') return
+    fetchAccount(accountId)
+      .then(d => setKeySource(d.account.ai_key_source === 'dros' ? 'dros' : 'client'))
+      .catch(() => {})
+  }, [accountId, user?.role])
+
   const allStages = funnels.flatMap(f => (f.stages || []).map(s => ({ ...s, funnel_name: f.name })))
 
   const handleSave = async () => {
@@ -178,6 +199,7 @@ export default function AgentEditorModal({ agentId, accountId, onClose, onSaved 
         identifies_as_bot: identifiesAsBot,
         is_active: isActive,
         activation_mode: activationMode,
+        mode,
         required_tag_id: requiredTagId,
         persona: persona.trim() || undefined,
         knowledge_base: knowledgeBase.trim() || undefined,
@@ -233,6 +255,19 @@ export default function AgentEditorModal({ agentId, accountId, onClose, onSaved 
       onSaved()
     } catch (e: any) { alert('Erro: ' + (e?.message || '')) }
     setSaving(false)
+  }
+
+  const handleKeySourceChange = async (value: 'client' | 'dros') => {
+    const previous = keySource
+    setKeySource(value)
+    setSavingKeySource(true)
+    try {
+      await updateAccount(accountId, { ai_key_source: value })
+    } catch (e: any) {
+      setKeySource(previous)
+      alert('Erro ao salvar a chave da IA: ' + (e?.message || ''))
+    }
+    setSavingKeySource(false)
   }
 
   const handleSandbox = async () => {
@@ -316,26 +351,53 @@ export default function AgentEditorModal({ agentId, accountId, onClose, onSaved 
         {/* ─── Tab: Identidade ─── */}
         {tab === 'identity' && (
           <>
+            <div className="form-group" style={{ padding: 12, border: `1px solid ${isActive ? 'var(--positive)' : 'var(--border-medium)'}`, borderRadius: 8 }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', margin: 0 }}>
+                <input type="checkbox" checked={isActive} onChange={e => setIsActive(e.target.checked)} />
+                <strong>{isActive ? 'Atendimento ligado' : 'Atendimento desligado'}</strong>
+              </label>
+              <small style={{ color: 'var(--text-muted)', fontSize: 11, marginLeft: 24, display: 'block' }}>
+                Desligado, a IA não responde nem sugere em nenhum lead. Ao salvar, as sugestões pendentes expiram e os leads que estavam com a IA vão para o vendedor responsável (ou roleta) com o aviso "IA desligada — assuma a conversa". Nenhuma mensagem é enviada ao lead: desligar só entrega a conversa ao vendedor.
+              </small>
+            </div>
+            <div className="form-group">
+              <label>Como a IA atua *</label>
+              <div style={{ display: 'grid', gap: 6 }}>
+                {AGENT_MODE_OPTS.map(m => (
+                  <label key={m.value} style={{ display: 'block', padding: 10, border: `1px solid ${mode === m.value ? 'var(--accent)' : 'var(--border-medium)'}`, borderRadius: 8, cursor: 'pointer', background: mode === m.value ? 'rgba(255,179,0,0.05)' : 'transparent' }}>
+                    <input type="radio" name="agent-mode" checked={mode === m.value} onChange={() => setMode(m.value)} style={{ marginRight: 6 }} />
+                    <strong>{m.label}</strong>
+                    <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2, marginLeft: 22 }}>{m.desc}</div>
+                  </label>
+                ))}
+              </div>
+              <small style={{ color: 'var(--text-muted)', fontSize: 11, display: 'block', marginTop: 4 }}>
+                Vale a partir de quando você clicar em Salvar; sugestões pendentes expiram nesse momento.
+              </small>
+            </div>
             <div className="form-group">
               <label>Nome do agente *</label>
               <input className="input" value={name} onChange={e => setName(e.target.value)} placeholder="Ex: Ana Clara" />
             </div>
             <div className="form-group">
-              <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
-                <input type="checkbox" checked={identifiesAsBot} onChange={e => setIdentifiesAsBot(e.target.checked)} />
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: mode === 'copilot' ? 'default' : 'pointer', opacity: mode === 'copilot' ? 0.5 : 1 }}>
+                <input type="checkbox" checked={identifiesAsBot} disabled={mode === 'copilot'} onChange={e => setIdentifiesAsBot(e.target.checked)} />
                 <span>Identifica como IA (recomendado)</span>
               </label>
               <small style={{ color: 'var(--text-muted)', fontSize: 11, marginLeft: 24, display: 'block' }}>
-                Bot avisa "sou IA assistente". Reduz expectativa do lead e legitima transferência pra humano.
+                Bot avisa "sou IA assistente". Reduz expectativa do lead e legitima transferência pra humano. No Copiloto não se aplica (desativado).
               </small>
             </div>
-            <div className="form-group">
-              <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
-                <input type="checkbox" checked={isActive} onChange={e => setIsActive(e.target.checked)} />
-                <span>Ativo</span>
-              </label>
-              <small style={{ color: 'var(--text-muted)', fontSize: 11, marginLeft: 24, display: 'block' }}>Desligue pra pausar o bot sem apagar a configuração.</small>
-            </div>
+            {user?.role === 'super_admin' && (
+              <div className="form-group">
+                <label>Chave da IA desta conta (só admin Dros)</label>
+                <select className="input" value={keySource} disabled={savingKeySource} onChange={e => handleKeySourceChange(e.target.value as 'client' | 'dros')}>
+                  <option value="client">Chave do cliente (Integrações)</option>
+                  <option value="dros">Chave da Dros</option>
+                </select>
+                <small style={{ color: 'var(--text-muted)', fontSize: 11, display: 'block' }}>Vale para todos os agentes da conta. Aplicada na hora, sem precisar clicar em Salvar.</small>
+              </div>
+            )}
           </>
         )}
 

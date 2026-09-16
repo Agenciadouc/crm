@@ -43,7 +43,7 @@ export default function Agents() {
   const handleToggle = async (a: Agent) => {
     if (!accountId || togglingId === a.id) return
     if (a.is_active) {
-      if (!confirm(`Pausar "${a.name}"?\n\nO bot vai parar de responder mensagens. Quando você reativar, ele responde a última msg de cada lead que ficou pendente.`)) return
+      if (!confirm(`Desligar o atendimento de "${a.name}"?\n\nA IA para de responder e de sugerir na hora. Os leads que estavam com ela vão para o vendedor responsável (ou roleta) com o aviso "IA desligada — assuma a conversa". Nenhuma mensagem é enviada aos leads.`)) return
     }
     setTogglingId(a.id)
     try {
@@ -55,10 +55,16 @@ export default function Agents() {
           const skipMsg = skipped > 0 ? ` ${skipped} ultrapassaram o limite (30/clique) e ficarão pro atendente.` : ''
           setToast({ type: 'info', message: `${a.name} reativado. Bot vai responder a última msg de ${r.replay.will_replay} leads pendentes em background.${skipMsg}` })
         } else {
-          setToast({ type: 'success', message: `${a.name} reativado` })
+          setToast({ type: 'success', message: `Atendimento de ${a.name} ligado` })
         }
       } else {
-        setToast({ type: 'success', message: `${a.name} pausado` })
+        const releasedLeads = r.released_leads || 0
+        setToast({
+          type: 'success',
+          message: releasedLeads > 0
+            ? `Atendimento de ${a.name} desligado. ${releasedLeads} lead(s) foram para o vendedor com o aviso "IA desligada — assuma a conversa".`
+            : `Atendimento de ${a.name} desligado`,
+        })
       }
     } catch (e: any) {
       alert('Erro: ' + (e?.message || ''))
@@ -138,21 +144,23 @@ export default function Agents() {
                       </div>
                       <div style={{ display: 'flex', gap: 4 }}>
                         <button
-                          className="btn btn-sm btn-icon"
+                          className="btn btn-sm"
                           style={{
                             background: a.is_active ? 'rgba(52,199,89,0.15)' : 'rgba(255,107,107,0.15)',
                             border: `1px solid ${a.is_active ? 'rgba(52,199,89,0.4)' : 'rgba(255,107,107,0.4)'}`,
                             color: a.is_active ? '#34C759' : '#FF6B6B',
                             cursor: togglingId === a.id ? 'wait' : 'pointer',
                             opacity: togglingId === a.id ? 0.6 : 1,
+                            display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, padding: '4px 8px',
                           }}
                           title={a.is_active
-                            ? 'Pausar bot (vai parar de responder)'
-                            : 'Reativar bot (responde a última msg dos leads que mandaram durante a pausa)'}
+                            ? 'Desligar o atendimento: a IA para na hora e os leads dela vão para o vendedor'
+                            : 'Ligar o atendimento (responde a última msg dos leads que mandaram enquanto estava desligado)'}
                           onClick={() => handleToggle(a)}
                           disabled={togglingId === a.id}
                         >
                           {a.is_active ? <Power size={11} /> : <PowerOff size={11} />}
+                          {a.is_active ? 'Atendimento ligado' : 'Atendimento desligado'}
                         </button>
                         <button className="btn btn-secondary btn-sm btn-icon" onClick={() => setEditingId(a.id)} title="Editar"><Edit3 size={11} /></button>
                         <button className="btn btn-danger btn-sm btn-icon" onClick={() => handleDelete(a)} title="Apagar"><Trash2 size={11} /></button>
