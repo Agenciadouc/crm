@@ -343,7 +343,7 @@ export async function analyzeConversation(leadId) {
   let tailContextMsgs = []
   if (isIncremental) {
     const newOnes = db.prepare(`
-      SELECT id, direction, content, sender_name, sent_by_user_id, ai_agent_id, follow_up_id,
+      SELECT id, direction, COALESCE(NULLIF(transcription, ''), content) AS content, sender_name, sent_by_user_id, ai_agent_id, follow_up_id,
              media_type, created_at
       FROM messages
       WHERE lead_id = ? AND id > ?
@@ -354,7 +354,7 @@ export async function analyzeConversation(leadId) {
       return { ok: true, skipped: true, reason: 'no_new_messages_recheck' }
     }
     tailContextMsgs = db.prepare(`
-      SELECT id, direction, content, sender_name, sent_by_user_id, ai_agent_id, follow_up_id,
+      SELECT id, direction, COALESCE(NULLIF(transcription, ''), content) AS content, sender_name, sent_by_user_id, ai_agent_id, follow_up_id,
              media_type, created_at
       FROM messages
       WHERE lead_id = ? AND id <= ?
@@ -363,7 +363,7 @@ export async function analyzeConversation(leadId) {
     msgs = [...tailContextMsgs, ...newOnes]  // ordem cronologica
   } else {
     msgs = db.prepare(`
-      SELECT id, direction, content, sender_name, sent_by_user_id, ai_agent_id, follow_up_id,
+      SELECT id, direction, COALESCE(NULLIF(transcription, ''), content) AS content, sender_name, sent_by_user_id, ai_agent_id, follow_up_id,
              media_type, created_at
       FROM messages
       WHERE lead_id = ?
