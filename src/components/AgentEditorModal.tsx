@@ -372,7 +372,7 @@ export default function AgentEditorModal({ agentId, accountId, onClose, onSaved 
                 ))}
               </div>
               <small style={{ color: 'var(--text-muted)', fontSize: 11, display: 'block', marginTop: 4 }}>
-                Trocar o modo vale para as próximas mensagens; sugestões pendentes expiram ao salvar.
+                Vale a partir de quando você clicar em Salvar; sugestões pendentes expiram nesse momento.
               </small>
             </div>
             <div className="form-group">
@@ -380,12 +380,12 @@ export default function AgentEditorModal({ agentId, accountId, onClose, onSaved 
               <input className="input" value={name} onChange={e => setName(e.target.value)} placeholder="Ex: Ana Clara" />
             </div>
             <div className="form-group">
-              <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
-                <input type="checkbox" checked={identifiesAsBot} onChange={e => setIdentifiesAsBot(e.target.checked)} />
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: mode === 'copilot' ? 'default' : 'pointer', opacity: mode === 'copilot' ? 0.5 : 1 }}>
+                <input type="checkbox" checked={identifiesAsBot} disabled={mode === 'copilot'} onChange={e => setIdentifiesAsBot(e.target.checked)} />
                 <span>Identifica como IA (recomendado)</span>
               </label>
               <small style={{ color: 'var(--text-muted)', fontSize: 11, marginLeft: 24, display: 'block' }}>
-                Bot avisa "sou IA assistente". Reduz expectativa do lead e legitima transferência pra humano. No Copiloto não se aplica.
+                Bot avisa "sou IA assistente". Reduz expectativa do lead e legitima transferência pra humano. No Copiloto não se aplica (desativado).
               </small>
             </div>
             {user?.role === 'super_admin' && (
@@ -395,7 +395,7 @@ export default function AgentEditorModal({ agentId, accountId, onClose, onSaved 
                   <option value="client">Chave do cliente (Integrações)</option>
                   <option value="dros">Chave da Dros</option>
                 </select>
-                <small style={{ color: 'var(--text-muted)', fontSize: 11, display: 'block' }}>Vale para todos os agentes da conta. Salva na hora.</small>
+                <small style={{ color: 'var(--text-muted)', fontSize: 11, display: 'block' }}>Vale para todos os agentes da conta. Aplicada na hora, sem precisar clicar em Salvar.</small>
               </div>
             )}
           </>
