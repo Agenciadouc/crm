@@ -36,7 +36,9 @@ cd /root/crm && git rev-parse HEAD | tee /root/crm-antes-provedor-fase1.txt
 ```
 Esperado: imprime um hash de 40 caracteres, igual ao salvo no arquivo. Se o arquivo já existir de uma tentativa anterior e o hash for diferente do que você espera, confirme manualmente qual é o commit bom antes de seguir — não sobrescreva sem olhar.
 
-**1.4 Checar `PUBLIC_BASE_URL`** — é dela que sai a URL nova do webhook (`<PUBLIC_BASE_URL>/api/webhooks/whatsapp/<token>`); se estiver errada, a Evolution é reconfigurada com uma URL que não bate com o domínio real e para de conseguir entregar:
+**1.4 Checar `PUBLIC_BASE_URL`** — é dela que sai a URL nova do webhook (`<PUBLIC_BASE_URL>/api/webhooks/whatsapp/<token>`); se estiver errada, a Evolution é reconfigurada com uma URL que não bate com o domínio real e para de conseguir entregar.
+
+**A consequência não é por instância, é global:** `reRegisterWebhooks` (`server/scheduler.js:184`) percorre **todas** as instâncias `connected` a cada 1 minuto e reconfigura cada uma para essa URL. Se ela estiver errada, no **primeiro tick depois do restart** os 24 números são reapontados de uma vez para uma URL que não resolve e o recebimento por webhook para em **todas as contas ao mesmo tempo** — sobra só o polling, com as limitações descritas na seção 4. Por isso este passo é antes de subir, não depois.
 
 ```bash
 grep -n PUBLIC_BASE_URL /root/.env
@@ -49,15 +51,57 @@ echo "PUBLIC_BASE_URL=https://SEU-DOMINIO-REAL/crm" >> /root/.env
 
 **1.5 Ver quantas instâncias estão conectadas agora**, para saber quantas checar depois: abra a tela **Integrações** do CRM (no navegador, não no terminal) e anote os números que aparecem como conectados. São esses que você vai conferir no passo 3.
 
+**1.6 Conferir o `instance_name` de cada instância conectada ANTES de subir** — este é o passo que evita o problema mais caro deste deploy.
+
+Por que agora e não depois: o fallback antigo da rota por conta **escondia** nome errado. Se o `instance_name` gravado no CRM não batesse com o nome real na Evolution, o payload caía na primeira instância da conta e a mensagem entrava assim mesmo — ou seja, uma conta pode estar rodando **há meses** com o nome errado sem ninguém perceber. Com o código novo não tem mais fallback: no minuto seguinte ao restart isso vira `401 Unknown instance` e a **Evolution não reentrega** a mensagem perdida.
+
+**(a) Lado CRM** — lista as instâncias conectadas no banco (uma linha; `node -e` roda como CJS mesmo com o projeto em ESM, então o `require` funciona):
+
+```bash
+cd /root/crm && node -e "const d=require('better-sqlite3')('/root/crm/server/data/crm.db');for(const r of d.prepare('SELECT a.slug, wi.instance_name, wi.status, wi.api_url, wi.api_key FROM whatsapp_instances wi JOIN accounts a ON a.id=wi.account_id WHERE wi.status = ? ORDER BY a.slug').all('connected'))console.log(r.slug,'|',r.instance_name,'|',r.status,'|',r.api_url,'|',r.api_key)"
+```
+Esperado: uma linha por número conectado, no formato `slug | instance_name | connected | api_url | api_key`. A quantidade de linhas tem que bater com o que você anotou no passo 1.5. (A `api_key` sai na tela porque é necessária em (b) — é a credencial da Evolution, não cole essa saída em lugar público.)
+
+**(b) Lado Evolution** — lista os nomes reais das instâncias. Rode uma vez para **cada `api_url` diferente** que apareceu em (a), trocando os dois valores pelos da linha correspondente (uma linha):
+
+```bash
+curl -s -H "apikey: COLE_A_API_KEY_AQUI" "http://COLE_A_API_URL_AQUI/instance/fetchInstances" | grep -oE '"(instanceName|name)":"[^"]*"'
+```
+Esperado: uma linha por instância existente na Evolution. (O `grep` aceita os dois formatos porque a Evolution v1 devolve `instanceName` e a v2 devolve `name`.)
+
+**(c) Comparar.** Cada `instance_name` de (a) tem que aparecer **idêntico** na lista de (b) — mesma caixa, mesmos espaços, mesmos acentos.
+
+**Se algum nome não casar: corrigir ANTES de subir, não depois.** Abra a tela **Integrações** do CRM, ache o número e ajuste o nome da instância para exatamente o nome que a Evolution devolveu em (b); depois rode (a) de novo e confirme que casou. Se não der para corrigir agora, **não suba**: essa conta específica vai começar a perder mensagens no minuto seguinte ao restart, sem reentrega.
+
 ## 2. Subir
 
 Tem mudança de front (o front chama `/api/integrations/public-config` e mostra o botão "Webhook" por instância), então é o **comando 3** do CLAUDE.md — inclui `npm install` e `npm run build`. Adicionei `npm test` antes do build, como trava: se a suíte falhar no Node 16 do servidor, não seguir para build/restart.
+
+**Antes do comando encadeado, rode `npm test` sozinho uma vez.** A suíte nunca rodou no Node 16.20.2 do servidor, só no Node 20 local; ela **deve** passar, mas rodando isolada você vê a saída inteira com calma e não confunde uma peculiaridade do runner de teste do Node 16 (formatação do TAP, ordem dos subtestes, aviso de experimental) com código quebrado às 22h:
+
+```bash
+source /opt/rh/devtoolset-11/enable && cd /root/crm && git pull && npm install && npm test
+```
+Esperado: termina com `# fail 0`. **Não conferir o total de testes contra um número fixo** — ele muda a cada merge (o registro de 118 na seção 0 é de um range de commits fechado, anterior a este roteiro). O que vale é `# fail 0`. Se falhar, pare aqui: nada foi buildado nem reiniciado e o servidor continua rodando o código antigo — vá para a seção 4 só para desfazer o `git pull`.
+
+Com o teste passando, a cadeia completa (o `git pull` e o `npm install` já feitos acima viram no-op):
 
 ```bash
 source /opt/rh/devtoolset-11/enable && cd /root/crm && git pull && npm install && npm test && npm run build && pm2 restart dros-crm
 ```
 
-**Resultado esperado:** `git pull` traz os 14 commits novos; `npm install` sem erro de compilação nativa (better-sqlite3); `npm test` termina com `# fail 0` (mesmo total de antes, 118, ou mais caso hajam outros testes fora desta fase); `npm run build` termina com `✓ built`; `pm2 restart dros-crm` mostra o processo `online`.
+**Resultado esperado:** `git pull` termina **sem conflito**; `npm install` sem erro de compilação nativa (better-sqlite3); `npm test` termina com `# fail 0`; `npm run build` termina com `✓ built`; `pm2 restart dros-crm` mostra o processo `online`.
+
+**Conferir o commit por identidade, não por contagem.** Não existe número de commits para esperar aqui: contagem é derivada do estado da branch e envelhece sozinha a cada merge. O que se confere é **qual commit** ficou no servidor:
+
+```bash
+cd /root/crm && git log --oneline -1
+```
+Esperado: o hash impresso é exatamente o commit de fechamento da branch, anotado aqui no merge:
+
+> **Commit de fechamento desta fase (preencher no merge da branch): `________________`**
+
+Se o hash impresso não for esse, o `git pull` trouxe outra coisa (ou entrou trabalho de outra branch depois deste documento) — pare e confirme com quem fez o merge antes de seguir para a seção 3.
 
 **Como saber que falhou:** qualquer uma dessas etapas encerra a cadeia (por causa do `&&`) e as seguintes não rodam — `pm2 restart` não vai executar. Rode `pm2 status dros-crm` para confirmar se reiniciou ou não. Se `npm test` for a etapa que falhou, o comando já parou sozinho **antes do build e do restart** — o processo em produção continua rodando o código antigo. Vá direto para a seção 4 (plano de volta) só para reverter o `git pull` (o `pm2 restart` nem chegou a rodar, então tecnicamente não precisa reiniciar nada, mas rode o checkout mesmo assim para não deixar o working tree do servidor num commit que não passou nos testes) e avise que o deploy não foi feito.
 
@@ -72,7 +116,7 @@ pm2 logs dros-crm --lines 300 --nostream | grep -E "Added column whatsapp_instan
 **O que é esperado ver:**
 - `[DB] Added column whatsapp_instances.provider`, `.provider_config`, `.webhook_token` — uma vez só, na primeira subida (migração de schema).
 - `[db] migration: webhook_token gerado para N instancias` — uma vez só, N = quantidade de instâncias existentes.
-- Nenhuma linha `[Webhook re-register] <nome>: <motivo>` — se aparecer, é falha ao reconfigurar o webhook daquela instância no provedor (rede, credencial); ela continua com o webhook antigo e vai depender do polling até ser corrigida.
+- Nenhuma linha `[Webhook re-register] <nome>: <motivo>` — se aparecer, é falha ao reconfigurar o webhook daquela instância no provedor (rede, credencial); ela continua com o webhook antigo e vai depender do polling até ser corrigida — e o polling **não** repõe IA, handoff, avanço de etapa nem não lidas (ver "Onde a rede de segurança NÃO pega", seção 4).
 - **Atenção com o silêncio**: o reregistro automático (o que roda no boot e depois a cada 1 minuto) **não loga sucesso**, só erro. Ou seja, não esperar ver `[Evolution Webhook] Set for ...` sozinho — essa linha só aparece quando alguém clica no botão **"Webhook"** ao lado do número, na tela Integrações (tooltip "Reenvia o webhook pra Evolution..."), ou quando uma instância é conectada/reconectada manualmente. Para ter certeza visível de que uma instância específica já está na URL nova, clique nesse botão para 1-2 números e confira a linha `[Evolution Webhook] Set for <nome> → .../api/webhooks/whatsapp/<token>` no log.
 - `[Webhook WhatsApp] 401 Invalid webhook token ip=...` **repetido** para uma instância real → sinal de token errado ou instância não migrada; isolado e não repetindo, ignorar.
 - `[Webhook Evolution] 401 Unknown instance account=<slug> instance=<nome>` **isolado**, logo após o deploy, é esperado: é a Evolution ainda mandando pela URL antiga por conta até o reregistro (item acima) trocar para a URL por token daquele número. **Se persistir para a mesma instância depois de 10 minutos, é o sinal real do risco descrito no plano** — a rota antiga não tem mais fallback (antes caía na primeira instância da conta; agora responde 401 e a Evolution **não reentrega**). Nesse caso: abrir Integrações, achar o número, clicar em **"Webhook"** para forçar o reregistro na URL nova; se o problema for o nome da instância não bater mesmo com a tolerância de caixa/espaço, o `instance_name` cadastrado no CRM precisa ser corrigido para bater com o nome real da instância na Evolution.
@@ -95,7 +139,8 @@ source /opt/rh/devtoolset-11/enable && cd /root/crm && git checkout $(cat /root/
 **Depois da volta (quando o `pm2 restart` deu certo):**
 - As colunas novas (`provider`, `provider_config`, `webhook_token`) ficam no banco, mas o código antigo não as lê nem as usa — não fazem diferença.
 - O reregistro de webhook do código antigo (mesmo ciclo de 1 em 1 minuto do scheduler, que já existia antes desta fase) recoloca a URL antiga (`/api/webhooks/evolution/<slug>`) sozinho; para acelerar, clicar em "Webhook" em cada número.
-- Mensagens recebidas durante o intervalo sem webhook certo não se perdem: o polling (a cada 30s) as recupera quando reconecta com a URL/lógica certa.
+- Mensagens recebidas durante o intervalo sem webhook certo não se perdem **no chat**: o polling (a cada 30s, `server/scheduler.js:721`) as recupera quando reconecta com a URL/lógica certa.
+- **Onde a rede de segurança NÃO pega — ler antes de concluir que está tudo bem.** O polling traz a mensagem para o Chat, e só isso. Por decisão preservada desta fase (`server/services/inboundHandler.js:73-75`), a mensagem que entra pelo polling **não dispara a IA, não dispara auto-mensagem, não faz handoff para atendente, não baixa foto de perfil, não avança etapa do funil e não incrementa o contador de não lidas**. Ou seja: enquanto o webhook estiver errado, você vai **ver mensagem nova chegando no Chat** e pode concluir que está tudo certo — enquanto o bot está mudo, o lead não é distribuído com aviso e o funil não anda. A prova de que o recebimento voltou de verdade não é a mensagem aparecer no Chat: é o bot responder / o lead avançar de etapa / o contador de não lidas subir.
 - **Não precisa reverter o banco.** Nenhuma coluna ou dado desta fase quebra o código antigo.
 
 ## 5. Só dá para confirmar com WhatsApp real (não dá para testar sem tráfego de produção)
@@ -105,15 +150,17 @@ Local (`npm test`/`npm run dev`) já cobre parsing, regras de negócio e regress
 1. Mensagem de texto de número novo cria lead no funil padrão, aparece no Chat com contador, e dispara a IA quando a conta tem agente configurado.
 2. Áudio recebido: o player carrega no Chat; se a IA transcreve, a transcrição aparece no log `[AI Agent] STT`.
 3. Imagem com legenda e PDF chegam com a legenda/nome do arquivo certos.
-4. Mensagem enviada pelo Chat recebe ✓, e depois ✓✓/lido chega pelo webhook (`MESSAGES_UPDATE`) — é o teste real do `markMessageAsRead` corrigido nesta fase.
-5. Envio de imagem pelo Chat para um número sem WhatsApp grava a falha com o aviso (em vez de sumir).
-6. Lead de anúncio (mensagem que começa com o padrão de campanha, ex. "P9 ...") fica com a fonte "Facebook Pago"/"Instagram Pago".
-7. Integrações → "Sincronizar agora" roda o polling sem erro (log `[Polling] ... all synced`).
-8. Integrações → Google Planilhas mostra a URL do webhook com o domínio de `PUBLIC_BASE_URL` (confirma o item 1.4 acima na prática).
-9. Um `POST` simulado para `/api/webhooks/evolution/<slug>` com `instance` inexistente responde 401 e não grava nada — só é seguro tentar isso em homologação, não em produção (para não gerar um 401 real que a Evolution não reentrega).
-10. **Diferenças de comportamento aceitas nesta fase, para não confundir com bug** ao olhar o Chat/logs nos primeiros dias:
+4. **Status de saída (`MESSAGES_UPDATE`):** mensagem enviada pelo Chat recebe ✓ e depois ✓✓/lido **no Chat do CRM**, vindo pelo webhook. Isso testa o parse de `MESSAGES_UPDATE` e a atualização de `delivery_status` — são as mensagens **de saída**.
+5. **`markMessageAsRead` (coisa diferente do item 4):** esta função marca as mensagens **de entrada do lead** como lidas no WhatsApp **dele**, e hoje só é chamada pelo agente de IA, antes de responder (`server/services/aiAgent.js:647`). Para testar: mandar mensagem de um número de teste para uma conta **com agente de IA ligado** e conferir, no WhatsApp desse número, que a mensagem ficou com ✓✓ azul (lida) quando o bot respondeu. Conta sem IA não exercita este caminho, e a chamada é num `try/catch` silencioso — então a ausência de erro no log **não** é prova de que funcionou; a prova é o ✓✓ azul no aparelho.
+6. Envio de imagem pelo Chat para um número sem WhatsApp grava a falha com o aviso (em vez de sumir).
+7. Lead de anúncio (mensagem que começa com o padrão de campanha, ex. "P9 ...") fica com a fonte "Facebook Pago"/"Instagram Pago".
+8. Integrações → "Sincronizar agora" roda o polling sem erro (log `[Polling] ... all synced`).
+9. Integrações → Google Planilhas mostra a URL do webhook com o domínio de `PUBLIC_BASE_URL` (confirma o item 1.4 acima na prática).
+10. Um `POST` simulado para `/api/webhooks/evolution/<slug>` com `instance` inexistente responde 401 e não grava nada — só é seguro tentar isso em homologação, não em produção (para não gerar um 401 real que a Evolution não reentrega).
+11. **Diferenças de comportamento aceitas nesta fase, para não confundir com bug** ao olhar o Chat/logs nos primeiros dias:
     - Mensagens **editadas**, respostas de **botão/lista** e mensagens **temporárias**, vindas do **polling** (recuperação de mensagens perdidas), agora aparecem — antes eram descartadas silenciosamente.
     - Legenda de **foto/vídeo** recebida pelo polling agora grava a legenda como texto da mensagem, em vez do texto fixo `[Imagem]`.
+    - **Documento** (PDF, planilha etc.) recebido pelo polling agora grava o **nome do arquivo** como texto da mensagem (`server/services/whatsapp/evolution.js:61`), em vez do texto fixo `[Documento]`.
     - Um log pontual `Tipo de mensagem nao tratado` para um tipo raro (enquete, mensagem de sistema, visualização única) é esperado e não é falha — é o mesmo comportamento de antes para esses tipos.
 
 ## Observação sobre um bug pré-existente (não desta fase, não bloqueia este deploy)
