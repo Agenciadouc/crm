@@ -3,6 +3,7 @@
 // agenda envio de 1 variacao de msg pra cada um (com stagger anti-flood).
 
 import db from '../db.js'
+import { findFollowUpAgent, agentSendsWithoutSeller } from './copilotGuards.js'
 
 function toSqlDate(d) {
   return new Date(d).toISOString().replace('T', ' ').slice(0, 19)
@@ -40,8 +41,15 @@ export async function processInactivityFollowUps() {
       // MODO AGENT: lead atendido pelo user-bot do agente, inativo ha >= N min,
       // E que JA TEVE CONVERSA REAL com o bot — ou seja: bot mandou msg E lead respondeu pelo menos 1x.
       // Isso evita disparar follow-up pra leads recem-atribuidos que nunca interagiram.
-      const agent = db.prepare('SELECT user_id FROM ai_agents WHERE id = ? AND is_active = 1').get(fu.agent_id)
+      const agent = findFollowUpAgent(db, { accountId: fu.account_id, agentId: fu.agent_id })
       if (!agent) continue
+      // Copiloto: nada sai para o lead sem o vendedor. Um agente migrado de auto para
+      // copilot tem outbounds antigas com ai_agent_id e continuaria passando no EXISTS
+      // abaixo — o follow-up de inatividade mandaria mensagem sozinho. Pula.
+      if (!agentSendsWithoutSeller(agent)) {
+        console.log(`[InactivityScan] Follow-up "${fu.name}" pulado: agente ${agent.id} esta em modo copilot`)
+        continue
+      }
       candidates = db.prepare(`
         SELECT l.id, l.name
         FROM leads l
