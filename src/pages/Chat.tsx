@@ -11,6 +11,7 @@ import {
   fetchLeadFollowUp, fetchFollowUps, assignFollowUp, pauseLeadFollowUp, resumeLeadFollowUp, cancelLeadFollowUp,
   archiveLead, blockLead, createStandaloneTask, fetchLeadTasks, completeStandaloneTask, deleteStandaloneTask, completeTask, skipTask, fetchLeadConversations, forceAiRespond, type LeadConversation,
   fetchReadyMessages, type ReadyMessage,
+  fetchPendingAiSuggestion, resolveAiSuggestion, pauseLeadAi, resumeLeadAi, type AiSuggestion,
   createLeadOrFindExisting, markLeadAsRead,
   requestLeadTransfer, acceptTransferRequest, rejectTransferRequest, fetchPendingTransferRequests, grabLead, type TransferRequest,
   type WhatsAppInstance, type Lead, type Message, type StageHistoryEntry, type LeadNote,
@@ -126,6 +127,13 @@ export default function Chat() {
   const [readyMsgIdx, setReadyMsgIdx] = useState(0)
   const readyMsgsContainerRef = useRef<HTMLDivElement>(null)
   const msgInputRef = useRef<HTMLTextAreaElement>(null)
+  // Copiloto: sugestao pendente da IA pro lead aberto
+  const [aiSuggestion, setAiSuggestion] = useState<AiSuggestion | null>(null)
+  const [suggestionInBox, setSuggestionInBox] = useState<AiSuggestion | null>(null)
+  const suggestionInBoxRef = useRef<AiSuggestion | null>(null)
+  const msgTextRef = useRef('')
+  const selectedLeadIdRef = useRef<number | null>(null)
+  const [togglingAiPause, setTogglingAiPause] = useState(false)
   const [noteText, setNoteText] = useState('')
   const [sending, setSending] = useState(false)
   const [attachFile, setAttachFile] = useState<File | null>(null)
@@ -319,6 +327,69 @@ export default function Chat() {
     }
   }, [selectedLeadId, accountId])
   useEffect(() => { loadLead() }, [loadLead])
+
+  // ─── Copiloto: sugestao da IA na caixa de mensagem ───
+  useEffect(() => { msgTextRef.current = msgText }, [msgText])
+
+  const placeSuggestionInBox = useCallback((s: AiSuggestion) => {
+    suggestionInBoxRef.current = s
+    setSuggestionInBox(s)
+    setMsgText(s.content)
+  }, [])
+
+  const clearSuggestionFromBox = useCallback(() => {
+    const inBox = suggestionInBoxRef.current
+    suggestionInBoxRef.current = null
+    setSuggestionInBox(null)
+    // So apaga a caixa se o texto ainda for exatamente a sugestao (nunca apaga o que o vendedor digitou)
+    if (inBox && msgTextRef.current === inBox.content) setMsgText('')
+  }, [])
+
+  const applyPendingSuggestion = useCallback((s: AiSuggestion | null) => {
+    setAiSuggestion(s)
+    const inBox = suggestionInBoxRef.current
+    if (!s) {
+      if (inBox) clearSuggestionFromBox()
+      return
+    }
+    if (inBox && inBox.id === s.id) return
+    if (inBox && msgTextRef.current === inBox.content) { placeSuggestionInBox(s); return }
+    if (msgTextRef.current.trim() === '') placeSuggestionInBox(s)
+  }, [clearSuggestionFromBox, placeSuggestionInBox])
+
+  const loadSuggestion = useCallback(async (leadId: number) => {
+    if (!accountId) return
+    try {
+      const s = await fetchPendingAiSuggestion(leadId, accountId)
+      if (leadId !== selectedLeadIdRef.current) return
+      applyPendingSuggestion(s)
+    } catch {
+      // Sem sugestao ou sem acesso: a caixa segue como esta
+    }
+  }, [accountId, applyPendingSuggestion])
+
+  // Troca de conversa: tira a sugestao intacta da conversa anterior e carrega a pendente da nova
+  useEffect(() => {
+    selectedLeadIdRef.current = selectedLeadId
+    clearSuggestionFromBox()
+    setAiSuggestion(null)
+    if (selectedLeadId) loadSuggestion(selectedLeadId)
+  }, [selectedLeadId, loadSuggestion, clearSuggestionFromBox])
+
+  useSSE('lead:ai_suggestion', useCallback((data: { lead_id: number }) => {
+    if (data.lead_id === selectedLeadId) loadSuggestion(data.lead_id)
+  }, [selectedLeadId, loadSuggestion]))
+
+  // Apagar todo o texto da sugestao = descartar
+  useEffect(() => {
+    const inBox = suggestionInBoxRef.current
+    if (inBox && msgText.trim() === '' && accountId) {
+      suggestionInBoxRef.current = null
+      setSuggestionInBox(null)
+      setAiSuggestion(null)
+      resolveAiSuggestion(inBox.id, accountId, 'discarded').catch(() => {})
+    }
+  }, [msgText, accountId])
 
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages])
 
@@ -651,16 +722,41 @@ export default function Chat() {
       setNotice({ kind: 'error', title: 'Escolha uma instancia', message: 'Clique em "Enviar via" acima do input pra escolher de qual WhatsApp essa mensagem vai sair.' })
       return
     }
+    const sentText = msgText
+    const suggestionUsed = suggestionInBoxRef.current
     setSending(true)
     try {
-      const result = await sendMessage(lead.id, accountId, msgText, override)
+      const result = await sendMessage(lead.id, accountId, sentText, override)
       setMessages(prev => [...prev, result.message])
+      if (suggestionUsed) {
+        // Zera a referencia ANTES de limpar a caixa, senao o efeito de "apagou = descartou" dispara
+        suggestionInBoxRef.current = null
+        setSuggestionInBox(null)
+        setAiSuggestion(null)
+        resolveAiSuggestion(suggestionUsed.id, accountId, 'sent', sentText).catch(() => {})
+      }
       setMsgText('')
       if (!result.delivered) setNotice({ kind: 'error', title: 'Mensagem nao entregue', message: 'A mensagem foi salva mas NAO foi enviada no WhatsApp. Verifique a conexao da instancia.' })
       setSendInstanceOverride(null)
       loadLeadsList()
     } catch (e: any) { setNotice({ kind: 'error', title: 'Erro ao enviar', message: e?.message || 'Erro desconhecido' }) }
     setSending(false)
+  }
+
+  const handleToggleAiPause = async () => {
+    if (!lead || !accountId) return
+    setTogglingAiPause(true)
+    try {
+      const r = lead.ai_paused_at ? await resumeLeadAi(lead.id, accountId) : await pauseLeadAi(lead.id, accountId)
+      setLead(prev => (prev && prev.id === r.lead_id ? { ...prev, ai_paused_at: r.ai_paused_at } : prev))
+      if (r.ai_paused_at) {
+        clearSuggestionFromBox()
+        setAiSuggestion(null)
+      }
+    } catch (e: any) {
+      setNotice({ kind: 'error', title: 'Erro na IA desta conversa', message: e?.message || 'Erro desconhecido' })
+    }
+    setTogglingAiPause(false)
   }
 
   const MEDIA_LIMITS_MB: Record<string, number> = { image: 5, audio: 16, video: 64, document: 100 }
@@ -931,6 +1027,7 @@ export default function Chat() {
 
   const allStages = funnels.flatMap(f => f.stages || [])
   const currentStage = lead ? allStages.find(s => s.id === lead.stage_id) : null
+  const aiEnabledForAccount = !!accounts.find(a => a.id === accountId)?.ai_agents_enabled
   // Gerentes tambem atendem leads — incluir junto com atendentes no dropdown
   const attendants = users.filter(u => (u.role === 'atendente' || u.role === 'gerente') && u.is_active)
   const availableTags = lead ? tags.filter(t => !lead.tags?.some(lt => lt.id === t.id)) : []
@@ -1079,6 +1176,23 @@ export default function Chat() {
                   <div style={{ fontWeight: 600, fontSize: 14 }}>{lead.name || 'Sem nome'}</div>
                   {lead.phone && <div style={{ fontSize: 11, color: '#9B96B0', display: 'flex', alignItems: 'center', gap: 4 }}><Phone size={10} />{lead.phone}</div>}
                 </div>
+                {lead.ai_close_chance != null && (
+                  <span title={lead.ai_moment ? `Momento: ${lead.ai_moment}` : 'Análise da IA'} style={{ fontSize: 10, padding: '2px 8px', borderRadius: 10, background: 'rgba(255,179,0,0.12)', color: '#FFB300', whiteSpace: 'nowrap' }}>
+                    Chance de fechar {lead.ai_close_chance}% · trava: {lead.ai_main_blocker || 'nenhuma'}
+                  </span>
+                )}
+                {aiEnabledForAccount && (
+                  <button
+                    className="btn btn-secondary btn-sm"
+                    onClick={handleToggleAiPause}
+                    disabled={togglingAiPause}
+                    title={lead.ai_paused_at ? 'A IA não responde nem sugere nesta conversa' : 'Parar a IA só nesta conversa'}
+                    style={{ padding: '4px 8px', display: 'flex', alignItems: 'center', gap: 4, fontSize: 11 }}
+                  >
+                    {lead.ai_paused_at ? <Play size={12} /> : <Pause size={12} />}
+                    {lead.ai_paused_at ? 'Retomar IA' : 'Pausar IA'}
+                  </button>
+                )}
                 {lead.instance_name && <span style={{ fontSize: 10, color: '#34C759', display: 'flex', alignItems: 'center', gap: 4 }}><Smartphone size={10} />{lead.instance_name}</span>}
                 {user?.role === 'super_admin' && (
                   <button className="btn btn-secondary btn-sm" title="Copiar conversa (pra analise por LLM)" onClick={handleCopyConversation} style={{ padding: '4px 8px' }}>
@@ -1195,6 +1309,19 @@ export default function Chat() {
                   </div>
                 )
               })()}
+              {aiSuggestion && suggestionInBox?.id !== aiSuggestion.id && (
+                <div style={{ padding: '4px 12px', fontSize: 11, color: '#9B96B0', borderTop: '1px solid rgba(255,255,255,0.04)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <Bot size={11} style={{ color: '#FFB300' }} />
+                  <span>Há uma sugestão —</span>
+                  <button onClick={() => placeSuggestionInBox(aiSuggestion)} style={{ background: 'none', border: 'none', color: '#FFB300', cursor: 'pointer', padding: 0, fontSize: 11, fontWeight: 600 }}>ver</button>
+                </div>
+              )}
+              {suggestionInBox && msgText.trim() !== '' && (
+                <div style={{ padding: '4px 12px 0', fontSize: 10, color: '#FFB300', display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <Bot size={10} /> {suggestionInBox.source === 'base' ? 'da base' : 'sugestão da IA'}
+                  <span style={{ color: '#6B6580' }}>· Enter envia · apagar descarta</span>
+                </div>
+              )}
               <div className="chat-input">
                 <input ref={fileInputRef} type="file" style={{ display: 'none' }} onChange={e => handlePickFile(e.target.files?.[0] || null)} accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip,.txt,.csv" />
                 <button
@@ -1854,7 +1981,7 @@ export default function Chat() {
                       <Clock size={10} style={{ color: '#FFB300', marginTop: 3, flexShrink: 0 }} />
                       <div>
                         <div style={{ fontSize: 11 }}>{h.from_stage_name ? `${h.from_stage_name} → ${h.to_stage_name}` : `Entrada: ${h.to_stage_name}`}</div>
-                        <div style={{ fontSize: 9, color: '#6B6580' }}>{h.trigger_type}{h.user_name ? ` · ${h.user_name}` : ''}</div>
+                        <div style={{ fontSize: 9, color: '#6B6580' }}>{h.trigger_type === 'ai_qualified' ? 'Movido pela IA — qualificação completa' : h.trigger_type}{h.user_name ? ` · ${h.user_name}` : ''}</div>
                         <div style={{ fontSize: 9, color: '#6B6580' }}>{parseSqlDate(h.created_at).toLocaleString('pt-BR')}</div>
                       </div>
                     </div>
