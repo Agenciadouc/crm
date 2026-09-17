@@ -541,6 +541,8 @@ addColumnIfNotExists('users', 'primary_instance_id', 'INTEGER REFERENCES whatsap
 addColumnIfNotExists('users', 'can_manage_proposals', 'INTEGER NOT NULL DEFAULT 0')
 // users.can_manage_contracts: permite ao atendente gerenciar contratos (igual proposals)
 addColumnIfNotExists('users', 'can_manage_contracts', 'INTEGER NOT NULL DEFAULT 0')
+// instance_auto_messages.greeting_cooldown_hours: cooldown configuravel da saudacao (default 24h, comportamento anterior)
+addColumnIfNotExists('instance_auto_messages', 'greeting_cooldown_hours', 'INTEGER NOT NULL DEFAULT 24')
 // proposals.has_comissao + comissao_percent: comissao sobre faturamento (opcional, alguns clientes tem)
 addColumnIfNotExists('proposals', 'has_comissao', 'INTEGER NOT NULL DEFAULT 0')
 addColumnIfNotExists('proposals', 'comissao_percent', 'REAL NOT NULL DEFAULT 0')
@@ -1280,9 +1282,6 @@ db.exec(`
     FOREIGN KEY (attendant_id) REFERENCES users(id) ON DELETE SET NULL
   );
 `)
-
-// instance_auto_messages.greeting_cooldown_hours: cooldown configuravel da saudacao (default 24h, comportamento anterior)
-addColumnIfNotExists('instance_auto_messages', 'greeting_cooldown_hours', 'INTEGER NOT NULL DEFAULT 24')
 
 // Instância padrão pra leads de formulário
 addColumnIfNotExists('accounts', 'default_form_instance_id', 'INTEGER REFERENCES whatsapp_instances(id) ON DELETE SET NULL')
