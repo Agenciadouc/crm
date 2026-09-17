@@ -423,8 +423,8 @@ git commit -m "feat: cliente de IA da Dros para entrevista com registro de custo
 - Consumes: schema da task 1.
 - Produces (todas recebem `db` e filtram por `accountId`):
   - `createBriefing(db, { accountId, userId })` -> `number` (id)
-  - `addTurn(db, { briefingId, role, content })` -> `number` (position gravada)
-  - `addSource(db, { briefingId, kind, ref = null, content = null, status = 'ok', error = null })` -> `number` (id)
+  - `addTurn(db, { accountId, briefingId, role, content })` -> `number` (position gravada) | `null` (briefing nao e da conta)
+  - `addSource(db, { accountId, briefingId, kind, ref = null, content = null, status = 'ok', error = null })` -> `number` (id) | `null` (briefing nao e da conta)
   - `getBriefing(db, accountId, briefingId)` -> `{ ...linha, turns: [], sources: [] } | null`
   - `listDrafts(db, accountId)` -> `[{ id, status, created_at, updated_at, first_answer }]`
   - `setCompiled(db, { accountId, briefingId, compiled })` -> `boolean`
@@ -465,9 +465,9 @@ test('createBriefing devolve um rascunho sem agente', () => {
 test('addTurn numera a posicao sozinho e getBriefing devolve na ordem', () => {
   const { db, accountId, userId } = setup()
   const id = createBriefing(db, { accountId, userId })
-  assert.equal(addTurn(db, { briefingId: id, role: 'ia', content: 'O que voce vende?' }), 1)
-  assert.equal(addTurn(db, { briefingId: id, role: 'user', content: 'imoveis' }), 2)
-  assert.equal(addTurn(db, { briefingId: id, role: 'ia', content: 'Compra ou aluguel?' }), 3)
+  assert.equal(addTurn(db, { accountId, briefingId: id, role: 'ia', content: 'O que voce vende?' }), 1)
+  assert.equal(addTurn(db, { accountId, briefingId: id, role: 'user', content: 'imoveis' }), 2)
+  assert.equal(addTurn(db, { accountId, briefingId: id, role: 'ia', content: 'Compra ou aluguel?' }), 3)
   const turns = getBriefing(db, accountId, id).turns
   assert.deepEqual(turns.map(t => t.position), [1, 2, 3])
   assert.deepEqual(turns.map(t => t.role), ['ia', 'user', 'ia'])
@@ -477,8 +477,8 @@ test('addTurn numera a posicao sozinho e getBriefing devolve na ordem', () => {
 test('addSource guarda fonte que deu certo e fonte que falhou', () => {
   const { db, accountId, userId } = setup()
   const id = createBriefing(db, { accountId, userId })
-  addSource(db, { briefingId: id, kind: 'colado', content: 'tabela de precos' })
-  addSource(db, { briefingId: id, kind: 'site', ref: 'https://x.com', status: 'falhou', error: 'timeout' })
+  addSource(db, { accountId, briefingId: id, kind: 'colado', content: 'tabela de precos' })
+  addSource(db, { accountId, briefingId: id, kind: 'site', ref: 'https://x.com', status: 'falhou', error: 'timeout' })
   const sources = getBriefing(db, accountId, id).sources
   assert.equal(sources.length, 2)
   assert.equal(sources[0].status, 'ok')
@@ -497,8 +497,8 @@ test('getBriefing nao devolve briefing de outra conta', () => {
 test('listDrafts traz so o que nao esta ativo, com a primeira resposta como rotulo', () => {
   const { db, accountId, userId, agentId } = setup()
   const rascunho = createBriefing(db, { accountId, userId })
-  addTurn(db, { briefingId: rascunho, role: 'ia', content: 'O que voce vende?' })
-  addTurn(db, { briefingId: rascunho, role: 'user', content: 'curso de ingles' })
+  addTurn(db, { accountId, briefingId: rascunho, role: 'ia', content: 'O que voce vende?' })
+  addTurn(db, { accountId, briefingId: rascunho, role: 'user', content: 'curso de ingles' })
 
   const ativo = createBriefing(db, { accountId, userId })
   setCompiled(db, { accountId, briefingId: ativo, compiled: { name: 'X' } })
@@ -583,7 +583,7 @@ export function createBriefing(db, { accountId, userId }) {
   ).run(accountId, userId || null).lastInsertRowid)
 }
 
-export function addTurn(db, { briefingId, role, content }) {
+export function addTurn(db, { accountId, briefingId, role, content }) {
   const insert = db.transaction(() => {
     const last = db.prepare('SELECT MAX(position) AS p FROM agent_briefing_turns WHERE briefing_id = ?').get(briefingId)
     const position = (last && last.p ? last.p : 0) + 1
@@ -596,7 +596,7 @@ export function addTurn(db, { briefingId, role, content }) {
   return insert()
 }
 
-export function addSource(db, { briefingId, kind, ref = null, content = null, status = 'ok', error = null }) {
+export function addSource(db, { accountId, briefingId, kind, ref = null, content = null, status = 'ok', error = null }) {
   const id = db.prepare(
     'INSERT INTO agent_briefing_sources (briefing_id, kind, ref, content, status, error) VALUES (?, ?, ?, ?, ?, ?)'
   ).run(briefingId, kind, ref, content, status, error).lastInsertRowid
@@ -683,7 +683,7 @@ git commit -m "feat: armazenamento do briefing com transcricao e fontes"
 
 **Interfaces:**
 - Consumes: `addSource` (task 3).
-- Produces: `collectPastedText(db, { briefingId, text })` -> `{ ok: boolean, id?: number, error?: string }`
+- Produces: `collectPastedText(db, { accountId, briefingId, text })` -> `{ ok: boolean, id?: number, error?: string }`
 
 Esta é a fonte mais simples de todas e existe para **fixar a interface** que `website.js` e `crmHistory.js` vão implementar no Plano 2: toda fonte recebe o `db` e o `briefingId`, grava em `agent_briefing_sources` e devolve `{ ok }` — nunca lança, para que uma fonte quebrada não derrube a entrevista.
 
@@ -707,7 +707,7 @@ function setup() {
 
 test('guarda o texto colado como fonte ok', () => {
   const { db, accountId, briefingId } = setup()
-  const r = collectPastedText(db, { briefingId, text: 'Tabela de precos: plano A R$ 500' })
+  const r = collectPastedText(db, { accountId, briefingId, text: 'Tabela de precos: plano A R$ 500' })
   assert.equal(r.ok, true)
   const sources = getBriefing(db, accountId, briefingId).sources
   assert.equal(sources.length, 1)
@@ -718,15 +718,15 @@ test('guarda o texto colado como fonte ok', () => {
 
 test('texto vazio ou so espaco nao vira fonte', () => {
   const { db, accountId, briefingId } = setup()
-  assert.equal(collectPastedText(db, { briefingId, text: '   ' }).ok, false)
-  assert.equal(collectPastedText(db, { briefingId, text: '' }).ok, false)
-  assert.equal(collectPastedText(db, { briefingId, text: null }).ok, false)
+  assert.equal(collectPastedText(db, { accountId, briefingId, text: '   ' }).ok, false)
+  assert.equal(collectPastedText(db, { accountId, briefingId, text: '' }).ok, false)
+  assert.equal(collectPastedText(db, { accountId, briefingId, text: null }).ok, false)
   assert.equal(getBriefing(db, accountId, briefingId).sources.length, 0)
 })
 
 test('texto gigante e cortado no teto, nao rejeitado', () => {
   const { db, accountId, briefingId } = setup()
-  const r = collectPastedText(db, { briefingId, text: 'a'.repeat(MAX_PASTED_CHARS + 5000) })
+  const r = collectPastedText(db, { accountId, briefingId, text: 'a'.repeat(MAX_PASTED_CHARS + 5000) })
   assert.equal(r.ok, true)
   const s = getBriefing(db, accountId, briefingId).sources[0]
   assert.equal(s.content.length, MAX_PASTED_CHARS)
@@ -735,8 +735,8 @@ test('texto gigante e cortado no teto, nao rejeitado', () => {
 
 test('erro inesperado vira fonte falhou e nao lanca', () => {
   const { db, accountId, briefingId } = setup()
-  // briefing_id inexistente viola a foreign key -> a fonte nao grava, mas nao lanca
-  const r = collectPastedText(db, { briefingId: 999999, text: 'texto' })
+  // briefing inexistente (ou de outra conta) -> addSource devolve null, a fonte nao grava, e nao lanca
+  const r = collectPastedText(db, { accountId, briefingId: 999999, text: 'texto' })
   assert.equal(r.ok, false)
   assert.ok(r.error, 'tem que dizer o motivo')
   assert.equal(getBriefing(db, accountId, briefingId).sources.length, 0)
@@ -761,16 +761,18 @@ import { addSource } from '../briefingStore.js'
 
 export const MAX_PASTED_CHARS = 20000
 
-export function collectPastedText(db, { briefingId, text }) {
+export function collectPastedText(db, { accountId, briefingId, text }) {
   const clean = String(text == null ? '' : text).trim()
   if (!clean) return { ok: false, error: 'texto_vazio' }
 
   try {
     const id = addSource(db, {
+      accountId,
       briefingId,
       kind: 'colado',
       content: clean.slice(0, MAX_PASTED_CHARS),
     })
+    if (id === null) return { ok: false, error: 'briefing_nao_encontrado' }
     return { ok: true, id }
   } catch (e) {
     return { ok: false, error: String(e && e.message ? e.message : e) }
@@ -874,9 +876,9 @@ function setup() {
   const db = createTestDb()
   const { accountId, userId } = seedAccountAndLead(db)
   const briefingId = createBriefing(db, { accountId, userId })
-  addTurn(db, { briefingId, role: 'ia', content: 'O que voce vende?' })
-  addTurn(db, { briefingId, role: 'user', content: 'curso de ingles online' })
-  addSource(db, { briefingId, kind: 'colado', content: 'ementa do curso' })
+  addTurn(db, { accountId, briefingId, role: 'ia', content: 'O que voce vende?' })
+  addTurn(db, { accountId, briefingId, role: 'user', content: 'curso de ingles online' })
+  addSource(db, { accountId, briefingId, kind: 'colado', content: 'ementa do curso' })
   return { db, accountId, briefingId }
 }
 
@@ -1197,7 +1199,7 @@ test('primeira pergunta e gravada como turno da ia', async () => {
 
 test('answer grava a resposta da pessoa', () => {
   const { db, accountId, briefingId } = setup()
-  addTurn(db, { briefingId, role: 'ia', content: 'O que voce vende?' })
+  addTurn(db, { accountId, briefingId, role: 'ia', content: 'O que voce vende?' })
   assert.equal(answer(db, { accountId, briefingId, text: 'software de gestao' }).ok, true)
   const turns = getBriefing(db, accountId, briefingId).turns
   assert.equal(turns[1].role, 'user')
@@ -1214,7 +1216,7 @@ test('answer recusa texto vazio e briefing de outra conta', () => {
 
 test('shouldFinish corta no teto de perguntas', () => {
   const { db, accountId, briefingId } = setup()
-  for (let i = 0; i < MAX_PERGUNTAS; i++) addTurn(db, { briefingId, role: 'ia', content: `p${i}` })
+  for (let i = 0; i < MAX_PERGUNTAS; i++) addTurn(db, { accountId, briefingId, role: 'ia', content: `p${i}` })
   const b = getBriefing(db, accountId, briefingId)
   assert.deepEqual(shouldFinish(b, fakeAi('x', 0)), { finish: true, reason: 'perguntas' })
 })
@@ -1227,14 +1229,14 @@ test('shouldFinish corta no teto de tokens', () => {
 
 test('shouldFinish deixa seguir quando esta dentro dos dois tetos', () => {
   const { db, accountId, briefingId } = setup()
-  addTurn(db, { briefingId, role: 'ia', content: 'p1' })
+  addTurn(db, { accountId, briefingId, role: 'ia', content: 'p1' })
   const b = getBriefing(db, accountId, briefingId)
   assert.deepEqual(shouldFinish(b, fakeAi('x', 100)), { finish: false, reason: null })
 })
 
 test('no teto, nextQuestion encerra sem gastar IA', async () => {
   const { db, accountId, briefingId } = setup()
-  for (let i = 0; i < MAX_PERGUNTAS; i++) addTurn(db, { briefingId, role: 'ia', content: `p${i}` })
+  for (let i = 0; i < MAX_PERGUNTAS; i++) addTurn(db, { accountId, briefingId, role: 'ia', content: `p${i}` })
   const ai = fakeAi()
   const r = await nextQuestion(db, { accountId, briefingId, ai })
   assert.equal(r.done, true)
@@ -1244,8 +1246,8 @@ test('no teto, nextQuestion encerra sem gastar IA', async () => {
 
 test('a IA recebe os temas e a conversa ate agora', async () => {
   const { db, accountId, briefingId } = setup()
-  addTurn(db, { briefingId, role: 'ia', content: 'O que voce vende?' })
-  addTurn(db, { briefingId, role: 'user', content: 'consultoria contabil' })
+  addTurn(db, { accountId, briefingId, role: 'ia', content: 'O que voce vende?' })
+  addTurn(db, { accountId, briefingId, role: 'user', content: 'consultoria contabil' })
   const ai = fakeAi('Quem e o seu cliente ideal?')
   await nextQuestion(db, { accountId, briefingId, ai })
   const call = ai.calls[0]
@@ -1352,7 +1354,7 @@ export async function nextQuestion(db, { accountId, briefingId, ai }) {
   if (!pergunta) return { ok: false, error: 'pergunta_vazia' }
   if (pergunta.toUpperCase() === 'PRONTO') return { ok: true, done: true, reason: 'temas_cobertos' }
 
-  addTurn(db, { briefingId, role: 'ia', content: pergunta })
+  addTurn(db, { accountId, briefingId, role: 'ia', content: pergunta })
   return { ok: true, done: false, question: pergunta }
 }
 
@@ -1361,7 +1363,7 @@ export function answer(db, { accountId, briefingId, text }) {
   if (!clean) return { ok: false, error: 'resposta_vazia' }
   const briefing = getBriefing(db, accountId, briefingId)
   if (!briefing) return { ok: false, error: 'briefing_nao_encontrado' }
-  addTurn(db, { briefingId, role: 'user', content: clean })
+  addTurn(db, { accountId, briefingId, role: 'user', content: clean })
   return { ok: true }
 }
 ```
@@ -1553,7 +1555,7 @@ function comBriefingCompilado() {
   const db = createTestDb()
   const { accountId, userId } = seedAccountAndLead(db)
   const briefingId = createBriefing(db, { accountId, userId })
-  addTurn(db, { briefingId, role: 'user', content: 'curso de ingles' })
+  addTurn(db, { accountId, briefingId, role: 'user', content: 'curso de ingles' })
   setCompiled(db, { accountId, briefingId, compiled: COMPILADO })
   return { db, accountId, briefingId }
 }
@@ -1563,8 +1565,8 @@ test('REGRA DE SEGURANCA: rascunho nao cria linha em ai_agents', () => {
   const { accountId, userId } = seedAccountAndLead(db)
   const antes = db.prepare('SELECT COUNT(*) c FROM ai_agents').get().c
   const briefingId = createBriefing(db, { accountId, userId })
-  addTurn(db, { briefingId, role: 'ia', content: 'O que voce vende?' })
-  addTurn(db, { briefingId, role: 'user', content: 'curso' })
+  addTurn(db, { accountId, briefingId, role: 'ia', content: 'O que voce vende?' })
+  addTurn(db, { accountId, briefingId, role: 'user', content: 'curso' })
   setCompiled(db, { accountId, briefingId, compiled: COMPILADO })
   assert.equal(db.prepare('SELECT COUNT(*) c FROM ai_agents').get().c, antes,
     'entrevistar e compilar NAO podem criar agente')
@@ -1926,7 +1928,7 @@ export function briefingFromAgent(db, { accountId, agentId, userId }) {
 
   const run = db.transaction(() => {
     const briefingId = createBriefing(db, { accountId, userId })
-    addSource(db, { briefingId, kind: 'entrevista', content: texto })
+    addSource(db, { accountId, briefingId, kind: 'entrevista', content: texto })
     setCompiled(db, { accountId, briefingId, compiled })
     linkAgent(db, { accountId, briefingId, agentId })
     return briefingId
@@ -2091,7 +2093,7 @@ router.post('/:id/answer', requireRole('super_admin', 'gerente'), async (req, re
 router.post('/:id/paste', requireRole('super_admin', 'gerente'), (req, res) => {
   const b = getBriefing(db, req.accountId, req.params.id)
   if (!b) return fail(res, 'briefing_nao_encontrado')
-  const r = collectPastedText(db, { briefingId: b.id, text: (req.body || {}).text })
+  const r = collectPastedText(db, { accountId: req.accountId, briefingId: b.id, text: (req.body || {}).text })
   if (!r.ok) return fail(res, r.error)
   res.json({ ok: true })
 })
