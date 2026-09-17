@@ -4,6 +4,7 @@ import { fileURLToPath } from 'url'
 import { dirname, resolve } from 'path'
 import { migrateWhatsappProviderSchema } from './services/whatsapp/schema.js'
 import { applyCopilotSchema } from './services/copilotSchema.js'
+import { applyAgentBriefingSchema } from './services/agentBriefingSchema.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const dbPath = resolve(__dirname, 'data', 'crm.db')
@@ -1427,5 +1428,8 @@ console.log('[DB] SQLite ready at', dbPath)
 
 // Copiloto do Agente de IA (modo, chave, analise no lead, pausa, ai_suggestions)
 applyCopilotSchema(db)
+
+// Briefing do agente por entrevista (agent_briefings, agent_briefing_turns, agent_briefing_sources)
+applyAgentBriefingSchema(db)
 
 export default db

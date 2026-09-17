@@ -6,8 +6,6 @@ import { agentSendsWithoutSeller, findAutoRescueCandidates, findFollowUpAgent } 
 // Colunas/tabelas de atendimento que o helper base nao cria
 function addAttendanceTables(db) {
   db.exec(`
-    ALTER TABLE users ADD COLUMN is_bot INTEGER NOT NULL DEFAULT 0;
-    ALTER TABLE users ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1;
     ALTER TABLE leads ADD COLUMN attendant_id INTEGER;
     ALTER TABLE leads ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1;
     ALTER TABLE leads ADD COLUMN is_archived INTEGER NOT NULL DEFAULT 0;

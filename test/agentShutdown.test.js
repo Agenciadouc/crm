@@ -10,14 +10,13 @@ const flush = (ms = 25) => new Promise((resolve) => setTimeout(resolve, ms))
 // Colunas e tabelas de atendimento que o helper da Task 1 nao cria
 function addAttendanceTables(db) {
   db.exec(`
-    ALTER TABLE users ADD COLUMN is_bot INTEGER NOT NULL DEFAULT 0;
-    ALTER TABLE users ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1;
     ALTER TABLE leads ADD COLUMN attendant_id INTEGER;
     ALTER TABLE leads ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1;
     ALTER TABLE leads ADD COLUMN is_archived INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE leads ADD COLUMN is_blocked INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE leads ADD COLUMN last_instance_id INTEGER;
     ALTER TABLE leads ADD COLUMN updated_at TEXT;
+    ALTER TABLE whatsapp_instances ADD COLUMN default_attendant_id INTEGER;
     CREATE TABLE IF NOT EXISTS messages (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       lead_id INTEGER NOT NULL,
@@ -25,11 +24,6 @@ function addAttendanceTables(db) {
       direction TEXT NOT NULL,
       content TEXT,
       ai_agent_id INTEGER
-    );
-    CREATE TABLE whatsapp_instances (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      account_id INTEGER NOT NULL,
-      default_attendant_id INTEGER
     );
     CREATE TABLE lead_instance_assignments (
       lead_id INTEGER NOT NULL,

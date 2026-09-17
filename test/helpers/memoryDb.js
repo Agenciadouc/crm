@@ -1,9 +1,11 @@
 // Banco SQLite em memoria para testes. NAO importa server/db.js (ele abre o banco real).
 import Database from 'better-sqlite3'
 import { applyCopilotSchema } from '../../server/services/copilotSchema.js'
+import { applyAgentBriefingSchema } from '../../server/services/agentBriefingSchema.js'
 
 export function createTestDb() {
   const db = new Database(':memory:')
+  db.pragma('foreign_keys = ON')
   db.exec(`
     CREATE TABLE accounts (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -13,14 +15,72 @@ export function createTestDb() {
     CREATE TABLE users (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       account_id INTEGER,
-      name TEXT NOT NULL
+      name TEXT NOT NULL,
+      email TEXT,
+      password TEXT,
+      role TEXT,
+      is_active INTEGER DEFAULT 1,
+      is_bot INTEGER DEFAULT 0,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now'))
     );
     CREATE TABLE ai_agents (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       account_id INTEGER NOT NULL,
       user_id INTEGER,
       name TEXT NOT NULL,
-      is_active INTEGER NOT NULL DEFAULT 1
+      is_active INTEGER NOT NULL DEFAULT 1,
+      identifies_as_bot INTEGER DEFAULT 1,
+      persona TEXT,
+      knowledge_base TEXT,
+      never_mention TEXT,
+      qualification_criteria TEXT,
+      required_fields TEXT,
+      responds_to_audio INTEGER DEFAULT 0,
+      audio_decline_message TEXT,
+      max_messages_before_handoff INTEGER DEFAULT 15,
+      handoff_keywords TEXT,
+      activation_mode TEXT,
+      required_tag_id INTEGER,
+      monthly_token_limit INTEGER DEFAULT 500000,
+      tokens_used_this_month INTEGER DEFAULT 0,
+      current_month TEXT,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now'))
+    );
+    CREATE TABLE ai_agent_stages (
+      agent_id INTEGER,
+      stage_id INTEGER
+    );
+    CREATE TABLE ai_agent_instances (
+      agent_id INTEGER,
+      instance_id INTEGER
+    );
+    CREATE TABLE ai_agent_handoff_rules (
+      agent_id INTEGER,
+      reason TEXT,
+      target_type TEXT,
+      target_user_id INTEGER,
+      fallback_to_roulette INTEGER,
+      move_to_stage_id INTEGER,
+      add_tag_id INTEGER
+    );
+    CREATE TABLE whatsapp_instances (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      account_id INTEGER NOT NULL,
+      instance_name TEXT,
+      status TEXT
+    );
+    CREATE TABLE funnels (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      account_id INTEGER NOT NULL,
+      name TEXT
+    );
+    CREATE TABLE funnel_stages (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      funnel_id INTEGER NOT NULL,
+      name TEXT,
+      position INTEGER
     );
     CREATE TABLE leads (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -51,8 +111,22 @@ export function createTestDb() {
       content TEXT NOT NULL,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
+    CREATE TABLE ai_agent_token_log (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      agent_id INTEGER,
+      account_id INTEGER NOT NULL,
+      lead_id INTEGER,
+      input_tokens INTEGER NOT NULL DEFAULT 0,
+      output_tokens INTEGER NOT NULL DEFAULT 0,
+      cache_read_tokens INTEGER NOT NULL DEFAULT 0,
+      cache_creation_tokens INTEGER NOT NULL DEFAULT 0,
+      cost_usd REAL,
+      source TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
   `)
   applyCopilotSchema(db)
+  applyAgentBriefingSchema(db)
   return db
 }
 
