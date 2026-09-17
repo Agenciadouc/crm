@@ -58,3 +58,25 @@ test('mode ausente cai no padrao auto', () => {
   assert.equal(r.ok, true)
   assert.equal(db.prepare('SELECT mode FROM ai_agents WHERE id = ?').get(r.agentId).mode, 'auto')
 })
+
+test('falha dentro da transacao (depois do INSERT do usuario-bot) nao deixa usuario nem agente orfao', () => {
+  const db = createTestDb()
+  const { accountId } = seedAccountAndLead(db)
+  const antesAgentes = db.prepare('SELECT COUNT(*) c FROM ai_agents').get().c
+  const antesUsers = db.prepare('SELECT COUNT(*) c FROM users').get().c
+
+  // required_fields circular: passa o Array.isArray (entra na transacao, apos o
+  // INSERT do usuario-bot) mas o JSON.stringify no INSERT do agente lanca
+  // TypeError. createAgentRecord nao captura essa excecao - ela sobe para o
+  // chamador (a rota trata isso com try/catch e devolve 500).
+  const circular = []
+  circular.push(circular)
+
+  assert.throws(
+    () => createAgentRecord(db, { accountId, body: { name: 'Vai falhar', required_fields: circular } }),
+    /circular structure/
+  )
+
+  assert.equal(db.prepare('SELECT COUNT(*) c FROM ai_agents').get().c, antesAgentes, 'nao pode sobrar agente orfao')
+  assert.equal(db.prepare('SELECT COUNT(*) c FROM users').get().c, antesUsers, 'nao pode sobrar usuario-bot orfao')
+})
