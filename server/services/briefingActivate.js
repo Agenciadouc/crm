@@ -65,7 +65,13 @@ export function activateBriefing(db, { accountId, briefingId, mode = 'copilot', 
       },
     })
     if (!created.ok) return created
-    linkAgent(db, { accountId, briefingId, agentId: created.agentId })
+    // linkAgent devolve false se o briefing desapareceu (ou trocou de conta)
+    // entre o getBriefing do topo e aqui. Nesse caso o agente acabou de ser
+    // criado com is_active=1 e ninguem o amarrou: lancar forca o rollback da
+    // transacao de fora e desfaz o agente e o usuario-bot tambem.
+    if (!linkAgent(db, { accountId, briefingId, agentId: created.agentId })) {
+      throw new Error('briefing_desapareceu')
+    }
     return { ok: true, agentId: created.agentId }
   })
 

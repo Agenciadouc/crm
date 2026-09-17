@@ -126,3 +126,98 @@ test('compiled_json corrompido nao cria agente', () => {
   assert.equal(r.error, 'compilado_invalido')
   assert.equal(db.prepare('SELECT COUNT(*) c FROM ai_agents').get().c, antes)
 })
+
+// Conserto 1 (rodada de conserto 1/5): linkAgent devolve false quando o
+// briefing desaparece entre o getBriefing do topo e a propria chamada de
+// linkAgent. Sem o throw, activateBriefing devolveria {ok:true} com um agente
+// is_active=1 no ar e nenhum briefing amarrado a ele. Forcamos o desaparecimento
+// com um trigger real do SQLite (nao um mock de funcao) disparado no exato
+// instante em que createAgentRecord insere o agente, reproduzindo a janela
+// entre o INSERT do agente e a chamada de linkAgent.
+test('briefing desaparecendo entre criar o agente e linkAgent desfaz o agente e o usuario-bot', () => {
+  const { db, accountId, briefingId } = comBriefingCompilado()
+
+  db.exec(`
+    CREATE TRIGGER apaga_briefing_no_meio AFTER INSERT ON ai_agents
+    BEGIN
+      DELETE FROM agent_briefings WHERE id = ${briefingId};
+    END;
+  `)
+
+  const antesAgentes = db.prepare('SELECT COUNT(*) c FROM ai_agents').get().c
+  const antesUsuarios = db.prepare('SELECT COUNT(*) c FROM users').get().c
+
+  let r
+  try {
+    r = activateBriefing(db, { accountId, briefingId })
+  } finally {
+    db.exec('DROP TRIGGER apaga_briefing_no_meio')
+  }
+
+  assert.equal(r.ok, false)
+  assert.equal(r.error, 'briefing_desapareceu')
+  assert.equal(db.prepare('SELECT COUNT(*) c FROM ai_agents').get().c, antesAgentes,
+    'agente criado nao pode sobrar quando o briefing desaparece antes do linkAgent')
+  assert.equal(db.prepare('SELECT COUNT(*) c FROM users').get().c, antesUsuarios,
+    'usuario-bot criado nao pode sobrar quando o briefing desaparece antes do linkAgent')
+})
+
+// Conserto 2, item 1: JSON valido mas que reprova validateCompiled (sem a
+// chave resumo) e um portao diferente do JSON malformado ja testado acima.
+test('compiled_json valido mas que reprova validateCompiled nao cria agente', () => {
+  const { db, accountId, briefingId } = comBriefingCompilado()
+  const semResumo = { ...COMPILADO }
+  delete semResumo.resumo
+  db.prepare('UPDATE agent_briefings SET compiled_json = ? WHERE id = ?').run(JSON.stringify(semResumo), briefingId)
+  const antes = db.prepare('SELECT COUNT(*) c FROM ai_agents').get().c
+  const r = activateBriefing(db, { accountId, briefingId })
+  assert.equal(r.ok, false)
+  assert.equal(r.error, 'compilado_invalido')
+  assert.equal(db.prepare('SELECT COUNT(*) c FROM ai_agents').get().c, antes)
+})
+
+// Conserto 2, item 2: compiled_json NULL. JSON.parse(null) nao lanca (parseia
+// o literal "null"), entao esse caminho passa pelo mesmo portao de
+// validateCompiled do teste acima, nao pelo catch do JSON.parse.
+test('compiled_json NULL nao cria agente', () => {
+  const { db, accountId, briefingId } = comBriefingCompilado()
+  db.prepare('UPDATE agent_briefings SET compiled_json = NULL WHERE id = ?').run(briefingId)
+  const antes = db.prepare('SELECT COUNT(*) c FROM ai_agents').get().c
+  const r = activateBriefing(db, { accountId, briefingId })
+  assert.equal(r.ok, false)
+  assert.equal(r.error, 'compilado_invalido')
+  assert.equal(db.prepare('SELECT COUNT(*) c FROM ai_agents').get().c, antes)
+})
+
+// Conserto 2, item 3: prova o rollback do aninhamento com uma falha genuina do
+// motor, sem mock. idx_agent_briefings_agente e unico em agent_id. Ocupamos
+// com antecedencia, num OUTRO briefing, o id que o PROXIMO agente criado vai
+// receber (previsivel porque nada mais insere em ai_agents entre a leitura do
+// MAX(id) e a chamada de activateBriefing); quando linkAgent tentar gravar
+// esse mesmo id no briefing alvo, o UPDATE colide com o indice unico e lanca
+// de verdade. O agente e o usuario-bot criados dentro da transacao de fora
+// tem que desaparecer junto com o rollback.
+test('rollback do aninhamento: indice unico ocupado desfaz agente e usuario-bot', () => {
+  const { db, accountId, briefingId } = comBriefingCompilado()
+
+  const proximoAgentId = db.prepare('SELECT COALESCE(MAX(id), 0) + 1 AS n FROM ai_agents').get().n
+  const outroBriefingId = createBriefing(db, { accountId, userId: null })
+  db.pragma('foreign_keys = OFF')
+  db.prepare('UPDATE agent_briefings SET agent_id = ? WHERE id = ?').run(proximoAgentId, outroBriefingId)
+  db.pragma('foreign_keys = ON')
+
+  const antesAgentes = db.prepare('SELECT COUNT(*) c FROM ai_agents').get().c
+  const antesUsuarios = db.prepare('SELECT COUNT(*) c FROM users').get().c
+
+  const r = activateBriefing(db, { accountId, briefingId })
+
+  assert.equal(r.ok, false, 'linkAgent tem que falhar por causa do indice unico ja ocupado')
+  assert.equal(db.prepare('SELECT COUNT(*) c FROM ai_agents').get().c, antesAgentes,
+    'agente criado dentro da transacao nao pode sobrar depois do rollback')
+  assert.equal(db.prepare('SELECT COUNT(*) c FROM users').get().c, antesUsuarios,
+    'usuario-bot criado dentro da transacao nao pode sobrar depois do rollback')
+
+  const b = getBriefing(db, accountId, briefingId)
+  assert.equal(b.status, 'compilado', 'briefing alvo nao pode ficar marcado como ativo')
+  assert.equal(b.agent_id, null)
+})
