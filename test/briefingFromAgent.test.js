@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createTestDb, seedAccountAndLead } from './helpers/memoryDb.js'
-import { getBriefing } from '../server/services/briefingStore.js'
+import { getBriefing, createBriefing, linkAgent } from '../server/services/briefingStore.js'
 import { briefingFromAgent } from '../server/services/briefingFromAgent.js'
 
 function comAgenteConfigurado() {
@@ -77,4 +77,20 @@ test('agente que ja tem briefing devolve o mesmo, sem duplicar', () => {
   assert.equal(segundo.ok, true)
   assert.equal(segundo.briefingId, primeiro.briefingId)
   assert.equal(db.prepare('SELECT COUNT(*) c FROM agent_briefings').get().c, 1)
+})
+
+test('colisao do indice unico do agent_id devolve erro em vez de lancar', () => {
+  const { db, accountId, userId, agentId } = comAgenteConfigurado()
+  // Caminho honesto para forcar a colisao sem mock: um briefing de OUTRA conta
+  // ja fica amarrado a este agent_id (agent_id tem indice unico na tabela toda,
+  // independente de conta). A checagem de idempotencia filtra por account_id,
+  // entao nao acha essa linha e a funcao segue ate o linkAgent de dentro da
+  // propria transacao, que colide com o indice unico e lanca.
+  const outraConta = Number(db.prepare('INSERT INTO accounts (name) VALUES (?)').run('Outra').lastInsertRowid)
+  const outroBriefingId = createBriefing(db, { accountId: outraConta, userId })
+  linkAgent(db, { accountId: outraConta, briefingId: outroBriefingId, agentId })
+
+  const r = briefingFromAgent(db, { accountId, agentId, userId })
+  assert.equal(r.ok, false)
+  assert.match(r.error, /UNIQUE constraint failed/)
 })

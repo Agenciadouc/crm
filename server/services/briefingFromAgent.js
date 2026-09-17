@@ -2,7 +2,7 @@
 // atuais, para que "Conversar com a IA" valha tambem para o que ja esta no ar.
 // NAO toca no agente: so le.
 
-import { createBriefing, addSource, setCompiled, linkAgent, getBriefing } from './briefingStore.js'
+import { createBriefing, addSource, setCompiled, linkAgent } from './briefingStore.js'
 import { REQUIRED_FIELD_KEYS } from './agentCompiler.js'
 
 function parseRequiredFields(raw) {
@@ -59,8 +59,13 @@ export function briefingFromAgent(db, { accountId, agentId, userId }) {
     return briefingId
   })
 
-  const briefingId = run()
-  // getBriefing confirma que ficou legivel pela conta antes de devolver.
-  if (!getBriefing(db, accountId, briefingId)) return { ok: false, error: 'falha_ao_criar' }
-  return { ok: true, briefingId }
+  // agent_id tem indice unico em agent_briefings: se dois pedidos concorrentes
+  // chegarem aqui para o mesmo agente, o segundo linkAgent colide e a
+  // transacao lanca. Sem este catch, a excecao subiria crua ate o Express.
+  try {
+    const briefingId = run()
+    return { ok: true, briefingId }
+  } catch (e) {
+    return { ok: false, error: String(e && e.message ? e.message : e) }
+  }
 }
