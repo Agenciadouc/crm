@@ -48,7 +48,8 @@ export default function Chat() {
   const [leads, setLeads] = useState<Lead[]>([])
   const [selectedLeadId, setSelectedLeadId] = useState<number | null>(() => {
     const params = new URLSearchParams(window.location.search)
-    const leadParam = params.get('lead')
+    // Aceita ambos os nomes: ?lead=X e ?lead_id=X (compat com links de outros modulos)
+    const leadParam = params.get('lead') || params.get('lead_id')
     return leadParam ? parseInt(leadParam) : null
   })
   const [showNewChat, setShowNewChat] = useState(false)
