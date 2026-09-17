@@ -9,8 +9,10 @@ export function createBriefing(db, { accountId, userId }) {
   ).run(accountId, userId || null).lastInsertRowid)
 }
 
-export function addTurn(db, { briefingId, role, content }) {
+export function addTurn(db, { accountId, briefingId, role, content }) {
   const insert = db.transaction(() => {
+    const dono = db.prepare('SELECT 1 FROM agent_briefings WHERE id = ? AND account_id = ?').get(briefingId, accountId)
+    if (!dono) return null
     const last = db.prepare('SELECT MAX(position) AS p FROM agent_briefing_turns WHERE briefing_id = ?').get(briefingId)
     const position = (last && last.p ? last.p : 0) + 1
     db.prepare(
@@ -22,12 +24,17 @@ export function addTurn(db, { briefingId, role, content }) {
   return insert()
 }
 
-export function addSource(db, { briefingId, kind, ref = null, content = null, status = 'ok', error = null }) {
-  const id = db.prepare(
-    'INSERT INTO agent_briefing_sources (briefing_id, kind, ref, content, status, error) VALUES (?, ?, ?, ?, ?, ?)'
-  ).run(briefingId, kind, ref, content, status, error).lastInsertRowid
-  db.prepare("UPDATE agent_briefings SET updated_at = datetime('now') WHERE id = ?").run(briefingId)
-  return Number(id)
+export function addSource(db, { accountId, briefingId, kind, ref = null, content = null, status = 'ok', error = null }) {
+  const insert = db.transaction(() => {
+    const dono = db.prepare('SELECT 1 FROM agent_briefings WHERE id = ? AND account_id = ?').get(briefingId, accountId)
+    if (!dono) return null
+    const id = db.prepare(
+      'INSERT INTO agent_briefing_sources (briefing_id, kind, ref, content, status, error) VALUES (?, ?, ?, ?, ?, ?)'
+    ).run(briefingId, kind, ref, content, status, error).lastInsertRowid
+    db.prepare("UPDATE agent_briefings SET updated_at = datetime('now') WHERE id = ?").run(briefingId)
+    return Number(id)
+  })
+  return insert()
 }
 
 export function getBriefing(db, accountId, briefingId) {

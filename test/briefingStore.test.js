@@ -25,9 +25,9 @@ test('createBriefing devolve um rascunho sem agente', () => {
 test('addTurn numera a posicao sozinho e getBriefing devolve na ordem', () => {
   const { db, accountId, userId } = setup()
   const id = createBriefing(db, { accountId, userId })
-  assert.equal(addTurn(db, { briefingId: id, role: 'ia', content: 'O que voce vende?' }), 1)
-  assert.equal(addTurn(db, { briefingId: id, role: 'user', content: 'imoveis' }), 2)
-  assert.equal(addTurn(db, { briefingId: id, role: 'ia', content: 'Compra ou aluguel?' }), 3)
+  assert.equal(addTurn(db, { accountId, briefingId: id, role: 'ia', content: 'O que voce vende?' }), 1)
+  assert.equal(addTurn(db, { accountId, briefingId: id, role: 'user', content: 'imoveis' }), 2)
+  assert.equal(addTurn(db, { accountId, briefingId: id, role: 'ia', content: 'Compra ou aluguel?' }), 3)
   const turns = getBriefing(db, accountId, id).turns
   assert.deepEqual(turns.map(t => t.position), [1, 2, 3])
   assert.deepEqual(turns.map(t => t.role), ['ia', 'user', 'ia'])
@@ -37,8 +37,8 @@ test('addTurn numera a posicao sozinho e getBriefing devolve na ordem', () => {
 test('addSource guarda fonte que deu certo e fonte que falhou', () => {
   const { db, accountId, userId } = setup()
   const id = createBriefing(db, { accountId, userId })
-  addSource(db, { briefingId: id, kind: 'colado', content: 'tabela de precos' })
-  addSource(db, { briefingId: id, kind: 'site', ref: 'https://x.com', status: 'falhou', error: 'timeout' })
+  addSource(db, { accountId, briefingId: id, kind: 'colado', content: 'tabela de precos' })
+  addSource(db, { accountId, briefingId: id, kind: 'site', ref: 'https://x.com', status: 'falhou', error: 'timeout' })
   const sources = getBriefing(db, accountId, id).sources
   assert.equal(sources.length, 2)
   assert.equal(sources[0].status, 'ok')
@@ -57,8 +57,8 @@ test('getBriefing nao devolve briefing de outra conta', () => {
 test('listDrafts traz so o que nao esta ativo, com a primeira resposta como rotulo', () => {
   const { db, accountId, userId, agentId } = setup()
   const rascunho = createBriefing(db, { accountId, userId })
-  addTurn(db, { briefingId: rascunho, role: 'ia', content: 'O que voce vende?' })
-  addTurn(db, { briefingId: rascunho, role: 'user', content: 'curso de ingles' })
+  addTurn(db, { accountId, briefingId: rascunho, role: 'ia', content: 'O que voce vende?' })
+  addTurn(db, { accountId, briefingId: rascunho, role: 'user', content: 'curso de ingles' })
 
   const ativo = createBriefing(db, { accountId, userId })
   setCompiled(db, { accountId, briefingId: ativo, compiled: { name: 'X' } })
@@ -110,6 +110,22 @@ test('linkAgent amarra o agente e marca ativo', () => {
   const b = getBriefing(db, accountId, id)
   assert.equal(b.status, 'ativo')
   assert.equal(b.agent_id, agentId)
+})
+
+test('addTurn de outra conta devolve null e nao cria turno', () => {
+  const { db, accountId, userId } = setup()
+  const outra = Number(db.prepare('INSERT INTO accounts (name) VALUES (?)').run('Outra').lastInsertRowid)
+  const id = createBriefing(db, { accountId, userId })
+  assert.equal(addTurn(db, { accountId: outra, briefingId: id, role: 'user', content: 'invasao' }), null)
+  assert.deepEqual(getBriefing(db, accountId, id).turns, [])
+})
+
+test('addSource de outra conta devolve null e nao cria fonte', () => {
+  const { db, accountId, userId } = setup()
+  const outra = Number(db.prepare('INSERT INTO accounts (name) VALUES (?)').run('Outra').lastInsertRowid)
+  const id = createBriefing(db, { accountId, userId })
+  assert.equal(addSource(db, { accountId: outra, briefingId: id, kind: 'colado', content: 'invasao' }), null)
+  assert.deepEqual(getBriefing(db, accountId, id).sources, [])
 })
 
 test('deleteBriefing apaga e nao apaga o de outra conta', () => {
