@@ -1745,7 +1745,14 @@ export function activateBriefing(db, { accountId, briefingId, mode = 'copilot', 
     return { ok: true, agentId: created.agentId }
   })
 
-  return run()
+  // createAgentRecord sinaliza erro de DUAS formas: devolvendo { ok:false } nas
+  // validacoes, e LANCANDO quando a montagem do INSERT falha (confirmado na
+  // Task 7). Sem este catch, a excecao subiria crua ate o Express.
+  try {
+    return run()
+  } catch (e) {
+    return { ok: false, error: String(e && e.message ? e.message : e) }
+  }
 }
 ```
 
