@@ -2199,7 +2199,7 @@ git commit -m "feat: rotas da entrevista do agente"
 
 **Interfaces:**
 - Consumes: as rotas da task 10.
-- Produces: `AgentBriefing`, `CompiledAgent`, `BriefingDraft` e as funções `startBriefing`, `answerBriefing`, `pasteIntoBriefing`, `compileBriefing`, `activateBriefing`, `fetchBriefing`, `fetchBriefingDrafts`, `deleteBriefing`, `briefingFromAgent`.
+- Produces: `AgentBriefing`, `CompiledAgent`, `BriefingDraft` e as funções `startBriefing`, `answerBriefing`, `retryNextQuestion`, `pasteIntoBriefing`, `compileBriefing`, `activateBriefing`, `fetchBriefing`, `fetchBriefingDrafts`, `deleteBriefing`, `briefingFromAgent`.
 
 Sem teste próprio: o projeto não tem teste de front-end, e essas funções são repasses diretos do `apiFetch`. O que valida é a task 14 (verificação no app rodando).
 
@@ -2240,6 +2240,13 @@ export const startBriefing = () =>
 export const answerBriefing = (id: number, text: string) =>
   apiFetch<{ done: boolean; question: string | null; reason: string | null }>(`/api/agent-briefings/${id}/answer`, {
     method: 'POST', body: JSON.stringify({ text }),
+  })
+
+// Usada quando a IA falha DEPOIS de a resposta ja ter sido gravada: pede so a
+// proxima pergunta, sem reenviar o texto (reenviar duplicaria o turno).
+export const retryNextQuestion = (id: number) =>
+  apiFetch<{ done: boolean; question: string | null; reason: string | null }>(`/api/agent-briefings/${id}/next-question`, {
+    method: 'POST',
   })
 
 export const pasteIntoBriefing = (id: number, text: string) =>
@@ -2300,7 +2307,7 @@ Create `src/pages/AgentInterview.tsx`:
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { Send, Loader, ClipboardPaste } from 'lucide-react'
-import { startBriefing, answerBriefing, fetchBriefing, pasteIntoBriefing, type BriefingTurn } from '../lib/api'
+import { startBriefing, answerBriefing, retryNextQuestion, fetchBriefing, pasteIntoBriefing, type BriefingTurn } from '../lib/api'
 
 export default function AgentInterview() {
   const navigate = useNavigate()
@@ -2311,6 +2318,7 @@ export default function AgentInterview() {
   const [carregando, setCarregando] = useState(true)
   const [erro, setErro] = useState<string | null>(null)
   const [colando, setColando] = useState(false)
+  const [podeTentarDeNovo, setPodeTentarDeNovo] = useState(false)
   const fimRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => { fimRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [turns, carregando])
@@ -2351,7 +2359,26 @@ export default function AgentInterview() {
       if (r.done) { navigate(`/agents/resumo/${briefingId}`); return }
       setTurns(prev => [...prev, { id: -Date.now() - 1, position: prev.length + 1, role: 'ia', content: r.question || '', created_at: '' }])
     } catch (e: any) {
-      setErro(e.message || 'A IA nao respondeu. Sua conversa esta salva — tente de novo.')
+      // A resposta ja foi gravada no servidor. Reenviar o texto duplicaria o
+      // turno, entao o retry pede SO a proxima pergunta.
+      setErro(e.message || 'A IA nao respondeu. Sua resposta esta salva.')
+      setPodeTentarDeNovo(true)
+    } finally {
+      setCarregando(false)
+    }
+  }
+
+  async function tentarDeNovo() {
+    if (!briefingId || carregando) return
+    setErro(null)
+    setCarregando(true)
+    try {
+      const r = await retryNextQuestion(briefingId)
+      if (r.done) { navigate(`/agents/resumo/${briefingId}`); return }
+      setTurns(prev => [...prev, { id: -Date.now() - 2, position: prev.length + 1, role: 'ia', content: r.question || '', created_at: '' }])
+      setPodeTentarDeNovo(false)
+    } catch (e: any) {
+      setErro(e.message || 'A IA continua sem responder. Tente daqui a pouco.')
     } finally {
       setCarregando(false)
     }
@@ -2399,7 +2426,12 @@ export default function AgentInterview() {
 
       {erro && (
         <div style={{ padding: 12, borderRadius: 8, background: 'rgba(255,80,80,0.12)', color: '#ff8080', marginBottom: 12 }}>
-          {erro}
+          <div>{erro}</div>
+          {podeTentarDeNovo && (
+            <button className="btn btn-sm btn-secondary" style={{ marginTop: 8 }} onClick={tentarDeNovo} disabled={carregando}>
+              Tentar de novo
+            </button>
+          )}
         </div>
       )}
 
