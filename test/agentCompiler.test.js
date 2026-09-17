@@ -64,6 +64,28 @@ test('validateCompiled recusa campo faltando, tipo errado e required_field inval
   assert.equal(validateCompiled('nao sou objeto').ok, false)
 })
 
+test('validateCompiled recusa resumo.o_que_descubro vazio', () => {
+  const r = validateCompiled({ ...VALIDO, resumo: { ...VALIDO.resumo, o_que_descubro: [] } })
+  assert.equal(r.ok, false)
+})
+
+test('validateCompiled recusa resumo.o_que_nunca_falo vazio', () => {
+  const r = validateCompiled({ ...VALIDO, resumo: { ...VALIDO.resumo, o_que_nunca_falo: [] } })
+  assert.equal(r.ok, false)
+})
+
+test('validateCompiled aceita required_fields vazio (negocio sem campo estruturado)', () => {
+  const r = validateCompiled({ ...VALIDO, required_fields: [] })
+  assert.equal(r.ok, true)
+  assert.deepEqual(r.value.required_fields, [])
+})
+
+test('validateCompiled remove duplicatas de required_fields preservando ordem', () => {
+  const r = validateCompiled({ ...VALIDO, required_fields: ['name', 'city', 'name'] })
+  assert.equal(r.ok, true)
+  assert.deepEqual(r.value.required_fields, ['name', 'city'])
+})
+
 test('compila o briefing e manda transcricao e fontes para a IA', async () => {
   const { db, accountId, briefingId } = setup()
   const ai = fakeAi(VALIDO)
@@ -74,6 +96,23 @@ test('compila o briefing e manda transcricao e fontes para a IA', async () => {
   assert.match(prompt, /curso de ingles online/, 'a resposta da pessoa tem que ir no prompt')
   assert.match(prompt, /ementa do curso/, 'a fonte colada tem que ir no prompt')
   assert.equal(ai.calls[0].source, 'compilacao')
+})
+
+test('fonte com status falhou nao entra no prompt, so a que deu ok', async () => {
+  const db = createTestDb()
+  const { accountId, userId } = seedAccountAndLead(db)
+  const briefingId = createBriefing(db, { accountId, userId })
+  addTurn(db, { accountId, briefingId, role: 'ia', content: 'O que voce vende?' })
+  addTurn(db, { accountId, briefingId, role: 'user', content: 'curso de ingles online' })
+  addSource(db, { accountId, briefingId, kind: 'colado', content: 'texto da fonte que deu certo' })
+  addSource(db, { accountId, briefingId, kind: 'colado', content: 'texto da fonte que falhou', status: 'falhou' })
+
+  const ai = fakeAi(VALIDO)
+  const r = await compileBriefing(db, { accountId, briefingId, ai })
+  assert.equal(r.ok, true)
+  const prompt = JSON.stringify(ai.calls[0].messages)
+  assert.match(prompt, /texto da fonte que deu certo/, 'a fonte ok tem que ir no prompt')
+  assert.doesNotMatch(prompt, /texto da fonte que falhou/, 'a fonte falhou NAO pode ir no prompt')
 })
 
 test('saida com cerca de markdown ainda e aceita', async () => {

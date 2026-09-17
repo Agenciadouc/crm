@@ -62,13 +62,24 @@ export function validateCompiled(raw) {
   if (!raw.required_fields.every(f => REQUIRED_FIELD_KEYS.includes(f))) {
     return { ok: false, error: 'campo_invalido:required_fields' }
   }
+  // required_fields vazio e valido de proposito: existe negocio que nao
+  // precisa coletar nenhum campo estruturado, e o formulario do agente ja
+  // aceita zero campos obrigatorios hoje. Nao "consertar" isso de novo.
 
   const r = raw.resumo
   if (!r || typeof r !== 'object' || Array.isArray(r)) return { ok: false, error: 'campo_invalido:resumo' }
   if (!isNonEmptyString(r.quem_sou)) return { ok: false, error: 'campo_invalido:resumo.quem_sou' }
   if (!isNonEmptyString(r.o_que_sei)) return { ok: false, error: 'campo_invalido:resumo.o_que_sei' }
-  if (!isStringArray(r.o_que_descubro)) return { ok: false, error: 'campo_invalido:resumo.o_que_descubro' }
-  if (!isStringArray(r.o_que_nunca_falo)) return { ok: false, error: 'campo_invalido:resumo.o_que_nunca_falo' }
+  // o_que_descubro e o_que_nunca_falo sao a versao legivel de campos que ja
+  // sao obrigatorios e nao-vazios (qualification_criteria e never_mention):
+  // precisam de pelo menos um item, senao a tela de aprovacao mostra uma
+  // secao em branco e o dono aprova um agente meio montado.
+  if (!isStringArray(r.o_que_descubro) || r.o_que_descubro.length === 0) {
+    return { ok: false, error: 'campo_invalido:resumo.o_que_descubro' }
+  }
+  if (!isStringArray(r.o_que_nunca_falo) || r.o_que_nunca_falo.length === 0) {
+    return { ok: false, error: 'campo_invalido:resumo.o_que_nunca_falo' }
+  }
 
   return {
     ok: true,
@@ -78,7 +89,7 @@ export function validateCompiled(raw) {
       knowledge_base: raw.knowledge_base.trim(),
       never_mention: raw.never_mention.trim(),
       qualification_criteria: raw.qualification_criteria.trim(),
-      required_fields: [...raw.required_fields],
+      required_fields: [...new Set(raw.required_fields)],
       resumo: {
         quem_sou: r.quem_sou.trim(),
         o_que_sei: r.o_que_sei.trim(),
