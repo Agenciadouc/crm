@@ -1104,3 +1104,67 @@ export const markProposalSent = (leadId: number, accountId: number) =>
   apiFetch(`/api/dashboard/leads/${leadId}/mark-proposal-sent?account_id=${accountId}`, { method: 'POST' })
 export const updateLeadValue = (leadId: number, accountId: number, value: number) =>
   apiFetch(`/api/dashboard/leads/${leadId}/value?account_id=${accountId}`, { method: 'PUT', body: JSON.stringify({ value_estimated: value }) })
+
+// ================ Agente por entrevista (bloco 6) ================
+export interface CompiledAgent {
+  name: string
+  persona: string
+  knowledge_base: string
+  never_mention: string
+  qualification_criteria: string
+  required_fields: string[]
+  resumo: {
+    quem_sou: string
+    o_que_sei: string
+    o_que_descubro: string[]
+    o_que_nunca_falo: string[]
+  }
+}
+
+export interface BriefingTurn { id: number; position: number; role: 'ia' | 'user'; content: string; created_at: string }
+export interface BriefingSource { id: number; kind: 'entrevista' | 'site' | 'conversas' | 'colado'; ref: string | null; content: string | null; status: 'ok' | 'falhou'; error: string | null }
+export interface AgentBriefing {
+  id: number; account_id: number; agent_id: number | null
+  status: 'entrevistando' | 'compilado' | 'ativo'
+  compiled_json: string | null; created_at: string; updated_at: string
+  turns: BriefingTurn[]; sources: BriefingSource[]
+}
+export interface BriefingDraft { id: number; status: string; created_at: string; updated_at: string; first_answer: string | null }
+
+export const startBriefing = () =>
+  apiFetch<{ briefing_id: number; question: string; done: boolean }>('/api/agent-briefings', { method: 'POST' })
+
+export const answerBriefing = (id: number, text: string) =>
+  apiFetch<{ done: boolean; question: string | null; reason: string | null }>(`/api/agent-briefings/${id}/answer`, {
+    method: 'POST', body: JSON.stringify({ text }),
+  })
+
+// Usada quando a IA falha DEPOIS de a resposta ja ter sido gravada: pede so a
+// proxima pergunta, sem reenviar o texto (reenviar duplicaria o turno).
+export const retryNextQuestion = (id: number) =>
+  apiFetch<{ done: boolean; question: string | null; reason: string | null }>(`/api/agent-briefings/${id}/next-question`, {
+    method: 'POST',
+  })
+
+export const pasteIntoBriefing = (id: number, text: string) =>
+  apiFetch<{ ok: true }>(`/api/agent-briefings/${id}/paste`, { method: 'POST', body: JSON.stringify({ text }) })
+
+export const compileBriefing = (id: number) =>
+  apiFetch<{ compiled: CompiledAgent }>(`/api/agent-briefings/${id}/compile`, { method: 'POST' })
+
+export const activateBriefing = (id: number, mode: 'auto' | 'copilot' | 'sdr' = 'copilot', instanceIds: number[] = []) =>
+  apiFetch<{ agent_id: number }>(`/api/agent-briefings/${id}/activate`, {
+    method: 'POST', body: JSON.stringify({ mode, instance_ids: instanceIds }),
+  })
+
+export const fetchBriefing = (id: number) =>
+  apiFetch<{ briefing: AgentBriefing }>(`/api/agent-briefings/${id}`).then(r => r.briefing)
+
+export const fetchBriefingDrafts = () =>
+  apiFetch<{ drafts: BriefingDraft[] }>('/api/agent-briefings').then(r => r.drafts)
+
+export const deleteBriefing = (id: number) =>
+  apiFetch<{ ok: true }>(`/api/agent-briefings/${id}`, { method: 'DELETE' })
+
+export const briefingFromAgent = (agentId: number) =>
+  apiFetch<{ briefing_id: number }>(`/api/agent-briefings/from-agent/${agentId}`, { method: 'POST' })
