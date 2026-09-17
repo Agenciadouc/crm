@@ -337,10 +337,14 @@ db.exec(`
 
 // ─── Schema migrations (add columns safely) ─────────────────────
 function addColumnIfNotExists(table, column, type) {
-  const cols = db.prepare(`PRAGMA table_info(${table})`).all()
-  if (!cols.some(c => c.name === column)) {
-    db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`)
-    console.log(`[DB] Added column ${table}.${column}`)
+  try {
+    const cols = db.prepare(`PRAGMA table_info(${table})`).all()
+    if (!cols.some(c => c.name === column)) {
+      db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`)
+      console.log(`[DB] Added column ${table}.${column}`)
+    }
+  } catch {
+    // Tabela pode nao existir ainda ou outro erro — vai ser criada/corrigida depois
   }
 }
 // whatsapp_instances: qr_code for QR code base64
