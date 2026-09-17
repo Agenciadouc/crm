@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { createTestDb, seedAccountAndLead } from './helpers/memoryDb.js'
 import { createBriefing, getBriefing, addTurn } from '../server/services/briefingStore.js'
 import {
-  TEMAS, MAX_PERGUNTAS, MAX_TOKENS_BRIEFING,
+  TEMAS, MAX_PERGUNTAS, MAX_TOKENS_BRIEFING, SYSTEM_PROMPT,
   shouldFinish, nextQuestion, answer,
 } from '../server/services/agentInterview.js'
 
@@ -28,6 +28,13 @@ test('os 6 temas do spec existem e nenhum cita ramo de negocio', () => {
   const texto = JSON.stringify(TEMAS).toLowerCase()
   for (const ramo of ['imovel', 'imobiliaria', 'clinica', 'curso', 'advogado', 'loja']) {
     assert.ok(!texto.includes(ramo), `o tema nao pode citar o ramo "${ramo}"`)
+  }
+})
+
+test('o SYSTEM_PROMPT tambem nao cita ramo de negocio', () => {
+  const texto = SYSTEM_PROMPT.toLowerCase()
+  for (const ramo of ['imovel', 'imobiliaria', 'clinica', 'curso', 'advogado', 'loja']) {
+    assert.ok(!texto.includes(ramo), `o prompt nao pode citar o ramo "${ramo}"`)
   }
 })
 
@@ -122,4 +129,29 @@ test('falha da IA vira erro nomeado, nao excecao', async () => {
   const r = await nextQuestion(db, { accountId, briefingId, ai })
   assert.equal(r.ok, false)
   assert.equal(r.error, 'dros_key_missing')
+})
+
+test('sentinela PRONTO com pontuacao ou espacos encerra e nao grava turno', async () => {
+  for (const variacao of ['PRONTO', 'pronto', '  PRONTO  ', 'Pronto!', 'PRONTO.']) {
+    const { db, accountId, briefingId } = setup()
+    const ai = fakeAi(variacao)
+    const r = await nextQuestion(db, { accountId, briefingId, ai })
+    assert.equal(r.ok, true, `variacao "${variacao}" deveria ser ok`)
+    assert.equal(r.done, true, `variacao "${variacao}" deveria encerrar`)
+    assert.equal(r.reason, 'temas_cobertos')
+    assert.equal(getBriefing(db, accountId, briefingId).turns.length, 0, `variacao "${variacao}" nao pode gravar turno`)
+  }
+})
+
+test('frase que so menciona PRONTO dentro de outra frase nao encerra, vira pergunta', async () => {
+  const { db, accountId, briefingId } = setup()
+  const ai = fakeAi('Tudo PRONTO')
+  const r = await nextQuestion(db, { accountId, briefingId, ai })
+  assert.equal(r.ok, true)
+  assert.equal(r.done, false)
+  assert.equal(r.question, 'Tudo PRONTO')
+  const turns = getBriefing(db, accountId, briefingId).turns
+  assert.equal(turns.length, 1)
+  assert.equal(turns[0].role, 'ia')
+  assert.equal(turns[0].content, 'Tudo PRONTO')
 })

@@ -16,7 +16,7 @@ export const TEMAS = [
   'Em qual numero de WhatsApp o atendente vai trabalhar',
 ]
 
-const SYSTEM_PROMPT = `Voce esta entrevistando o dono de um negocio para montar um atendente de IA que vai responder os leads dele no WhatsApp.
+export const SYSTEM_PROMPT = `Voce esta entrevistando o dono de um negocio para montar um atendente de IA que vai responder os leads dele no WhatsApp.
 
 Faca UMA pergunta por vez, curta, em portugues simples, sem jargao. Responda APENAS com a pergunta, sem numeracao e sem comentario.
 
@@ -66,7 +66,11 @@ export async function nextQuestion(db, { accountId, briefingId, ai }) {
 
   const pergunta = String(r.content || '').trim()
   if (!pergunta) return { ok: false, error: 'pergunta_vazia' }
-  if (pergunta.toUpperCase() === 'PRONTO') return { ok: true, done: true, reason: 'temas_cobertos' }
+  // Normaliza antes de comparar com o sentinela: tira tudo que nao for letra
+  // e maiusculiza, para aceitar variacoes como "Pronto!" ou "PRONTO.", mas
+  // sem adivinhar frases que so mencionam a palavra, como "Tudo PRONTO".
+  const normalizado = pergunta.toUpperCase().replace(/[^A-Z]/g, '')
+  if (normalizado === 'PRONTO') return { ok: true, done: true, reason: 'temas_cobertos' }
 
   addTurn(db, { accountId, briefingId, role: 'ia', content: pergunta })
   return { ok: true, done: false, question: pergunta }
