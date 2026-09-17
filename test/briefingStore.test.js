@@ -112,6 +112,17 @@ test('linkAgent amarra o agente e marca ativo', () => {
   assert.equal(b.agent_id, agentId)
 })
 
+test('linkAgent com agente de outra conta devolve false e nao muda o briefing', () => {
+  const { db, accountId, userId } = setup()
+  const outra = Number(db.prepare('INSERT INTO accounts (name) VALUES (?)').run('Outra').lastInsertRowid)
+  const agenteDaOutra = Number(db.prepare('INSERT INTO ai_agents (account_id, name) VALUES (?, ?)').run(outra, 'Agente da Outra').lastInsertRowid)
+  const id = createBriefing(db, { accountId, userId })
+  assert.equal(linkAgent(db, { accountId, briefingId: id, agentId: agenteDaOutra }), false)
+  const b = getBriefing(db, accountId, id)
+  assert.equal(b.status, 'entrevistando')
+  assert.equal(b.agent_id, null)
+})
+
 test('addTurn de outra conta devolve null e nao cria turno', () => {
   const { db, accountId, userId } = setup()
   const outra = Number(db.prepare('INSERT INTO accounts (name) VALUES (?)').run('Outra').lastInsertRowid)

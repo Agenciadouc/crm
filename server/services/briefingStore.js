@@ -77,6 +77,8 @@ export function setCompiled(db, { accountId, briefingId, compiled }) {
 }
 
 export function linkAgent(db, { accountId, briefingId, agentId }) {
+  const donoAgente = db.prepare('SELECT 1 FROM ai_agents WHERE id = ? AND account_id = ?').get(agentId, accountId)
+  if (!donoAgente) return false
   const r = db.prepare(`
     UPDATE agent_briefings
        SET agent_id = ?, status = 'ativo', updated_at = datetime('now')

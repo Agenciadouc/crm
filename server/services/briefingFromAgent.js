@@ -55,7 +55,12 @@ export function briefingFromAgent(db, { accountId, agentId, userId }) {
     const briefingId = createBriefing(db, { accountId, userId })
     addSource(db, { accountId, briefingId, kind: 'entrevista', content: texto })
     setCompiled(db, { accountId, briefingId, compiled })
-    linkAgent(db, { accountId, briefingId, agentId })
+    // linkAgent devolve false se o agente ja nao pertencer mais a esta conta
+    // entre a checagem do topo e aqui. Lancar forca o rollback e desfaz o
+    // briefing recem-criado, em vez de deixar um briefing sem agente amarrado.
+    if (!linkAgent(db, { accountId, briefingId, agentId })) {
+      throw new Error('falha_ao_amarrar_agente_ao_briefing')
+    }
     return briefingId
   })
 

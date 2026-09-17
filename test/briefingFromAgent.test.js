@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createTestDb, seedAccountAndLead } from './helpers/memoryDb.js'
-import { getBriefing, createBriefing, linkAgent } from '../server/services/briefingStore.js'
+import { getBriefing, createBriefing } from '../server/services/briefingStore.js'
 import { briefingFromAgent } from '../server/services/briefingFromAgent.js'
 
 function comAgenteConfigurado() {
@@ -83,12 +83,16 @@ test('colisao do indice unico do agent_id devolve erro em vez de lancar', () => 
   const { db, accountId, userId, agentId } = comAgenteConfigurado()
   // Caminho honesto para forcar a colisao sem mock: um briefing de OUTRA conta
   // ja fica amarrado a este agent_id (agent_id tem indice unico na tabela toda,
-  // independente de conta). A checagem de idempotencia filtra por account_id,
-  // entao nao acha essa linha e a funcao segue ate o linkAgent de dentro da
-  // propria transacao, que colide com o indice unico e lanca.
+  // independente de conta). Usa UPDATE direto em SQL para montar esse estado
+  // invalido de proposito: linkAgent ja nao aceita mais amarrar um agente de
+  // uma conta a um briefing de outra, que era o caminho antigo usado aqui -
+  // e essa e exatamente a brecha que a validacao de posse do agente fechou.
+  // A checagem de idempotencia filtra por account_id, entao nao acha essa
+  // linha e a funcao segue ate o linkAgent de dentro da propria transacao,
+  // que colide com o indice unico e lanca.
   const outraConta = Number(db.prepare('INSERT INTO accounts (name) VALUES (?)').run('Outra').lastInsertRowid)
   const outroBriefingId = createBriefing(db, { accountId: outraConta, userId })
-  linkAgent(db, { accountId: outraConta, briefingId: outroBriefingId, agentId })
+  db.prepare('UPDATE agent_briefings SET agent_id = ? WHERE id = ?').run(agentId, outroBriefingId)
 
   const r = briefingFromAgent(db, { accountId, agentId, userId })
   assert.equal(r.ok, false)
