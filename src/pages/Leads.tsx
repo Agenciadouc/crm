@@ -5,6 +5,7 @@ import { useAccount } from '../context/AccountContext'
 import { useSSE } from '../context/SSEContext'
 import AccountSelector from '../components/AccountSelector'
 import {
+  apiFetch,
   fetchLeads, fetchFunnels, fetchUsers, fetchTags, createLead, bulkAssignLeads, bulkMoveLeads,
   archiveLead, unarchiveLead, fetchArchivedCount, fetchWhatsAppInstances,
   formatNumber, type Lead, type Funnel, type User as UserType, type Tag, type WhatsAppInstance,
@@ -39,6 +40,7 @@ export default function Leads() {
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
   const [tagFilter, setTagFilter] = useState('')
+  const [sourceOptions, setSourceOptions] = useState<{ value: string; count: number }[]>([])
   const [showNew, setShowNew] = useState(false)
   const [newLead, setNewLead] = useState<Record<string, any>>({ name: '', phone: '', email: '', city: '', source: 'manual', empresa: '', cpf_cnpj: '', instagram: '' })
   const [showArchived, setShowArchived] = useState(false)
@@ -56,6 +58,9 @@ export default function Leads() {
     fetchUsers(accountId).then(setUsers).catch(() => {})
     fetchTags(accountId).then(setTags).catch(() => {})
     fetchWhatsAppInstances(accountId).then(insts => setWhatsappInstances(insts.filter(i => i.status === 'connected'))).catch(() => {})
+    apiFetch<{ sources: { value: string; count: number }[] }>(`/api/leads/sources?account_id=${accountId}`)
+      .then(d => setSourceOptions(d.sources || []))
+      .catch(() => setSourceOptions([]))
   }, [accountId])
 
   const loadLeads = () => {
@@ -165,8 +170,10 @@ export default function Leads() {
           {allStages.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
         </select>
         <select className="select" value={sourceFilter} onChange={e => { setSourceFilter(e.target.value); setPage(1) }}>
-          <option value="">Todas fontes</option>
-          <option value="whatsapp">WhatsApp</option><option value="meta_form">Meta Form</option><option value="website">Website</option><option value="manual">Manual</option>
+          <option value="">Todas fontes ({sourceOptions.reduce((s, o) => s + o.count, 0)})</option>
+          {sourceOptions.map(opt => (
+            <option key={opt.value} value={opt.value}>{opt.value} ({opt.count})</option>
+          ))}
         </select>
         {user?.role !== 'atendente' && (
           <select className="select" value={attendantFilter} onChange={e => { setAttendantFilter(e.target.value); setPage(1) }}>

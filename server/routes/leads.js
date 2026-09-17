@@ -250,6 +250,19 @@ router.get('/archived-count', (req, res) => {
   res.json({ count, withActivity })
 })
 
+// Lista fontes (source) distintas dos leads da conta atual — pra popular filtro
+router.get('/sources', (req, res) => {
+  if (!req.accountId) return res.json({ sources: [] })
+  const rows = db.prepare(`
+    SELECT source, COUNT(*) as n
+    FROM leads
+    WHERE account_id = ? AND source IS NOT NULL AND source != ''
+    GROUP BY source
+    ORDER BY n DESC, source
+  `).all(req.accountId)
+  res.json({ sources: rows.map(r => ({ value: r.source, count: r.n })) })
+})
+
 // ─── Pedidos de transferencia de lead entre atendentes ─────────────
 // IMPORTANTE: precisam vir ANTES da rota '/:id' pra nao serem capturadas como id
 
