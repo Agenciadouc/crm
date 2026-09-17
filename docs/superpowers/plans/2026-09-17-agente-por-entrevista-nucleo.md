@@ -762,10 +762,12 @@ import { addSource } from '../briefingStore.js'
 export const MAX_PASTED_CHARS = 20000
 
 export function collectPastedText(db, { accountId, briefingId, text }) {
-  const clean = String(text == null ? '' : text).trim()
-  if (!clean) return { ok: false, error: 'texto_vazio' }
-
+  // O try envolve TAMBEM a normalizacao: uma entrada cujo toString/valueOf
+  // lance nao pode escapar como excecao e derrubar a entrevista inteira.
   try {
+    const clean = String(text == null ? '' : text).trim()
+    if (!clean) return { ok: false, error: 'texto_vazio' }
+
     const id = addSource(db, {
       accountId,
       briefingId,
