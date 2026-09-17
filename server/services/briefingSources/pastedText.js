@@ -7,10 +7,10 @@ import { addSource } from '../briefingStore.js'
 export const MAX_PASTED_CHARS = 20000
 
 export function collectPastedText(db, { accountId, briefingId, text }) {
-  const clean = String(text == null ? '' : text).trim()
-  if (!clean) return { ok: false, error: 'texto_vazio' }
-
   try {
+    const clean = String(text == null ? '' : text).trim()
+    if (!clean) return { ok: false, error: 'texto_vazio' }
+
     const id = addSource(db, {
       accountId,
       briefingId,

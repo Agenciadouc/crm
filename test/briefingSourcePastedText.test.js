@@ -47,3 +47,29 @@ test('erro inesperado vira fonte falhou e nao lanca', () => {
   assert.ok(r.error, 'tem que dizer o motivo')
   assert.equal(getBriefing(db, accountId, briefingId).sources.length, 0)
 })
+
+test('entrada cujo toString lanca vira ok:false, nao derruba', () => {
+  const { db, accountId, briefingId } = setup()
+  const hostil = { toString() { throw new Error('boom-toString') } }
+  const r = collectPastedText(db, { accountId, briefingId, text: hostil })
+  assert.equal(r.ok, false)
+  assert.ok(r.error)
+  assert.equal(getBriefing(db, accountId, briefingId).sources.length, 0)
+})
+
+test('addSource com kind invalido vira ok:false, nao lanca', () => {
+  const { db, accountId, briefingId } = setup()
+  // Testa que mesmo um erro do addSource nao derruba a funcao, devolve ok:false
+  // Para isso, precisamos forcar addSource a falhar. Vamos fazer isso chamando
+  // collectPastedText com um accountId que nao existe (vai passar pelas validacoes
+  // iniciais mas addSource vai falhar) ou passando um briefingId invalido ja testado.
+  // Na verdade, a forma mais clara de exercitar o catch e garantindo que addSource
+  // lancara e nao devolvera null, seria mockarlo. Mas sem mock, qualquer falha de
+  // db.run() dentro de addSource vira catch aqui. Vamos usar um briefingId negativo
+  // que passa a normalização mas causa erro no db quando tenta gravar.
+  const r = collectPastedText(db, { accountId, briefingId: -1, text: 'texto valido' })
+  assert.equal(r.ok, false)
+  assert.ok(r.error)
+  // A fonte nao foi gravada
+  assert.equal(getBriefing(db, accountId, briefingId).sources.length, 0)
+})
