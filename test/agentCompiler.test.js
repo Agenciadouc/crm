@@ -1,8 +1,12 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createTestDb, seedAccountAndLead } from './helpers/memoryDb.js'
-import { createBriefing, addTurn, addSource } from '../server/services/briefingStore.js'
-import { compileBriefing, validateCompiled, REQUIRED_FIELD_KEYS } from '../server/services/agentCompiler.js'
+import { createBriefing, addTurn, addSource, getBriefing, addTokens } from '../server/services/briefingStore.js'
+import { MAX_TOKENS_BRIEFING, MAX_TOKENS_ENTREVISTA } from '../server/services/agentInterview.js'
+import {
+  compileBriefing, validateCompiled, REQUIRED_FIELD_KEYS,
+  buildBriefingText, MAX_MATERIAIS_CHARS, MARCA_TRUNCADO,
+} from '../server/services/agentCompiler.js'
 
 const VALIDO = {
   name: 'Ana Clara',
@@ -157,4 +161,62 @@ test('falha da IA vira erro nomeado, nao excecao', async () => {
   const r = await compileBriefing(db, { accountId, briefingId, ai })
   assert.equal(r.ok, false)
   assert.equal(r.error, 'dros_key_missing')
+})
+
+// ---- teto de texto das fontes (I3) ---------------------------------------
+// POST /:id/paste pode ser chamado quantas vezes a pessoa quiser, e o
+// compilador concatenava TODAS as fontes no prompt. Vinte colagens de 20.000
+// caracteres = 400 KB num prompt so, acima da janela do modelo.
+test('buildBriefingText corta o total das fontes e deixa marca visivel', () => {
+  // Briefing montado aqui (sem o setup) para a conta de caracteres ser exata.
+  const db = createTestDb()
+  const { accountId, userId } = seedAccountAndLead(db)
+  const briefingId = createBriefing(db, { accountId, userId })
+  for (let i = 0; i < 5; i++) {
+    addSource(db, { accountId, briefingId, kind: 'colado', content: 'x'.repeat(20000) })
+  }
+  const texto = buildBriefingText(getBriefing(db, accountId, briefingId))
+  const materiais = texto.split('=== MATERIAIS ===')[1]
+  assert.ok(materiais.includes(MARCA_TRUNCADO), 'o corte tem que aparecer no prompt')
+  // A propria marca tem um "x" (em "texto"): tira ela antes de contar.
+  const xs = (materiais.replace(MARCA_TRUNCADO, '').match(/x/g) || []).length
+  assert.equal(xs, MAX_MATERIAIS_CHARS, 'nao pode passar do teto total de caracteres de fonte')
+})
+
+test('dentro do teto, nenhuma fonte e cortada nem marcada', () => {
+  const { db, accountId, briefingId } = setup()
+  addSource(db, { accountId, briefingId, kind: 'colado', content: 'tabela de precos' })
+  addSource(db, { accountId, briefingId, kind: 'colado', content: 'faq da empresa' })
+  const texto = buildBriefingText(getBriefing(db, accountId, briefingId))
+  assert.ok(texto.includes('tabela de precos'))
+  assert.ok(texto.includes('faq da empresa'))
+  assert.ok(!texto.includes(MARCA_TRUNCADO))
+})
+
+test('fonte que falhou continua fora do prompt e nao gasta o teto', () => {
+  const { db, accountId, briefingId } = setup()
+  addSource(db, { accountId, briefingId, kind: 'site', ref: 'https://x.com', status: 'falhou', error: 'timeout' })
+  addSource(db, { accountId, briefingId, kind: 'colado', content: 'material bom' })
+  const texto = buildBriefingText(getBriefing(db, accountId, briefingId))
+  assert.ok(texto.includes('material bom'))
+  assert.ok(!texto.includes('timeout'))
+})
+
+// ---- teto de tokens na compilacao (I2) -----------------------------------
+test('briefing que estourou o teto de tokens nao compila e nao chama a IA', async () => {
+  const { db, accountId, briefingId } = setup()
+  addTokens(db, { accountId, briefingId, tokens: MAX_TOKENS_BRIEFING })
+  const ai = fakeAi(VALIDO)
+  const r = await compileBriefing(db, { accountId, briefingId, ai })
+  assert.equal(r.ok, false)
+  assert.equal(r.error, 'teto_de_tokens')
+  assert.equal(ai.calls.length, 0, 'nao pode gastar a chave da Dros depois do teto')
+})
+
+test('abaixo do teto total, a compilacao ainda roda mesmo com a entrevista encerrada por tokens', async () => {
+  const { db, accountId, briefingId } = setup()
+  addTokens(db, { accountId, briefingId, tokens: MAX_TOKENS_ENTREVISTA })
+  const ai = fakeAi(VALIDO)
+  const r = await compileBriefing(db, { accountId, briefingId, ai })
+  assert.equal(r.ok, true, 'a reserva existe justamente para o briefing nunca ficar sem compilar')
 })

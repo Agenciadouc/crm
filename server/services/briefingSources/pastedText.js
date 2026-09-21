@@ -5,11 +5,21 @@
 import { addSource } from '../briefingStore.js'
 
 export const MAX_PASTED_CHARS = 20000
+// Teto de colagens por briefing. Sem ele, POST /:id/paste podia ser repetido
+// sem limite e o compilador concatenava tudo num prompt gigante.
+export const MAX_COLAGENS_POR_BRIEFING = 10
 
 export function collectPastedText(db, { accountId, briefingId, text }) {
   try {
     const clean = String(text == null ? '' : text).trim()
     if (!clean) return { ok: false, error: 'texto_vazio' }
+
+    const dono = db.prepare('SELECT 1 FROM agent_briefings WHERE id = ? AND account_id = ?').get(briefingId, accountId)
+    if (!dono) return { ok: false, error: 'briefing_nao_encontrado' }
+    const ja = db.prepare(
+      "SELECT COUNT(*) AS c FROM agent_briefing_sources WHERE briefing_id = ? AND kind = 'colado'"
+    ).get(briefingId)
+    if (ja && ja.c >= MAX_COLAGENS_POR_BRIEFING) return { ok: false, error: 'limite_de_materiais' }
 
     const id = addSource(db, {
       accountId,

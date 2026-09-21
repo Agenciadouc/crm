@@ -1,30 +1,53 @@
 import { useState, useEffect } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { Loader, Check, MessageSquare, Settings } from 'lucide-react'
-import { compileBriefing, activateBriefing, fetchBriefing, type CompiledAgent } from '../lib/api'
+import { useAccount } from '../context/AccountContext'
+import { compileBriefing, activateBriefing, fetchBriefing, type CompiledAgent, type BriefingAtendimento } from '../lib/api'
 
 export default function AgentBriefingSummary() {
   const navigate = useNavigate()
+  const { accountId } = useAccount()
   const { briefingId } = useParams()
   const id = Number(briefingId)
   const [compiled, setCompiled] = useState<CompiledAgent | null>(null)
+  const [atendimento, setAtendimento] = useState<BriefingAtendimento | null>(null)
   const [carregando, setCarregando] = useState(true)
   const [ativando, setAtivando] = useState(false)
   const [erro, setErro] = useState<string | null>(null)
+  const [aviso, setAviso] = useState<string | null>(null)
+  const [jaAtivo, setJaAtivo] = useState(false)
 
   useEffect(() => {
+    if (!accountId) return
     let cancelado = false
+    setCarregando(true)
     ;(async () => {
       try {
-        // Se ja foi compilado antes, aproveita; senao compila agora.
-        const b = await fetchBriefing(id)
+        const r = await fetchBriefing(id, accountId)
         if (cancelado) return
-        if (b.compiled_json) {
+        setAtendimento(r.atendimento)
+        const b = r.briefing
+        setJaAtivo(b.status === 'ativo')
+        // So reaproveita o compilado quando ele esta em dia com o briefing.
+        // Se a pessoa voltou para a conversa e corrigiu algo depois de compilar,
+        // precisa_recompilar vem 1 e a IA roda de novo: sem isso ela aprovaria o
+        // resumo VELHO e o agente nasceria sem a correcao.
+        if (b.compiled_json && !b.precisa_recompilar) {
           setCompiled(JSON.parse(b.compiled_json))
-        } else {
-          const r = await compileBriefing(id)
+          return
+        }
+        try {
+          const c = await compileBriefing(id, accountId)
           if (cancelado) return
-          setCompiled(r.compiled)
+          setCompiled(c.compiled)
+        } catch (e: any) {
+          if (cancelado) return
+          // Recompilar falhou (IA fora do ar, teto de tokens do briefing).
+          // Se existe um resumo anterior, mostra ele com aviso: melhor que
+          // prender a pessoa numa tela de erro sem saida.
+          if (!b.compiled_json) throw e
+          setCompiled(JSON.parse(b.compiled_json))
+          setAviso(`Não consegui atualizar o resumo com a sua última correção (${e.message || 'erro'}). O que aparece abaixo é a versão anterior, e só dá para ativar depois de atualizar: recarregue a página para tentar de novo.`)
         }
       } catch (e: any) {
         if (!cancelado) setErro(e.message || 'Não consegui montar o resumo.')
@@ -33,19 +56,22 @@ export default function AgentBriefingSummary() {
       }
     })()
     return () => { cancelado = true }
-  }, [id])
+  }, [id, accountId])
 
   async function ativar() {
+    if (!accountId) return
     setAtivando(true)
     setErro(null)
     try {
-      await activateBriefing(id, 'copilot')
+      await activateBriefing(id, accountId, 'copilot')
       navigate('/agents')
     } catch (e: any) {
       setErro(e.message || 'Não consegui ativar o atendente.')
       setAtivando(false)
     }
   }
+
+  if (!accountId) return <div className="loading-container"><span>Selecione uma conta</span></div>
 
   if (carregando) {
     return (
@@ -73,6 +99,13 @@ export default function AgentBriefingSummary() {
   }
 
   const c = compiled!
+  // Agente novo sem numero ou sem etapa nasceria surdo: o servidor recusa, e a
+  // tela ja diz o que fazer antes. Agente que ja existe so recebe correcao de
+  // texto, entao nao trava.
+  const semNumero = !jaAtivo && !!atendimento && atendimento.instancias.length === 0
+  const semEtapa = !jaAtivo && !!atendimento && atendimento.etapas.length === 0
+  // Com aviso, o que aparece e o resumo VELHO: ativar poria no ar sem a correcao.
+  const bloqueado = !!aviso || semNumero || semEtapa
   const bloco = (titulo: string, corpo: React.ReactNode) => (
     <div style={{ marginBottom: 24 }}>
       <div style={{ fontSize: 11, letterSpacing: 1, color: 'var(--text-secondary)', textTransform: 'uppercase', marginBottom: 6 }}>{titulo}</div>
@@ -99,13 +132,29 @@ export default function AgentBriefingSummary() {
           {c.resumo.o_que_nunca_falo.map((x, i) => <li key={i}>{x}</li>)}
         </ul>
       ))}
+      {atendimento && bloco('Onde eu atendo', (
+        <div>
+          <div>
+            <strong>Números de WhatsApp:</strong>{' '}
+            {atendimento.instancias.length ? atendimento.instancias.join(', ') : 'Nenhum número de WhatsApp conectado — conecte um em Integrações e volte aqui para ativar.'}
+          </div>
+          <div style={{ marginTop: 4 }}>
+            <strong>Etapas do funil:</strong>{' '}
+            {atendimento.etapas.length ? atendimento.etapas.join(', ') : 'Nenhuma etapa de funil — crie o funil antes de ativar.'}
+          </div>
+        </div>
+      ))}
+
+      {aviso && (
+        <div style={{ padding: 12, borderRadius: 8, background: 'rgba(255,179,0,0.12)', color: '#FBBC04', marginBottom: 16 }}>{aviso}</div>
+      )}
 
       {erro && (
         <div style={{ padding: 12, borderRadius: 8, background: 'rgba(255,80,80,0.12)', color: '#ff8080', marginBottom: 16 }}>{erro}</div>
       )}
 
       <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-        <button className="btn btn-primary" onClick={ativar} disabled={ativando}>
+        <button className="btn btn-primary" onClick={ativar} disabled={ativando || bloqueado}>
           {ativando ? <Loader size={16} className="spin" /> : <Check size={16} />} Tá certo, ativar
         </button>
         <button className="btn btn-secondary" onClick={() => navigate(`/agents/interview/${id}`)} disabled={ativando}>

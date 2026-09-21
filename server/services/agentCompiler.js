@@ -3,6 +3,14 @@
 // nunca entrega agente meio montado.
 
 import { getBriefing } from './briefingStore.js'
+import { MAX_TOKENS_BRIEFING } from './agentInterview.js'
+
+// Teto de texto das fontes dentro do prompt de compilacao. Cada colagem ja e
+// limitada em 20.000 caracteres, mas POST /:id/paste pode ser chamado varias
+// vezes e o compilador concatenava TODAS as fontes: vinte colagens passavam da
+// janela de contexto do modelo e a pessoa via um erro generico.
+export const MAX_MATERIAIS_CHARS = 60000
+export const MARCA_TRUNCADO = '[MATERIAL TRUNCADO: o limite de texto do briefing foi atingido e o resto foi descartado]'
 
 // Mesmas chaves de REQUIRED_FIELDS_OPTS em src/components/AgentEditorModal.tsx:14
 export const REQUIRED_FIELD_KEYS = ['name', 'email', 'phone', 'city', 'empresa', 'instagram']
@@ -28,7 +36,9 @@ Responda APENAS com um objeto JSON, sem texto antes ou depois, neste formato exa
   }
 }
 
-O campo "resumo" e o que o dono le na tela para aprovar: escreva em portugues simples, sem jargao.`
+O campo "resumo" e o que o dono le na tela para aprovar: escreva em portugues simples, sem jargao.
+
+Escreva em portugues do Brasil com acentuacao correta em todos os campos de texto.`
 
 function parseJsonLoose(text) {
   const raw = String(text == null ? '' : text).trim()
@@ -100,15 +110,31 @@ export function validateCompiled(raw) {
   }
 }
 
+// Junta as fontes respeitando MAX_MATERIAIS_CHARS no TOTAL, e nao por fonte.
+// Corta no meio quando precisa e deixa uma marca visivel no lugar do que saiu.
+function juntaFontes(sources) {
+  const partes = []
+  let usado = 0
+  let cortou = false
+  for (const s of sources) {
+    if (s.status !== 'ok' || !s.content) continue
+    const espaco = MAX_MATERIAIS_CHARS - usado
+    if (espaco <= 0) { cortou = true; break }
+    let corpo = String(s.content)
+    if (corpo.length > espaco) { corpo = corpo.slice(0, espaco); cortou = true }
+    partes.push(`--- MATERIAL (${s.kind}${s.ref ? ' ' + s.ref : ''}) ---\n${corpo}`)
+    usado += corpo.length
+  }
+  if (cortou) partes.push(MARCA_TRUNCADO)
+  return partes.join('\n\n')
+}
+
 export function buildBriefingText(briefing) {
   const conversa = briefing.turns
     .map(t => `${t.role === 'ia' ? 'PERGUNTA' : 'RESPOSTA'}: ${t.content}`)
     .join('\n')
 
-  const fontes = briefing.sources
-    .filter(s => s.status === 'ok' && s.content)
-    .map(s => `--- MATERIAL (${s.kind}${s.ref ? ' ' + s.ref : ''}) ---\n${s.content}`)
-    .join('\n\n')
+  const fontes = juntaFontes(briefing.sources || [])
 
   return [`=== ENTREVISTA ===\n${conversa}`, fontes ? `=== MATERIAIS ===\n${fontes}` : '']
     .filter(Boolean).join('\n\n')
@@ -117,6 +143,11 @@ export function buildBriefingText(briefing) {
 export async function compileBriefing(db, { accountId, briefingId, ai }) {
   const briefing = getBriefing(db, accountId, briefingId)
   if (!briefing) return { ok: false, error: 'briefing_nao_encontrado' }
+  // O teto vale para o briefing inteiro, compilacao inclusa. Sem esta checagem,
+  // um ciclo de corrigir-e-recompilar gastaria a chave da Dros sem limite.
+  if (Number(briefing.tokens_used || 0) >= MAX_TOKENS_BRIEFING) {
+    return { ok: false, error: 'teto_de_tokens' }
+  }
 
   const texto = buildBriefingText(briefing)
   let ultimoErro = 'saida_invalida'

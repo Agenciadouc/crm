@@ -10,7 +10,8 @@ export function createTestDb() {
     CREATE TABLE accounts (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL,
-      anthropic_api_key TEXT
+      anthropic_api_key TEXT,
+      ai_agents_enabled INTEGER NOT NULL DEFAULT 0
     );
     CREATE TABLE users (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -74,7 +75,9 @@ export function createTestDb() {
     CREATE TABLE funnels (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       account_id INTEGER NOT NULL,
-      name TEXT
+      name TEXT,
+      is_default INTEGER NOT NULL DEFAULT 0,
+      is_active INTEGER NOT NULL DEFAULT 1
     );
     CREATE TABLE funnel_stages (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -128,6 +131,23 @@ export function createTestDb() {
   applyCopilotSchema(db)
   applyAgentBriefingSchema(db)
   return db
+}
+
+// Conta com o recurso pago de agentes ligado, um funil padrao com etapas e uma
+// instancia de WhatsApp: o minimo para as rotas da entrevista funcionarem de
+// ponta a ponta (portao do recurso + amarracao de etapas/instancias na ativacao).
+export function seedContaCompleta(db, { accountName = 'Conta Teste' } = {}) {
+  const accountId = Number(db.prepare('INSERT INTO accounts (name, ai_agents_enabled) VALUES (?, 1)').run(accountName).lastInsertRowid)
+  const userId = Number(db.prepare("INSERT INTO users (account_id, name, email, role) VALUES (?, ?, ?, 'gerente')")
+    .run(accountId, 'Gerente', `gerente-${accountId}@teste.local`).lastInsertRowid)
+  const funnelId = Number(db.prepare('INSERT INTO funnels (account_id, name, is_default, is_active) VALUES (?, ?, 1, 1)')
+    .run(accountId, 'Funil Principal').lastInsertRowid)
+  const stageIds = ['Novo', 'Em atendimento'].map((nome, i) => Number(
+    db.prepare('INSERT INTO funnel_stages (funnel_id, name, position) VALUES (?, ?, ?)').run(funnelId, nome, i).lastInsertRowid
+  ))
+  const instanceId = Number(db.prepare("INSERT INTO whatsapp_instances (account_id, instance_name, status) VALUES (?, ?, 'connected')")
+    .run(accountId, `linha-${accountId}`).lastInsertRowid)
+  return { accountId, userId, funnelId, stageIds, instanceId }
 }
 
 export function seedAccountAndLead(db, { accountName = 'Conta Teste' } = {}) {

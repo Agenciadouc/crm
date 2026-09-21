@@ -5,7 +5,13 @@
 import { getBriefing, addTurn } from './briefingStore.js'
 
 export const MAX_PERGUNTAS = 20
+// Teto do briefing INTEIRO (entrevista + fontes + compilacao), spec secao 6.
 export const MAX_TOKENS_BRIEFING = 60000
+// Fatia do teto guardada para a compilacao final. A entrevista para antes de
+// gastar tudo: se ela consumisse o teto inteiro, o briefing terminaria sem
+// orcamento para compilar e a pessoa ficaria sem agente nenhum.
+export const RESERVA_COMPILACAO = 10000
+export const MAX_TOKENS_ENTREVISTA = MAX_TOKENS_BRIEFING - RESERVA_COMPILACAO
 
 export const TEMAS = [
   'O que a empresa vende',
@@ -31,12 +37,17 @@ Ao longo da conversa, quando fizer sentido, ofereca tambem:
 - pedir o site da empresa, dizendo que voce le sozinha
 - pedir que a pessoa cole qualquer material pronto que ela ja tenha
 
+Escreva em portugues do Brasil com acentuacao correta.
+
 Quando todos os temas estiverem cobertos, responda exatamente: PRONTO`
 
-export function shouldFinish(briefing, ai) {
+// Le o acumulado PERSISTIDO do briefing (agent_briefings.tokens_used). O
+// contador do cliente de IA nao serve: ele e criado por requisicao HTTP e
+// sempre vale 0 quando esta checagem roda, entao o teto nunca disparava.
+export function shouldFinish(briefing) {
   const perguntas = briefing.turns.filter(t => t.role === 'ia').length
   if (perguntas >= MAX_PERGUNTAS) return { finish: true, reason: 'perguntas' }
-  if (ai.tokensUsed() >= MAX_TOKENS_BRIEFING) return { finish: true, reason: 'tokens' }
+  if (Number(briefing.tokens_used || 0) >= MAX_TOKENS_ENTREVISTA) return { finish: true, reason: 'tokens' }
   return { finish: false, reason: null }
 }
 
@@ -45,8 +56,17 @@ export async function nextQuestion(db, { accountId, briefingId, ai }) {
   if (!briefing) return { ok: false, error: 'briefing_nao_encontrado' }
 
   // Teto conferido ANTES de gastar IA.
-  const corte = shouldFinish(briefing, ai)
+  const corte = shouldFinish(briefing)
   if (corte.finish) return { ok: true, done: true, reason: corte.reason }
+
+  // Ja existe pergunta no ar esperando resposta: devolve ela em vez de gastar
+  // IA de novo. Duas rotas chamam esta funcao (/answer e /next-question, esta
+  // ultima com o botao "Tentar de novo" na mao da pessoa), e sem a guarda dois
+  // cliques seguidos empilhavam perguntas da IA e queimavam o teto a toa.
+  const ultimo = briefing.turns.length ? briefing.turns[briefing.turns.length - 1] : null
+  if (ultimo && ultimo.role === 'ia') {
+    return { ok: true, done: false, question: ultimo.content, repetida: true }
+  }
 
   const messages = briefing.turns.map(t => ({
     role: t.role === 'ia' ? 'assistant' : 'user',

@@ -10,11 +10,23 @@ function columns(db, table) {
 test('cria as tres tabelas com as colunas do spec', () => {
   const db = createTestDb()
   assert.deepEqual(columns(db, 'agent_briefings'),
-    ['id', 'account_id', 'agent_id', 'status', 'compiled_json', 'created_by', 'created_at', 'updated_at'])
+    ['id', 'account_id', 'agent_id', 'status', 'compiled_json', 'created_by', 'created_at', 'updated_at',
+     'compiled_at', 'tokens_used'])
   assert.deepEqual(columns(db, 'agent_briefing_turns'),
     ['id', 'briefing_id', 'position', 'role', 'content', 'created_at'])
   assert.deepEqual(columns(db, 'agent_briefing_sources'),
     ['id', 'briefing_id', 'kind', 'ref', 'content', 'status', 'error', 'created_at'])
+})
+
+test('migracao das colunas novas e idempotente e nao mexe em briefing que ja existe', () => {
+  const db = createTestDb()
+  const { accountId, userId } = seedAccountAndLead(db)
+  const id = db.prepare('INSERT INTO agent_briefings (account_id, created_by) VALUES (?, ?)').run(accountId, userId).lastInsertRowid
+  applyAgentBriefingSchema(db)
+  applyAgentBriefingSchema(db)
+  const row = db.prepare('SELECT compiled_at, tokens_used FROM agent_briefings WHERE id = ?').get(id)
+  assert.equal(row.compiled_at, null)
+  assert.equal(row.tokens_used, 0, 'briefing antigo entra na migracao com contador zerado')
 })
 
 test('briefing nasce como rascunho sem agente', () => {

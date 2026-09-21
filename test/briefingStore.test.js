@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { createTestDb, seedAccountAndLead } from './helpers/memoryDb.js'
 import {
   createBriefing, addTurn, addSource, getBriefing,
-  listDrafts, setCompiled, linkAgent, deleteBriefing,
+  listDrafts, setCompiled, linkAgent, deleteBriefing, addTokens,
 } from '../server/services/briefingStore.js'
 
 function setup() {
@@ -146,4 +146,108 @@ test('deleteBriefing apaga e nao apaga o de outra conta', () => {
   assert.equal(deleteBriefing(db, outra, id), false)
   assert.equal(deleteBriefing(db, accountId, id), true)
   assert.equal(getBriefing(db, accountId, id), null)
+})
+
+// ---- compiled_at: o compilado so vale enquanto nada mudou depois dele -------
+// Defeito que estes testes cobrem: addTurn mexia so no updated_at, nada
+// invalidava o compiled_json, e a tela de resumo reaproveitava o compilado
+// velho. A pessoa corrigia "preco a IA pode falar sim", via o resumo ANTIGO e
+// ativava um agente sem a correcao — em silencio.
+
+const COMPILADO = {
+  name: 'Ana', persona: 'Cordial.', knowledge_base: 'Curso.', never_mention: 'preco',
+  qualification_criteria: 'nome', required_fields: ['name'],
+  resumo: { quem_sou: 'a', o_que_sei: 'b', o_que_descubro: ['c'], o_que_nunca_falo: ['d'] },
+}
+
+test('setCompiled carimba compiled_at e o briefing deixa de precisar recompilar', () => {
+  const db = createTestDb()
+  const { accountId, userId } = seedAccountAndLead(db)
+  const briefingId = createBriefing(db, { accountId, userId })
+  assert.equal(getBriefing(db, accountId, briefingId).precisa_recompilar, 1, 'sem compilado, precisa compilar')
+
+  setCompiled(db, { accountId, briefingId, compiled: COMPILADO })
+  const b = getBriefing(db, accountId, briefingId)
+  assert.ok(b.compiled_at, 'compiled_at tem que ser preenchido')
+  assert.equal(b.precisa_recompilar, 0)
+})
+
+test('turno novo depois do compile obriga a recompilar', () => {
+  const db = createTestDb()
+  const { accountId, userId } = seedAccountAndLead(db)
+  const briefingId = createBriefing(db, { accountId, userId })
+  setCompiled(db, { accountId, briefingId, compiled: COMPILADO })
+  assert.equal(getBriefing(db, accountId, briefingId).precisa_recompilar, 0)
+
+  addTurn(db, { accountId, briefingId, role: 'user', content: 'nao, preco a IA pode falar sim' })
+
+  const b = getBriefing(db, accountId, briefingId)
+  assert.equal(b.compiled_at, null, 'a correcao tem que invalidar o compilado')
+  assert.equal(b.precisa_recompilar, 1)
+  assert.ok(b.compiled_json, 'o texto antigo continua guardado, so deixa de valer')
+})
+
+test('material colado depois do compile tambem obriga a recompilar', () => {
+  const db = createTestDb()
+  const { accountId, userId } = seedAccountAndLead(db)
+  const briefingId = createBriefing(db, { accountId, userId })
+  setCompiled(db, { accountId, briefingId, compiled: COMPILADO })
+  addSource(db, { accountId, briefingId, kind: 'colado', content: 'tabela de precos nova' })
+  assert.equal(getBriefing(db, accountId, briefingId).precisa_recompilar, 1)
+})
+
+test('recompilar depois da correcao volta a valer o compilado', () => {
+  const db = createTestDb()
+  const { accountId, userId } = seedAccountAndLead(db)
+  const briefingId = createBriefing(db, { accountId, userId })
+  setCompiled(db, { accountId, briefingId, compiled: COMPILADO })
+  addTurn(db, { accountId, briefingId, role: 'user', content: 'corrige isso' })
+  setCompiled(db, { accountId, briefingId, compiled: { ...COMPILADO, never_mention: 'nada' } })
+
+  const b = getBriefing(db, accountId, briefingId)
+  assert.equal(b.precisa_recompilar, 0)
+  assert.equal(JSON.parse(b.compiled_json).never_mention, 'nada')
+})
+
+test('updated_at mais novo que compiled_at tambem pede recompilacao', () => {
+  const db = createTestDb()
+  const { accountId, userId } = seedAccountAndLead(db)
+  const briefingId = createBriefing(db, { accountId, userId })
+  setCompiled(db, { accountId, briefingId, compiled: COMPILADO })
+  // Segunda linha de defesa: escrita direta no banco, sem passar por addTurn.
+  db.prepare("UPDATE agent_briefings SET updated_at = '2099-01-01 00:00:00' WHERE id = ?").run(briefingId)
+  assert.equal(getBriefing(db, accountId, briefingId).precisa_recompilar, 1)
+})
+
+// ---- tokens_used: teto do briefing --------------------------------------
+test('addTokens acumula por briefing, respeita a conta e nao invalida o compilado', () => {
+  const db = createTestDb()
+  const { accountId, userId } = seedAccountAndLead(db)
+  const briefingId = createBriefing(db, { accountId, userId })
+  setCompiled(db, { accountId, briefingId, compiled: COMPILADO })
+
+  assert.equal(addTokens(db, { accountId, briefingId, tokens: 1200 }), 1200)
+  assert.equal(addTokens(db, { accountId, briefingId, tokens: 800 }), 2000)
+  assert.equal(addTokens(db, { accountId, briefingId, tokens: 0 }), 2000)
+
+  const outra = Number(db.prepare('INSERT INTO accounts (name) VALUES (?)').run('Outra').lastInsertRowid)
+  assert.equal(addTokens(db, { accountId: outra, briefingId, tokens: 5000 }), 0, 'outra conta nao soma nem le')
+  assert.equal(getBriefing(db, accountId, briefingId).tokens_used, 2000)
+  assert.equal(getBriefing(db, accountId, briefingId).precisa_recompilar, 0, 'gastar token nao e mudanca de conteudo')
+})
+
+// linkAgent nao e mudanca de conteudo: se mexesse em updated_at, todo briefing
+// ativado passaria a dizer precisa_recompilar = 1 e reabrir o resumo pagaria
+// uma compilacao nova. Os carimbos vao para o passado para o teste nao
+// depender de cair no mesmo segundo.
+test('linkAgent nao marca o briefing como desatualizado', () => {
+  const { db, accountId, userId, agentId } = setup()
+  const briefingId = createBriefing(db, { accountId, userId })
+  setCompiled(db, { accountId, briefingId, compiled: { name: 'X' } })
+  db.prepare("UPDATE agent_briefings SET updated_at = '2020-01-01 00:00:00', compiled_at = '2020-01-01 00:00:00' WHERE id = ?").run(briefingId)
+  assert.equal(linkAgent(db, { accountId, briefingId, agentId }), true)
+  assert.equal(getBriefing(db, accountId, briefingId).precisa_recompilar, 0)
+
+  addTurn(db, { accountId, briefingId, role: 'user', content: 'correcao' })
+  assert.equal(getBriefing(db, accountId, briefingId).precisa_recompilar, 1, 'turno novo depois de compilar continua invalidando')
 })

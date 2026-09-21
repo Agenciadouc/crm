@@ -1,10 +1,12 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { Send, Loader, ClipboardPaste } from 'lucide-react'
+import { useAccount } from '../context/AccountContext'
 import { startBriefing, answerBriefing, retryNextQuestion, fetchBriefing, pasteIntoBriefing, type BriefingTurn } from '../lib/api'
 
 export default function AgentInterview() {
   const navigate = useNavigate()
+  const { accountId } = useAccount()
   const { briefingId: paramId } = useParams()
   const [briefingId, setBriefingId] = useState<number | null>(paramId ? Number(paramId) : null)
   const [turns, setTurns] = useState<BriefingTurn[]>([])
@@ -18,16 +20,18 @@ export default function AgentInterview() {
   useEffect(() => { fimRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [turns, carregando])
 
   useEffect(() => {
+    if (!accountId) return
     let cancelado = false
+    setCarregando(true)
     ;(async () => {
       try {
         if (paramId) {
-          const b = await fetchBriefing(Number(paramId))
+          const r = await fetchBriefing(Number(paramId), accountId)
           if (cancelado) return
-          setBriefingId(b.id)
-          setTurns(b.turns)
+          setBriefingId(r.briefing.id)
+          setTurns(r.briefing.turns)
         } else {
-          const r = await startBriefing()
+          const r = await startBriefing(accountId)
           if (cancelado) return
           setBriefingId(r.briefing_id)
           setTurns([{ id: 0, position: 1, role: 'ia', content: r.question, created_at: '' }])
@@ -39,17 +43,17 @@ export default function AgentInterview() {
       }
     })()
     return () => { cancelado = true }
-  }, [paramId])
+  }, [paramId, accountId])
 
   async function enviar() {
     const t = texto.trim()
-    if (!t || !briefingId || carregando) return
+    if (!t || !briefingId || !accountId || carregando) return
     setTexto('')
     setErro(null)
     setTurns(prev => [...prev, { id: -Date.now(), position: prev.length + 1, role: 'user', content: t, created_at: '' }])
     setCarregando(true)
     try {
-      const r = await answerBriefing(briefingId, t)
+      const r = await answerBriefing(briefingId, accountId, t)
       if (r.done) { navigate(`/agents/resumo/${briefingId}`); return }
       setTurns(prev => [...prev, { id: -Date.now() - 1, position: prev.length + 1, role: 'ia', content: r.question || '', created_at: '' }])
     } catch (e: any) {
@@ -63,11 +67,11 @@ export default function AgentInterview() {
   }
 
   async function tentarDeNovo() {
-    if (!briefingId || carregando) return
+    if (!briefingId || !accountId || carregando) return
     setErro(null)
     setCarregando(true)
     try {
-      const r = await retryNextQuestion(briefingId)
+      const r = await retryNextQuestion(briefingId, accountId)
       if (r.done) { navigate(`/agents/resumo/${briefingId}`); return }
       setTurns(prev => [...prev, { id: -Date.now() - 2, position: prev.length + 1, role: 'ia', content: r.question || '', created_at: '' }])
       setPodeTentarDeNovo(false)
@@ -80,10 +84,10 @@ export default function AgentInterview() {
 
   async function colar() {
     const material = texto.trim()
-    if (!material || !briefingId) return
+    if (!material || !briefingId || !accountId) return
     setColando(true)
     try {
-      await pasteIntoBriefing(briefingId, material)
+      await pasteIntoBriefing(briefingId, accountId, material)
       setTexto('')
       setTurns(prev => [...prev, { id: -Date.now(), position: prev.length + 1, role: 'user', content: '(material enviado para a IA ler)', created_at: '' }])
     } catch (e: any) {
@@ -92,6 +96,8 @@ export default function AgentInterview() {
       setColando(false)
     }
   }
+
+  if (!accountId) return <div className="loading-container"><span>Selecione uma conta</span></div>
 
   return (
     <div style={{ maxWidth: 760, margin: '0 auto', padding: '32px 16px', display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>

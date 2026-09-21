@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createTestDb, seedAccountAndLead } from './helpers/memoryDb.js'
 import { createBriefing, getBriefing } from '../server/services/briefingStore.js'
-import { collectPastedText, MAX_PASTED_CHARS } from '../server/services/briefingSources/pastedText.js'
+import { collectPastedText, MAX_PASTED_CHARS, MAX_COLAGENS_POR_BRIEFING } from '../server/services/briefingSources/pastedText.js'
 
 function setup() {
   const db = createTestDb()
@@ -70,4 +70,25 @@ test('falha real do banco vira ok:false, nao lanca', () => {
   assert.notEqual(r.error, 'texto_vazio')
   // A fonte nao foi gravada
   assert.equal(getBriefing(db, accountId, briefingId).sources.length, 0)
+})
+
+// ---- teto de colagens por briefing (I3) ----------------------------------
+test('passando do teto de colagens, a fonte nao entra e o erro e nomeado', () => {
+  const { db, accountId, briefingId } = setup()
+  for (let i = 0; i < MAX_COLAGENS_POR_BRIEFING; i++) {
+    assert.equal(collectPastedText(db, { accountId, briefingId, text: `material ${i}` }).ok, true)
+  }
+  const r = collectPastedText(db, { accountId, briefingId, text: 'mais um' })
+  assert.equal(r.ok, false)
+  assert.equal(r.error, 'limite_de_materiais')
+  assert.equal(getBriefing(db, accountId, briefingId).sources.length, MAX_COLAGENS_POR_BRIEFING)
+})
+
+test('o teto conta so as colagens daquele briefing', () => {
+  const { db, accountId, briefingId } = setup()
+  for (let i = 0; i < MAX_COLAGENS_POR_BRIEFING; i++) {
+    collectPastedText(db, { accountId, briefingId, text: `material ${i}` })
+  }
+  const outroBriefing = createBriefing(db, { accountId, userId: null })
+  assert.equal(collectPastedText(db, { accountId, briefingId: outroBriefing, text: 'primeiro' }).ok, true)
 })

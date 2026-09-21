@@ -1,5 +1,4 @@
 import { Router } from 'express'
-import bcrypt from 'bcryptjs'
 import db from '../db.js'
 import { requireRole } from '../middleware/auth.js'
 import { callHaiku } from '../services/anthropicClient.js'
@@ -7,6 +6,7 @@ import { replayLastMessagesForAgent, releaseLeadsFromAgent } from '../services/a
 import { pickAnthropicKey } from '../services/anthropicKeyPicker.js'
 import { AGENT_MODES, normalizeAgentMode } from '../services/copilotMode.js'
 import { createAgentRecord } from '../services/agentCreate.js'
+import { accountHasAiAgents } from '../services/accountFeature.js'
 import { expirePendingForAgent } from '../services/aiSuggestions.js'
 import { cancelAiTimersForAgent } from '../services/copilotScheduler.js'
 import { broadcastSSE } from '../sse.js'
@@ -48,8 +48,7 @@ function loadAgentFull(agentId) {
 }
 
 function checkAccountFeature(accountId) {
-  const acc = db.prepare('SELECT ai_agents_enabled FROM accounts WHERE id = ?').get(accountId)
-  return acc && acc.ai_agents_enabled === 1
+  return accountHasAiAgents(db, accountId)
 }
 
 function resetMonthlyTokensIfNeeded(agent) {
@@ -103,7 +102,7 @@ router.get('/', (req, res) => {
 // Detalhe (com stages, instances, handoff_rules)
 router.get('/:id', (req, res) => {
   if (!req.accountId) return res.status(400).json({ error: 'account_id required' })
-  if (!checkAccountFeature(req.accountId)) return res.status(403).json({ error: 'Recurso nao habilitado nessa conta' })
+  if (!checkAccountFeature(req.accountId)) return res.status(403).json({ error: 'Recurso não habilitado nesta conta' })
   const agent = loadAgentFull(req.params.id)
   if (!agent || agent.account_id !== req.accountId) return res.status(404).json({ error: 'Agente nao encontrado' })
   resetMonthlyTokensIfNeeded(agent)
@@ -113,7 +112,7 @@ router.get('/:id', (req, res) => {
 // Criar agente (cria user shadow is_bot=1 + agente + relacionamentos em transacao)
 router.post('/', requireRole('super_admin', 'gerente'), (req, res) => {
   if (!req.accountId) return res.status(400).json({ error: 'account_id required' })
-  if (!checkAccountFeature(req.accountId)) return res.status(403).json({ error: 'Recurso nao habilitado nessa conta' })
+  if (!checkAccountFeature(req.accountId)) return res.status(403).json({ error: 'Recurso não habilitado nesta conta' })
 
   try {
     const r = createAgentRecord(db, { accountId: req.accountId, body: req.body || {} })
@@ -130,7 +129,7 @@ router.post('/', requireRole('super_admin', 'gerente'), (req, res) => {
 // Editar agente
 router.put('/:id', requireRole('super_admin', 'gerente'), (req, res) => {
   if (!req.accountId) return res.status(400).json({ error: 'account_id required' })
-  if (!checkAccountFeature(req.accountId)) return res.status(403).json({ error: 'Recurso nao habilitado nessa conta' })
+  if (!checkAccountFeature(req.accountId)) return res.status(403).json({ error: 'Recurso não habilitado nesta conta' })
 
   const existing = db.prepare('SELECT * FROM ai_agents WHERE id = ? AND account_id = ?').get(req.params.id, req.accountId)
   if (!existing) return res.status(404).json({ error: 'Agente nao encontrado' })

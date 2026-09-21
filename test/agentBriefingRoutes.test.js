@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { statusForError } from '../server/routes/agentBriefings.js'
+import { statusForError } from '../server/routes/agentBriefingsRouter.js'
 
 test('erro de nao encontrado vira 404', () => {
   assert.equal(statusForError('briefing_nao_encontrado'), 404)
@@ -31,4 +31,10 @@ test('falha da IA vira 502', () => {
 test('corrida de estado vira 409', () => {
   assert.equal(statusForError('briefing_desapareceu'), 409)
   assert.equal(statusForError('falha_ao_amarrar_agente_ao_briefing'), 409)
+})
+
+test('ativacao recusada por compilado velho ou falta de numero/etapa vira 409', () => {
+  assert.equal(statusForError('briefing_desatualizado'), 409)
+  assert.equal(statusForError('sem_instancia'), 409)
+  assert.equal(statusForError('sem_etapa'), 409)
 })

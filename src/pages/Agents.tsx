@@ -17,7 +17,7 @@ export default function Agents() {
   const [featureEnabled, setFeatureEnabled] = useState(false)
   const [hasApiKey, setHasApiKey] = useState(true)
   const [loading, setLoading] = useState(true)
-  const [editingId, setEditingId] = useState<'new' | number | null>(null)
+  const [editingId, setEditingId] = useState<number | null>(null)
   const [togglingId, setTogglingId] = useState<number | null>(null)
   const [deleteConfirmId, setDeleteConfirmId] = useState<number | null>(null)
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'info' } | null>(null)
@@ -35,7 +35,7 @@ export default function Agents() {
     fetchAgents(accountId)
       .then(d => { setAgents(d.agents); setFeatureEnabled(d.feature_enabled); setHasApiKey(d.has_api_key !== false) })
       .finally(() => setLoading(false))
-    fetchBriefingDrafts().then(setDrafts).catch(() => setDrafts([]))
+    fetchBriefingDrafts(accountId).then(setDrafts).catch(() => setDrafts([]))
   }
   useEffect(load, [accountId])
 
@@ -144,7 +144,7 @@ export default function Agents() {
                       onClick={async () => {
                         if (deleteConfirmId !== d.id) { setDeleteConfirmId(d.id); return }
                         try {
-                          await deleteBriefing(d.id)
+                          await deleteBriefing(d.id, accountId)
                           setDeleteConfirmId(null)
                           setDrafts(prev => prev.filter(x => x.id !== d.id))
                         } catch (e: any) {
@@ -213,7 +213,7 @@ export default function Agents() {
                         <button className="btn btn-sm btn-secondary" title="Conversar com a IA para ajustar este atendente"
                           onClick={async () => {
                             try {
-                              const r = await briefingFromAgent(a.id)
+                              const r = await briefingFromAgent(a.id, accountId)
                               navigate(`/agents/interview/${r.briefing_id}`)
                             } catch (e: any) {
                               alert('Erro: ' + (e?.message || 'Não consegui iniciar a conversa com a IA.'))

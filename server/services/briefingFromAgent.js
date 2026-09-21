@@ -30,14 +30,14 @@ export function briefingFromAgent(db, { accountId, agentId, userId }) {
   const compiled = {
     name: agent.name,
     persona: agent.persona || 'Cordial e objetiva.',
-    knowledge_base: agent.knowledge_base || 'Ainda nao descrito.',
+    knowledge_base: agent.knowledge_base || 'Ainda não descrito.',
     never_mention: agent.never_mention || 'nada',
-    qualification_criteria: agent.qualification_criteria || 'Ainda nao definido.',
+    qualification_criteria: agent.qualification_criteria || 'Ainda não definido.',
     required_fields: requiredFields,
     resumo: {
       quem_sou: agent.persona || 'Atendente da empresa.',
-      o_que_sei: agent.knowledge_base || 'Ainda nao descrito.',
-      o_que_descubro: requiredFields.length ? requiredFields : ['Ainda nao definido'],
+      o_que_sei: agent.knowledge_base || 'Ainda não descrito.',
+      o_que_descubro: requiredFields.length ? requiredFields : ['Ainda não definido'],
       o_que_nunca_falo: agent.never_mention ? [agent.never_mention] : ['Nada definido'],
     },
   }

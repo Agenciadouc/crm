@@ -1,6 +1,16 @@
 // Schema do agente por entrevista (bloco 6). Recebe o db por parametro para ser
 // testavel em memoria. Segue o padrao de copilotSchema.js: CREATE TABLE IF NOT EXISTS.
 
+// Mesmo helper de copilotSchema.js: coluna nova em tabela que ja existe no
+// banco de producao entra por ALTER TABLE, nunca recriando a tabela.
+function addColumnIfNotExists(db, table, column, type) {
+  const cols = db.prepare(`PRAGMA table_info(${table})`).all()
+  if (!cols.some(c => c.name === column)) {
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`)
+    console.log(`[DB] Added column ${table}.${column}`)
+  }
+}
+
 export function applyAgentBriefingSchema(db) {
   db.exec(`
     CREATE TABLE IF NOT EXISTS agent_briefings (
@@ -48,4 +58,15 @@ export function applyAgentBriefingSchema(db) {
     CREATE INDEX IF NOT EXISTS idx_agent_briefing_sources_briefing
       ON agent_briefing_sources(briefing_id);
   `)
+
+  // Quando o compiled_json foi escrito. NULO = nao ha compilado em dia com o
+  // briefing, entao o resumo precisa recompilar. addTurn/addSource zeram esta
+  // coluna: sem isso a correcao entra no briefing e o resumo continua mostrando
+  // (e a ativacao continua gravando) o texto velho, em silencio.
+  addColumnIfNotExists(db, 'agent_briefings', 'compiled_at', 'TEXT')
+
+  // Total de tokens de IA ja gastos NESTE briefing (entrevista + compilacao).
+  // Tem que ser persistido: o cliente de IA e criado por requisicao HTTP, entao
+  // um contador em memoria volta a zero a cada pergunta e o teto nunca dispara.
+  addColumnIfNotExists(db, 'agent_briefings', 'tokens_used', 'INTEGER NOT NULL DEFAULT 0')
 }

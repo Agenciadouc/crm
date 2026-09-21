@@ -1,8 +1,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { createTestDb, seedAccountAndLead } from './helpers/memoryDb.js'
+import { createTestDb, seedAccountAndLead, seedContaCompleta } from './helpers/memoryDb.js'
 import { createBriefing, getBriefing, setCompiled, addTurn } from '../server/services/briefingStore.js'
-import { activateBriefing } from '../server/services/briefingActivate.js'
+import { activateBriefing, resolveOndeAtende } from '../server/services/briefingActivate.js'
 
 // Nota: setCompiled mantem o status 'ativo' quando o briefing ja foi ativado,
 // e e por isso que a segunda ativacao cai no caminho de ATUALIZAR o agente.
@@ -17,9 +17,10 @@ const COMPILADO = {
   resumo: { quem_sou: 'a', o_que_sei: 'b', o_que_descubro: ['c'], o_que_nunca_falo: ['d'] },
 }
 
+// Conta com funil padrao e instancia: sem isso a ativacao recusa (agente surdo).
 function comBriefingCompilado() {
   const db = createTestDb()
-  const { accountId, userId } = seedAccountAndLead(db)
+  const { accountId, userId } = seedContaCompleta(db)
   const briefingId = createBriefing(db, { accountId, userId })
   addTurn(db, { accountId, briefingId, role: 'user', content: 'curso de ingles' })
   setCompiled(db, { accountId, briefingId, compiled: COMPILADO })
@@ -220,4 +221,149 @@ test('rollback do aninhamento: indice unico ocupado desfaz agente e usuario-bot'
   const b = getBriefing(db, accountId, briefingId)
   assert.equal(b.status, 'compilado', 'briefing alvo nao pode ficar marcado como ativo')
   assert.equal(b.agent_id, null)
+})
+
+// ---- onde o agente atende (I1) -------------------------------------------
+// Defeito que estes testes cobrem: a ativacao criava o agente sem nenhuma linha
+// em ai_agent_stages nem em ai_agent_instances. O findAgentForLead (aiAgent.js)
+// PULA agente sem etapa e sem instancia, entao a pessoa via "Atendimento
+// ligado" e o agente nunca respondia nada.
+
+function comFunilEInstancias() {
+  const db = createTestDb()
+  const { accountId, userId, stageIds, instanceId } = seedContaCompleta(db)
+  const briefingId = createBriefing(db, { accountId, userId })
+  addTurn(db, { accountId, briefingId, role: 'user', content: 'curso de ingles' })
+  setCompiled(db, { accountId, briefingId, compiled: COMPILADO })
+  return { db, accountId, briefingId, stageIds, instanceId }
+}
+
+test('ativar amarra TODAS as etapas do funil padrao e TODAS as instancias da conta', () => {
+  const { db, accountId, briefingId, stageIds, instanceId } = comFunilEInstancias()
+  const r = activateBriefing(db, { accountId, briefingId })
+  assert.equal(r.ok, true)
+
+  const etapas = db.prepare('SELECT stage_id FROM ai_agent_stages WHERE agent_id = ? ORDER BY stage_id').all(r.agentId).map(x => x.stage_id)
+  assert.deepEqual(etapas, [...stageIds].sort((a, b) => a - b))
+  const instancias = db.prepare('SELECT instance_id FROM ai_agent_instances WHERE agent_id = ?').all(r.agentId).map(x => x.instance_id)
+  assert.deepEqual(instancias, [instanceId])
+})
+
+test('etapa de funil de OUTRA conta nunca entra', () => {
+  const { db, accountId, briefingId } = comFunilEInstancias()
+  const outra = seedContaCompleta(db, { accountName: 'Outra' })
+  const r = activateBriefing(db, { accountId, briefingId })
+
+  const etapas = db.prepare('SELECT stage_id FROM ai_agent_stages WHERE agent_id = ?').all(r.agentId).map(x => x.stage_id)
+  for (const sid of outra.stageIds) assert.ok(!etapas.includes(sid), 'etapa de outra conta nao pode ser amarrada')
+  const instancias = db.prepare('SELECT instance_id FROM ai_agent_instances WHERE agent_id = ?').all(r.agentId).map(x => x.instance_id)
+  assert.ok(!instancias.includes(outra.instanceId))
+})
+
+test('instance_ids explicito manda mais que o padrao de amarrar todas', () => {
+  const { db, accountId, briefingId, instanceId } = comFunilEInstancias()
+  const outraLinha = Number(db.prepare("INSERT INTO whatsapp_instances (account_id, instance_name, status) VALUES (?, 'linha-2', 'connected')").run(accountId).lastInsertRowid)
+  const r = activateBriefing(db, { accountId, briefingId, instanceIds: [outraLinha] })
+  const instancias = db.prepare('SELECT instance_id FROM ai_agent_instances WHERE agent_id = ?').all(r.agentId).map(x => x.instance_id)
+  assert.deepEqual(instancias, [outraLinha])
+  assert.ok(!instancias.includes(instanceId))
+})
+
+// Conta sem numero ou sem funil: ativar criaria um agente surdo, que aparece
+// como "Atendimento ligado" e nunca responde. Recusa antes de criar qualquer coisa.
+function semAmarracao({ comInstancia = false, comFunil = false } = {}) {
+  const db = createTestDb()
+  const { accountId, userId } = seedAccountAndLead(db)
+  if (comInstancia) {
+    db.prepare("INSERT INTO whatsapp_instances (account_id, instance_name, status) VALUES (?, 'linha-1', 'connected')").run(accountId)
+  }
+  if (comFunil) {
+    const f = Number(db.prepare("INSERT INTO funnels (account_id, name, is_default, is_active) VALUES (?, 'Funil', 1, 1)").run(accountId).lastInsertRowid)
+    db.prepare("INSERT INTO funnel_stages (funnel_id, name, position) VALUES (?, 'Novo', 0)").run(f)
+  }
+  const briefingId = createBriefing(db, { accountId, userId })
+  addTurn(db, { accountId, briefingId, role: 'user', content: 'curso de ingles' })
+  setCompiled(db, { accountId, briefingId, compiled: COMPILADO })
+  return { db, accountId, briefingId }
+}
+
+test('conta sem instancia de WhatsApp nao ativa (sem_instancia)', () => {
+  const { db, accountId, briefingId } = semAmarracao({ comFunil: true })
+  const antes = db.prepare('SELECT COUNT(*) c FROM ai_agents').get().c
+  const r = activateBriefing(db, { accountId, briefingId })
+  assert.equal(r.ok, false)
+  assert.equal(r.error, 'sem_instancia')
+  assert.equal(db.prepare('SELECT COUNT(*) c FROM ai_agents').get().c, antes)
+})
+
+test('conta sem etapa de funil nao ativa (sem_etapa)', () => {
+  const { db, accountId, briefingId } = semAmarracao({ comInstancia: true })
+  const antes = db.prepare('SELECT COUNT(*) c FROM ai_agents').get().c
+  const r = activateBriefing(db, { accountId, briefingId })
+  assert.equal(r.ok, false)
+  assert.equal(r.error, 'sem_etapa')
+  assert.equal(db.prepare('SELECT COUNT(*) c FROM ai_agents').get().c, antes)
+})
+
+test('instance_ids explicito dispensa a checagem de instancia da conta', () => {
+  const { db, accountId, briefingId } = semAmarracao({ comFunil: true })
+  // Instancia criada depois do seed: a checagem padrao olharia a conta, mas o
+  // pedido ja diz qual numero usar.
+  const linha = Number(db.prepare("INSERT INTO whatsapp_instances (account_id, instance_name, status) VALUES (?, 'linha-x', 'connected')").run(accountId).lastInsertRowid)
+  const r = activateBriefing(db, { accountId, briefingId, instanceIds: [linha] })
+  assert.equal(r.ok, true)
+})
+
+// ---- compilado desatualizado (C1) ------------------------------------------
+
+test('briefing corrigido depois de compilar nao ativa (briefing_desatualizado)', () => {
+  const { db, accountId, briefingId } = comBriefingCompilado()
+  addTurn(db, { accountId, briefingId, role: 'user', content: 'pode falar o preco sim' })
+  const antes = db.prepare('SELECT COUNT(*) c FROM ai_agents').get().c
+  const r = activateBriefing(db, { accountId, briefingId })
+  assert.equal(r.ok, false)
+  assert.equal(r.error, 'briefing_desatualizado')
+  assert.equal(db.prepare('SELECT COUNT(*) c FROM ai_agents').get().c, antes)
+})
+
+test('correcao de agente ativo tambem exige recompilar antes', () => {
+  const { db, accountId, briefingId } = comBriefingCompilado()
+  const primeira = activateBriefing(db, { accountId, briefingId })
+  addTurn(db, { accountId, briefingId, role: 'user', content: 'mais informal' })
+  const r = activateBriefing(db, { accountId, briefingId })
+  assert.equal(r.ok, false)
+  assert.equal(r.error, 'briefing_desatualizado')
+  assert.equal(db.prepare('SELECT persona FROM ai_agents WHERE id = ?').get(primeira.agentId).persona, 'Cordial.')
+})
+
+test('compilar e ativar deixa o briefing em dia; turno novo volta a pedir recompilar', () => {
+  const { db, accountId, briefingId } = comBriefingCompilado()
+  // Carimbos no passado: prova que ativar nao mexe em updated_at sem depender do relogio.
+  db.prepare("UPDATE agent_briefings SET updated_at = '2020-01-01 00:00:00', compiled_at = '2020-01-01 00:00:00' WHERE id = ?").run(briefingId)
+  const r = activateBriefing(db, { accountId, briefingId })
+  assert.equal(r.ok, true)
+  assert.equal(getBriefing(db, accountId, briefingId).precisa_recompilar, 0)
+
+  addTurn(db, { accountId, briefingId, role: 'user', content: 'mais uma coisa' })
+  assert.equal(getBriefing(db, accountId, briefingId).precisa_recompilar, 1)
+})
+
+test('resolveOndeAtende mostra o padrao antes de existir agente e o real depois', () => {
+  const { db, accountId, briefingId } = comFunilEInstancias()
+  const antes = resolveOndeAtende(db, { accountId, agentId: null })
+  assert.deepEqual(antes.etapas, ['Novo', 'Em atendimento'])
+  assert.equal(antes.instancias.length, 1)
+
+  const r = activateBriefing(db, { accountId, briefingId })
+  const depois = resolveOndeAtende(db, { accountId, agentId: r.agentId })
+  assert.deepEqual([...depois.etapas].sort(), ['Em atendimento', 'Novo'])
+  assert.deepEqual(depois.instancias, antes.instancias)
+})
+
+test('resolveOndeAtende nao mostra agente de outra conta', () => {
+  const { db, accountId, briefingId } = comFunilEInstancias()
+  const r = activateBriefing(db, { accountId, briefingId })
+  const outra = seedContaCompleta(db, { accountName: 'Outra' })
+  const visto = resolveOndeAtende(db, { accountId: outra.accountId, agentId: r.agentId })
+  assert.deepEqual(visto.etapas, ['Novo', 'Em atendimento'], 'cai no padrao da propria conta, nao no agente alheio')
 })

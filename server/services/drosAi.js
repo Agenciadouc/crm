@@ -4,13 +4,18 @@
 // O custo cai no ai_agent_token_log que ja existe, com agent_id NULL.
 
 import { callHaiku } from './anthropicClient.js'
+import { addTokens } from './briefingStore.js'
 
 export function resolveDrosKey(env = process.env) {
   const key = String((env && env.ANTHROPIC_API_KEY_DROS) || '').trim()
   return key || null
 }
 
-export function createDrosAi(db, { accountId, callAi = callHaiku, env = process.env }) {
+// briefingId e opcional so para nao quebrar chamador antigo: quando vem, o
+// gasto e somado em agent_briefings.tokens_used. Esse acumulado persistido e o
+// unico que serve para o teto do briefing — o contador em memoria abaixo morre
+// junto com a requisicao HTTP que criou este cliente.
+export function createDrosAi(db, { accountId, briefingId = null, callAi = callHaiku, env = process.env }) {
   let total = 0
 
   async function ask({ systemPrompt, messages, maxTokens = 600, source }) {
@@ -27,6 +32,7 @@ export function createDrosAi(db, { accountId, callAi = callHaiku, env = process.
 
     const u = r.usage || {}
     total += u.total || 0
+    if (briefingId) addTokens(db, { accountId, briefingId, tokens: u.total || 0 })
     db.prepare(`
       INSERT INTO ai_agent_token_log
         (agent_id, account_id, lead_id, input_tokens, output_tokens,

@@ -98,3 +98,9 @@ test('colisao do indice unico do agent_id devolve erro em vez de lancar', () => 
   assert.equal(r.ok, false)
   assert.match(r.error, /UNIQUE constraint failed/)
 })
+
+test('briefing criado a partir do agente ja nasce em dia (nao pede recompilar)', () => {
+  const { db, accountId, userId, agentId } = comAgenteConfigurado()
+  const r = briefingFromAgent(db, { accountId, agentId, userId })
+  assert.equal(getBriefing(db, accountId, r.briefingId).precisa_recompilar, 0)
+})
