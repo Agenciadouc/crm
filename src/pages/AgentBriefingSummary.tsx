@@ -27,7 +27,7 @@ export default function AgentBriefingSummary() {
           setCompiled(r.compiled)
         }
       } catch (e: any) {
-        if (!cancelado) setErro(e.message || 'Nao consegui montar o resumo.')
+        if (!cancelado) setErro(e.message || 'Não consegui montar o resumo.')
       } finally {
         if (!cancelado) setCarregando(false)
       }
@@ -42,7 +42,7 @@ export default function AgentBriefingSummary() {
       await activateBriefing(id, 'copilot')
       navigate('/agents')
     } catch (e: any) {
-      setErro(e.message || 'Nao consegui ativar o atendente.')
+      setErro(e.message || 'Não consegui ativar o atendente.')
       setAtivando(false)
     }
   }
@@ -51,7 +51,7 @@ export default function AgentBriefingSummary() {
     return (
       <div style={{ maxWidth: 640, margin: '0 auto', padding: 48, textAlign: 'center', color: 'var(--text-secondary)' }}>
         <Loader size={20} className="spin" />
-        <p>Montando seu atendente com o que voce contou...</p>
+        <p>Montando seu atendente com o que você contou...</p>
       </div>
     )
   }
@@ -65,7 +65,7 @@ export default function AgentBriefingSummary() {
             <MessageSquare size={16} /> Voltar para a conversa
           </button>
           <button className="btn btn-secondary" onClick={() => navigate('/agents')}>
-            <Settings size={16} /> Ir para ajustes avancados
+            <Settings size={16} /> Ir para ajustes avançados
           </button>
         </div>
       </div>
@@ -84,7 +84,7 @@ export default function AgentBriefingSummary() {
     <div style={{ maxWidth: 640, margin: '0 auto', padding: '32px 16px' }}>
       <h1>Pronto, montei seu atendente</h1>
       <p style={{ color: 'var(--text-secondary)', marginTop: 0, marginBottom: 32 }}>
-        Confira se ficou do jeito que voce quer. Se algo estiver errado, e so me falar.
+        Confira se ficou do jeito que você quer. Se algo estiver errado, é só me falar.
       </p>
 
       {bloco('Quem eu sou', c.resumo.quem_sou)}
@@ -106,7 +106,7 @@ export default function AgentBriefingSummary() {
 
       <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
         <button className="btn btn-primary" onClick={ativar} disabled={ativando}>
-          {ativando ? <Loader size={16} className="spin" /> : <Check size={16} />} Ta certo, ativar
+          {ativando ? <Loader size={16} className="spin" /> : <Check size={16} />} Tá certo, ativar
         </button>
         <button className="btn btn-secondary" onClick={() => navigate(`/agents/interview/${id}`)} disabled={ativando}>
           <MessageSquare size={16} /> Corrigir algo
@@ -115,12 +115,12 @@ export default function AgentBriefingSummary() {
 
       <p style={{ marginTop: 24, fontSize: 13 }}>
         <a href="#" onClick={e => { e.preventDefault(); navigate('/agents') }} style={{ color: 'var(--text-secondary)' }}>
-          ajustes avancados &gt;
+          ajustes avançados &gt;
         </a>
       </p>
       <p style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
-        O atendente nasce em modo Copiloto: ele so sugere a resposta no Chat, o vendedor revisa e envia.
-        Nada e enviado sozinho enquanto voce nao trocar o modo.
+        O atendente nasce em modo Copiloto: ele só sugere a resposta no Chat, o vendedor revisa e envia.
+        Nada é enviado sozinho enquanto você não trocar o modo.
       </p>
     </div>
   )
