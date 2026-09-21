@@ -143,9 +143,13 @@ export default function Agents() {
                       className="btn btn-sm btn-secondary"
                       onClick={async () => {
                         if (deleteConfirmId !== d.id) { setDeleteConfirmId(d.id); return }
-                        setDeleteConfirmId(null)
-                        await deleteBriefing(d.id)
-                        setDrafts(prev => prev.filter(x => x.id !== d.id))
+                        try {
+                          await deleteBriefing(d.id)
+                          setDeleteConfirmId(null)
+                          setDrafts(prev => prev.filter(x => x.id !== d.id))
+                        } catch (e: any) {
+                          alert('Erro: ' + (e?.message || 'Não consegui apagar o rascunho.'))
+                        }
                       }}
                     >
                       {deleteConfirmId === d.id ? 'Confirmar?' : 'Apagar'}
@@ -208,8 +212,12 @@ export default function Agents() {
                         </button>
                         <button className="btn btn-sm btn-secondary" title="Conversar com a IA para ajustar este atendente"
                           onClick={async () => {
-                            const r = await briefingFromAgent(a.id)
-                            navigate(`/agents/interview/${r.briefing_id}`)
+                            try {
+                              const r = await briefingFromAgent(a.id)
+                              navigate(`/agents/interview/${r.briefing_id}`)
+                            } catch (e: any) {
+                              alert('Erro: ' + (e?.message || 'Não consegui iniciar a conversa com a IA.'))
+                            }
                           }}>
                           <MessageSquare size={14} />
                         </button>
