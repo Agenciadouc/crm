@@ -889,7 +889,13 @@ export async function analyzeConversationsBatch(accountId, opts = {}) {
   console.log(`[Analyzer V2] account=${accountId} candidates=${candidates.length} (incremental=${candidates.filter(c => c.mode === 'incremental').length} full=${candidates.filter(c => c.mode === 'full').length}) max=${maxLeads}`)
 
   let okFull = 0, okIncr = 0, skipCount = 0, errCount = 0, totalCost = 0
-  for (const c of candidates) {
+  // Rate limit entre leads pra nao afogar a Evolution API que roda no mesmo host.
+  // Sem pausa, N chamadas Claude API em serie picavam CPU/RAM e derrubavam WhatsApp.
+  const SLEEP_MS_BETWEEN_LEADS = 800  // ~1 lead a cada 0.8s + tempo da chamada Claude = ~3s por lead
+  const sleep = (ms) => new Promise(r => setTimeout(r, ms))
+
+  for (let i = 0; i < candidates.length; i++) {
+    const c = candidates[i]
     try {
       const r = await analyzeConversation(c.id)
       if (r.ok && !r.skipped) {
@@ -905,10 +911,16 @@ export async function analyzeConversationsBatch(accountId, opts = {}) {
           console.warn(`[Analyzer V2] account=${accountId} budget atingido durante batch`)
           break
         }
+        // A cada 10 leads processados, pausa mais longa (2s) pra aliviar o servidor
+        await sleep(2000)
+      } else if (i < candidates.length - 1) {
+        // Pausa curta entre leads consecutivos
+        await sleep(SLEEP_MS_BETWEEN_LEADS)
       }
     } catch (e) {
       errCount++
       console.error(`[Analyzer V2] err lead=${c.id}:`, e.message)
+      await sleep(SLEEP_MS_BETWEEN_LEADS)  // pausa mesmo em erro pra nao spammar
     }
   }
 
