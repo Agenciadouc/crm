@@ -38,6 +38,7 @@ import Propostas from './pages/Propostas'
 import Contratos from './pages/Contratos'
 import TransferRequests from './pages/TransferRequests'
 import AgentInterview from './pages/AgentInterview'
+import AgentBriefingSummary from './pages/AgentBriefingSummary'
 
 // Fix global: impede modal de fechar quando user arrasta seleção de texto
 // de dentro do input pra fora do modal (mousedown dentro, mouseup no overlay)
@@ -115,6 +116,7 @@ function AppRoutes() {
             <Route path="/agents" element={<Agents />} />
             <Route path="/agents/interview" element={<AgentInterview />} />
             <Route path="/agents/interview/:briefingId" element={<AgentInterview />} />
+            <Route path="/agents/resumo/:briefingId" element={<AgentBriefingSummary />} />
             <Route path="/ready-messages" element={<ReadyMessages />} />
             <Route path="/qualifications" element={<Qualifications />} />
             <Route path="/launches" element={<Launches />} />
