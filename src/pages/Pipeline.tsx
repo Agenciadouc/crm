@@ -4,7 +4,7 @@ import { useAccount } from '../context/AccountContext'
 import AccountSelector from '../components/AccountSelector'
 import FilterDropdown, { type FilterValue } from '../components/FilterDropdown'
 import { useSSE } from '../context/SSEContext'
-import { fetchFunnels, fetchLeads, fetchTags, fetchUsers, moveLeadStage, fetchPipelineMetrics, archiveLead, updateLeadValue, type Funnel, type Lead, type PipelineMetric, type Tag, type User } from '../lib/api'
+import { fetchFunnels, fetchLeads, fetchTags, fetchUsers, moveLeadStage, fetchPipelineMetrics, archiveLead, updateLeadValue, type Funnel, type Lead, type PipelineMetric, type Tag, type User as ApiUser } from '../lib/api'
 import { Phone, MessageCircle, User, Clock, ChevronDown, ChevronRight, ArrowRight, Smartphone, Archive, DollarSign, X } from 'lucide-react'
 import { parseSqlDate } from '../lib/dates'
 
@@ -46,7 +46,7 @@ export default function Pipeline() {
   const [saleSaving, setSaleSaving] = useState(false)
   const [tags, setTags] = useState<Tag[]>([])
   const [tagFilter, setTagFilter] = useState<FilterValue[]>([])
-  const [users, setUsers] = useState<User[]>([])
+  const [users, setUsers] = useState<ApiUser[]>([])
   const [attendantFilter, setAttendantFilter] = useState<FilterValue[]>([])
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
