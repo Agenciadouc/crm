@@ -1,0 +1,11 @@
+# UzAPI — achados da etapa 0 (21/09/2026, instancia real "Dros")
+- Webhook: envelope Meta; sem assinatura (headers so user-agent Go-http-client + padrao). field "connection" => value.status[0].connection.
+- Recebidas (texto/audio/imagem/documento): from = telefone real 55..., contacts[0].profile.name = nome, isGroup false, id hex, timestamp string seg. Audio sem flag de voz.
+- Resposta digitada no celular do numero: NAO vem como mensagem; vem SO status (delivered/read, recipient_id "") com contacts[0].wa_id = telefone do lead. Conteudo via POST /chats {type:chats,action:get,chats:{message_id}} -> data.data.Info{Chat(@lid!),IsFromMe:true,...} + Message.ExtendedTextMessage.text | Message.Conversation.
+- Status com recipient_id preenchido e id de mensagem RECEBIDA = leitura feita pelo numero (nao e ack de envio). Nunca apareceu "sent".
+- Envio: POST /{user}/v1/{pnid}/messages -> 201 {status:"success",queueId,messageId:"3EB...",contacts,messages[0].id wamid}. Status do envio chega com statuses[].id = messageId (3EB...).
+- Midia: GET /{user}/v1/{mediaId} (Bearer) -> {url,mime_type,filename,file_size,sha256}; url = https://api.uzapi.com.br/v1/{pnid}/{arquivo} baixa JA DECIFRADO e SEM token (publico).
+- GET /{user}/v1/{pnid}/instance responde SEM autenticacao e devolve o token da instancia (falha de seguranca da UzAPI). /chats exige token (401 sem).
+- GET instance: deploymentStatus ("connected"), isAuthenticated, authenticationMethod, webhook, webhookEvents, expiresIn (trial), phoneNumber.
+- JWT da instancia tem exp de 60s apos iat, mas continua aceito (exp nao e checado).
+- Historico (/chats list): muitos chats @lid sem telefone; grupos e broadcast misturados.
