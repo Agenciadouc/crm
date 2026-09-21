@@ -1,20 +1,25 @@
 import { useState, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useAccount } from '../context/AccountContext'
 import {
   fetchAgents, deleteAgent, toggleAgentActive,
+  fetchBriefingDrafts, deleteBriefing, briefingFromAgent, type BriefingDraft,
   type Agent,
 } from '../lib/api'
-import { Bot, Plus, Edit3, Trash2, Activity, AlertCircle, Power, PowerOff, X } from 'lucide-react'
+import { Bot, Plus, Edit3, Trash2, Activity, AlertCircle, Power, PowerOff, X, MessageSquare } from 'lucide-react'
 import AgentEditorModal from '../components/AgentEditorModal'
 
 export default function Agents() {
+  const navigate = useNavigate()
   const { accountId } = useAccount()
   const [agents, setAgents] = useState<Agent[]>([])
+  const [drafts, setDrafts] = useState<BriefingDraft[]>([])
   const [featureEnabled, setFeatureEnabled] = useState(false)
   const [hasApiKey, setHasApiKey] = useState(true)
   const [loading, setLoading] = useState(true)
   const [editingId, setEditingId] = useState<'new' | number | null>(null)
   const [togglingId, setTogglingId] = useState<number | null>(null)
+  const [deleteConfirmId, setDeleteConfirmId] = useState<number | null>(null)
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'info' } | null>(null)
 
   // Auto-dismiss do toast
@@ -30,6 +35,7 @@ export default function Agents() {
     fetchAgents(accountId)
       .then(d => { setAgents(d.agents); setFeatureEnabled(d.feature_enabled); setHasApiKey(d.has_api_key !== false) })
       .finally(() => setLoading(false))
+    fetchBriefingDrafts().then(setDrafts).catch(() => setDrafts([]))
   }
   useEffect(load, [accountId])
 
@@ -80,7 +86,7 @@ export default function Agents() {
       <div className="page-header">
         <h1><Bot size={22} style={{ verticalAlign: -4, marginRight: 6 }} />Agentes de IA</h1>
         {featureEnabled && (
-          <button className="btn btn-primary" onClick={() => setEditingId('new')}>
+          <button className="btn btn-primary" onClick={() => navigate('/agents/interview')}>
             <Plus size={14} /> Novo Agente
           </button>
         )}
@@ -111,6 +117,44 @@ export default function Agents() {
           <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 16 }}>
             Configure agentes de IA pra atender leads automaticamente no WhatsApp. Cada agente tem persona/conhecimento próprios, decide quando transferir pra humano e respeita limite mensal de tokens.
           </p>
+
+          {drafts.length > 0 && (
+            <div style={{ marginBottom: 24 }}>
+              <div style={{ fontSize: 11, letterSpacing: 1, color: 'var(--text-secondary)', textTransform: 'uppercase', marginBottom: 8 }}>
+                Entrevistas em andamento
+              </div>
+              {drafts.map(d => (
+                <div key={d.id} style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+                  padding: 12, marginBottom: 8, borderRadius: 8,
+                  border: '1px dashed var(--border-medium)', background: 'transparent',
+                }}>
+                  <div>
+                    <strong style={{ fontSize: 14 }}>Rascunho</strong>
+                    <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
+                      {d.first_answer || 'ainda sem resposta'}
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <button className="btn btn-sm btn-primary" onClick={() => navigate(
+                      d.status === 'compilado' ? `/agents/resumo/${d.id}` : `/agents/interview/${d.id}`
+                    )}>Continuar</button>
+                    <button
+                      className="btn btn-sm btn-secondary"
+                      onClick={async () => {
+                        if (deleteConfirmId !== d.id) { setDeleteConfirmId(d.id); return }
+                        setDeleteConfirmId(null)
+                        await deleteBriefing(d.id)
+                        setDrafts(prev => prev.filter(x => x.id !== d.id))
+                      }}
+                    >
+                      {deleteConfirmId === d.id ? 'Confirmar?' : 'Apagar'}
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
 
           {agents.length === 0 ? (
             <div className="card" style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}>
@@ -161,6 +205,13 @@ export default function Agents() {
                         >
                           {a.is_active ? <Power size={11} /> : <PowerOff size={11} />}
                           {a.is_active ? 'Atendimento ligado' : 'Atendimento desligado'}
+                        </button>
+                        <button className="btn btn-sm btn-secondary" title="Conversar com a IA para ajustar este atendente"
+                          onClick={async () => {
+                            const r = await briefingFromAgent(a.id)
+                            navigate(`/agents/interview/${r.briefing_id}`)
+                          }}>
+                          <MessageSquare size={14} />
                         </button>
                         <button className="btn btn-secondary btn-sm btn-icon" onClick={() => setEditingId(a.id)} title="Editar"><Edit3 size={11} /></button>
                         <button className="btn btn-danger btn-sm btn-icon" onClick={() => handleDelete(a)} title="Apagar"><Trash2 size={11} /></button>
