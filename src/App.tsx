@@ -113,6 +113,8 @@ function AppRoutes() {
             <Route path="/cadences" element={<Cadences />} />
             <Route path="/follow-ups" element={<FollowUps />} />
             <Route path="/agents" element={<Agents />} />
+            <Route path="/agents/interview" element={<AgentInterview />} />
+            <Route path="/agents/interview/:briefingId" element={<AgentInterview />} />
             <Route path="/ready-messages" element={<ReadyMessages />} />
             <Route path="/qualifications" element={<Qualifications />} />
             <Route path="/launches" element={<Launches />} />
@@ -127,8 +129,6 @@ function AppRoutes() {
           <Route path="/leads" element={<Leads />} />
           <Route path="/leads/:id" element={<LeadDetail />} />
           <Route path="/transferencias" element={<TransferRequests />} />
-          <Route path="/agents/interview" element={<AgentInterview />} />
-          <Route path="/agents/interview/:briefingId" element={<AgentInterview />} />
 
           <Route path="*" element={<Navigate to={homeRoute} />} />
         </Routes>
