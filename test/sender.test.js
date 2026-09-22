@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createTestDb, seedBasic, insertLead } from './helpers/db.js'
-import { createSender, LEAD_DAILY_CAP_DEFAULT } from '../server/services/whatsapp/sender.js'
+import { createSender, LEAD_DAILY_CAP_DEFAULT, typingDelaySeconds } from '../server/services/whatsapp/sender.js'
 
 function fakeProvider(overrides = {}) {
   const calls = { sendText: [], sendMedia: [], checkNumber: [], sendPresence: [], markRead: [] }
@@ -144,4 +144,27 @@ test('markMessageAsRead usa a ultima inbound do lead e nao quebra (bug da coluna
   ins.run(lead.id, seed.account.id, 'outbound', 'OUT1')
   await sender.markMessageAsRead(seed.instance, lead)
   assert.deepEqual(calls.markRead, [[lead.id, 'IN2']])
+})
+
+test('typingDelaySeconds: 1s a cada 20 caracteres, entre 1 e 15', () => {
+  assert.equal(typingDelaySeconds(''), 1)
+  assert.equal(typingDelaySeconds('x'.repeat(20)), 1)
+  assert.equal(typingDelaySeconds('x'.repeat(21)), 2)
+  assert.equal(typingDelaySeconds('x'.repeat(1000)), 15)
+})
+
+test('provedor com typingDelay (UzAPI): manda delayTyping no envio; Chat humano (skipTyping) nao manda', async () => {
+  const db = createTestDb()
+  const seed = seedBasic(db)
+  const opts = []
+  const provider = {
+    name: 'uz',
+    capabilities: { numberCheck: false, presence: false, typingDelay: true },
+    async sendText(i, phone, text, o) { opts.push(o); return { ok: true, messageId: 'U1', raw: {} } },
+  }
+  const sender = createSender({ db, getProvider: () => provider, sleep: async () => {}, random: () => 0.5 })
+  const r = await sender.sendViaInstance(seed.instance, '5547991351835', 'x'.repeat(45))
+  await sender.sendViaInstance(seed.instance, '5547991351835', 'oi', humanChat)
+  assert.deepEqual(r, { ok: true, wamsgId: 'U1', raw: {} })
+  assert.deepEqual(opts, [{ delayTyping: 3 }, undefined])
 })

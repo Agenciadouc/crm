@@ -263,3 +263,22 @@ test('handleStatusUpdate: erro dentro do loop e engolido (rota segue respondendo
   assert.doesNotThrow(() => { semLista = handler.handleStatusUpdate(seed.account, seed.instance, {}) })
   assert.equal(semLista, 0)
 })
+
+test('status com outboundOnly (UzAPI) nao mexe em mensagem RECEBIDA; sem o campo (Evolution) segue igual', () => {
+  const { db, seed, handler } = setup()
+  const lead = insertLead(db, { account_id: seed.account.id, funnel_id: seed.funnelId, stage_id: seed.stage1, phone: '5547991351835' })
+  const ins = (id, direction) => db.prepare("INSERT INTO messages (lead_id, account_id, direction, content, wa_msg_id, delivery_status) VALUES (?, ?, ?, 'x', ?, 'sent')").run(lead.id, seed.account.id, direction, id)
+  ins('IN1', 'inbound')
+  ins('OUT1', 'outbound')
+  ins('IN2', 'inbound')
+  const changed = handler.handleStatusUpdate(seed.account, seed.instance, [
+    { messageId: 'IN1', status: 'read', outboundOnly: true },
+    { messageId: 'OUT1', status: 'read', outboundOnly: true },
+    { messageId: 'IN2', status: 'read' },
+  ])
+  const st = (id) => db.prepare('SELECT delivery_status FROM messages WHERE wa_msg_id = ?').get(id).delivery_status
+  assert.equal(changed, 2)
+  assert.equal(st('IN1'), 'sent')
+  assert.equal(st('OUT1'), 'read')
+  assert.equal(st('IN2'), 'read')
+})

@@ -53,8 +53,10 @@ export function createInboundHandler(deps) {
         if (newStatus === 'delivered') timestampCol = 'delivered_at'
         else if (newStatus === 'read') timestampCol = 'read_at'
         else if (newStatus !== 'sent') continue
-        const msg = db.prepare('SELECT id, lead_id, account_id, delivery_status FROM messages WHERE wa_msg_id = ? AND account_id = ?').get(s.messageId, account.id)
+        const msg = db.prepare('SELECT id, lead_id, account_id, delivery_status, direction FROM messages WHERE wa_msg_id = ? AND account_id = ?').get(s.messageId, account.id)
         if (!msg) continue
+        // UzAPI manda tambem a leitura que o proprio numero faz das recebidas: so vale para mensagem enviada.
+        if (s.outboundOnly && msg.direction !== 'outbound') continue
         if ((STATUS_RANK[newStatus] || 0) <= (STATUS_RANK[msg.delivery_status] || 0)) continue
         const sets = ['delivery_status = ?']
         const params = [newStatus]

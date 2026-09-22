@@ -15,6 +15,12 @@ const TYPING_MAX_MS = 5000
 
 const defaultSleep = (ms) => new Promise(r => setTimeout(r, ms))
 
+// "Digitando" embutido no envio (UzAPI: delayTyping em segundos, 1 a 15): 1s a cada 20 caracteres.
+export function typingDelaySeconds(text) {
+  const n = String(text || '').length
+  return Math.min(15, Math.max(1, Math.ceil(n / 20)))
+}
+
 export function createSender({ db, getProvider, sleep = defaultSleep, random = Math.random, now = () => new Date(), nowMs = () => Date.now() }) {
   // Cache do pre-flight: Map<"instId:numero", { exists, expires }>
   const numberCache = new Map()
@@ -263,7 +269,10 @@ export function createSender({ db, getProvider, sleep = defaultSleep, random = M
   async function sendViaInstance(instance, phone, text, opts = {}) {
     const guard = await runSendGuards(instance, phone, text, opts)
     if (!guard.ok) return guard.result
-    return mapProviderResult(await guard.provider.sendText(instance, guard.number, text))
+    const sendOpts = (!opts.skipTyping && guard.provider.capabilities?.typingDelay)
+      ? { delayTyping: typingDelaySeconds(text) }
+      : undefined
+    return mapProviderResult(await guard.provider.sendText(instance, guard.number, text, sendOpts))
   }
 
   async function sendMediaViaInstance(instance, phone, media, opts = {}) {
