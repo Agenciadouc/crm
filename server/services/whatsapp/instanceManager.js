@@ -41,8 +41,17 @@ function withTimeout(promise, ms, fallback) {
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timer))
 }
 
-export function createInstanceManager({ db, getProvider, env = process.env, log = console, removeTimeoutMs = 8000 }) {
+// resumeBroadcastIfPaused/resumeFollowUpsIfPaused: injetados (routes/broadcasts.js e followUpSender.js), como o
+// scheduler faz na Evolution ao reconectar. Padrao sem efeito para testes e chamadores que nao precisam.
+export function createInstanceManager({
+  db, getProvider, env = process.env, log = console, removeTimeoutMs = 8000,
+  resumeBroadcastIfPaused = () => {}, resumeFollowUpsIfPaused = () => {},
+}) {
   const byId = (id) => db.prepare('SELECT * FROM whatsapp_instances WHERE id = ?').get(id)
+  // Trava de criacao em andamento por conta + nome normalizado (cliques simultaneos no mesmo nome).
+  const creating = new Set()
+  const creationKey = (accountId, name) => `${accountId}:${String(name || '').trim().toLowerCase()}`
+  const nameTaken = () => new ProviderError('instance_name_taken', 'Já existe um número com esse nome nesta conta.', 409)
 
   async function createUzapiInstance({ accountId, instanceName, leadIntakeMode = 'open' }) {
     if (!isUzapiConfigured(env)) {
@@ -51,9 +60,19 @@ export function createInstanceManager({ db, getProvider, env = process.env, log 
     if (!hasEncryptionKey(env)) {
       throw new ProviderError('wa_enc_key_missing', 'Falta a chave WA_ENC_KEY no servidor para guardar o token do número.')
     }
+    const lockKey = creationKey(accountId, instanceName)
+    if (creating.has(lockKey)) throw nameTaken()
     const existing = db.prepare('SELECT id FROM whatsapp_instances WHERE account_id = ? AND instance_name = ?').get(accountId, instanceName)
-    if (existing) throw new ProviderError('instance_name_taken', 'Já existe um número com esse nome nesta conta.', 409)
+    if (existing) throw nameTaken()
+    creating.add(lockKey)
+    try {
+      return await createUzapiInstanceNow({ accountId, instanceName, leadIntakeMode })
+    } finally {
+      creating.delete(lockKey)
+    }
+  }
 
+  async function createUzapiInstanceNow({ accountId, instanceName, leadIntakeMode }) {
     const webhookToken = generateWebhookToken()
     const webhookUrl = buildInstanceWebhookUrl({ webhook_token: webhookToken }, env)
     let created
@@ -107,7 +126,10 @@ export function createInstanceManager({ db, getProvider, env = process.env, log 
           updated_at = datetime('now')
         WHERE id = ?
       `).run(phoneNumber || '', cur.id)
-      if (cur.status !== 'connected') logConnectionEvent(db, cur, 'connected')
+      if (cur.status !== 'connected') {
+        logConnectionEvent(db, cur, 'connected')
+        resumePaused(cur)
+      }
     } else if (connection === 'disconnected') {
       db.prepare("UPDATE whatsapp_instances SET status = 'disconnected', qr_code = NULL, updated_at = datetime('now') WHERE id = ?").run(cur.id)
       if (cur.status !== 'disconnected') logConnectionEvent(db, cur, 'disconnected')
@@ -117,10 +139,17 @@ export function createInstanceManager({ db, getProvider, env = process.env, log 
     return byId(cur.id)
   }
 
+  // Reconectou: retoma disparos e follow-ups pausados deste numero (erro de um nao impede o outro).
+  function resumePaused(inst) {
+    try { resumeBroadcastIfPaused(inst.id) } catch (e) { log.error('[UzAPI] retomar disparos:', e.message) }
+    try { resumeFollowUpsIfPaused(inst.id) } catch (e) { log.error('[UzAPI] retomar follow-ups:', e.message) }
+  }
+
+  // 'connecting' nao rebaixa um numero conectado: so 'disconnected' da UzAPI tira de 'connected'.
   function applyStatus(instance, st) {
     if (st.status === 'connected') return applyConnection(instance, { connection: 'connected', phoneNumber: st.phoneNumber })
     if (st.status === 'disconnected') return applyConnection(instance, { connection: 'disconnected' })
-    db.prepare("UPDATE whatsapp_instances SET status = 'connecting', updated_at = datetime('now') WHERE id = ? AND status != 'connecting'").run(instance.id)
+    db.prepare("UPDATE whatsapp_instances SET status = 'connecting', updated_at = datetime('now') WHERE id = ? AND status NOT IN ('connecting', 'connected')").run(instance.id)
     return byId(instance.id)
   }
 
@@ -140,6 +169,8 @@ export function createInstanceManager({ db, getProvider, env = process.env, log 
     }
     const current = byId(instance.id)
     if (!current) return { instance: null, qr_code: null, status: 'disconnected' }
+    // UzAPI fora do ar nao rebaixa numero conectado
+    if (!st.ok && current.status === 'connected') return { instance: current, qr_code: null, status: 'connected', error: st.reason || 'provider_error' }
     const qr = st.qr || current.qr_code || null
     if (qr) return { instance: applyConnection(current, { qr }), qr_code: qr, status: 'connecting' }
     db.prepare("UPDATE whatsapp_instances SET status = 'connecting', updated_at = datetime('now') WHERE id = ?").run(current.id)

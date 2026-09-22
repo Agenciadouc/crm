@@ -8,11 +8,13 @@ import { getProvider } from '../services/whatsapp/index.js'
 import { generateWebhookToken } from '../services/whatsapp/schema.js'
 import { createWebhookRegistrar } from '../services/whatsapp/webhookRegistration.js'
 import { createInstanceManager, listAvailableProviders, sanitizeInstance, ProviderError } from '../services/whatsapp/instanceManager.js'
+import { resumeBroadcastIfPaused } from './broadcasts.js'
+import { resumeFollowUpsIfPaused } from '../services/followUpSender.js'
 
 const router = Router()
 
 // Provedor por numero: UzAPI delega ao instanceManager; Evolution segue com o codigo de sempre.
-const manager = createInstanceManager({ db, getProvider })
+const manager = createInstanceManager({ db, getProvider, resumeBroadcastIfPaused, resumeFollowUpsIfPaused })
 const isUzapi = (instance) => (instance?.provider || 'evolution') === 'uzapi'
 const safe = (row, req) => sanitizeInstance(row, req.user.role)
 

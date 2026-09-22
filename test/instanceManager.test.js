@@ -211,3 +211,61 @@ test('sanitizeInstance: nunca provider_config; atendente tambem sem api_url/api_
   assert.equal(sanitizeInstance({ id: 2, provider: null }, 'gerente').provider, 'evolution')
   assert.equal(sanitizeInstance(null, 'gerente'), null)
 })
+
+test('refreshQr: UzAPI falhou com o numero conectado -> devolve conectado com o erro e nao mexe no banco', async () => {
+  for (const st of [new Error('ECONNREFUSED'), { ok: false, status: null, reason: 'provider_error' }]) {
+    const { db, seed, manager } = setup({ status: () => { if (st instanceof Error) throw st; return st } })
+    const inst = insertUzapiInstance(db, seed.account.id, { status: 'connected' })
+    const before = row(db, inst.id)
+    const r = await manager.refreshQr(inst)
+    assert.deepEqual([r.status, r.qr_code, r.instance.status, r.panel_url], ['connected', null, 'connected', undefined])
+    assert.ok(r.error)
+    assert.deepEqual(row(db, inst.id), before)
+  }
+})
+
+test('applyStatus: conectado so e rebaixado quando a UzAPI diz disconnected (connecting nao rebaixa)', () => {
+  const { db, seed, manager } = setup()
+  const inst = insertUzapiInstance(db, seed.account.id, { status: 'connected' })
+  manager.applyStatus(inst, { ok: true, status: 'connecting', phoneNumber: null })
+  assert.equal(row(db, inst.id).status, 'connected')
+  manager.applyStatus(inst, { ok: true, status: 'disconnected', phoneNumber: null })
+  assert.equal(row(db, inst.id).status, 'disconnected')
+  manager.applyStatus(inst, { ok: true, status: 'connecting', phoneNumber: null })
+  assert.equal(row(db, inst.id).status, 'connecting')
+})
+
+test('applyConnection: ao voltar para connected retoma disparos e follow-ups pausados (uma vez; erro nao derruba)', () => {
+  const db = createTestDb()
+  const seed = seedBasic(db)
+  const resumed = []
+  const manager = createInstanceManager({
+    db, getProvider: () => ({}), env: UZAPI_TEST_ENV, log: quietLog,
+    resumeBroadcastIfPaused: (id) => { resumed.push(['broadcast', id]); throw new Error('boom') },
+    resumeFollowUpsIfPaused: (id) => { resumed.push(['followup', id]) },
+  })
+  const inst = insertUzapiInstance(db, seed.account.id, { status: 'disconnected' })
+  const a = manager.applyConnection(inst, { connection: 'connected' })
+  assert.equal(a.status, 'connected')
+  manager.applyConnection(a, { connection: 'connected' })
+  assert.deepEqual(resumed, [['broadcast', inst.id], ['followup', inst.id]])
+})
+
+test('criar numero UzAPI: dois cliques ao mesmo tempo com o mesmo nome -> o segundo recebe instance_name_taken 409', async () => {
+  let open
+  const gate = new Promise(r => { open = r })
+  const { db, seed, manager, calls } = setup({
+    createInstance: async () => { await gate; return { phoneNumberId: '100000000000009', instanceToken: 'TOKEN-NOVO', uzapiInstanceId: null, qr: null } },
+  })
+  const p1 = manager.createUzapiInstance({ accountId: seed.account.id, instanceName: 'Loja Centro' })
+  await assert.rejects(
+    manager.createUzapiInstance({ accountId: seed.account.id, instanceName: '  loja centro ' }),
+    (e) => e instanceof ProviderError && e.code === 'instance_name_taken' && e.status === 409,
+  )
+  open()
+  await p1
+  assert.equal(calls.createInstance.length, 1)
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM whatsapp_instances WHERE provider = 'uzapi'").get().n, 1)
+  // terminou: a trava sai (outra conta ou outro nome segue livre)
+  await manager.createUzapiInstance({ accountId: seed.account.id, instanceName: 'Loja Norte' })
+})

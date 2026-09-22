@@ -707,7 +707,7 @@ function revertFalseFailures() {
 }
 
 // ─── UzAPI: checagem de hora em hora (so status/telefone) ─────────
-const uzapiStatusSync = createUzapiStatusSync({ db, getProvider, manager: createInstanceManager({ db, getProvider }) })
+const uzapiStatusSync = createUzapiStatusSync({ db, getProvider, manager: createInstanceManager({ db, getProvider, resumeBroadcastIfPaused, resumeFollowUpsIfPaused }) })
 
 export function startScheduler() {
   console.log('[Scheduler] Started — main every 1 min, polling every 30s, revert-false every 10s, daily health 05h BRT')
