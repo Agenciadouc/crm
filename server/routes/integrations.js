@@ -12,6 +12,7 @@ import { createInstanceManager, listAvailableProviders, sanitizeInstance, Provid
 import { resumeBroadcastIfPaused } from './broadcasts.js'
 import { resumeFollowUpsIfPaused } from '../services/followUpSender.js'
 import { businessHoursUpdate } from '../services/serviceHours.js'
+import { canManageInstance, HOLD_SENDS_FORBIDDEN_MSG } from '../services/instanceOwnership.js'
 
 const router = Router()
 
@@ -184,11 +185,15 @@ router.post('/whatsapp', requireRole('super_admin', 'gerente', 'atendente'), asy
 
 // ─── Connect (get QR code for existing instance) ─────────────────
 // Middleware: permite gerente/admin OU atendente DONO da instância (primary_instance_id)
-function allowInstanceOwner(req, res, next) {
-  if (req.user.role === 'super_admin' || req.user.role === 'gerente') return next()
-  // Atendente: tem que ser primary_instance dele
+function instanceOwnerAllowed(req) {
+  // Gerente/admin passam sem consultar o banco; atendente tem que ser o dono (primary_instance)
+  if (req.user.role === 'super_admin' || req.user.role === 'gerente') return true
   const userPrimary = db.prepare('SELECT primary_instance_id FROM users WHERE id = ?').get(req.user.id)
-  if (userPrimary?.primary_instance_id && Number(req.params.id) === Number(userPrimary.primary_instance_id)) return next()
+  return canManageInstance(req.user.role, userPrimary?.primary_instance_id, req.params.id)
+}
+
+function allowInstanceOwner(req, res, next) {
+  if (instanceOwnerAllowed(req)) return next()
   return res.status(403).json({ error: 'Sem permissao (so o gerente ou o atendente dono da instancia)' })
 }
 
@@ -609,6 +614,11 @@ router.put('/whatsapp/:id/auto-messages', requireRole('super_admin', 'gerente', 
       if (typeof away_schedule_json === 'string') { JSON.parse(away_schedule_json); scheduleStr = away_schedule_json }
       else scheduleStr = JSON.stringify(away_schedule_json)
     } catch { return res.status(400).json({ error: 'away_schedule_json invalido' }) }
+  }
+
+  // A trava de envios e do numero inteiro: atendente so mexe nela no proprio numero.
+  if (req.body && req.body.hold_sends_outside_hours !== undefined && !instanceOwnerAllowed(req)) {
+    return res.status(403).json({ error: HOLD_SENDS_FORBIDDEN_MSG })
   }
 
   const bh = businessHoursUpdate(req.body, scheduleStr)
