@@ -11,6 +11,7 @@ import { findInstanceByName } from '../services/whatsapp/instanceQueries.js'
 import { createInstanceManager, listAvailableProviders, sanitizeInstance, ProviderError } from '../services/whatsapp/instanceManager.js'
 import { resumeBroadcastIfPaused } from './broadcasts.js'
 import { resumeFollowUpsIfPaused } from '../services/followUpSender.js'
+import { businessHoursUpdate } from '../services/serviceHours.js'
 
 const router = Router()
 
@@ -585,7 +586,8 @@ router.get('/whatsapp/:id/auto-messages', (req, res) => {
   const instance = getOwnedInstance(req, res)
   if (!instance) return
   const cfg = db.prepare('SELECT * FROM instance_auto_messages WHERE instance_id = ?').get(instance.id)
-  res.json({ config: cfg || { instance_id: instance.id, greeting_enabled: 0, away_enabled: 0, away_mode: 'manual' } })
+  const base = cfg || { instance_id: instance.id, greeting_enabled: 0, away_enabled: 0, away_mode: 'manual' }
+  res.json({ config: { ...base, business_hours_json: instance.business_hours_json || null } })
 })
 
 // PUT: salva config (upsert)
@@ -608,6 +610,9 @@ router.put('/whatsapp/:id/auto-messages', requireRole('super_admin', 'gerente', 
       else scheduleStr = JSON.stringify(away_schedule_json)
     } catch { return res.status(400).json({ error: 'away_schedule_json invalido' }) }
   }
+
+  const bh = businessHoursUpdate(req.body, scheduleStr)
+  if (bh.error) return res.status(400).json({ error: bh.error })
 
   const existing = db.prepare('SELECT id FROM instance_auto_messages WHERE instance_id = ?').get(instance.id)
   if (existing) {
@@ -634,8 +639,12 @@ router.put('/whatsapp/:id/auto-messages', requireRole('super_admin', 'gerente', 
       away_enabled ? 1 : 0, away_mode || 'manual', away_manual_active ? 1 : 0, away_text, scheduleStr, parseInt(away_cooldown_hours) || 4,
     )
   }
+  if (bh.touch) {
+    db.prepare("UPDATE whatsapp_instances SET business_hours_json = ?, updated_at = datetime('now') WHERE id = ?").run(bh.value, instance.id)
+  }
   const cfg = db.prepare('SELECT * FROM instance_auto_messages WHERE instance_id = ?').get(instance.id)
-  res.json({ config: cfg })
+  const fresh = db.prepare('SELECT business_hours_json FROM whatsapp_instances WHERE id = ?').get(instance.id)
+  res.json({ config: { ...cfg, business_hours_json: fresh?.business_hours_json || null } })
 })
 
 // Status da integracao Google Sheets — retorna timestamp do ultimo lead recebido
