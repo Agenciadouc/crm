@@ -739,4 +739,8 @@ export function startScheduler() {
   setInterval(() => {
     uzapiStatusSync.run().catch(e => console.error('[UzAPI checagem]', e.message))
   }, 60 * 60 * 1000)
+  // e uma vez ~2 min depois de subir (nao espera a primeira hora)
+  setTimeout(() => {
+    uzapiStatusSync.run().catch(e => console.error('[UzAPI checagem boot]', e.message))
+  }, 2 * 60 * 1000)
 }
