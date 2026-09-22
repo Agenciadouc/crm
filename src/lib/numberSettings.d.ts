@@ -33,3 +33,5 @@ export declare function buildServiceHoursSave(schedule: Schedule, holdSends: boo
   hold_sends_outside_hours: boolean
 }
 export declare function scheduleErrors(schedule: Schedule): string[]
+export declare const HOLD_WITHOUT_HOURS_MSG: string
+export declare function holdSendsError(schedule: Schedule, holdSends: boolean): string | null

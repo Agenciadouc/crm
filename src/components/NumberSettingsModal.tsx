@@ -6,7 +6,7 @@ import {
 } from '../lib/api'
 import {
   DAY_KEYS, DAY_LABELS, resolveFirstMessage, buildFirstMessageSave,
-  resolveServiceHours, buildServiceHoursSave, scheduleErrors,
+  resolveServiceHours, buildServiceHoursSave, scheduleErrors, holdSendsError,
   type FirstMessageState, type ServiceHoursState, type DayKey,
 } from '../lib/numberSettings.js'
 import { X, MessageSquare, Clock, Moon, Save, AlertTriangle, Smartphone, Info } from 'lucide-react'
@@ -121,6 +121,8 @@ export default function NumberSettingsModal({ instance, accountId, canEditFirstM
     if (first.conflict && !firstChoice) { setError('Escolha qual texto fica antes de salvar.'); setTab('primeira'); return }
     const errs = scheduleErrors(hours.schedule)
     if (errs.length > 0) { setError(errs.join(' ')); setTab('horario'); return }
+    const holdErr = holdSendsError(hours.schedule, hours.holdSends)
+    if (holdErr) { setError(holdErr); setTab('horario'); return }
     setSaving(true); setError(null)
     try {
       const firstSave = buildFirstMessageSave(first)

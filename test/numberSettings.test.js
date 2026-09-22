@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   DAY_KEYS, defaultSchedule, resolveFirstMessage, buildFirstMessageSave,
-  resolveServiceHours, buildServiceHoursSave, scheduleErrors,
+  resolveServiceHours, buildServiceHoursSave, scheduleErrors, holdSendsError,
 } from '../src/lib/numberSettings.js'
 
 // ---- Primeira mensagem ----
@@ -117,4 +117,27 @@ test('horario: aponta horario invertido e horario vazio', () => {
     'Sábado: preencha o início e o fim do horário.',
   ])
   assert.deepEqual(scheduleErrors(soSegundaManha), [])
+})
+
+// A tela precisa barrar ANTES de salvar: com a semana toda "Fechado" e a caixa
+// "Segurar envios" marcada, o numero pararia de mandar tudo que e automatico.
+test('horario: segurar envios com a semana toda fechada e barrado na tela', () => {
+  const fechado = { mon: [], tue: [], wed: [], thu: [], fri: [], sat: [], sun: [] }
+  assert.match(holdSendsError(fechado, true), /Fechado/)
+  assert.match(holdSendsError(fechado, true), /pelo menos uma faixa/)
+})
+
+test('horario: faixa pela metade nao conta como horario preenchido', () => {
+  const meia = { mon: [{ start: '09:00', end: '' }], tue: [], wed: [], thu: [], fri: [], sat: [], sun: [] }
+  assert.notEqual(holdSendsError(meia, true), null)
+})
+
+test('horario: sem segurar envios, semana toda fechada e permitida', () => {
+  const fechado = { mon: [], tue: [], wed: [], thu: [], fri: [], sat: [], sun: [] }
+  assert.equal(holdSendsError(fechado, false), null)
+})
+
+test('horario: uma faixa em um dia ja libera segurar envios', () => {
+  assert.equal(holdSendsError(soSegundaManha, true), null)
+  assert.equal(holdSendsError(defaultSchedule(), true), null)
 })

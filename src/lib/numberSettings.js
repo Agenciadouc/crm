@@ -80,6 +80,18 @@ export function buildServiceHoursSave(schedule, holdSends) {
   }
 }
 
+// Segurar envios com a semana toda "Fechado" gravaria business_hours_json vazio e pararia,
+// em silencio, follow-ups, disparos, cadencias, a primeira mensagem do handoff e as respostas
+// do agente de IA. A tela barra antes de salvar (o servidor recusa igual, por seguranca).
+export const HOLD_WITHOUT_HOURS_MSG = 'Para segurar os envios fora do horário, preencha pelo menos uma faixa de horário: a semana inteira está como Fechado.'
+
+export function holdSendsError(schedule, holdSends) {
+  if (!holdSends) return null
+  const normalized = normalizeSchedule(schedule)
+  const hasSlot = DAY_KEYS.some(day => normalized[day].length > 0)
+  return hasSlot ? null : HOLD_WITHOUT_HOURS_MSG
+}
+
 export function scheduleErrors(schedule) {
   const errors = []
   for (const day of DAY_KEYS) {
