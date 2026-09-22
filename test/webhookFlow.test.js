@@ -3,7 +3,10 @@ import assert from 'node:assert/strict'
 import * as P from './fixtures/evolution-payloads.js'
 import { createTestDb, seedBasic, TEST_TOKEN } from './helpers/db.js'
 import { createEvolutionAdapter } from '../server/services/whatsapp/evolution.js'
-import { resolveInstanceByToken, resolveLegacyEvolutionInstance, processWebhook } from '../server/services/whatsapp/webhookFlow.js'
+import { resolveInstanceByToken, resolveLegacyEvolutionInstance, processWebhook, webhookErrorStatus, webhookJsonErrorHandler } from '../server/services/whatsapp/webhookFlow.js'
+import { createTestInboundHandler } from './helpers/inboundSetup.js'
+import { createUzapiAdapter } from '../server/services/whatsapp/uzapi.js'
+import { insertUzapiInstance, loadUzapiFixture, LEAD_PHONE, UZAPI_TEST_ENV, quietLog } from './helpers/uzapiFixtures.js'
 
 test('token valido resolve instancia e conta', () => {
   const db = createTestDb()
@@ -119,4 +122,74 @@ test('processWebhook: devolve o resultado do handler (blocked/restricted)', () =
   const { deps } = flowDeps()
   deps.handleInboundMessage = () => ({ ok: true, blocked: true })
   assert.deepEqual(processWebhook(deps, { id: 1 }, { id: 2 }, { body: P.textConversation, headers: {} }), { ok: true, blocked: true })
+})
+
+test('processWebhook: conexao/QR vao para handleConnection; ecos vao para resolveEchoes sem travar a resposta', async () => {
+  const provider = { parseWebhook: () => ({ messages: [], statuses: [], echoes: [{ messageId: 'E1', phone: '5548990000002' }], connection: 'connected', qr: null }) }
+  const conn = []
+  const echoes = []
+  const r = processWebhook({
+    getProvider: () => provider,
+    handleInboundMessage: () => ({ ok: true }),
+    handleStatusUpdate: () => 0,
+    handleConnection: (inst, info) => { conn.push([inst.id, info]) },
+    resolveEchoes: async (acc, inst, list) => { echoes.push(list) },
+  }, { id: 1 }, { id: 9 }, { body: {} })
+  assert.deepEqual(r, { ok: true })
+  assert.deepEqual(conn, [[9, { connection: 'connected', qr: null }]])
+  await new Promise(res => setImmediate(res))
+  assert.deepEqual(echoes, [[{ messageId: 'E1', phone: '5548990000002' }]])
+})
+
+test('UzAPI ponta a ponta: texto real cria lead e mensagem; leitura do proprio numero nao mexe na recebida; outro phone_number_id nao grava', () => {
+  const db = createTestDb()
+  const seed = seedBasic(db)
+  const instance = insertUzapiInstance(db, seed.account.id)
+  const adapter = createUzapiAdapter({ fetch: async () => { throw new Error('sem rede nos testes') }, env: UZAPI_TEST_ENV, log: quietLog })
+  const { handler } = createTestInboundHandler(db)
+  const deps = { getProvider: () => adapter, handleInboundMessage: handler.handleInboundMessage, handleStatusUpdate: handler.handleStatusUpdate }
+
+  processWebhook(deps, seed.account, instance, { body: loadUzapiFixture('message-text.json'), headers: {} })
+  const lead = db.prepare('SELECT * FROM leads WHERE phone = ?').get(LEAD_PHONE)
+  assert.equal(lead.name, 'Contato 02')
+  const msg = db.prepare('SELECT * FROM messages WHERE wa_msg_id = ?').get('2A2ACD4E776A27C10B00')
+  assert.equal(msg.direction, 'inbound')
+  assert.equal(msg.content, 'Teste 1')
+  assert.equal(msg.instance_id, instance.id)
+
+  processWebhook(deps, seed.account, instance, { body: loadUzapiFixture('status-read-by-self.json'), headers: {} })
+  assert.equal(db.prepare('SELECT delivery_status FROM messages WHERE id = ?').get(msg.id).delivery_status, msg.delivery_status)
+
+  const body = loadUzapiFixture('message-audio.json')
+  body.entry[0].changes[0].value.metadata.phone_number_id = '999999999999999'
+  processWebhook(deps, seed.account, instance, { body, headers: {} })
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM messages WHERE wa_msg_id = '2AF1064222DEF32AAEBA'").get().n, 0)
+})
+
+test('UzAPI ponta a ponta: audio real grava o id da midia em media_url', () => {
+  const db = createTestDb()
+  const seed = seedBasic(db)
+  const instance = insertUzapiInstance(db, seed.account.id)
+  const adapter = createUzapiAdapter({ fetch: async () => { throw new Error('sem rede nos testes') }, env: UZAPI_TEST_ENV, log: quietLog })
+  const { handler } = createTestInboundHandler(db)
+  processWebhook({ getProvider: () => adapter, handleInboundMessage: handler.handleInboundMessage, handleStatusUpdate: handler.handleStatusUpdate },
+    seed.account, instance, { body: loadUzapiFixture('message-audio.json'), headers: {} })
+  const msg = db.prepare("SELECT * FROM messages WHERE wa_msg_id = '2AF1064222DEF32AAEBA'").get()
+  assert.deepEqual([msg.media_type, msg.media_url], ['audio', '582578164494741'])
+})
+
+test('webhookErrorStatus: UzAPI recebe 200 em erro interno (evita reenvio em laco); Evolution segue 500', () => {
+  assert.equal(webhookErrorStatus({ provider: 'uzapi' }), 200)
+  assert.equal(webhookErrorStatus({ provider: 'evolution' }), 500)
+  assert.equal(webhookErrorStatus(null), 500)
+})
+
+test('webhookJsonErrorHandler: JSON invalido no webhook de WhatsApp vira 200; outros erros seguem', () => {
+  const res = { code: null, body: null, status(c) { this.code = c; return this }, json(b) { this.body = b; return this } }
+  let passed = null
+  const parseErr = Object.assign(new Error('Unexpected token'), { type: 'entity.parse.failed' })
+  webhookJsonErrorHandler(parseErr, { originalUrl: '/crm/api/webhooks/whatsapp/' + 'a'.repeat(32) }, res, (e) => { passed = e })
+  assert.deepEqual([res.code, res.body, passed], [200, { ok: false, error: 'invalid_json' }, null])
+  webhookJsonErrorHandler(parseErr, { originalUrl: '/api/leads' }, res, (e) => { passed = e })
+  assert.equal(passed, parseErr)
 })

@@ -6,27 +6,44 @@ import { triggerCapiForStageChange } from '../services/metaCapi.js'
 import { sendBotWelcomeForSheetsLead } from '../services/aiAgent.js'
 import { notifyAndOpenLead } from '../services/leadHandoff.js'
 import { getProvider } from '../services/whatsapp/index.js'
-import { resolveInstanceByToken, resolveLegacyEvolutionInstance, processWebhook } from '../services/whatsapp/webhookFlow.js'
+import { resolveInstanceByToken, resolveLegacyEvolutionInstance, processWebhook, webhookErrorStatus } from '../services/whatsapp/webhookFlow.js'
+import { createInstanceManager } from '../services/whatsapp/instanceManager.js'
+import { createEchoResolver } from '../services/whatsapp/uzapiEcho.js'
 import { leadIntake, handleInboundMessage, handleStatusUpdate } from '../services/inboundRuntime.js'
 
 const router = Router()
 
 const { getOrCreateLead } = leadIntake
 
-const webhookDeps = { getProvider, handleInboundMessage, handleStatusUpdate }
+const instanceManager = createInstanceManager({ db, getProvider })
+const echoResolver = createEchoResolver({ db, getProvider, handleInboundMessage })
+
+// Aviso de conexao/QR (UzAPI). Conectou sem telefone conhecido: busca o status para preencher phone_number.
+function handleConnection(instance, info) {
+  const updated = instanceManager.applyConnection(instance, info)
+  if (info.connection === 'connected' && updated && !updated.phone_number) {
+    instanceManager.checkStatus(updated).catch(e => console.error('[UzAPI status]', e.message))
+  }
+  return updated
+}
+
+const webhookDeps = { getProvider, handleInboundMessage, handleStatusUpdate, handleConnection, resolveEchoes: echoResolver.resolveEchoes }
 
 // WhatsApp webhook por numero (qualquer provedor). O token identifica a instancia; sem fallback.
 router.post('/whatsapp/:instanceToken', (req, res) => {
+  let instance = null
   try {
     const r = resolveInstanceByToken(db, req.params.instanceToken)
     if (r.error) {
       console.warn(`[Webhook WhatsApp] ${r.status} ${r.error} ip=${req.ip}`)
       return res.status(r.status).json({ error: r.error })
     }
+    instance = r.instance
     return res.json(processWebhook(webhookDeps, r.account, r.instance, req))
   } catch (err) {
     console.error('[Webhook WhatsApp]', err.message)
-    res.status(500).json({ error: err.message })
+    const status = webhookErrorStatus(instance)
+    res.status(status).json(status === 200 ? { ok: false } : { error: err.message })
   }
 })
 

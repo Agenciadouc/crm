@@ -41,12 +41,15 @@ import { recoverPendingBroadcasts } from './routes/broadcasts.js'
 import { createMediaTemp } from './services/mediaTemp.js'
 import { createMediaTempRouter } from './routes/mediaTemp.js'
 import { configureUzapiMediaTemp } from './services/whatsapp/uzapi.js'
+import { webhookJsonErrorHandler } from './services/whatsapp/webhookFlow.js'
 
 const app = express()
 // Atras de Apache reverse proxy — confia no X-Forwarded-For pra req.ip funcionar
 app.set('trust proxy', 1)
 app.use(cors())
 app.use(express.json({ limit: '5mb' }))
+// JSON invalido no webhook de WhatsApp: 200 + log (a UzAPI reenviaria em laco). Demais rotas seguem com o erro padrao.
+app.use(webhookJsonErrorHandler)
 
 const PORT = 3002
 

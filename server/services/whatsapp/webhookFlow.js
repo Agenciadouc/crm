@@ -32,9 +32,16 @@ export function resolveLegacyEvolutionInstance(db, accountSlug, body, headers) {
   return { account, instance }
 }
 
-export function processWebhook({ getProvider, handleInboundMessage, handleStatusUpdate }, account, instance, req) {
+export function processWebhook({ getProvider, handleInboundMessage, handleStatusUpdate, handleConnection, resolveEchoes }, account, instance, req) {
   const provider = getProvider(instance)
   const parsed = provider.parseWebhook(instance, req.body || {}, req.headers || {})
+  if ((parsed.connection || parsed.qr) && handleConnection) {
+    try {
+      handleConnection(instance, { connection: parsed.connection || null, qr: parsed.qr || null })
+    } catch (e) {
+      console.error('[Webhook connection]', e.message)
+    }
+  }
   if (parsed.statuses.length > 0) {
     try {
       handleStatusUpdate(account, instance, parsed.statuses)
@@ -46,5 +53,26 @@ export function processWebhook({ getProvider, handleInboundMessage, handleStatus
   for (const normalized of parsed.messages) {
     result = handleInboundMessage(account, instance, normalized, { source: 'webhook', req })
   }
+  // Eco (resposta dada pelo celular, UzAPI): busca em segundo plano; a resposta ao provedor nao espera.
+  if (parsed.echoes && parsed.echoes.length > 0 && resolveEchoes) {
+    Promise.resolve()
+      .then(() => resolveEchoes(account, instance, parsed.echoes))
+      .catch(e => console.error('[Webhook eco]', e.message))
+  }
   return result
+}
+
+// UzAPI reenvia o aviso em laco se nao receber 2xx: erro interno vira 200 (ja logado). Evolution segue com 500.
+export function webhookErrorStatus(instance) {
+  return instance && (instance.provider || 'evolution') === 'uzapi' ? 200 : 500
+}
+
+// Registrado logo depois do express.json (server/index.js): JSON invalido no webhook de WhatsApp responde 200.
+const WHATSAPP_WEBHOOK_PATH = /^(\/crm)?\/api\/webhooks\/whatsapp\//
+export function webhookJsonErrorHandler(err, req, res, next) {
+  if (err && err.type === 'entity.parse.failed' && WHATSAPP_WEBHOOK_PATH.test(req.originalUrl || req.url || '')) {
+    console.warn(`[Webhook WhatsApp] JSON invalido ignorado: ${err.message}`)
+    return res.status(200).json({ ok: false, error: 'invalid_json' })
+  }
+  return next(err)
 }
