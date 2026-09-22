@@ -1,15 +1,16 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import {
   fetchAgent, createAgent, updateAgent, testAgent, fetchAgentUsage,
   fetchWhatsAppInstances, fetchFunnels, fetchUsers, fetchTags,
-  fetchAgentInactivityFollowUp, saveAgentInactivityFollowUp,
-  fetchAccount, updateAccount, type AgentMode,
+  fetchAgentInactivityFollowUp, saveAgentInactivityFollowUp, briefingFromAgent,
+  type AgentMode,
   type Agent, type AgentInput, type AgentHandoffReason, type AgentActivationMode,
   type AgentHandoffRule,
   type WhatsAppInstance, type Funnel, type User, type Tag,
 } from '../lib/api'
-import { Bot, X, Save, Send, Activity, BookOpen, Target, ArrowRightLeft, Volume2, DollarSign, Play, AlertCircle, Zap, Plus, Trash2 } from 'lucide-react'
+import { Bot, X, Save, Send, BookOpen, ArrowRightLeft, DollarSign, Play, AlertCircle, Plus, Trash2, MessageSquare } from 'lucide-react'
 
 const REQUIRED_FIELDS_OPTS = [
   { key: 'name', label: 'Nome' },
@@ -24,15 +25,15 @@ const HANDOFF_REASONS: { key: AgentHandoffReason; label: string; desc: string }[
   { key: 'qualified', label: 'Qualificado', desc: 'Bot coletou todos campos obrigatórios' },
   { key: 'keyword', label: 'Pediu humano', desc: 'Lead disse "humano", "atendente", etc' },
   { key: 'unknown', label: 'Bot não soube', desc: 'Pergunta fora do conhecimento' },
-  { key: 'max_messages', label: 'Estourou limite de msgs', desc: 'Passou do max sem qualificar' },
+  { key: 'max_messages', label: 'Passou do limite de mensagens', desc: 'Chegou ao limite sem qualificar' },
   { key: 'audio_received', label: 'Áudio recebido', desc: 'Lead mandou áudio (se bot não responde áudio)' },
 ]
 
 const ACTIVATION_MODES: { value: AgentActivationMode; label: string; desc: string }[] = [
-  { value: 'default_attendant', label: '🎯 Default Attendant', desc: 'Bot vira default da instância — todo lead novo cai nele' },
-  { value: 'roulette', label: '🎲 Roleta', desc: 'Bot entra na roleta da instância — divide com humanos' },
-  { value: 'conditional', label: '🔍 Conditional', desc: 'Bot atua quando filtros (etapa + tag) baterem, sem ser atendente designado' },
-  { value: 'manual', label: '✋ Manual', desc: 'Só atende se gerente atribuir manualmente' },
+  { value: 'default_attendant', label: 'Atendente padrão do número', desc: 'O agente vira o atendente padrão dos números marcados: todo lead novo cai nele.' },
+  { value: 'roulette', label: 'Roleta', desc: 'O agente entra na roleta dos números marcados e divide os leads com as pessoas.' },
+  { value: 'conditional', label: 'Por condição', desc: 'O agente atua quando a etapa e a tag abaixo baterem, sem ser o atendente designado.' },
+  { value: 'manual', label: 'Manual', desc: 'Só atende quando o gerente atribuir o lead a ele.' },
 ]
 
 const AGENT_MODE_OPTS: { value: AgentMode; label: string; desc: string }[] = [
@@ -41,19 +42,31 @@ const AGENT_MODE_OPTS: { value: AgentMode; label: string; desc: string }[] = [
   { value: 'sdr', label: 'SDR', desc: 'A IA atende sozinha até o lead estar qualificado, passa para o vendedor e continua como Copiloto.' },
 ]
 
-type Tab = 'identity' | 'when' | 'training' | 'qualification' | 'handoff' | 'audio' | 'followup' | 'cost'
+export type AgentEditorTab = 'geral' | 'perfil' | 'atendimento' | 'resultados'
+type Tab = AgentEditorTab
+
+function SectionHeading({ children, first = false }: { children: ReactNode; first?: boolean }) {
+  return (
+    <h3 style={{ fontSize: 13, fontWeight: 700, margin: first ? '0 0 10px' : '20px 0 10px', paddingTop: first ? 0 : 14, borderTop: first ? 'none' : '1px solid var(--border-subtle)', color: 'var(--text-primary)' }}>
+      {children}
+    </h3>
+  )
+}
 
 interface Props {
   agentId: 'new' | number
   accountId: number
+  initialTab?: AgentEditorTab
   onClose: () => void
   onSaved: () => void
 }
 
-export default function AgentEditorModal({ agentId, accountId, onClose, onSaved }: Props) {
+export default function AgentEditorModal({ agentId, accountId, initialTab, onClose, onSaved }: Props) {
   const { user } = useAuth()
   const isNew = agentId === 'new'
-  const [tab, setTab] = useState<Tab>('identity')
+  const navigate = useNavigate()
+  const [tab, setTab] = useState<Tab>(initialTab || 'geral')
+  const [openingInterview, setOpeningInterview] = useState(false)
   const [loading, setLoading] = useState(!isNew)
   const [saving, setSaving] = useState(false)
 
@@ -62,8 +75,6 @@ export default function AgentEditorModal({ agentId, accountId, onClose, onSaved 
   const [identifiesAsBot, setIdentifiesAsBot] = useState(true)
   const [isActive, setIsActive] = useState(true)
   const [mode, setMode] = useState<AgentMode>('auto')
-  const [keySource, setKeySource] = useState<'client' | 'dros'>('client')
-  const [savingKeySource, setSavingKeySource] = useState(false)
   // When
   const [activationMode, setActivationMode] = useState<AgentActivationMode>('conditional')
   const [stageIds, setStageIds] = useState<number[]>([])
@@ -180,14 +191,6 @@ export default function AgentEditorModal({ agentId, accountId, onClose, onSaved 
     }
   }, [agentId, accountId, isNew])
 
-  // Fonte da chave da IA (so admin da Dros ve e troca)
-  useEffect(() => {
-    if (user?.role !== 'super_admin') return
-    fetchAccount(accountId)
-      .then(d => setKeySource(d.account.ai_key_source === 'dros' ? 'dros' : 'client'))
-      .catch(() => {})
-  }, [accountId, user?.role])
-
   const allStages = funnels.flatMap(f => (f.stages || []).map(s => ({ ...s, funnel_name: f.name })))
 
   const handleSave = async () => {
@@ -230,8 +233,8 @@ export default function AgentEditorModal({ agentId, accountId, onClose, onSaved 
       if (savedAgentId && fuLoaded) {
         try {
           if (fuEnabled) {
-            if (!fuInstanceId) { alert('Aba Follow-up: escolha a instância antes de salvar.'); setSaving(false); return }
-            if (fuSteps.some(s => !s.message_template.trim())) { alert('Aba Follow-up: todos os steps precisam de mensagem.'); setSaving(false); return }
+            if (!fuInstanceId) { alert('Aba Atendimento (follow-up): escolha o número antes de salvar.'); setSaving(false); return }
+            if (fuSteps.some(s => !s.message_template.trim())) { alert('Aba Atendimento (follow-up): todos os passos precisam de mensagem.'); setSaving(false); return }
             await saveAgentInactivityFollowUp(savedAgentId, accountId, {
               enabled: true,
               instance_id: fuInstanceId,
@@ -246,7 +249,7 @@ export default function AgentEditorModal({ agentId, accountId, onClose, onSaved 
             await saveAgentInactivityFollowUp(savedAgentId, accountId, { enabled: false, steps: [] }).catch(() => {})
           }
         } catch (e: any) {
-          alert('Agente salvo, mas Follow-up falhou: ' + (e?.message || ''))
+          alert('Agente salvo, mas o follow-up falhou: ' + (e?.message || ''))
           setSaving(false)
           return
         }
@@ -255,19 +258,6 @@ export default function AgentEditorModal({ agentId, accountId, onClose, onSaved 
       onSaved()
     } catch (e: any) { alert('Erro: ' + (e?.message || '')) }
     setSaving(false)
-  }
-
-  const handleKeySourceChange = async (value: 'client' | 'dros') => {
-    const previous = keySource
-    setKeySource(value)
-    setSavingKeySource(true)
-    try {
-      await updateAccount(accountId, { ai_key_source: value })
-    } catch (e: any) {
-      setKeySource(previous)
-      alert('Erro ao salvar a chave da IA: ' + (e?.message || ''))
-    }
-    setSavingKeySource(false)
   }
 
   const handleSandbox = async () => {
@@ -286,6 +276,19 @@ export default function AgentEditorModal({ agentId, accountId, onClose, onSaved 
       setSandboxHistory(sandboxHistory)
     }
     setSandboxLoading(false)
+  }
+
+  const handleOpenInterview = async () => {
+    if (isNew) return
+    if (!confirm('Abrir a conversa com a IA para ajustar este agente?\n\nAlterações que você ainda não salvou neste editor serão perdidas.')) return
+    setOpeningInterview(true)
+    try {
+      const r = await briefingFromAgent(agentId as number, accountId)
+      navigate(`/agents/interview/${r.briefing_id}`)
+    } catch (e: any) {
+      alert('Erro: ' + (e?.message || 'Não consegui iniciar a conversa com a IA.'))
+      setOpeningInterview(false)
+    }
   }
 
   const updateHandoffRule = (reason: AgentHandoffReason, patch: Partial<AgentHandoffRule>) => {
@@ -328,15 +331,11 @@ export default function AgentEditorModal({ agentId, accountId, onClose, onSaved 
         {/* Tabs */}
         <div style={{ display: 'flex', gap: 4, marginBottom: 16, borderBottom: '1px solid rgba(255,255,255,0.08)', paddingBottom: 0, overflowX: 'auto' }}>
           {([
-            { id: 'identity', label: 'Identidade', icon: <Bot size={11} /> },
-            { id: 'when', label: 'Quando atuar', icon: <Activity size={11} /> },
-            { id: 'training', label: 'Treinamento', icon: <BookOpen size={11} /> },
-            { id: 'qualification', label: 'Qualificação', icon: <Target size={11} /> },
-            { id: 'handoff', label: 'Handoff', icon: <ArrowRightLeft size={11} /> },
-            { id: 'audio', label: 'Áudio', icon: <Volume2 size={11} /> },
-            { id: 'followup', label: 'Follow-up', icon: <Zap size={11} /> },
-            { id: 'cost', label: 'Custo + Sandbox', icon: <DollarSign size={11} /> },
-          ] as { id: Tab; label: string; icon: any }[]).map(t => (
+            { id: 'geral', label: 'Geral', icon: <Bot size={11} /> },
+            { id: 'perfil', label: 'Perfil', icon: <BookOpen size={11} /> },
+            { id: 'atendimento', label: 'Atendimento', icon: <ArrowRightLeft size={11} /> },
+            { id: 'resultados', label: 'Resultados', icon: <DollarSign size={11} /> },
+          ] as { id: Tab; label: string; icon: ReactNode }[]).map(t => (
             <button
               key={t.id}
               onClick={() => setTab(t.id)}
@@ -349,8 +348,9 @@ export default function AgentEditorModal({ agentId, accountId, onClose, onSaved 
         </div>
 
         {/* ─── Tab: Identidade ─── */}
-        {tab === 'identity' && (
+        {tab === 'geral' && (
           <>
+            <SectionHeading first>Identidade e modo</SectionHeading>
             <div className="form-group" style={{ padding: 12, border: `1px solid ${isActive ? 'var(--positive)' : 'var(--border-medium)'}`, borderRadius: 8 }}>
               <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', margin: 0 }}>
                 <input type="checkbox" checked={isActive} onChange={e => setIsActive(e.target.checked)} />
@@ -389,21 +389,20 @@ export default function AgentEditorModal({ agentId, accountId, onClose, onSaved 
               </small>
             </div>
             {user?.role === 'super_admin' && (
-              <div className="form-group">
-                <label>Chave da IA desta conta (só admin Dros)</label>
-                <select className="input" value={keySource} disabled={savingKeySource} onChange={e => handleKeySourceChange(e.target.value as 'client' | 'dros')}>
-                  <option value="client">Chave do cliente (Integrações)</option>
-                  <option value="dros">Chave da Dros</option>
-                </select>
-                <small style={{ color: 'var(--text-muted)', fontSize: 11, display: 'block' }}>Vale para todos os agentes da conta. Aplicada na hora, sem precisar clicar em Salvar.</small>
-              </div>
+              <small style={{ color: 'var(--text-muted)', fontSize: 11, display: 'block' }}>
+                A origem da chave da IA (cliente ou Dros) agora fica em{' '}
+                <button type="button" onClick={() => navigate('/integrations?card=ia')} style={{ background: 'none', border: 'none', padding: 0, color: 'var(--accent)', cursor: 'pointer', fontSize: 11 }}>
+                  Integrações → IA
+                </button>.
+              </small>
             )}
           </>
         )}
 
         {/* ─── Tab: Quando atuar ─── */}
-        {tab === 'when' && (
+        {tab === 'geral' && (
           <>
+            <SectionHeading>Quando atuar</SectionHeading>
             <div className="form-group">
               <label>Modo de ativação *</label>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -418,7 +417,7 @@ export default function AgentEditorModal({ agentId, accountId, onClose, onSaved 
             </div>
 
             <div className="form-group">
-              <label>Instâncias WhatsApp (multi-select)</label>
+              <label>Números de WhatsApp</label>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 200, overflowY: 'auto', padding: 8, border: '1px solid var(--border-medium)', borderRadius: 6 }}>
                 {instances.map(i => (
                   <label key={i.id} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, cursor: 'pointer' }}>
@@ -434,7 +433,7 @@ export default function AgentEditorModal({ agentId, accountId, onClose, onSaved 
             </div>
 
             <div className="form-group">
-              <label>Etapas do funil (multi-select)</label>
+              <label>Etapas do funil</label>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 200, overflowY: 'auto', padding: 8, border: '1px solid var(--border-medium)', borderRadius: 6 }}>
                 {allStages.map(s => (
                   <label key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, cursor: 'pointer' }}>
@@ -467,7 +466,7 @@ export default function AgentEditorModal({ agentId, accountId, onClose, onSaved 
                   checked={welcomeForSheets}
                   onChange={e => setWelcomeForSheets(e.target.checked)}
                 />
-                <span>Enviar primeira msg pra leads vindos da planilha</span>
+                <span>A IA escreve a primeira mensagem para leads vindos da planilha</span>
               </label>
               <small style={{ color: 'var(--text-muted)', display: 'block', marginTop: 4, marginLeft: 24, fontSize: 11 }}>
                 Quando lead novo chega via Google Sheets, o bot dispara uma saudação automática
@@ -494,23 +493,36 @@ export default function AgentEditorModal({ agentId, accountId, onClose, onSaved 
           </>
         )}
 
+        {tab === 'perfil' && !isNew && (
+          <div style={{ padding: 12, border: '1px solid var(--border-medium)', borderRadius: 8, marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', flex: 1, minWidth: 220 }}>
+              <strong style={{ color: 'var(--text-primary)', display: 'block', marginBottom: 2 }}>Montar com entrevista</strong>
+              Converse com a IA e ela reescreve o tom, o conhecimento e a qualificação deste agente para você revisar.
+            </div>
+            <button type="button" className="btn btn-secondary btn-sm" onClick={handleOpenInterview} disabled={openingInterview}>
+              <MessageSquare size={12} /> {openingInterview ? 'Abrindo...' : 'Conversar com a IA'}
+            </button>
+          </div>
+        )}
+
         {/* ─── Tab: Treinamento ─── */}
-        {tab === 'training' && (
+        {tab === 'perfil' && (
           <>
+            <SectionHeading first>Treinamento</SectionHeading>
             <div className="form-group">
-              <label>Persona (tom de voz)</label>
+              <label>Tom de voz</label>
               <textarea className="input" rows={2} value={persona} onChange={e => setPersona(e.target.value)}
                 placeholder="Ex: Cordial, objetiva, PT-BR informal mas profissional. Máx 2 frases por resposta. Sem emoji excessivo." />
             </div>
             <div className="form-group">
-              <label>Knowledge base (conhecimento da empresa)</label>
+              <label>Conhecimento da empresa</label>
               <textarea className="input" rows={10} value={knowledgeBase} onChange={e => setKnowledgeBase(e.target.value)}
                 placeholder="Tudo que o bot precisa saber pra responder. Quanto mais detalhado, melhor. Ex: produtos, regiões de entrega, quem atende, FAQ..."
               />
               <small style={{ color: 'var(--text-muted)', fontSize: 11 }}>Bot só responde sobre o que está aqui. Quando perguntarem algo fora, ele transfere pra humano.</small>
             </div>
             <div className="form-group">
-              <label>NUNCA mencione (proibições)</label>
+              <label>Nunca mencionar</label>
               <textarea className="input" rows={3} value={neverMention} onChange={e => setNeverMention(e.target.value)}
                 placeholder="Ex: preços específicos, descontos, prazos exatos, frete, disponibilidade em estoque" />
               <small style={{ color: 'var(--text-muted)', fontSize: 11 }}>Mesmo se o lead insistir, bot redireciona pra atendente em vez de mencionar isso.</small>
@@ -519,15 +531,16 @@ export default function AgentEditorModal({ agentId, accountId, onClose, onSaved 
         )}
 
         {/* ─── Tab: Qualificação ─── */}
-        {tab === 'qualification' && (
+        {tab === 'perfil' && (
           <>
+            <SectionHeading>Qualificação</SectionHeading>
             <div className="form-group">
               <label>Critério de qualificação</label>
               <textarea className="input" rows={3} value={qualificationCriteria} onChange={e => setQualificationCriteria(e.target.value)}
                 placeholder="Ex: Qualificado quando souber nome, cidade, se é PF ou CNPJ, e categoria de produto" />
             </div>
             <div className="form-group">
-              <label>Campos obrigatórios (bot coleta antes de qualificar)</label>
+              <label>Campos obrigatórios (a IA coleta antes de qualificar)</label>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
                 {REQUIRED_FIELDS_OPTS.map(f => (
                   <label key={f.key} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, cursor: 'pointer' }}>
@@ -540,24 +553,25 @@ export default function AgentEditorModal({ agentId, accountId, onClose, onSaved 
                 ))}
               </div>
             </div>
-            <div className="form-group">
-              <label>Limite de mensagens antes de handoff automático</label>
-              <input className="input" type="number" min={3} max={100} value={maxMessages} onChange={e => setMaxMessages(parseInt(e.target.value) || 15)} style={{ width: 100 }} />
-              <small style={{ color: 'var(--text-muted)', fontSize: 11 }}>Se passar disso sem qualificar, bot transfere pra humano (motivo: max_messages).</small>
-            </div>
-            <div className="form-group">
-              <label>Palavras de handoff (CSV)</label>
-              <input className="input" value={handoffKeywords} onChange={e => setHandoffKeywords(e.target.value)} />
-              <small style={{ color: 'var(--text-muted)', fontSize: 11 }}>Quando lead disser uma dessas, bot transfere imediatamente.</small>
-            </div>
           </>
         )}
 
         {/* ─── Tab: Handoff ─── */}
-        {tab === 'handoff' && (
+        {tab === 'atendimento' && (
           <>
+            <SectionHeading first>Passagem para humano</SectionHeading>
+            <div className="form-group">
+              <label>Limite de mensagens antes de passar para uma pessoa</label>
+              <input className="input" type="number" min={3} max={100} value={maxMessages} onChange={e => setMaxMessages(parseInt(e.target.value) || 15)} style={{ width: 100 }} />
+              <small style={{ color: 'var(--text-muted)', fontSize: 11 }}>Se passar disso sem qualificar, o agente passa o lead para uma pessoa (motivo: limite de mensagens).</small>
+            </div>
+            <div className="form-group">
+              <label>Palavras que pedem uma pessoa (separadas por vírgula)</label>
+              <input className="input" value={handoffKeywords} onChange={e => setHandoffKeywords(e.target.value)} />
+              <small style={{ color: 'var(--text-muted)', fontSize: 11 }}>Quando o lead escrever uma dessas palavras, o agente passa a conversa na hora.</small>
+            </div>
             <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 12 }}>
-              Configure por motivo o que acontece quando o bot transfere o lead pra um humano. Cada linha é independente.
+              Escolha, para cada motivo, o que acontece quando o agente passa o lead para uma pessoa. Cada linha é independente.
             </p>
             {HANDOFF_REASONS.map(r => {
               const rule = handoffRules[r.key]
@@ -613,8 +627,9 @@ export default function AgentEditorModal({ agentId, accountId, onClose, onSaved 
         )}
 
         {/* ─── Tab: Áudio ─── */}
-        {tab === 'audio' && (
+        {tab === 'atendimento' && (
           <>
+            <SectionHeading>Áudio</SectionHeading>
             <div className="form-group">
               <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
                 <input type="checkbox" checked={respondsToAudio} onChange={e => setRespondsToAudio(e.target.checked)} />
@@ -634,11 +649,12 @@ export default function AgentEditorModal({ agentId, accountId, onClose, onSaved 
         )}
 
         {/* ─── Tab: Follow-up (bot manda msg se lead parar de responder) ─── */}
-        {tab === 'followup' && (
+        {tab === 'atendimento' && (
           <>
+            <SectionHeading>Follow-up de inatividade</SectionHeading>
             {isNew ? (
               <div style={{ padding: 16, background: 'var(--bg-hover)', borderRadius: 8, fontSize: 12, color: 'var(--text-muted)' }}>
-                Crie o agente primeiro (salve), depois volte aqui pra configurar o follow-up de inatividade.
+                Salve o agente primeiro; depois volte aqui para configurar o follow-up de inatividade.
               </div>
             ) : !fuLoaded ? (
               <div style={{ padding: 16, color: 'var(--text-muted)', fontSize: 12 }}>Carregando...</div>
@@ -658,7 +674,7 @@ export default function AgentEditorModal({ agentId, accountId, onClose, onSaved 
                 {fuEnabled && (
                   <>
                     <div className="form-group">
-                      <label>Instância WhatsApp pra envio</label>
+                      <label>Número que envia o follow-up</label>
                       <select className="select" value={fuInstanceId || ''} onChange={e => setFuInstanceId(e.target.value ? +e.target.value : null)}>
                         <option value="">— Selecione —</option>
                         {instances.map(i => <option key={i.id} value={i.id}>{i.instance_name}</option>)}
@@ -804,8 +820,9 @@ export default function AgentEditorModal({ agentId, accountId, onClose, onSaved 
         )}
 
         {/* ─── Tab: Custo + Sandbox ─── */}
-        {tab === 'cost' && (
+        {tab === 'resultados' && (
           <>
+            <SectionHeading first>Custo do mês</SectionHeading>
             <div className="form-group">
               <label>Limite mensal de tokens</label>
               <input className="input" type="number" min={1000} step={10000} value={monthlyTokenLimit} onChange={e => setMonthlyTokenLimit(parseInt(e.target.value) || 500000)} style={{ width: 200 }} />
@@ -845,10 +862,11 @@ export default function AgentEditorModal({ agentId, accountId, onClose, onSaved 
             )}
 
             {/* SANDBOX */}
+            <SectionHeading>Simulador</SectionHeading>
             {!isNew ? (
               <div className="form-group" style={{ padding: 12, border: '1px solid rgba(91,173,226,0.3)', borderRadius: 8, background: 'rgba(91,173,226,0.04)' }}>
                 <label style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#5DADE2', fontWeight: 600 }}>
-                  <Play size={12} /> Sandbox — testa o agente sem disparar WhatsApp
+                  <Play size={12} /> Simulador — testa o agente sem enviar nada no WhatsApp
                 </label>
                 <p style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 8 }}>
                   Mesma engine real (Haiku 4.5), mesma persona/KB, mas nenhuma msg vai pra WhatsApp.
@@ -893,7 +911,7 @@ export default function AgentEditorModal({ agentId, accountId, onClose, onSaved 
             ) : (
               <div style={{ padding: 10, background: 'rgba(91,173,226,0.05)', borderRadius: 6, fontSize: 12, color: '#5DADE2', display: 'flex', alignItems: 'center', gap: 8 }}>
                 <AlertCircle size={14} />
-                Salve o agente primeiro pra testar no sandbox.
+                Salve o agente primeiro para testar no simulador.
               </div>
             )}
           </>
