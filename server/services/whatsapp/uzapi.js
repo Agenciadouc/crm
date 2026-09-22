@@ -5,6 +5,7 @@ import nodeFetch, { FormData as NodeFormData, Blob as NodeBlob } from 'node-fetc
 import { createUzapiClient, phonePath, reasonFromResponse } from './uzapiClient.js'
 import { tryReadUzapiConfig, readUzapiPhoneNumberId } from './providerConfig.js'
 import { parseMetaWebhook } from './metaFormat.js'
+import { createUzapiSession } from './uzapiSession.js'
 
 export const UZAPI_CAPABILITIES = Object.freeze({
   qr: true, presence: false, readReceipts: false, numberCheck: false, templates: false, window24h: false, polling: false, typingDelay: true,
@@ -73,6 +74,7 @@ export function createUzapiAdapter({ fetch, env = process.env, FormData = NodeFo
   return {
     name: 'uzapi',
     capabilities: UZAPI_CAPABILITIES,
+    ...createUzapiSession({ client, env, log }),
 
     async sendText(instance, phone, text, opts = {}) {
       const payload = { to: phone, type: 'text', text: { body: text } }
