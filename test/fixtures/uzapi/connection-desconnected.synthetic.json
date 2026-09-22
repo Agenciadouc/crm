@@ -1,0 +1,19 @@
+{
+  "_nota": "SINTETICO: copiado do exemplo da documentacao da UzAPI (evento connection desconnected), phone_number_id mascarado.",
+  "object": "whatsapp_business_account",
+  "entry": [
+    {
+      "id": "",
+      "changes": [
+        {
+          "value": {
+            "messaging_product": "whatsapp",
+            "metadata": { "display_phone_number": "", "phone_number_id": "100000000000001" },
+            "status": [ { "connection": "desconnected" } ]
+          },
+          "field": "connection"
+        }
+      ]
+    }
+  ]
+}

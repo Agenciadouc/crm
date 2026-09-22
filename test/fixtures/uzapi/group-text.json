@@ -1,0 +1,41 @@
+{
+  "object": "whatsapp_business_account",
+  "entry": [
+    {
+      "id": "200000000000001",
+      "changes": [
+        {
+          "value": {
+            "messaging_product": "whatsapp",
+            "metadata": {
+              "display_phone_number": "554890000001",
+              "phone_number_id": "100000000000001"
+            },
+            "contacts": [
+              {
+                "profile": {
+                  "name": "Contato 04"
+                },
+                "wa_id": "554890000004"
+              }
+            ],
+            "messages": [
+              {
+                "from": "554890000004",
+                "group_id": "120363000000000001@g.us",
+                "id": "3EB03303A488428164AD5F",
+                "isGroup": true,
+                "text": {
+                  "body": "texto de grupo"
+                },
+                "timestamp": "1790022937",
+                "type": "text"
+              }
+            ]
+          },
+          "field": "messages"
+        }
+      ]
+    }
+  ]
+}

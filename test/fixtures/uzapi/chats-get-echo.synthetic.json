@@ -1,0 +1,9 @@
+{
+  "_nota": "SINTETICO: resposta de POST /chats {action:get} montada a partir de uzapi-achados-etapa0.md. Confirmar com a conta ativa.",
+  "data": {
+    "data": {
+      "Info": { "ID": "2A286AC5064891EF4DE7", "Chat": "123456789012345@lid", "IsFromMe": true, "Timestamp": "2026-09-21T20:27:57Z" },
+      "Message": { "ExtendedTextMessage": { "text": "Resposta pelo celular" } }
+    }
+  }
+}

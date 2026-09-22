@@ -1,0 +1,19 @@
+{
+  "_nota": "HIPOTESE: formato do aviso authentication nao confirmado (spec 9.3). O leitor procura o QR por nome de campo.",
+  "object": "whatsapp_business_account",
+  "entry": [
+    {
+      "id": "",
+      "changes": [
+        {
+          "value": {
+            "messaging_product": "whatsapp",
+            "metadata": { "display_phone_number": "", "phone_number_id": "100000000000001" },
+            "qrcode": "2@QR-DE-TESTE-NAO-E-REAL,abcdefghijklmnopqrstuvwxyz"
+          },
+          "field": "authentication"
+        }
+      ]
+    }
+  ]
+}
