@@ -35,8 +35,11 @@ export default function NumberSettingsModal({ instance, accountId, canEditFirstM
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [first, setFirst] = useState<FirstMessageState>(() => resolveFirstMessage({ first_msg_template: instance.first_msg_template }))
+  const [firstChoice, setFirstChoice] = useState<'a' | 'b' | null>(null)
+  const [firstOptions, setFirstOptions] = useState<{ a: string; b: string } | null>(null)
   const [greetingCooldown, setGreetingCooldown] = useState(24)
   const [hours, setHours] = useState<ServiceHoursState>(() => resolveServiceHours({}))
+  const [hoursTouched, setHoursTouched] = useState(false)
   const [awayEnabled, setAwayEnabled] = useState(false)
   const [awayText, setAwayText] = useState('')
   const [awayCooldown, setAwayCooldown] = useState(4)
@@ -52,13 +55,22 @@ export default function NumberSettingsModal({ instance, accountId, canEditFirstM
       fetchAgents(accountId).then(d => d.agents).catch(() => [] as Agent[]),
     ]).then(([cfg, funnels, agents]) => {
       if (!alive) return
-      setFirst(resolveFirstMessage({
+      const resolvedFirst = resolveFirstMessage({
         first_msg_template: instance.first_msg_template,
         greeting_text: cfg.greeting_text,
         greeting_enabled: cfg.greeting_enabled,
-      }))
+      })
+      setFirst(resolvedFirst)
+      if (resolvedFirst.conflict) {
+        setFirstOptions({ a: resolvedFirst.text, b: resolvedFirst.conflict.otherText })
+        setFirstChoice(null)
+      } else {
+        setFirstOptions(null)
+        setFirstChoice('a')
+      }
       setGreetingCooldown(cfg.greeting_cooldown_hours || 24)
       setHours(resolveServiceHours({ away_schedule_json: cfg.away_schedule_json, business_hours_json: cfg.business_hours_json }))
+      setHoursTouched(false)
       setAwayEnabled(!!cfg.away_enabled)
       setAwayText(cfg.away_text || '')
       setAwayCooldown(cfg.away_cooldown_hours || 4)
@@ -72,15 +84,28 @@ export default function NumberSettingsModal({ instance, accountId, canEditFirstM
     return () => { alive = false }
   }, [instance.id, instance.first_msg_template, accountId])
 
-  const setSlot = (day: DayKey, idx: number, field: 'start' | 'end', value: string) =>
+  const setSlot = (day: DayKey, idx: number, field: 'start' | 'end', value: string) => {
+    setHoursTouched(true)
     setHours(h => ({ ...h, schedule: { ...h.schedule, [day]: h.schedule[day].map((s, i) => i === idx ? { ...s, [field]: value } : s) } }))
-  const addSlot = (day: DayKey) =>
+  }
+  const addSlot = (day: DayKey) => {
+    setHoursTouched(true)
     setHours(h => ({ ...h, schedule: { ...h.schedule, [day]: [...h.schedule[day], { start: '09:00', end: '18:00' }] } }))
-  const removeSlot = (day: DayKey, idx: number) =>
+  }
+  const removeSlot = (day: DayKey, idx: number) => {
+    setHoursTouched(true)
     setHours(h => ({ ...h, schedule: { ...h.schedule, [day]: h.schedule[day].filter((_, i) => i !== idx) } }))
+  }
+  const setHoldSends = (value: boolean) => {
+    setHoursTouched(true)
+    setHours(h => ({ ...h, holdSends: value }))
+  }
 
-  const swapConflict = () =>
-    setFirst(f => f.conflict ? { ...f, text: f.conflict.otherText, conflict: { otherText: f.text } } : f)
+  const chooseFirstOption = (opt: 'a' | 'b') => {
+    if (!firstOptions) return
+    setFirst(f => ({ ...f, text: opt === 'a' ? firstOptions.a : firstOptions.b }))
+    setFirstChoice(opt)
+  }
 
   const handleUseNumberMessage = async (f: Funnel) => {
     if (!confirm(`Parar de usar a mensagem própria do funil "${f.name}"?\n\nA partir de agora, os leads desse funil recebem a Primeira mensagem do número que os atende.`)) return
@@ -93,6 +118,7 @@ export default function NumberSettingsModal({ instance, accountId, canEditFirstM
   }
 
   const handleSave = async () => {
+    if (first.conflict && !firstChoice) { setError('Escolha qual texto fica antes de salvar.'); setTab('primeira'); return }
     const errs = scheduleErrors(hours.schedule)
     if (errs.length > 0) { setError(errs.join(' ')); setTab('horario'); return }
     setSaving(true); setError(null)
@@ -107,7 +133,9 @@ export default function NumberSettingsModal({ instance, accountId, canEditFirstM
         away_text: awayText.trim() || null,
         away_cooldown_hours: awayCooldown,
         away_schedule_json: hoursSave.away_schedule_json,
-        hold_sends_outside_hours: hoursSave.hold_sends_outside_hours,
+        // So manda a trava anti-bloqueio quando o dono mexeu na caixa "Segurar envios..." ou na
+        // agenda nesta sessao — sem o campo, o servidor mantem business_hours_json como esta.
+        ...(hoursTouched ? { hold_sends_outside_hours: hoursSave.hold_sends_outside_hours } : {}),
       })
       let updated = instance
       if (canEditFirstMessage && (instance.first_msg_template || null) !== firstSave.first_msg_template) {
@@ -133,7 +161,13 @@ export default function NumberSettingsModal({ instance, accountId, canEditFirstM
 
         <div style={{ display: 'flex', gap: 4, marginBottom: 12, borderBottom: '1px solid var(--border-subtle)', paddingBottom: 6, flexWrap: 'wrap' }}>
           <button className={`btn btn-sm ${tab === 'primeira' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setTab('primeira')}><MessageSquare size={12} /> Primeira mensagem</button>
-          <button className={`btn btn-sm ${tab === 'horario' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setTab('horario')}><Clock size={12} /> Horário de atendimento</button>
+          <button
+            className={`btn btn-sm ${tab === 'horario' ? 'btn-primary' : 'btn-secondary'}`}
+            onClick={() => setTab('horario')}
+            title={hours.conflict ? 'Havia dois horários diferentes — conferir antes de salvar' : undefined}
+          >
+            <Clock size={12} /> Horário de atendimento{hours.conflict && <AlertTriangle size={11} style={{ color: '#FFB300', marginLeft: 4 }} />}
+          </button>
           <button className={`btn btn-sm ${tab === 'ausencia' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setTab('ausencia')}><Moon size={12} /> Ausência</button>
         </div>
 
@@ -151,76 +185,95 @@ export default function NumberSettingsModal({ instance, accountId, canEditFirstM
               <div>
                 <p style={hint}>Uma mensagem só para este número, enviada uma vez para cada lead novo. Leads que já existem não recebem. Escolha abaixo em quais situações ela sai.</p>
 
-                {first.conflict && (
+                {first.conflict && firstOptions && (
                   <div style={warnBox}>
                     <AlertTriangle size={14} style={{ color: '#FFB300', flexShrink: 0, marginTop: 2 }} />
-                    <div>
-                      Este número tinha duas mensagens diferentes. Abaixo está a que vai para leads de formulário e planilha. A outra, que ia para quem manda a primeira mensagem, é:
-                      <div style={{ margin: '6px 0', padding: '6px 10px', background: 'var(--bg-hover)', borderRadius: 6, fontStyle: 'italic', whiteSpace: 'pre-wrap' }}>{first.conflict.otherText}</div>
-                      <button type="button" className="btn btn-secondary btn-sm" onClick={swapConflict}>Trocar pela outra</button>
-                      <div style={{ marginTop: 6, color: 'var(--text-muted)', fontSize: 11 }}>Ao salvar, as duas situações passam a usar o texto que estiver na caixa.</div>
+                    <div style={{ flex: 1 }}>
+                      Este número tinha duas mensagens diferentes. Escolha qual delas fica antes de salvar.
+                      <div style={{ margin: '8px 0 4px', padding: '6px 10px', background: 'var(--bg-hover)', borderRadius: 6, fontStyle: 'italic', whiteSpace: 'pre-wrap' }}>{firstOptions.a}</div>
+                      <button
+                        type="button"
+                        className={`btn btn-sm ${firstChoice === 'a' ? 'btn-primary' : 'btn-secondary'}`}
+                        onClick={() => chooseFirstOption('a')}
+                      >
+                        Usar este texto
+                      </button>
+                      <div style={{ margin: '10px 0 4px', padding: '6px 10px', background: 'var(--bg-hover)', borderRadius: 6, fontStyle: 'italic', whiteSpace: 'pre-wrap' }}>{firstOptions.b}</div>
+                      <button
+                        type="button"
+                        className={`btn btn-sm ${firstChoice === 'b' ? 'btn-primary' : 'btn-secondary'}`}
+                        onClick={() => chooseFirstOption('b')}
+                      >
+                        Usar o outro
+                      </button>
+                      {!firstChoice && <div style={{ marginTop: 8, color: '#FF6B6B', fontSize: 11.5, fontWeight: 600 }}>Escolha qual texto fica antes de salvar.</div>}
+                      {firstChoice && <div style={{ marginTop: 8, color: 'var(--text-muted)', fontSize: 11 }}>Ao salvar, as duas situações passam a usar o texto escolhido.</div>}
                     </div>
                   </div>
                 )}
 
-                <div className="form-group">
-                  <label>Mensagem</label>
-                  <textarea
-                    className="input"
-                    rows={5}
-                    value={first.text}
-                    onChange={e => setFirst(f => ({ ...f, text: e.target.value }))}
-                    placeholder="Ex.: Olá, {{primeiro_nome}}! Aqui é {{atendente_nome}}. Recebi seu contato e vou te ajudar."
-                    style={{ resize: 'vertical', fontFamily: 'inherit', fontSize: 13, lineHeight: 1.5 }}
-                  />
-                  <small style={{ ...hint, display: 'block', marginTop: 4 }}>{VARS_HELP}</small>
-                </div>
+                {(!first.conflict || firstChoice) && (
+                  <>
+                    <div className="form-group">
+                      <label>Mensagem</label>
+                      <textarea
+                        className="input"
+                        rows={5}
+                        value={first.text}
+                        onChange={e => setFirst(f => ({ ...f, text: e.target.value }))}
+                        placeholder="Ex.: Olá, {{primeiro_nome}}! Aqui é {{atendente_nome}}. Recebi seu contato e vou te ajudar."
+                        style={{ resize: 'vertical', fontFamily: 'inherit', fontSize: 13, lineHeight: 1.5 }}
+                      />
+                      <small style={{ ...hint, display: 'block', marginTop: 4 }}>{VARS_HELP}</small>
+                    </div>
 
-                <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 13, marginBottom: 8, cursor: 'pointer' }}>
-                  <input type="checkbox" checked={first.onInbound} onChange={e => setFirst(f => ({ ...f, onInbound: e.target.checked }))} style={{ marginTop: 3 }} />
-                  <span>Quando um lead novo mandar a primeira mensagem para este número</span>
-                </label>
-                <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 13, marginBottom: 8, cursor: canEditFirstMessage ? 'pointer' : 'default', opacity: canEditFirstMessage ? 1 : 0.5 }}>
-                  <input type="checkbox" checked={first.onAssign} disabled={!canEditFirstMessage} onChange={e => setFirst(f => ({ ...f, onAssign: e.target.checked }))} style={{ marginTop: 3 }} />
-                  <span>Quando um lead de formulário ou planilha for entregue a um vendedor que usa este número</span>
-                </label>
+                    <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 13, marginBottom: 8, cursor: 'pointer' }}>
+                      <input type="checkbox" checked={first.onInbound} onChange={e => setFirst(f => ({ ...f, onInbound: e.target.checked }))} style={{ marginTop: 3 }} />
+                      <span>Quando um lead novo mandar a primeira mensagem para este número</span>
+                    </label>
+                    <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 13, marginBottom: 8, cursor: canEditFirstMessage ? 'pointer' : 'default', opacity: canEditFirstMessage ? 1 : 0.5 }}>
+                      <input type="checkbox" checked={first.onAssign} disabled={!canEditFirstMessage} onChange={e => setFirst(f => ({ ...f, onAssign: e.target.checked }))} style={{ marginTop: 3 }} />
+                      <span>Quando um lead de formulário ou planilha for entregue a um vendedor que usa este número</span>
+                    </label>
 
-                <div className="form-group" style={{ marginTop: 8 }}>
-                  <label style={{ fontSize: 12 }}>Intervalo mínimo entre duas saudações para o mesmo lead (horas)</label>
-                  <input className="input" type="number" min={1} max={720} style={{ width: 100 }} value={greetingCooldown} onChange={e => setGreetingCooldown(parseInt(e.target.value) || 24)} />
-                </div>
+                    <div className="form-group" style={{ marginTop: 8 }}>
+                      <label style={{ fontSize: 12 }}>Intervalo mínimo entre duas saudações para o mesmo lead (horas)</label>
+                      <input className="input" type="number" min={1} max={720} style={{ width: 100 }} value={greetingCooldown} onChange={e => setGreetingCooldown(parseInt(e.target.value) || 24)} />
+                    </div>
 
-                <div style={infoBox}>
-                  <div style={{ fontWeight: 700, color: 'var(--text-primary)', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 6 }}><Info size={12} /> Qual mensagem sai</div>
-                  <ol style={{ margin: 0, paddingLeft: 18 }}>
-                    <li>Lead de planilha atendido por agente de IA com saudação ligada: a IA escreve a primeira mensagem (esta não sai).</li>
-                    <li>Lead de formulário ou planilha de um funil com mensagem própria: sai a do funil.</li>
-                    <li>Nos outros casos, sai esta mensagem, nas situações marcadas acima.</li>
-                    <li>A mensagem só sai com o número conectado, para lead com telefone válido e não bloqueado.</li>
-                  </ol>
-                </div>
+                    <div style={infoBox}>
+                      <div style={{ fontWeight: 700, color: 'var(--text-primary)', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 6 }}><Info size={12} /> Qual mensagem sai</div>
+                      <ol style={{ margin: 0, paddingLeft: 18 }}>
+                        <li>Lead de planilha atendido por agente de IA com saudação ligada: a IA escreve a primeira mensagem (esta não sai).</li>
+                        <li>Lead de formulário ou planilha de um funil com mensagem própria: sai a do funil.</li>
+                        <li>Nos outros casos, sai esta mensagem, nas situações marcadas acima.</li>
+                        <li>A mensagem só sai com o número conectado, para lead com telefone válido e não bloqueado.</li>
+                      </ol>
+                    </div>
 
-                {welcomeAgents.length > 0 && (
-                  <div style={{ ...infoBox, borderColor: 'rgba(255,179,0,0.3)', background: 'rgba(255,179,0,0.05)' }}>
-                    Agentes com saudação por IA para leads de planilha: <strong>{welcomeAgents.map(a => a.name).join(', ')}</strong>. Para ligar ou desligar, abra o agente em Agentes de IA, aba Geral.
-                  </div>
-                )}
-
-                {funnelOverrides.length > 0 && (
-                  <div style={{ ...infoBox, borderColor: 'rgba(255,179,0,0.3)', background: 'rgba(255,179,0,0.05)' }}>
-                    <div style={{ fontWeight: 700, color: 'var(--text-primary)', marginBottom: 6 }}>Funis com mensagem própria (valem no lugar desta)</div>
-                    {funnelOverrides.map(f => (
-                      <div key={f.id} style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8, padding: '6px 0', borderTop: '1px solid var(--border-subtle)' }}>
-                        <div style={{ flex: 1 }}>
-                          <strong>{f.name}</strong>
-                          <div style={{ fontStyle: 'italic', whiteSpace: 'pre-wrap' }}>{f.first_msg_template}</div>
-                        </div>
-                        {canManageFunnels && (
-                          <button type="button" className="btn btn-secondary btn-sm" onClick={() => handleUseNumberMessage(f)}>Usar a deste número</button>
-                        )}
+                    {welcomeAgents.length > 0 && (
+                      <div style={{ ...infoBox, borderColor: 'rgba(255,179,0,0.3)', background: 'rgba(255,179,0,0.05)' }}>
+                        Agentes com saudação por IA para leads de planilha: <strong>{welcomeAgents.map(a => a.name).join(', ')}</strong>. Para ligar ou desligar, abra o agente em Agentes de IA, aba Geral.
                       </div>
-                    ))}
-                  </div>
+                    )}
+
+                    {funnelOverrides.length > 0 && (
+                      <div style={{ ...infoBox, borderColor: 'rgba(255,179,0,0.3)', background: 'rgba(255,179,0,0.05)' }}>
+                        <div style={{ fontWeight: 700, color: 'var(--text-primary)', marginBottom: 6 }}>Funis com mensagem própria (valem no lugar desta)</div>
+                        {funnelOverrides.map(f => (
+                          <div key={f.id} style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8, padding: '6px 0', borderTop: '1px solid var(--border-subtle)' }}>
+                            <div style={{ flex: 1 }}>
+                              <strong>{f.name}</strong>
+                              <div style={{ fontStyle: 'italic', whiteSpace: 'pre-wrap' }}>{f.first_msg_template}</div>
+                            </div>
+                            {canManageFunnels && (
+                              <button type="button" className="btn btn-secondary btn-sm" onClick={() => handleUseNumberMessage(f)}>Usar a deste número</button>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
             )}
@@ -256,7 +309,7 @@ export default function NumberSettingsModal({ instance, accountId, canEditFirstM
                 ))}
 
                 <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 13, marginTop: 12, cursor: 'pointer' }}>
-                  <input type="checkbox" checked={hours.holdSends} onChange={e => setHours(h => ({ ...h, holdSends: e.target.checked }))} style={{ marginTop: 3 }} />
+                  <input type="checkbox" checked={hours.holdSends} onChange={e => setHoldSends(e.target.checked)} style={{ marginTop: 3 }} />
                   <span><strong>Segurar envios automáticos fora deste horário</strong></span>
                 </label>
                 <p style={{ ...hint, marginLeft: 24 }}>{HOLD_HELP}</p>
@@ -294,7 +347,12 @@ export default function NumberSettingsModal({ instance, accountId, canEditFirstM
 
             <div className="modal-actions">
               <button className="btn btn-secondary" onClick={onClose} disabled={saving}>Cancelar</button>
-              <button className="btn btn-primary" onClick={handleSave} disabled={saving}>
+              <button
+                className="btn btn-primary"
+                onClick={handleSave}
+                disabled={saving || (!!first.conflict && !firstChoice)}
+                title={first.conflict && !firstChoice ? 'Escolha qual texto fica antes de salvar.' : undefined}
+              >
                 <Save size={14} /> {saving ? 'Salvando...' : 'Salvar'}
               </button>
             </div>
