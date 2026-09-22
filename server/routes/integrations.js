@@ -7,8 +7,28 @@ import { getPublicBaseUrl } from '../services/publicUrl.js'
 import { getProvider } from '../services/whatsapp/index.js'
 import { generateWebhookToken } from '../services/whatsapp/schema.js'
 import { createWebhookRegistrar } from '../services/whatsapp/webhookRegistration.js'
+import { createInstanceManager, listAvailableProviders, sanitizeInstance, ProviderError } from '../services/whatsapp/instanceManager.js'
 
 const router = Router()
+
+// Provedor por numero: UzAPI delega ao instanceManager; Evolution segue com o codigo de sempre.
+const manager = createInstanceManager({ db, getProvider })
+const isUzapi = (instance) => (instance?.provider || 'evolution') === 'uzapi'
+const safe = (row, req) => sanitizeInstance(row, req.user.role)
+
+function sendProviderError(res, err) {
+  if (err instanceof ProviderError) return res.status(err.status).json({ error: err.message, code: err.code })
+  console.error('[WhatsApp provedor]', err.message)
+  return res.status(502).json({ error: 'Falha ao falar com o provedor do WhatsApp.', code: 'provider_error' })
+}
+
+// Se atendente criou, vira dono automatico (primary_instance_id + default_attendant_id).
+function makeAttendantOwner(req, instance) {
+  if (req.user.role !== 'atendente') return
+  db.prepare("UPDATE users SET primary_instance_id = ?, updated_at = datetime('now') WHERE id = ?").run(instance.id, req.user.id)
+  db.prepare("UPDATE whatsapp_instances SET default_attendant_id = ?, updated_at = datetime('now') WHERE id = ?").run(req.user.id, instance.id)
+  console.log(`[integrations] Atendente ${req.user.id} virou dono da instancia recem-criada ${instance.id}`)
+}
 
 // Helper: get instance only if it belongs to the user's account (or user is super_admin)
 function getOwnedInstance(req, res) {
@@ -64,12 +84,16 @@ router.get('/whatsapp', requireRole('super_admin', 'gerente', 'atendente'), (req
     if (!primaryId) return res.json({ instances: [] })
     const row = db.prepare('SELECT * FROM whatsapp_instances WHERE id = ? AND account_id = ?').get(primaryId, req.accountId)
     if (!row) return res.json({ instances: [] })
-    const { api_url, api_key, webhook_secret, ...safe } = row
-    return res.json({ instances: [safe] })
+    return res.json({ instances: [sanitizeInstance(row, 'atendente')] })
   }
 
   const rows = db.prepare('SELECT * FROM whatsapp_instances WHERE account_id = ? ORDER BY created_at DESC').all(req.accountId)
-  res.json({ instances: rows })
+  res.json({ instances: rows.map(r => safe(r, req)) })
+})
+
+// ─── Provedores disponiveis para novos numeros (UzAPI so com credenciais da Dros no .env) ───
+router.get('/whatsapp/providers', requireRole('super_admin', 'gerente', 'atendente'), (req, res) => {
+  res.json({ providers: listAvailableProviders(), default: 'evolution' })
 })
 
 // Helper: registra no provedor o webhook exclusivo da instancia (URL por token, MESSAGES_UPSERT + MESSAGES_UPDATE)
@@ -88,6 +112,20 @@ router.post('/whatsapp', requireRole('super_admin', 'gerente', 'atendente'), asy
   if (!instance_name) return res.status(400).json({ error: 'instance_name obrigatorio' })
   if (!['open', 'restricted'].includes(lead_intake_mode)) return res.status(400).json({ error: 'lead_intake_mode invalido (use open ou restricted)' })
 
+  const provider = req.body.provider || 'evolution'
+  if (!['evolution', 'uzapi'].includes(provider)) {
+    return res.status(400).json({ error: 'Provedor inválido (use evolution ou uzapi).', code: 'invalid_provider' })
+  }
+  if (provider === 'uzapi') {
+    try {
+      const created = await manager.createUzapiInstance({ accountId: req.accountId, instanceName: instance_name, leadIntakeMode: lead_intake_mode })
+      makeAttendantOwner(req, created)
+      return res.json({ instance: safe(db.prepare('SELECT * FROM whatsapp_instances WHERE id = ?').get(created.id), req) })
+    } catch (err) {
+      return sendProviderError(res, err)
+    }
+  }
+
   // Get Evolution API credentials from account config (or fallback to body for backwards compat)
   const account = db.prepare('SELECT evolution_api_url, evolution_api_key, slug FROM accounts WHERE id = ?').get(req.accountId)
   const api_url = req.body.api_url || account?.evolution_api_url
@@ -103,7 +141,7 @@ router.post('/whatsapp', requireRole('super_admin', 'gerente', 'atendente'), asy
     db.prepare("UPDATE whatsapp_instances SET api_url = ?, api_key = ?, updated_at = datetime('now') WHERE id = ?").run(baseUrl, api_key, existing.id)
     const instance = db.prepare('SELECT * FROM whatsapp_instances WHERE id = ?').get(existing.id)
     await registerInstanceWebhook(instance)
-    return res.json({ instance: db.prepare('SELECT * FROM whatsapp_instances WHERE id = ?').get(existing.id) })
+    return res.json({ instance: safe(db.prepare('SELECT * FROM whatsapp_instances WHERE id = ?').get(existing.id), req) })
   }
 
   // Create instance on Evolution API
@@ -128,16 +166,12 @@ router.post('/whatsapp', requireRole('super_admin', 'gerente', 'atendente'), asy
 
   // Se atendente criou, vira dono automatico (seta primary_instance_id + default_attendant_id).
   // Assim ele passa a ver a instancia dele em /integrations e opera sem intervencao do gerente.
-  if (req.user.role === 'atendente') {
-    db.prepare("UPDATE users SET primary_instance_id = ?, updated_at = datetime('now') WHERE id = ?").run(instance.id, req.user.id)
-    db.prepare("UPDATE whatsapp_instances SET default_attendant_id = ?, updated_at = datetime('now') WHERE id = ?").run(req.user.id, instance.id)
-    console.log(`[integrations] Atendente ${req.user.id} virou dono da instancia recem-criada ${instance.id}`)
-  }
+  makeAttendantOwner(req, instance)
 
   // Setup webhook automatically (Evolution v2.3 format)
   await registerInstanceWebhook(instance)
 
-  res.json({ instance })
+  res.json({ instance: safe(instance, req) })
 })
 
 // ─── Connect (get QR code for existing instance) ─────────────────
@@ -157,12 +191,21 @@ router.put('/whatsapp/:id/first-msg-template', allowInstanceOwner, (req, res) =>
   const tpl = req.body.first_msg_template != null ? String(req.body.first_msg_template) : null
   db.prepare("UPDATE whatsapp_instances SET first_msg_template = ?, updated_at = datetime('now') WHERE id = ?").run(tpl || null, instance.id)
   const updated = db.prepare('SELECT * FROM whatsapp_instances WHERE id = ?').get(instance.id)
-  res.json({ instance: updated })
+  res.json({ instance: safe(updated, req) })
 })
 
 router.post('/whatsapp/:id/connect', allowInstanceOwner, async (req, res) => {
   const instance = getOwnedInstance(req, res)
   if (!instance) return
+
+  if (isUzapi(instance)) {
+    try {
+      const r = await manager.refreshQr(instance)
+      return res.json({ ...r, instance: safe(r.instance, req) })
+    } catch (err) {
+      return sendProviderError(res, err)
+    }
+  }
 
   try {
     const r = await fetch(`${instance.api_url}/instance/connect/${instance.instance_name}`, {
@@ -179,7 +222,7 @@ router.post('/whatsapp/:id/connect', allowInstanceOwner, async (req, res) => {
     await registerInstanceWebhook(instance)
 
     const updated = db.prepare('SELECT * FROM whatsapp_instances WHERE id = ?').get(instance.id)
-    res.json({ instance: updated })
+    res.json({ instance: safe(updated, req), qr_code: updated.qr_code, status: updated.status })
   } catch (err) {
     console.error('[Evolution Connect]', err.message)
     res.status(500).json({ error: 'Falha ao conectar: ' + err.message })
@@ -188,7 +231,7 @@ router.post('/whatsapp/:id/connect', allowInstanceOwner, async (req, res) => {
 
 // POST /whatsapp/sync-phones — backfill: popula phone_number de todas as inst connected sem phone (super_admin)
 router.post('/whatsapp/sync-phones', requireRole('super_admin'), async (req, res) => {
-  const insts = db.prepare("SELECT * FROM whatsapp_instances WHERE status='connected' AND (phone_number IS NULL OR phone_number = '')").all()
+  const insts = db.prepare("SELECT * FROM whatsapp_instances WHERE status='connected' AND (phone_number IS NULL OR phone_number = '') AND COALESCE(provider, 'evolution') = 'evolution'").all()
   const results = []
   for (const inst of insts) {
     const phone = await syncInstancePhoneIfMissing(inst)
@@ -226,6 +269,11 @@ router.get('/whatsapp/:id/status', async (req, res) => {
   const instance = getOwnedInstance(req, res)
   if (!instance) return
 
+  if (isUzapi(instance)) {
+    const r = await manager.checkStatus(instance)
+    return res.json({ instance: safe(r.instance, req), state: r.state, error: r.error })
+  }
+
   try {
     const r = await fetch(`${instance.api_url}/instance/connectionState/${instance.instance_name}`, {
       headers: { apikey: instance.api_key },
@@ -253,10 +301,10 @@ router.get('/whatsapp/:id/status', async (req, res) => {
     )
 
     const updated = db.prepare('SELECT * FROM whatsapp_instances WHERE id = ?').get(instance.id)
-    res.json({ instance: updated, state })
+    res.json({ instance: safe(updated, req), state })
   } catch (err) {
     db.prepare("UPDATE whatsapp_instances SET status = 'disconnected' WHERE id = ?").run(instance.id)
-    res.json({ instance: db.prepare('SELECT * FROM whatsapp_instances WHERE id = ?').get(instance.id), error: err.message })
+    res.json({ instance: safe(db.prepare('SELECT * FROM whatsapp_instances WHERE id = ?').get(instance.id), req), error: err.message })
   }
 })
 
@@ -329,6 +377,15 @@ router.post('/whatsapp/:id/qrcode', allowInstanceOwner, async (req, res) => {
   const instance = getOwnedInstance(req, res)
   if (!instance) return
 
+  if (isUzapi(instance)) {
+    try {
+      const r = await manager.refreshQr(instance)
+      return res.json({ ...r, instance: safe(r.instance, req) })
+    } catch (err) {
+      return sendProviderError(res, err)
+    }
+  }
+
   try {
     const r = await fetch(`${instance.api_url}/instance/connect/${instance.instance_name}`, {
       headers: { apikey: instance.api_key },
@@ -339,7 +396,7 @@ router.post('/whatsapp/:id/qrcode', allowInstanceOwner, async (req, res) => {
 
     db.prepare("UPDATE whatsapp_instances SET qr_code = ?, status = 'connecting', updated_at = datetime('now') WHERE id = ?").run(qrCode, instance.id)
     const updated = db.prepare('SELECT * FROM whatsapp_instances WHERE id = ?').get(instance.id)
-    res.json({ instance: updated })
+    res.json({ instance: safe(updated, req), qr_code: updated.qr_code, status: updated.status })
   } catch (err) {
     res.status(500).json({ error: 'Falha ao gerar QR code: ' + err.message })
   }
@@ -349,6 +406,15 @@ router.post('/whatsapp/:id/qrcode', allowInstanceOwner, async (req, res) => {
 router.post('/whatsapp/:id/disconnect', requireRole('super_admin', 'gerente', 'atendente'), async (req, res) => {
   const instance = getOwnedInstance(req, res)
   if (!instance) return
+
+  if (isUzapi(instance)) {
+    try {
+      await manager.disconnect(instance)
+      return res.json({ ok: true })
+    } catch (err) {
+      return sendProviderError(res, err)
+    }
+  }
 
   try {
     await fetch(`${instance.api_url}/instance/logout/${instance.instance_name}`, {
@@ -367,6 +433,11 @@ router.post('/whatsapp/:id/disconnect', requireRole('super_admin', 'gerente', 'a
 router.delete('/whatsapp/:id', requireRole('super_admin', 'gerente', 'atendente'), async (req, res) => {
   const instance = getOwnedInstance(req, res)
   if (!instance) return
+
+  if (isUzapi(instance)) {
+    await manager.remove(instance)
+    return res.json({ ok: true })
+  }
   // Tenta apagar na Evolution tambem (best-effort com timeout de 8s).
   // Se Evolution responder 404 ou timeoutar, segue o jogo e apaga do banco assim mesmo
   // — instancia fantasma (so no CRM) eh um caso valido e nao deve travar o user.
@@ -404,7 +475,7 @@ router.put('/whatsapp/:id/mode', requireRole('super_admin', 'gerente', 'atendent
   if (!['open', 'restricted'].includes(mode)) return res.status(400).json({ error: 'mode invalido (use open ou restricted)' })
   db.prepare("UPDATE whatsapp_instances SET lead_intake_mode = ?, updated_at = datetime('now') WHERE id = ?").run(mode, instance.id)
   const updated = db.prepare('SELECT * FROM whatsapp_instances WHERE id = ?').get(instance.id)
-  res.json({ instance: updated })
+  res.json({ instance: safe(updated, req) })
 })
 
 // ─── Update default attendant for an instance ────────────────────
@@ -420,13 +491,24 @@ router.put('/whatsapp/:id/attendant', requireRole('super_admin', 'gerente', 'ate
   }
   db.prepare("UPDATE whatsapp_instances SET default_attendant_id = ?, updated_at = datetime('now') WHERE id = ?").run(attendant_id || null, instance.id)
   const updated = db.prepare('SELECT * FROM whatsapp_instances WHERE id = ?').get(instance.id)
-  res.json({ instance: updated })
+  res.json({ instance: safe(updated, req) })
 })
 
 // ─── Restart Baileys session on Evolution (fixes "open but no msgs" zombie state) ───
 router.post('/whatsapp/:id/restart', requireRole('super_admin', 'gerente', 'atendente'), async (req, res) => {
   const instance = getOwnedInstance(req, res)
   if (!instance) return
+
+  if (isUzapi(instance)) {
+    try {
+      const r = await manager.restart(instance)
+      if (!r.ok) return res.status(502).json({ error: 'A UzAPI não reiniciou o número: ' + r.reason, code: 'provider_error' })
+      return res.json({ ok: true, response: r })
+    } catch (err) {
+      return sendProviderError(res, err)
+    }
+  }
+
   try {
     const r = await fetch(`${instance.api_url}/instance/restart/${encodeURIComponent(instance.instance_name)}`, {
       method: 'POST',
@@ -454,6 +536,11 @@ router.post('/whatsapp/sync-now', requireRole('super_admin', 'gerente', 'atenden
 router.post('/whatsapp/:id/test', requireRole('super_admin', 'gerente', 'atendente'), async (req, res) => {
   const instance = getOwnedInstance(req, res)
   if (!instance) return
+
+  if (isUzapi(instance)) {
+    const r = await manager.checkStatus(instance)
+    return res.json({ success: r.instance.status === 'connected', status: r.instance.status, error: r.error })
+  }
 
   try {
     const r = await fetch(`${instance.api_url}/instance/connectionState/${instance.instance_name}`, {

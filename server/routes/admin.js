@@ -2,6 +2,7 @@ import { Router } from 'express'
 import fetch from 'node-fetch'
 import db from '../db.js'
 import { requireRole } from '../middleware/auth.js'
+import { uzapiUsageByAccount } from '../services/whatsapp/connectionLog.js'
 
 const router = Router()
 
@@ -82,6 +83,11 @@ router.post('/instances/check-all', requireRole('super_admin'), async (req, res)
   }
 
   res.json({ ok: true, summary, results })
+})
+
+// ─── Numeros UzAPI por conta e desde quando (base da cobranca futura) ───
+router.get('/uzapi-usage', requireRole('super_admin'), (req, res) => {
+  res.json({ accounts: uzapiUsageByAccount(db) })
 })
 
 export default router
