@@ -5,13 +5,13 @@ import {
   fetchWhatsAppInstances, createWhatsAppInstance, connectWhatsAppInstance,
   checkWhatsAppStatus, refreshWhatsAppQR, disconnectWhatsApp, deleteWhatsAppInstance,
   fetchEvolutionConfig, saveEvolutionConfig, setupWhatsAppWebhook, restartWhatsAppInstance, syncWhatsAppNow, setInstanceAttendant, setInstanceMode, fetchUsers, apiFetch, fetchPublicConfig,
-  updateMetaCapi, testMetaCapi, updateAiConfig, testAnthropic, updateInstanceFirstMsgTemplate,
+  updateMetaCapi, testMetaCapi, updateAiConfig, testAnthropic,
   fetchTags, fetchTagInstanceMappings, upsertTagInstanceMapping, deleteTagInstanceMapping,
   fetchDefaultFormInstance, setDefaultFormInstance, fetchSheetsStatus, setSheetsDefaultTag,
   type WhatsAppInstance, type User as UserType, type Account, type Tag, type TagInstanceMapping,
 } from '../lib/api'
 import { Plug, Plus, Wifi, WifiOff, Loader, Trash2, QrCode, Power, PowerOff, RefreshCw, Smartphone, Save, Check, Settings, FileSpreadsheet, Copy, Webhook, RotateCw, Download, User, Eye, EyeOff, Activity, AlertTriangle, MessageSquare, Link as LinkIcon, GitBranch } from 'lucide-react'
-import InstanceAutoMessagesModal from '../components/InstanceAutoMessagesModal'
+import NumberSettingsModal from '../components/NumberSettingsModal'
 import { BlockedBanner } from '../components/BlockedBanner'
 import { parseSqlDate } from '../lib/dates'
 
@@ -33,9 +33,6 @@ export default function Integrations() {
   const isGerenteOuAdmin = user?.role === 'gerente' || user?.role === 'super_admin'
   const [instances, setInstances] = useState<WhatsAppInstance[]>([])
   const [loading, setLoading] = useState(true)
-  // First msg template editor
-  const [tplModal, setTplModal] = useState<{ inst: WhatsAppInstance; value: string } | null>(null)
-  const [tplSaving, setTplSaving] = useState(false)
   const [showNew, setShowNew] = useState(false)
   const [newName, setNewName] = useState('')
   const [newMode, setNewMode] = useState<'open' | 'restricted'>('open')
@@ -248,7 +245,7 @@ export default function Integrations() {
   }
 
   const [restarting, setRestarting] = useState<number | null>(null)
-  const [autoMsgInstance, setAutoMsgInstance] = useState<WhatsAppInstance | null>(null)
+  const [settingsInstance, setSettingsInstance] = useState<WhatsAppInstance | null>(null)
   const [sheetsLastAt, setSheetsLastAt] = useState<string | null>(null)
   const [sheetsDefaultTagId, setSheetsDefaultTagId] = useState<number | null>(null)
   const [sheetsTagSaving, setSheetsTagSaving] = useState(false)
@@ -513,16 +510,6 @@ export default function Integrations() {
                     )}
                     {inst.status === 'connected' && (
                       <>
-                        {/* Botao Msg Inicial: visivel pra todos (atendente edita SO se for primary dele — validado no back) */}
-                        {(isGerenteOuAdmin || user?.primary_instance_id === inst.id) && (
-                          <button
-                            className="btn btn-secondary btn-sm"
-                            onClick={() => setTplModal({ inst, value: inst.first_msg_template || '' })}
-                            title="Mensagem inicial automatica quando lead novo cair com esta inst como atendente"
-                          >
-                            💬 Msg inicial
-                          </button>
-                        )}
                         {(
                           <>
                             <button
@@ -541,21 +528,21 @@ export default function Integrations() {
                             >
                               {restarting === inst.id ? <Loader size={12} className="spinning" /> : <RotateCw size={12} />} Reiniciar sessao
                             </button>
-                            <button
-                              className="btn btn-secondary btn-sm"
-                              onClick={() => setAutoMsgInstance(inst)}
-                              title="Configurar saudacao, ausencia e inatividade"
-                            >
-                              <MessageSquare size={12} /> Auto-mensagens
-                            </button>
                             <button className="btn btn-secondary btn-sm" onClick={() => handleDisconnect(inst)}><PowerOff size={12} /> Desconectar</button>
                           </>
                         )}
                       </>
                     )}
-                    {(
-                      <button className="btn btn-danger btn-sm btn-icon" onClick={() => handleDelete(inst)} title="Excluir"><Trash2 size={12} /></button>
+                    {(isGerenteOuAdmin || user?.primary_instance_id === inst.id) && (
+                      <button
+                        className="btn btn-secondary btn-sm"
+                        onClick={() => setSettingsInstance(inst)}
+                        title="Primeira mensagem, horário de atendimento e ausência deste número"
+                      >
+                        <MessageSquare size={12} /> Mensagens do número
+                      </button>
                     )}
+                    <button className="btn btn-danger btn-sm btn-icon" onClick={() => handleDelete(inst)} title="Excluir"><Trash2 size={12} /></button>
                   </div>
                 </div>
               </div>
@@ -1233,80 +1220,16 @@ function onChange(e) {
         </div>
       )}
 
-      {/* Auto-Messages Modal */}
-      {autoMsgInstance && accountId && (
-        <InstanceAutoMessagesModal
-          instance={autoMsgInstance}
+      {/* Mensagens do numero: primeira mensagem, horario de atendimento e ausencia */}
+      {settingsInstance && accountId && (
+        <NumberSettingsModal
+          instance={settingsInstance}
           accountId={accountId}
-          onClose={() => setAutoMsgInstance(null)}
+          canEditFirstMessage={isGerenteOuAdmin || user?.primary_instance_id === settingsInstance.id}
+          canManageFunnels={isGerenteOuAdmin}
+          onClose={() => setSettingsInstance(null)}
+          onSaved={updated => { setInstances(prev => prev.map(i => i.id === updated.id ? updated : i)); setSettingsInstance(null) }}
         />
-      )}
-
-      {/* Modal: editor de mensagem inicial automatica */}
-      {tplModal && (
-        <div className="modal-overlay" onClick={() => !tplSaving && setTplModal(null)}>
-          <div className="modal" style={{ maxWidth: 560 }} onClick={e => e.stopPropagation()}>
-            <h2 style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-              💬 Mensagem inicial — {tplModal.inst.instance_name}
-            </h2>
-            <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 12, lineHeight: 1.5 }}>
-              Quando um lead novo for atribuido (roleta, bot ou manual) a esta instancia, essa msg sai automaticamente do numero <strong>{tplModal.inst.phone_number || tplModal.inst.instance_name}</strong> pro lead.
-              <br />Deixe em branco pra desativar.
-            </p>
-
-            <div className="form-group">
-              <label>Mensagem (use variáveis abaixo)</label>
-              <textarea
-                className="input"
-                rows={6}
-                value={tplModal.value}
-                onChange={e => setTplModal({ ...tplModal, value: e.target.value })}
-                placeholder="Ex: Olá {{primeiro_nome}}! Sou {{vendedor_primeiro_nome}}. Recebi seu interesse e gostaria de te ajudar..."
-                style={{ resize: 'vertical', fontFamily: 'inherit', fontSize: 13, lineHeight: 1.5 }}
-              />
-              <small style={{ color: 'var(--text-muted)', fontSize: 11 }}>
-                Variáveis: <code>{'{{primeiro_nome}}'}</code>, <code>{'{{nome}}'}</code>, <code>{'{{vendedor}}'}</code>, <code>{'{{vendedor_primeiro_nome}}'}</code>, <code>{'{{cidade}}'}</code>, <code>{'{{etapa}}'}</code>, <code>{'{{funil}}'}</code>
-              </small>
-            </div>
-
-            <div style={{ background: 'rgba(255,179,0,0.05)', border: '1px solid rgba(255,179,0,0.20)', borderRadius: 8, padding: '12px 14px', marginTop: 4 }}>
-              <div style={{ fontSize: 12, fontWeight: 700, color: '#FFB300', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
-                <span>ℹ️</span> Condições pra essa mensagem disparar
-              </div>
-              <ul style={{ fontSize: 11.5, color: '#B8B4C7', lineHeight: 1.7, margin: 0, paddingLeft: 18 }}>
-                <li>Lead precisa ser <strong>novo</strong> (primeira interação com essa conta) — leads que já existem não recebem</li>
-                <li>Lead precisa ter <strong>telefone válido</strong> registrado</li>
-                <li>Lead <strong>não pode estar bloqueado</strong> nem em modo restrito</li>
-                <li>Precisa ter <strong>atendente atribuído</strong> (roleta, bot ou manual) que use esta instância</li>
-                <li>Esta instância precisa estar com status <strong style={{ color: '#34C759' }}>conectada</strong> no WhatsApp</li>
-                <li>Idempotente: só dispara <strong>1x por lead</strong> — se já foi enviada antes, não repete</li>
-                <li>Se a conta tem <strong>bot IA de boas-vindas ativado</strong> pra esse lead, o bot dispara em vez desta mensagem</li>
-                <li>Campo em branco <strong>desativa</strong> — nenhuma mensagem sai automaticamente</li>
-              </ul>
-            </div>
-
-            <div className="modal-actions" style={{ marginTop: 16 }}>
-              <button className="btn btn-secondary" onClick={() => setTplModal(null)} disabled={tplSaving}>Cancelar</button>
-              <button
-                className="btn btn-primary"
-                disabled={tplSaving}
-                onClick={async () => {
-                  setTplSaving(true)
-                  try {
-                    const updated = await updateInstanceFirstMsgTemplate(tplModal.inst.id, tplModal.value.trim() || null)
-                    setInstances(prev => prev.map(i => i.id === updated.id ? updated : i))
-                    setTplModal(null)
-                  } catch (e: any) {
-                    alert('Erro: ' + (e?.message || 'desconhecido'))
-                  }
-                  setTplSaving(false)
-                }}
-              >
-                {tplSaving ? 'Salvando...' : 'Salvar'}
-              </button>
-            </div>
-          </div>
-        </div>
       )}
 
       {deleteTarget && (
