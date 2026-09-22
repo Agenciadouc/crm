@@ -2,6 +2,7 @@
 import fs from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
+import { buildUzapiConfig } from '../../server/services/whatsapp/providerConfig.js'
 
 export const UZAPI_FIXTURE_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'fixtures', 'uzapi')
 
@@ -27,6 +28,22 @@ export const UZAPI_TEST_ENV = Object.freeze({
   WA_ENC_KEY: 'ab'.repeat(32),
   PUBLIC_BASE_URL: 'https://crm.test',
 })
+
+// Numero UzAPI pronto no banco de teste (token do numero: TOKEN-INSTANCIA, cifrado com UZAPI_TEST_ENV).
+export function insertUzapiInstance(db, accountId, overrides = {}) {
+  const id = db.prepare(`
+    INSERT INTO whatsapp_instances (account_id, instance_name, api_url, api_key, status, provider, provider_config, webhook_token, phone_number)
+    VALUES (?, ?, '', '', ?, 'uzapi', ?, ?, ?)
+  `).run(
+    accountId,
+    overrides.instance_name || 'uzapi-teste',
+    overrides.status || 'connected',
+    buildUzapiConfig({ phoneNumberId: overrides.phoneNumberId || UZAPI_PNID, instanceToken: 'TOKEN-INSTANCIA' }, UZAPI_TEST_ENV),
+    overrides.webhook_token || 'c'.repeat(32),
+    overrides.phone_number ?? null,
+  ).lastInsertRowid
+  return db.prepare('SELECT * FROM whatsapp_instances WHERE id = ?').get(id)
+}
 
 export const quietLog = { error() {}, warn() {}, log() {} }
 
