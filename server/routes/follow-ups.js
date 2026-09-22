@@ -2,8 +2,16 @@ import { Router } from 'express'
 import db from '../db.js'
 import { requireRole } from '../middleware/auth.js'
 import { broadcastSSE } from '../sse.js'
+import { agentFollowUpLock } from '../services/followUpOwnership.js'
 
 const router = Router()
+
+function lockIfAgentOwned(fu, res) {
+  const agentExists = fu.agent_id ? !!db.prepare('SELECT 1 FROM ai_agents WHERE id = ?').get(fu.agent_id) : false
+  const lock = agentFollowUpLock(fu, agentExists)
+  if (lock) { res.status(lock.status).json({ error: lock.error, agent_id: lock.agent_id }); return true }
+  return false
+}
 
 // Helper: calcula next_run_at do step considerando modo absolute/relative
 export function computeNextRun(step, anchorDate) {
@@ -220,6 +228,7 @@ router.post('/', requireRole('super_admin', 'gerente'), (req, res) => {
 router.put('/:id', requireRole('super_admin', 'gerente'), (req, res) => {
   const fu = db.prepare('SELECT * FROM follow_ups WHERE id = ? AND account_id = ?').get(req.params.id, req.accountId)
   if (!fu) return res.status(404).json({ error: 'Follow-up nao encontrado' })
+  if (lockIfAgentOwned(fu, res)) return
 
   const { name, description, instance_id, stop_on_reply, is_active, steps, inactivity_stage_id, inactivity_days, inactivity_minutes, inactivity_mode, variation_delay_seconds } = req.body
   // Tipo nao muda em edit (pra simplificar — se quiser mudar de sequence pra inactivity, cria outro)
@@ -351,6 +360,7 @@ router.put('/:id', requireRole('super_admin', 'gerente'), (req, res) => {
 router.delete('/:id', requireRole('super_admin', 'gerente'), (req, res) => {
   const fu = db.prepare('SELECT * FROM follow_ups WHERE id = ? AND account_id = ?').get(req.params.id, req.accountId)
   if (!fu) return res.status(404).json({ error: 'Follow-up nao encontrado' })
+  if (lockIfAgentOwned(fu, res)) return
 
   const active = db.prepare("SELECT COUNT(*) as c FROM lead_follow_ups WHERE follow_up_id = ? AND status = 'active'").get(fu.id).c
   if (active > 0 && !req.query.force) {
