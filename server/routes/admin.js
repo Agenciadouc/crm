@@ -3,18 +3,14 @@ import fetch from 'node-fetch'
 import db from '../db.js'
 import { requireRole } from '../middleware/auth.js'
 import { uzapiUsageByAccount } from '../services/whatsapp/connectionLog.js'
+import { listAdminCheckAll } from '../services/whatsapp/instanceQueries.js'
 
 const router = Router()
 
 // ─── Check + auto-reconnect TODAS as instancias WhatsApp (admin global)
 // Usado pelo botao "Verificar todas as instancias" no painel admin
 router.post('/instances/check-all', requireRole('super_admin'), async (req, res) => {
-  const instances = db.prepare(`
-    SELECT w.id, w.instance_name, w.api_url, w.api_key, w.status, a.name as account_name
-    FROM whatsapp_instances w
-    JOIN accounts a ON a.id = w.account_id
-    ORDER BY a.name, w.instance_name
-  `).all()
+  const instances = listAdminCheckAll(db)
 
   const results = []
   for (const inst of instances) {

@@ -8,6 +8,9 @@ import { getProvider } from './services/whatsapp/index.js'
 import { handleInboundMessage } from './services/inboundRuntime.js'
 import { createWebhookRegistrar } from './services/whatsapp/webhookRegistration.js'
 import { apiUrlKey, checkApiUrlsAlive } from './services/whatsapp/evolutionHealth.js'
+import { listGhostCandidates, listDailyCheckInstances, listWebhookReRegister, cleanupStaleQRCodes as cleanupStaleQRCodesByProvider } from './services/whatsapp/instanceQueries.js'
+import { createUzapiStatusSync } from './services/whatsapp/uzapiStatusSync.js'
+import { createInstanceManager } from './services/whatsapp/instanceManager.js'
 import { aggregateAllAccounts } from './services/attendantMetrics.js'
 import { analyzeAllAccounts } from './services/conversationAnalyzer.js'
 import { generateAllCoachings, isoMonday } from './services/coachingAnalyzer.js'
@@ -181,7 +184,7 @@ async function pollMissedMessages() {
 // ─── Re-register webhooks on every health check (URL por token + MESSAGES_UPSERT/MESSAGES_UPDATE) ─────
 const webhookRegistrar = createWebhookRegistrar({ db, getProvider })
 async function reRegisterWebhooks() {
-  const instances = db.prepare("SELECT * FROM whatsapp_instances WHERE status = 'connected'").all()
+  const instances = listWebhookReRegister(db)
   for (const inst of instances) {
     try {
       const r = await webhookRegistrar.registerInstanceWebhook(inst)
@@ -192,13 +195,9 @@ async function reRegisterWebhooks() {
   }
 }
 
-// ─── Clean up stale QR codes (older than 2 minutes) ──────────────
+// ─── Clean up stale QR codes (Evolution 2 min, UzAPI 5 min) ──────────────
 function cleanupStaleQRCodes() {
-  db.prepare(`
-    UPDATE whatsapp_instances SET qr_code = NULL
-    WHERE qr_code IS NOT NULL AND status = 'connecting'
-    AND datetime(updated_at) < datetime('now', '-2 minutes')
-  `).run()
+  cleanupStaleQRCodesByProvider(db)
 }
 
 // ─── Follow-ups due ─────────────────────────────────────────────
@@ -301,7 +300,7 @@ const _ghostRestartCooldown = new Map() // instance_id -> timestamp ultimo resta
 
 async function detectGhostInstancesAndRestart() {
   try {
-    const instances = db.prepare("SELECT id, instance_name, api_url, api_key FROM whatsapp_instances WHERE status = 'connected'").all()
+    const instances = listGhostCandidates(db)
     for (const inst of instances) {
       // Cooldown — nao tenta restart de novo se ja tentou nos ultimos 15min
       const lastRestart = _ghostRestartCooldown.get(inst.id) || 0
@@ -553,11 +552,7 @@ export { pollTick as runPollNow }
 // este aqui tenta reconectar instancias que ja estavam disconnected ha tempo.
 async function dailyInstanceHealthCheck() {
   console.log('[DailyHealthCheck] Iniciando verificacao diaria das instancias...')
-  const instances = db.prepare(`
-    SELECT w.id, w.instance_name, w.api_url, w.api_key, w.status, a.name as account_name
-    FROM whatsapp_instances w
-    JOIN accounts a ON a.id = w.account_id
-  `).all()
+  const instances = listDailyCheckInstances(db)
 
   let connected = 0, reconnected = 0, qrNeeded = 0, errors = 0
 
@@ -711,6 +706,9 @@ function revertFalseFailures() {
   }
 }
 
+// ─── UzAPI: checagem de hora em hora (so status/telefone) ─────────
+const uzapiStatusSync = createUzapiStatusSync({ db, getProvider, manager: createInstanceManager({ db, getProvider }) })
+
 export function startScheduler() {
   console.log('[Scheduler] Started — main every 1 min, polling every 30s, revert-false every 10s, daily health 05h BRT')
   try { revertFalseFailures() } catch (e) { console.error('[RevertFalseFailures startup]', e.message) }
@@ -737,4 +735,8 @@ export function startScheduler() {
   }, 60 * 1000)
   // Daily instance health check (auto-reconecta disconnected)
   scheduleDailyHealthCheck()
+  // Numeros UzAPI: confere status/telefone de hora em hora (sem reiniciar, sem QR)
+  setInterval(() => {
+    uzapiStatusSync.run().catch(e => console.error('[UzAPI checagem]', e.message))
+  }, 60 * 60 * 1000)
 }
