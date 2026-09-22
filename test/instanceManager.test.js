@@ -128,17 +128,23 @@ test('applyConnection com QR: grava o QR e fica connecting', () => {
   assert.equal(r.status, 'connecting')
 })
 
-test('refreshQr: conectado, com QR, sem QR (plano B com panel_url) e UzAPI fora do ar', async () => {
+test('refreshQr: conectado, com QR (com panel_url de alternativa), sem QR (plano B com panel_url) e UzAPI fora do ar', async () => {
   let st = { ok: true, status: 'connected', phoneNumber: '554890000001', qr: null }
   const { db, seed, manager } = setup({ status: () => { if (st instanceof Error) throw st; return st } })
   const inst = insertUzapiInstance(db, seed.account.id, { status: 'connecting' })
-  assert.deepEqual((({ qr_code, status }) => ({ qr_code, status }))(await manager.refreshQr(inst)), { qr_code: null, status: 'connected' })
+  const connected = await manager.refreshQr(inst)
+  assert.deepEqual([connected.qr_code, connected.status, connected.panel_url], [null, 'connected', undefined])
 
   db.prepare("UPDATE whatsapp_instances SET status = 'connecting' WHERE id = ?").run(inst.id)
   st = { ok: true, status: 'connecting', phoneNumber: null, qr: 'data:image/png;base64,AAAABBBBCCCCDDDDEEEE' }
   const withQr = await manager.refreshQr(row(db, inst.id))
   assert.equal(withQr.qr_code, 'data:image/png;base64,AAAABBBBCCCCDDDDEEEE')
-  assert.equal(withQr.panel_url, undefined)
+  assert.equal(withQr.panel_url, 'https://painel.uzapi.test')
+
+  // QR em texto cru do WhatsApp (nao da para desenhar na tela): o painel vai junto
+  st = { ok: true, status: 'connecting', phoneNumber: null, qr: '2@QR-DE-TESTE-NAO-E-REAL,abcdefghij' }
+  const rawQr = await manager.refreshQr(row(db, inst.id))
+  assert.deepEqual([rawQr.qr_code, rawQr.status, rawQr.panel_url], ['2@QR-DE-TESTE-NAO-E-REAL,abcdefghij', 'connecting', 'https://painel.uzapi.test'])
 
   db.prepare("UPDATE whatsapp_instances SET qr_code = NULL WHERE id = ?").run(inst.id)
   st = { ok: true, status: 'connecting', phoneNumber: null, qr: null }

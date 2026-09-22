@@ -171,10 +171,13 @@ export function createInstanceManager({
     if (!current) return { instance: null, qr_code: null, status: 'disconnected' }
     // UzAPI fora do ar nao rebaixa numero conectado
     if (!st.ok && current.status === 'connected') return { instance: current, qr_code: null, status: 'connected', error: st.reason || 'provider_error' }
+    // panel_url vai em toda resposta nao conectada: o QR pode vir em texto cru ("2@...") que a tela
+    // nao desenha, e o painel da UzAPI fica como alternativa para ler o QR.
+    const panelUrl = getUzapiEnv(env).panelUrl
     const qr = st.qr || current.qr_code || null
-    if (qr) return { instance: applyConnection(current, { qr }), qr_code: qr, status: 'connecting' }
+    if (qr) return { instance: applyConnection(current, { qr }), qr_code: qr, status: 'connecting', panel_url: panelUrl }
     db.prepare("UPDATE whatsapp_instances SET status = 'connecting', updated_at = datetime('now') WHERE id = ?").run(current.id)
-    return { instance: byId(current.id), qr_code: null, status: 'connecting', panel_url: getUzapiEnv(env).panelUrl }
+    return { instance: byId(current.id), qr_code: null, status: 'connecting', panel_url: panelUrl }
   }
 
   async function checkStatus(instance) {
