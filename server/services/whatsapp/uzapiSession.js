@@ -92,6 +92,7 @@ export function createUzapiSession({ client, env = process.env, log = console })
       const { cfg, error } = tryReadUzapiConfig(instance, env)
       if (error) throw codedError(error)
       const cur = await client.request('GET', phonePath(cfg.phoneNumberId, 'instance'), { token: cfg.instanceToken })
+      if (!cur.ok) throw codedError('uzapi_update_failed', `uzapi_update_failed: ${reasonFromResponse(cur)}`)
       const d = unwrap(cur.data)
       const body = { authenticationMethod: d.authenticationMethod || 'QRCode', webhook: url, webhookEvents: { ...UZAPI_WEBHOOK_EVENTS } }
       for (const k of ['name', 'appVersion', 'autoRejectCall', 'answerMissedCall']) {

@@ -82,6 +82,13 @@ test('registerWebhook: le a instancia e faz PUT /instance/update mantendo os dem
   await assert.rejects(() => make(fakeFetch((u, i) => i.method === 'GET' ? { json: {} } : { status: 500, json: {} })).registerWebhook(inst, WEBHOOK), /uzapi_update_failed/)
 })
 
+test('registerWebhook: GET preliminar falha -> rejeita e nao chama o PUT', async () => {
+  const f = fakeFetch(() => ({ status: 500, json: {} }))
+  await assert.rejects(() => make(f).registerWebhook(inst, WEBHOOK), /uzapi_update_failed/)
+  assert.equal(f.calls.length, 1)
+  assert.equal(f.calls[0].init.method, 'GET')
+})
+
 test('disconnect, restart e remove: rotas e metodos certos; falha vira ok:false', async () => {
   const f = fakeFetch(() => ({ status: 201, json: {} }))
   const a = make(f)
