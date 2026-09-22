@@ -13,8 +13,14 @@ export function agentFollowUpLock(fu, agentExists) {
 // `agentExists` acima: o agent_id do follow-up so "trava" enquanto apontar pra um
 // agente ATIVO da MESMA conta do follow-up. Um agente apagado (soft delete,
 // is_active = 0) ou de outra conta nao trava mais a edicao na pagina Follow-ups.
+// A conta tambem precisa estar com os agentes de IA LIGADOS: com a feature desligada,
+// a pagina Agentes de IA vem vazia e o editor do agente responde 403 — travar aqui
+// deixaria a linha sem nenhum caminho de edicao.
 export function agentIsActiveOwner(db, fu) {
   if (!fu || !fu.agent_id) return false
-  return !!db.prepare('SELECT 1 FROM ai_agents WHERE id = ? AND account_id = ? AND is_active = 1')
-    .get(fu.agent_id, fu.account_id)
+  return !!db.prepare(`
+    SELECT 1 FROM ai_agents a
+    JOIN accounts acc ON acc.id = a.account_id
+    WHERE a.id = ? AND a.account_id = ? AND a.is_active = 1 AND acc.ai_agents_enabled = 1
+  `).get(fu.agent_id, fu.account_id)
 }
