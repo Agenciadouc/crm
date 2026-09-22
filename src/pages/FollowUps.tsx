@@ -1,13 +1,14 @@
 import { useState, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useAccount } from '../context/AccountContext'
 import {
   fetchFollowUps, createFollowUp, updateFollowUp, deleteFollowUp,
   fetchWhatsAppInstances, fetchFunnels, fetchUsers, fetchTags,
-  fetchAvailableGlobalTemplates, applyGlobalFollowUpHere,
+  fetchAvailableGlobalTemplates, applyGlobalFollowUpHere, fetchAgents,
   type FollowUp, type FollowUpStep, type WhatsAppInstance, type Funnel, type User, type Tag,
   type GlobalFollowUpAvailable,
 } from '../lib/api'
-import { Zap, Plus, Edit3, Trash2, MessageSquare, Clock, Smartphone, Trash, Calendar, Activity, Layers, Download, ChevronDown, ChevronUp } from 'lucide-react'
+import { Zap, Plus, Edit3, Trash2, MessageSquare, Clock, Smartphone, Trash, Calendar, Activity, Layers, Download, ChevronDown, ChevronUp, Bot } from 'lucide-react'
 
 type StepDraft = {
   delay_value: number
@@ -57,6 +58,9 @@ const BLANK_STEP_INACT_SEQ: StepDraft = { delay_value: 0, delay_unit: 'hours', m
 
 export default function FollowUps() {
   const { accountId } = useAccount()
+  const navigate = useNavigate()
+  const [agentNames, setAgentNames] = useState<Record<number, string>>({})
+  const [activeAgentIds, setActiveAgentIds] = useState<Set<number>>(new Set())
   const [followUps, setFollowUps] = useState<FollowUp[]>([])
   const [instances, setInstances] = useState<WhatsAppInstance[]>([])
   const [funnels, setFunnels] = useState<Funnel[]>([])
@@ -100,13 +104,16 @@ export default function FollowUps() {
       fetchUsers(accountId),
       fetchTags(accountId),
       fetchAvailableGlobalTemplates(accountId).then(d => d.follow_ups).catch(() => []),
-    ]).then(([fus, insts, fns, usrs, tgs, globs]) => {
+      fetchAgents(accountId).then(d => d.agents).catch(() => []),
+    ]).then(([fus, insts, fns, usrs, tgs, globs, agents]) => {
       setFollowUps(fus)
       setInstances(insts)
       setFunnels(fns)
       setUsers(usrs.filter(u => u.is_active === 1))
       setTags(tgs)
       setGlobals(globs)
+      setAgentNames(Object.fromEntries(agents.map(a => [a.id, a.name])))
+      setActiveAgentIds(new Set(agents.filter(a => a.is_active).map(a => a.id)))
     }).finally(() => setLoading(false))
   }
   useEffect(load, [accountId])
@@ -303,6 +310,10 @@ export default function FollowUps() {
   // Lista de stages pra select de inatividade
   const allStages = funnels.flatMap(f => (f.stages || []).map(s => ({ ...s, funnel_name: f.name })))
 
+  // Follow-up de agente so fica travado (editavel so no agente) enquanto o agente estiver ativo;
+  // agente apagado (soft delete) volta a ser editavel normal aqui.
+  const isAgentOwned = (fu: FollowUp) => !!fu.agent_id && activeAgentIds.has(fu.agent_id)
+
   return (
     <div>
       <div className="page-header">
@@ -364,6 +375,13 @@ export default function FollowUps() {
         />
       )}
 
+      {followUps.some(isAgentOwned) && (
+        <div className="card" style={{ display: 'flex', gap: 8, alignItems: 'flex-start', padding: 12, marginBottom: 12, fontSize: 12, color: 'var(--text-muted)' }}>
+          <Bot size={16} style={{ color: '#FFB300', flexShrink: 0 }} />
+          <span>Os follow-ups dos agentes de IA são configurados no próprio agente (Agentes de IA → editar o agente → aba Atendimento). Aqui eles aparecem só para consulta.</span>
+        </div>
+      )}
+
       {loading ? (
         <div className="loading-container"><div className="spinner" /></div>
       ) : followUps.length === 0 ? (
@@ -390,7 +408,9 @@ export default function FollowUps() {
                 <tr key={fu.id}>
                   <td><strong>{fu.name}</strong></td>
                   <td style={{ fontSize: 11 }}>
-                    {fu.type === 'inactivity' ? (
+                    {isAgentOwned(fu) ? (
+                      <span style={{ color: '#FFB300' }}><Bot size={10} style={{ verticalAlign: -1 }} /> Agente: {agentNames[fu.agent_id as number] || `#${fu.agent_id}`}</span>
+                    ) : fu.type === 'inactivity' ? (
                       <span style={{ color: '#FF8A2B' }}><Activity size={10} style={{ verticalAlign: -1 }} /> Inatividade</span>
                     ) : (
                       <span style={{ color: '#5DADE2' }}><Clock size={10} style={{ verticalAlign: -1 }} /> Sequência</span>
@@ -405,12 +425,20 @@ export default function FollowUps() {
                   <td>{fu.active_leads || 0}</td>
                   <td style={{ fontSize: 11, color: 'var(--text-muted)' }}>{fu.created_by_name || '—'}</td>
                   <td style={{ textAlign: 'right' }}>
-                    <button className="btn btn-secondary btn-sm" onClick={() => openEdit(fu)} title="Editar" style={{ marginRight: 4 }}>
-                      <Edit3 size={12} />
-                    </button>
-                    <button className="btn btn-danger btn-sm" onClick={() => handleDelete(fu)} title="Apagar">
-                      <Trash2 size={12} />
-                    </button>
+                    {isAgentOwned(fu) ? (
+                      <button className="btn btn-secondary btn-sm" onClick={() => navigate(`/agents?editar=${fu.agent_id}&aba=atendimento`)} title="Este follow-up é configurado no agente">
+                        <Bot size={12} /> Editar no agente
+                      </button>
+                    ) : (
+                      <>
+                        <button className="btn btn-secondary btn-sm" onClick={() => openEdit(fu)} title="Editar" style={{ marginRight: 4 }}>
+                          <Edit3 size={12} />
+                        </button>
+                        <button className="btn btn-danger btn-sm" onClick={() => handleDelete(fu)} title="Apagar">
+                          <Trash2 size={12} />
+                        </button>
+                      </>
+                    )}
                   </td>
                 </tr>
               ))}

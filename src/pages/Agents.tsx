@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useAccount } from '../context/AccountContext'
 import {
   fetchAgents, deleteAgent, toggleAgentActive,
@@ -7,7 +7,7 @@ import {
   type Agent,
 } from '../lib/api'
 import { Bot, Plus, Edit3, Trash2, Activity, AlertCircle, Power, PowerOff, X, MessageSquare } from 'lucide-react'
-import AgentEditorModal from '../components/AgentEditorModal'
+import AgentEditorModal, { type AgentEditorTab } from '../components/AgentEditorModal'
 
 export default function Agents() {
   const navigate = useNavigate()
@@ -18,6 +18,8 @@ export default function Agents() {
   const [hasApiKey, setHasApiKey] = useState(true)
   const [loading, setLoading] = useState(true)
   const [editingId, setEditingId] = useState<number | null>(null)
+  const [searchParams, setSearchParams] = useSearchParams()
+  const [editingTab, setEditingTab] = useState<AgentEditorTab | undefined>(undefined)
   const [togglingId, setTogglingId] = useState<number | null>(null)
   const [deleteConfirmId, setDeleteConfirmId] = useState<number | null>(null)
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'info' } | null>(null)
@@ -38,6 +40,21 @@ export default function Agents() {
     fetchBriefingDrafts(accountId).then(setDrafts).catch(() => setDrafts([]))
   }
   useEffect(load, [accountId])
+
+  // Abre o editor direto por link: /agents?editar=12&aba=atendimento (usado pela pagina Follow-ups)
+  useEffect(() => {
+    const id = Number(searchParams.get('editar'))
+    if (!id) return
+    const aba = searchParams.get('aba')
+    setEditingTab(aba === 'geral' || aba === 'perfil' || aba === 'atendimento' || aba === 'resultados' ? aba : undefined)
+    setEditingId(id)
+  }, [searchParams])
+
+  const closeEditor = () => {
+    setEditingId(null)
+    setEditingTab(undefined)
+    if (searchParams.get('editar')) setSearchParams({}, { replace: true })
+  }
 
   const handleDelete = async (a: Agent) => {
     if (!accountId) return
@@ -96,7 +113,7 @@ export default function Agents() {
         <div className="card" style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: 14, marginBottom: 16, background: 'rgba(255,179,0,0.07)', border: '1px solid rgba(255,179,0,0.3)' }}>
           <AlertCircle size={20} style={{ color: '#FFB300', flexShrink: 0, marginTop: 2 }} />
           <div style={{ fontSize: 13, lineHeight: 1.5 }}>
-            <strong style={{ color: '#FFCB45' }}>Falta cadastrar a API Anthropic.</strong> Os agentes de IA estão habilitados, mas <strong>não respondem</strong> até você cadastrar sua chave Anthropic em <strong>Integrações → Agentes de IA — API Anthropic</strong>. Toda a IA desta conta usa a sua própria conta Anthropic.
+            <strong style={{ color: '#FFCB45' }}>Falta cadastrar a API Anthropic.</strong> Os agentes de IA estão habilitados, mas <strong>não respondem</strong> até você cadastrar sua chave Anthropic em <button type="button" onClick={() => navigate('/integrations?card=ia')} style={{ background: 'none', border: 'none', padding: 0, color: '#FFCB45', fontWeight: 700, cursor: 'pointer', fontSize: 13 }}>Integrações → IA</button>. Toda a IA desta conta usa a sua própria conta Anthropic.
           </div>
         </div>
       )}
@@ -221,7 +238,7 @@ export default function Agents() {
                           }}>
                           <MessageSquare size={14} />
                         </button>
-                        <button className="btn btn-secondary btn-sm btn-icon" onClick={() => setEditingId(a.id)} title="Editar"><Edit3 size={11} /></button>
+                        <button className="btn btn-secondary btn-sm btn-icon" onClick={() => { setEditingTab(undefined); setEditingId(a.id) }} title="Editar"><Edit3 size={11} /></button>
                         <button className="btn btn-danger btn-sm btn-icon" onClick={() => handleDelete(a)} title="Apagar"><Trash2 size={11} /></button>
                       </div>
                     </div>
@@ -254,8 +271,9 @@ export default function Agents() {
         <AgentEditorModal
           agentId={editingId}
           accountId={accountId}
-          onClose={() => setEditingId(null)}
-          onSaved={() => { setEditingId(null); load() }}
+          initialTab={editingTab}
+          onClose={closeEditor}
+          onSaved={() => { closeEditor(); load() }}
         />
       )}
 

@@ -7,7 +7,7 @@ import { agentFollowUpLock } from '../services/followUpOwnership.js'
 const router = Router()
 
 function lockIfAgentOwned(fu, res) {
-  const agentExists = fu.agent_id ? !!db.prepare('SELECT 1 FROM ai_agents WHERE id = ?').get(fu.agent_id) : false
+  const agentExists = fu.agent_id ? !!db.prepare('SELECT 1 FROM ai_agents WHERE id = ? AND account_id = ? AND is_active = 1').get(fu.agent_id, fu.account_id) : false
   const lock = agentFollowUpLock(fu, agentExists)
   if (lock) { res.status(lock.status).json({ error: lock.error, agent_id: lock.agent_id }); return true }
   return false
