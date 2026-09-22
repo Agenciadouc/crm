@@ -1,6 +1,7 @@
 import { Router } from 'express'
 import db from '../db.js'
 import { requireRole } from '../middleware/auth.js'
+import { funnelUpdateTarget } from '../services/funnelScope.js'
 
 const router = Router()
 
@@ -104,8 +105,10 @@ router.put('/:id', requireRole('super_admin', 'gerente'), (req, res) => {
   if (is_active !== undefined) { sets.push('is_active = ?'); params.push(is_active ? 1 : 0) }
   if (first_msg_template !== undefined) { sets.push('first_msg_template = ?'); params.push(first_msg_template || null) }
   if (sets.length === 0) return res.status(400).json({ error: 'Nada pra atualizar' })
-  params.push(req.params.id)
-  db.prepare(`UPDATE funnels SET ${sets.join(', ')} WHERE id = ?`).run(...params)
+  // So funil da propria conta (super_admin alcanca qualquer uma)
+  const target = funnelUpdateTarget(req.user.role, req.accountId, req.params.id)
+  const info = db.prepare(`UPDATE funnels SET ${sets.join(', ')} WHERE ${target.where}`).run(...params, ...target.params)
+  if (info.changes === 0) return res.status(404).json({ error: 'Funil não encontrado' })
   const funnel = db.prepare('SELECT * FROM funnels WHERE id = ?').get(req.params.id)
   funnel.stages = db.prepare('SELECT * FROM funnel_stages WHERE funnel_id = ? ORDER BY position').all(funnel.id)
   res.json({ funnel })
