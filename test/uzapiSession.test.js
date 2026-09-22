@@ -38,7 +38,15 @@ test('createInstance: erros com codigo', async () => {
   await assert.rejects(() => make(fakeFetch(() => ({ json: {} })), { ...UZAPI_TEST_ENV, UZAPI_ACCOUNT_TOKEN: '' }).createInstance({ name: 'x', webhookUrl: WEBHOOK }), (e) => e.code === 'uzapi_not_configured')
   await assert.rejects(() => make(fakeFetch(() => ({ status: 401, json: {} }))).createInstance({ name: 'x', webhookUrl: WEBHOOK }), (e) => e.code === 'provider_auth')
   await assert.rejects(() => make(fakeFetch(() => ({ status: 409, json: { message: 'ja existe' } }))).createInstance({ name: 'x', webhookUrl: WEBHOOK }), (e) => e.code === 'uzapi_create_failed')
-  await assert.rejects(() => make(fakeFetch(() => ({ status: 201, json: { ok: true } }))).createInstance({ name: 'x', webhookUrl: WEBHOOK }), (e) => e.code === 'uzapi_create_incomplete')
+  await assert.rejects(() => make(fakeFetch(() => ({ status: 201, json: { ok: true } }))).createInstance({ name: 'x', webhookUrl: WEBHOOK }), (e) => e.code === 'uzapi_create_incomplete' && e.phoneNumberId === null)
+})
+
+test('createInstance: uzapi_create_incomplete carrega o phoneNumberId (quando veio na resposta) para limpeza manual', async () => {
+  const f = fakeFetch(() => ({ status: 201, json: { phone_number_id: '100000000000009' } }))
+  await assert.rejects(
+    () => make(f).createInstance({ name: 'x', webhookUrl: WEBHOOK }),
+    (e) => e.code === 'uzapi_create_incomplete' && e.phoneNumberId === '100000000000009'
+  )
 })
 
 test('extractInstanceCredentials aceita os nomes de campo provaveis', () => {

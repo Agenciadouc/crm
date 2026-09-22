@@ -76,7 +76,9 @@ export function createUzapiSession({ client, env = process.env, log = console })
       }
       if (!creds.phoneNumberId || !creds.instanceToken) {
         log.error(`[UzAPI] /instance/add sem phone_number_id ou token; campos recebidos: ${Object.keys(unwrap(r.data)).join(',')}`)
-        throw codedError('uzapi_create_incomplete')
+        const err = codedError('uzapi_create_incomplete')
+        err.phoneNumberId = creds.phoneNumberId || null
+        throw err
       }
       return { ...creds, qr: extractQr(unwrap(r.data)) }
     },

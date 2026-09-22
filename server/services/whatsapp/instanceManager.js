@@ -3,7 +3,7 @@
 // A Evolution continua com o codigo de sempre em routes/integrations.js.
 import { generateWebhookToken } from './schema.js'
 import { buildInstanceWebhookUrl } from '../publicUrl.js'
-import { buildUzapiConfig, hasEncryptionKey } from './providerConfig.js'
+import { buildUzapiConfig, hasEncryptionKey, readUzapiPhoneNumberId } from './providerConfig.js'
 import { isUzapiConfigured, getUzapiEnv } from './uzapiClient.js'
 import { logConnectionEvent } from './connectionLog.js'
 
@@ -60,16 +60,39 @@ export function createInstanceManager({ db, getProvider, env = process.env, log 
     try {
       created = await getProvider({ provider: 'uzapi' }).createInstance({ name: instanceName, webhookUrl })
     } catch (e) {
-      log.error('[UzAPI criar numero]', e.code || '', e.message)
+      log.error('[UzAPI criar numero]', e.code || '', e.message, e.phoneNumberId ? `phoneNumberId=${e.phoneNumberId}` : '')
       throw new ProviderError(e.code || 'uzapi_create_failed', 'Não foi possível criar o número na UzAPI. Tente de novo em instantes.', 502)
     }
-    const r = db.prepare(`
-      INSERT INTO whatsapp_instances (account_id, instance_name, api_url, api_key, status, qr_code, lead_intake_mode, warmup_until, provider, provider_config, webhook_token)
-      VALUES (?, ?, '', '', 'connecting', ?, ?, datetime('now', '+3 days'), 'uzapi', ?, ?)
-    `).run(accountId, instanceName, created.qr || null, leadIntakeMode, buildUzapiConfig(created, env), webhookToken)
-    const instance = byId(r.lastInsertRowid)
-    logConnectionEvent(db, instance, 'created')
-    return instance
+    // Do ponto aqui em diante o numero ja existe na UzAPI: se gravar no banco falhar (indice unico,
+    // banco ocupado, cifra), exclui na UzAPI (best-effort) para nao ficar cobrando numero orfao.
+    try {
+      const providerConfig = buildUzapiConfig(created, env)
+      const r = db.prepare(`
+        INSERT INTO whatsapp_instances (account_id, instance_name, api_url, api_key, status, qr_code, lead_intake_mode, warmup_until, provider, provider_config, webhook_token)
+        VALUES (?, ?, '', '', 'connecting', ?, ?, datetime('now', '+3 days'), 'uzapi', ?, ?)
+      `).run(accountId, instanceName, created.qr || null, leadIntakeMode, providerConfig, webhookToken)
+      const instance = byId(r.lastInsertRowid)
+      logConnectionEvent(db, instance, 'created')
+      return instance
+    } catch (e) {
+      await cleanupOrphanUzapiInstance(created, instanceName)
+      throw new ProviderError('uzapi_create_failed', 'O número foi criado na UzAPI mas não foi possível salvá-lo no CRM. Tente de novo.', 502)
+    }
+  }
+
+  // Numero criado na UzAPI mas que nao entrou no banco: exclui na UzAPI (best-effort, com tempo
+  // limite) para nao gerar cobranca por numero orfao. Nunca loga o token, so o phoneNumberId.
+  async function cleanupOrphanUzapiInstance(created, instanceName) {
+    let providerConfig = null
+    try { providerConfig = buildUzapiConfig(created, env) } catch { /* sem config valida: pula a exclusao */ }
+    if (!providerConfig) {
+      log.error(`[UzAPI criar numero] falha ao gravar e nao foi possivel montar a config para excluir; exclua manualmente no painel (phoneNumberId=${created.phoneNumberId})`)
+      return
+    }
+    const temp = { id: null, provider: 'uzapi', instance_name: instanceName, provider_config: providerConfig }
+    const attempt = Promise.resolve().then(() => getProvider(temp).remove(temp)).catch(e => ({ ok: false, reason: e.message }))
+    const r = await withTimeout(attempt, removeTimeoutMs, { ok: false, reason: `timeout ${removeTimeoutMs}ms` })
+    if (!r.ok) log.error(`[UzAPI criar numero] falha ao gravar no CRM; exclusao na UzAPI tambem falhou, exclua manualmente no painel (phoneNumberId=${created.phoneNumberId}): ${r.reason}`)
   }
 
   // Sincrono (chamado pelo webhook). connected: limpa QR, 1a conexao em connected_at; QR: grava e fica connecting.
@@ -116,6 +139,7 @@ export function createInstanceManager({ db, getProvider, env = process.env, log 
       return { instance: applyStatus(instance, st), qr_code: null, status: 'connected' }
     }
     const current = byId(instance.id)
+    if (!current) return { instance: null, qr_code: null, status: 'disconnected' }
     const qr = st.qr || current.qr_code || null
     if (qr) return { instance: applyConnection(current, { qr }), qr_code: qr, status: 'connecting' }
     db.prepare("UPDATE whatsapp_instances SET status = 'connecting', updated_at = datetime('now') WHERE id = ?").run(current.id)
@@ -142,7 +166,7 @@ export function createInstanceManager({ db, getProvider, env = process.env, log 
   async function remove(instance) {
     const attempt = Promise.resolve().then(() => getProvider(instance).remove(instance)).catch(e => ({ ok: false, reason: e.message }))
     const r = await withTimeout(attempt, removeTimeoutMs, { ok: false, reason: `timeout ${removeTimeoutMs}ms` })
-    if (!r.ok) log.error(`[UzAPI excluir] ${instance.instance_name}: ${r.reason}`)
+    if (!r.ok) log.error(`[UzAPI excluir] ${instance.instance_name} (phoneNumberId=${readUzapiPhoneNumberId(instance)}): ${r.reason}`)
     logConnectionEvent(db, instance, 'removed')
     db.prepare('DELETE FROM whatsapp_instances WHERE id = ?').run(instance.id)
     return { ok: true, providerOk: !!r.ok }

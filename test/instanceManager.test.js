@@ -22,15 +22,33 @@ function fakeUzapi(overrides = {}) {
   return { adapter, calls }
 }
 
-function setup(overrides = {}, env = UZAPI_TEST_ENV) {
+function setup(overrides = {}, env = UZAPI_TEST_ENV, log = quietLog) {
   const db = createTestDb()
   const seed = seedBasic(db)
   const { adapter, calls } = fakeUzapi(overrides)
-  const manager = createInstanceManager({ db, getProvider: () => adapter, env, log: quietLog, removeTimeoutMs: 50 })
+  const manager = createInstanceManager({ db, getProvider: () => adapter, env, log, removeTimeoutMs: 50 })
   return { db, seed, manager, calls }
 }
 const row = (db, id) => db.prepare('SELECT * FROM whatsapp_instances WHERE id = ?').get(id)
 const logs = (db) => db.prepare('SELECT instance_id, provider, event FROM whatsapp_connection_log ORDER BY id').all()
+
+// Log falso que guarda as mensagens de erro (junta os argumentos numa string) para conferir o que foi logado.
+function capturingLog() {
+  const errors = []
+  return { log: { error: (...args) => errors.push(args.join(' ')), warn() {}, log() {} }, errors }
+}
+
+// Faz o INSERT de criacao do numero UzAPI (o unico com provider_config na lista de colunas) falhar,
+// simulando SQLITE_BUSY/colisao de indice/etc depois que o numero ja existe na UzAPI.
+function breakUzapiInsert(db) {
+  const real = db.prepare.bind(db)
+  db.prepare = (sql) => {
+    if (sql.includes('INSERT INTO whatsapp_instances') && sql.includes('provider_config')) {
+      return { run: () => { throw new Error('SQLITE_BUSY: database is locked') } }
+    }
+    return real(sql)
+  }
+}
 
 test('criar numero UzAPI: cria na UzAPI com o webhook do numero, grava provider/config cifrada, aquecimento e registro', async () => {
   const { db, seed, manager, calls } = setup()
@@ -63,6 +81,26 @@ test('criar numero UzAPI: sem credenciais da Dros, sem WA_ENC_KEY, nome repetido
   const { seed, manager, calls } = setup()
   await assert.rejects(() => manager.createUzapiInstance({ accountId: seed.account.id, instanceName: 'inst-teste' }), (e) => e.code === 'instance_name_taken' && e.status === 409)
   assert.equal(calls.createInstance.length, 0)
+})
+
+test('criar numero UzAPI: falha ao gravar no CRM depois de criado na UzAPI -> exclui na UzAPI (best-effort) e ProviderError uzapi_create_failed', async () => {
+  const { db, seed, manager, calls } = setup()
+  breakUzapiInsert(db)
+  await assert.rejects(
+    () => manager.createUzapiInstance({ accountId: seed.account.id, instanceName: 'Nova' }),
+    (e) => e instanceof ProviderError && e.code === 'uzapi_create_failed' && e.status === 502
+  )
+  assert.equal(calls.remove.length, 1)
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM whatsapp_instances WHERE instance_name = 'Nova'").get().n, 0)
+})
+
+test('criar numero UzAPI: uzapi_create_incomplete registra o phoneNumberId para limpeza manual, nunca o token', async () => {
+  const { errors, log } = capturingLog()
+  const { seed, manager } = setup({ createInstance: () => { const e = new Error('uzapi_create_incomplete'); e.code = 'uzapi_create_incomplete'; e.phoneNumberId = '100000000000009'; throw e } }, UZAPI_TEST_ENV, log)
+  await assert.rejects(() => manager.createUzapiInstance({ accountId: seed.account.id, instanceName: 'Nova' }), (e) => e.code === 'uzapi_create_incomplete')
+  const joined = errors.join(' | ')
+  assert.match(joined, /100000000000009/)
+  assert.doesNotMatch(joined, /TOKEN/)
 })
 
 test('applyConnection: connected limpa QR, grava connected_at e telefone e registra uma vez; disconnected registra', () => {
@@ -112,6 +150,15 @@ test('refreshQr: conectado, com QR, sem QR (plano B com panel_url) e UzAPI fora 
   assert.equal(down.panel_url, 'https://painel.uzapi.test')
 })
 
+test('refreshQr: numero apagado durante a chamada nao lanca (cai para disconnected)', async () => {
+  const { db, seed, manager } = setup({
+    status: async (i) => { db.prepare('DELETE FROM whatsapp_instances WHERE id = ?').run(i.id); return { ok: true, status: 'connecting', phoneNumber: null, qr: null } },
+  })
+  const inst = insertUzapiInstance(db, seed.account.id, { status: 'connecting' })
+  const r = await manager.refreshQr(inst)
+  assert.deepEqual(r, { instance: null, qr_code: null, status: 'disconnected' })
+})
+
 test('checkStatus: aplica o status da UzAPI; erro da UzAPI nao derruba o numero', async () => {
   let st = { ok: true, status: 'connected', phoneNumber: '554890000001', qr: null }
   const { db, seed, manager } = setup({ status: () => st })
@@ -139,6 +186,17 @@ test('remove: exclui na UzAPI (best-effort, com tempo limite), registra removed 
   assert.deepEqual(calls.remove, [inst.id])
   assert.equal(row(db, inst.id), undefined)
   assert.deepEqual(logs(db).map(l => l.event), ['removed'])
+})
+
+test('remove: quando a exclusao na UzAPI falha, o log traz o phoneNumberId (nunca o token)', async () => {
+  const { errors, log } = capturingLog()
+  const { db, seed, manager } = setup({ remove: () => ({ ok: false, reason: 'provider_error' }) }, UZAPI_TEST_ENV, log)
+  const inst = insertUzapiInstance(db, seed.account.id)
+  const r = await manager.remove(inst)
+  assert.deepEqual(r, { ok: true, providerOk: false })
+  const joined = errors.join(' | ')
+  assert.match(joined, /100000000000001/)
+  assert.doesNotMatch(joined, /TOKEN-INSTANCIA/)
 })
 
 test('listAvailableProviders: UzAPI so com usuario e token da conta', () => {
