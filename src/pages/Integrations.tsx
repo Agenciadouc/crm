@@ -205,8 +205,8 @@ export default function Integrations() {
   const handleRefreshQR = async (inst: WhatsAppInstance) => {
     if (!accountId) return
     try {
-      const updated = await refreshWhatsAppQR(inst.id, accountId)
-      setInstances(prev => prev.map(i => i.id === updated.id ? updated : i))
+      const r = await refreshWhatsAppQR(inst.id, accountId)
+      setInstances(prev => prev.map(i => i.id === inst.id ? { ...i, qr_code: r.qr_code, status: r.status } : i))
     } catch (e: any) { alert('Erro: ' + e.message) }
   }
 

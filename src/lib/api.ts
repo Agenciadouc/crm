@@ -1,3 +1,6 @@
+import { normalizeProviders, type WhatsAppProviderId } from './whatsappProviders.js'
+export type { WhatsAppProviderId }
+
 const getToken = () => localStorage.getItem('dros_crm_token')
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, '')
 
@@ -58,7 +61,7 @@ export interface DashboardStats {
   daily: { date: string; count: number }[]
 }
 export interface AgentStat { id: number; name: string; is_active: number; leads_period: number; leads_total: number; conversions: number }
-export interface WhatsAppInstance { id: number; account_id: number; instance_name: string; api_url: string; api_key: string; status: string; phone_number: string | null; qr_code: string | null; default_attendant_id: number | null; lead_intake_mode?: 'open' | 'restricted'; first_msg_template?: string | null }
+export interface WhatsAppInstance { id: number; account_id: number; instance_name: string; api_url: string; api_key: string; status: string; phone_number: string | null; qr_code: string | null; default_attendant_id: number | null; lead_intake_mode?: 'open' | 'restricted'; first_msg_template?: string | null; provider?: WhatsAppProviderId | string }
 export interface Broadcast {
   id: number; account_id?: number; name: string; message_template: string; message_variations?: string | null
   status: string; sent_count: number; failed_count: number; total_count: number
@@ -102,6 +105,8 @@ export const fetchFunnels = (accountId: number) => apiFetch<{ funnels: Funnel[] 
 export const createFunnel = (accountId: number, data: { name: string; stages: Partial<FunnelStage>[] }) => apiFetch<{ funnel: Funnel }>(`/api/funnels?account_id=${accountId}`, { method: 'POST', body: JSON.stringify(data) }).then(d => d.funnel)
 export const fetchFunnel = (id: number, accountId: number) => apiFetch<{ funnel: Funnel }>(`/api/funnels/${id}?account_id=${accountId}`).then(d => d.funnel)
 export const updateFunnelStages = (id: number, accountId: number, stages: Partial<FunnelStage>[]) => apiFetch(`/api/funnels/${id}/stages?account_id=${accountId}`, { method: 'PUT', body: JSON.stringify({ stages }) })
+export const updateFunnelFirstMessage = (funnelId: number, accountId: number, template: string | null) =>
+  apiFetch(`/api/funnels/${funnelId}?account_id=${accountId}`, { method: 'PUT', body: JSON.stringify({ first_msg_template: template }) })
 
 // Leads
 export interface LeadFilters { stage_id?: number | string; attendant_id?: number | string; instance_id?: number | string; funnel_id?: number; source?: string; city?: string; tag?: number | string; search?: string; date_from?: string; date_to?: string; show_archived?: '1' | 'all'; page?: number; limit?: number }
@@ -412,12 +417,24 @@ export interface EvolutionConfig { api_url: string | null; api_key: string | nul
 export const fetchEvolutionConfig = (accountId: number) => apiFetch<EvolutionConfig>(`/api/integrations/evolution-config?account_id=${accountId}`)
 export const saveEvolutionConfig = (accountId: number, data: { api_url: string; api_key: string }) => apiFetch(`/api/integrations/evolution-config?account_id=${accountId}`, { method: 'PUT', body: JSON.stringify(data) })
 export const fetchPublicConfig = () => apiFetch<{ public_base_url: string }>('/api/integrations/public-config')
+export const fetchWhatsAppProviders = (accountId: number): Promise<WhatsAppProviderId[]> =>
+  apiFetch<unknown>(`/api/integrations/whatsapp/providers?account_id=${accountId}`)
+    .then(normalizeProviders)
+    .catch(() => ['evolution'] as WhatsAppProviderId[])
 
 export const fetchWhatsAppInstances = (accountId: number) => apiFetch<{ instances: WhatsAppInstance[] }>(`/api/integrations/whatsapp?account_id=${accountId}`).then(d => d.instances)
-export const createWhatsAppInstance = (accountId: number, data: { instance_name: string; lead_intake_mode?: 'open' | 'restricted' }) => apiFetch<{ instance: WhatsAppInstance }>(`/api/integrations/whatsapp?account_id=${accountId}`, { method: 'POST', body: JSON.stringify(data) }).then(d => d.instance)
+export const createWhatsAppInstance = (accountId: number, data: { instance_name: string; lead_intake_mode?: 'open' | 'restricted'; provider?: WhatsAppProviderId }) => apiFetch<{ instance: WhatsAppInstance }>(`/api/integrations/whatsapp?account_id=${accountId}`, { method: 'POST', body: JSON.stringify(data) }).then(d => d.instance)
 export const connectWhatsAppInstance = (id: number, accountId: number) => apiFetch<{ instance: WhatsAppInstance }>(`/api/integrations/whatsapp/${id}/connect?account_id=${accountId}`, { method: 'POST' }).then(d => d.instance)
 export const checkWhatsAppStatus = (id: number, accountId: number) => apiFetch<{ instance: WhatsAppInstance; state: string }>(`/api/integrations/whatsapp/${id}/status?account_id=${accountId}`)
-export const refreshWhatsAppQR = (id: number, accountId: number) => apiFetch<{ instance: WhatsAppInstance }>(`/api/integrations/whatsapp/${id}/qrcode?account_id=${accountId}`, { method: 'POST' }).then(d => d.instance)
+export interface QrCodeResult { qr_code: string | null; status: string; panel_url: string | null }
+// Contrato: { qr_code, status, panel_url? }. Aceita tambem o formato antigo { instance } por seguranca.
+export const refreshWhatsAppQR = (id: number, accountId: number) =>
+  apiFetch<any>(`/api/integrations/whatsapp/${id}/qrcode?account_id=${accountId}`, { method: 'POST' })
+    .then((d): QrCodeResult => ({
+      qr_code: d?.qr_code ?? d?.instance?.qr_code ?? null,
+      status: d?.status ?? d?.instance?.status ?? 'connecting',
+      panel_url: d?.panel_url ?? null,
+    }))
 export const disconnectWhatsApp = (id: number, accountId: number) => apiFetch(`/api/integrations/whatsapp/${id}/disconnect?account_id=${accountId}`, { method: 'POST' })
 export const deleteWhatsAppInstance = (id: number, accountId: number) => apiFetch(`/api/integrations/whatsapp/${id}?account_id=${accountId}`, { method: 'DELETE' })
 export const setupWhatsAppWebhook = (id: number, accountId: number) => apiFetch<{ ok: boolean; webhookUrl: string }>(`/api/integrations/whatsapp/${id}/setup-webhook?account_id=${accountId}`, { method: 'POST' })
@@ -477,6 +494,8 @@ export interface InstanceAutoMessageConfig {
   away_text?: string | null
   away_schedule_json?: string | null
   away_cooldown_hours?: number
+  business_hours_json?: string | null      // trava anti-bloqueio (whatsapp_instances); so leitura no GET
+  hold_sends_outside_hours?: boolean       // PUT: grava o horario tambem na trava (true) ou libera 24h (false)
 }
 export const fetchInstanceAutoMessages = (instanceId: number, accountId: number) =>
   apiFetch<{ config: InstanceAutoMessageConfig }>(`/api/integrations/whatsapp/${instanceId}/auto-messages?account_id=${accountId}`)
