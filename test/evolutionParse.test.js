@@ -151,5 +151,5 @@ test('capabilities e getProvider', () => {
   assert.equal(getProvider({}).name, 'evolution')
   assert.equal(getProvider({ provider: null }).name, 'evolution')
   assert.throws(() => getProvider({ provider: 'cloud_api' }), /unknown_whatsapp_provider:cloud_api/)
-  assert.deepEqual(listProviders(), ['evolution'])
+  assert.deepEqual(listProviders(), ['evolution', 'uzapi'])
 })

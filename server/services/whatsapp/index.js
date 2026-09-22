@@ -1,8 +1,10 @@
 // A "tomada": escolhe o adaptador pelo provider da instancia. Sem provider = evolution.
 import { evolutionAdapter } from './evolution.js'
+import { uzapiAdapter } from './uzapi.js'
 
 const registry = new Map([
   ['evolution', evolutionAdapter],
+  ['uzapi', uzapiAdapter],
 ])
 
 export function getProvider(instance) {
