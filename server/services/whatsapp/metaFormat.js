@@ -115,19 +115,19 @@ export function parseMetaWebhook(body, opts = {}) {
         if (log) log(`[metaFormat] phone_number_id "${pnid}" nao e o do numero — aviso descartado`)
         continue
       }
-      if (change.field === 'connection') {
+      if (change?.field === 'connection') {
         const raw = Array.isArray(value.status) ? value.status[0]?.connection : value.status?.connection
         if (CONNECTION_MAP[raw]) out.connection = CONNECTION_MAP[raw]
         const qr = extractQr(value)
         if (qr) out.qr = qr
         continue
       }
-      if (change.field === 'authentication') {
+      if (change?.field === 'authentication') {
         const qr = extractQr(value)
         if (qr) out.qr = qr
         continue
       }
-      if (change.field !== 'messages') continue
+      if (change?.field !== 'messages') continue
       const contacts = Array.isArray(value.contacts) ? value.contacts : []
       for (const m of (Array.isArray(value.messages) ? value.messages : [])) {
         const n = parseMetaMessage(m, contacts)

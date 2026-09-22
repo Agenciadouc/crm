@@ -122,7 +122,12 @@ test('tipos sinteticos: video, sticker, localizacao, contato, reacao, botao, lis
 })
 
 test('corpo invalido nao lanca', () => {
-  for (const b of [null, undefined, 'x', {}, { entry: 'x' }, { entry: [{ changes: [{ field: 'messages', value: null }] }] }]) {
+  for (const b of [
+    null, undefined, 'x', {}, { entry: 'x' },
+    { entry: [{ changes: [{ field: 'messages', value: null }] }] },
+    { entry: [null] },
+    { entry: [{ changes: [null] }] },
+  ]) {
     assert.deepEqual(parseMetaWebhook(b, { log: null }).messages, [])
   }
 })
