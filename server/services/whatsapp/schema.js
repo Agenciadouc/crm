@@ -1,6 +1,6 @@
 import crypto from 'crypto'
 
-export const WHATSAPP_PROVIDERS = ['evolution', 'cloud_api', 'custom']
+export const WHATSAPP_PROVIDERS = ['evolution', 'uzapi', 'cloud_api', 'custom']
 
 function addColumnIfNotExists(db, table, column, type) {
   const cols = db.prepare(`PRAGMA table_info(${table})`).all()
@@ -20,6 +20,26 @@ export function migrateWhatsappProviderSchema(db) {
   addColumnIfNotExists(db, 'whatsapp_instances', 'provider', "TEXT NOT NULL DEFAULT 'evolution'")
   addColumnIfNotExists(db, 'whatsapp_instances', 'provider_config', 'TEXT')
   addColumnIfNotExists(db, 'whatsapp_instances', 'webhook_token', 'TEXT')
+  // qr_code ja existe em producao (db.js); aqui garante nos bancos de teste. connected_at = 1a conexao (cobranca futura).
+  addColumnIfNotExists(db, 'whatsapp_instances', 'qr_code', 'TEXT')
+  addColumnIfNotExists(db, 'whatsapp_instances', 'connected_at', 'TEXT')
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS whatsapp_connection_log (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      account_id INTEGER NOT NULL,
+      instance_id INTEGER NOT NULL,
+      provider TEXT NOT NULL,
+      event TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_wa_conn_log_account ON whatsapp_connection_log(account_id, provider);
+    CREATE TABLE IF NOT EXISTS media_temp (
+      token TEXT PRIMARY KEY,
+      file_path TEXT NOT NULL,
+      mimetype TEXT,
+      expires_at TEXT NOT NULL
+    );
+  `)
   const missing = db.prepare("SELECT id FROM whatsapp_instances WHERE webhook_token IS NULL OR webhook_token = ''").all()
   const update = db.prepare('UPDATE whatsapp_instances SET webhook_token = ? WHERE id = ?')
   for (const row of missing) update.run(generateWebhookToken(), row.id)

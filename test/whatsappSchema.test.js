@@ -54,7 +54,7 @@ test('generateWebhookToken, isValidWebhookToken e lista de provedores', () => {
   assert.equal(isValidWebhookToken('A'.repeat(32)), false)
   assert.equal(isValidWebhookToken('abc'), false)
   assert.equal(isValidWebhookToken(null), false)
-  assert.deepEqual(WHATSAPP_PROVIDERS, ['evolution', 'cloud_api', 'custom'])
+  assert.deepEqual(WHATSAPP_PROVIDERS, ['evolution', 'uzapi', 'cloud_api', 'custom'])
 })
 
 test('ensureWebhookToken gera token quando falta e preserva quando existe', () => {
@@ -66,4 +66,15 @@ test('ensureWebhookToken gera token quando falta e preserva quando existe', () =
   assert.match(comToken.webhook_token, /^[a-f0-9]{32}$/)
   const denovo = ensureWebhookToken(db, comToken)
   assert.equal(denovo.webhook_token, comToken.webhook_token)
+})
+
+test('migracao garante qr_code e connected_at e cria whatsapp_connection_log e media_temp (idempotente)', () => {
+  const db = createTestDb()
+  migrateWhatsappProviderSchema(db)
+  const cols = db.prepare('PRAGMA table_info(whatsapp_instances)').all().map(c => c.name)
+  assert.ok(cols.includes('qr_code'))
+  assert.ok(cols.includes('connected_at'))
+  const tables = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map(t => t.name)
+  assert.ok(tables.includes('whatsapp_connection_log'))
+  assert.ok(tables.includes('media_temp'))
 })
