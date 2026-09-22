@@ -38,6 +38,9 @@ import { authenticate, scopeToAccount } from './middleware/auth.js'
 import { addSSEClient, removeSSEClient } from './sse.js'
 import { startScheduler } from './scheduler.js'
 import { recoverPendingBroadcasts } from './routes/broadcasts.js'
+import { createMediaTemp } from './services/mediaTemp.js'
+import { createMediaTempRouter } from './routes/mediaTemp.js'
+import { configureUzapiMediaTemp } from './services/whatsapp/uzapi.js'
 
 const app = express()
 // Atras de Apache reverse proxy — confia no X-Forwarded-For pra req.ip funcionar
@@ -57,6 +60,14 @@ app.use((req, res, next) => {
 // Public routes
 app.use('/api/auth', authRoutes)
 app.use('/api/webhooks', webhookRoutes)
+
+// Link temporario de midia (reserva do envio pela UzAPI). Publico; arquivos em server/data/media-temp por 10 min.
+const mediaTemp = createMediaTemp({ db, dir: resolve(__dirname, 'data', 'media-temp') })
+configureUzapiMediaTemp(mediaTemp)
+app.use('/api/media-temp', createMediaTempRouter(mediaTemp))
+setInterval(() => {
+  try { mediaTemp.cleanup() } catch (e) { console.error('[MediaTemp] limpeza:', e.message) }
+}, 60 * 1000)
 
 // Public proposal viewer (sem auth) — /crm/proposta/:slug ou /proposta/:slug
 app.get('/proposta/:slug', publicProposalHandler)
