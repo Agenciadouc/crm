@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { FormData } from 'node-fetch'
-import { createUzapiAdapter, parseChatMessage, UZAPI_CAPABILITIES } from '../server/services/whatsapp/uzapi.js'
+import { createUzapiAdapter, createPendingSends, parseChatMessage, UZAPI_CAPABILITIES } from '../server/services/whatsapp/uzapi.js'
 import { reasonFromResponse, getUzapiEnv, isUzapiConfigured } from '../server/services/whatsapp/uzapiClient.js'
 import { buildUzapiConfig } from '../server/services/whatsapp/providerConfig.js'
 import { getProvider, listProviders } from '../server/services/whatsapp/index.js'
@@ -153,4 +153,32 @@ test('parseChatMessage: Conversation, imagem sem texto e mensagem que nao e do n
   assert.deepEqual([img.type, img.text, img.messageId], ['image', '[Imagem]', 'A2'])
   assert.equal(parseChatMessage({ data: { data: { Info: { IsFromMe: false }, Message: { Conversation: 'x' } } } }, { phone: LEAD_PHONE, messageId: 'A3' }), null)
   assert.equal(parseChatMessage({}, { phone: LEAD_PHONE, messageId: 'A4' }), null)
+})
+
+test('sendText: com delayTyping o timeout do POST cresce (15 s + digitando + 5 s); sem ele fica o padrao', async () => {
+  const seen = []
+  const client = { async request(method, path, opts) { seen.push(opts.timeout); return { ok: true, status: 201, data: { messageId: 'M1' } } } }
+  const a = make(fakeFetch(() => ok201()), { client })
+  await a.sendText(inst, '5548990000002', 'Ola', { delayTyping: 10 })
+  await a.sendText(inst, '5548990000002', 'Ola')
+  assert.deepEqual(seen, [30000, undefined])
+})
+
+test('envios em andamento: marcado durante o POST (texto e midia) e desmarcado ao terminar, mesmo com erro', async () => {
+  const pendingSends = createPendingSends()
+  let release
+  const f = fakeFetch(() => new Promise(r => { release = () => r(ok201()) }))
+  const a = make(f, { pendingSends })
+  assert.equal(pendingSends.isSending(inst.id, LEAD_PHONE), false)
+  const p = a.sendText(inst, '554890000002', 'Ola')
+  await new Promise(r => setImmediate(r))
+  // mesma pessoa com e sem o 9 do celular
+  assert.equal(pendingSends.isSending(inst.id, LEAD_PHONE), true)
+  assert.equal(pendingSends.isSending(inst.id + 1, LEAD_PHONE), false)
+  release()
+  await p
+  assert.equal(pendingSends.isSending(inst.id, LEAD_PHONE), false)
+  const falha = make(fakeFetch(() => new Error('rede')), { pendingSends })
+  await falha.sendMedia(inst, LEAD_PHONE, { type: 'image', url: 'https://x.test/a.png' })
+  assert.equal(pendingSends.isSending(inst.id, LEAD_PHONE), false)
 })

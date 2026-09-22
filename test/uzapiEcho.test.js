@@ -75,3 +75,40 @@ test('eco: busca sem resultado ou com erro nao grava nada e nao lanca', async ()
   assert.equal(await erro.resolver.resolveEchoes(erro.seed.account, erro.instance, [{ messageId: ECHO_ID, phone: LEAD_PHONE }]), 0)
   assert.equal(erro.db.prepare('SELECT COUNT(*) AS n FROM messages').get().n, 0)
 })
+
+test('eco: envio do CRM ainda em andamento para o telefone -> espera terminar; gravado pelo envio, o eco nao duplica', async () => {
+  const ctx = setup()
+  let sending = true
+  const waits = []
+  const resolver = createEchoResolver({
+    db: ctx.db,
+    getProvider: () => ({ fetchMessageById: async () => { throw new Error('nao deveria buscar') } }),
+    handleInboundMessage: () => { throw new Error('nao deveria gravar') },
+    delayMs: 5000, pollMs: 1000,
+    isSending: (instId, phone) => sending && instId === ctx.instance.id && phone === LEAD_PHONE,
+    // o envio lento termina na 3a espera e o chamador grava a mensagem com o id que voltou
+    wait: async (ms) => {
+      waits.push(ms)
+      if (waits.length === 3) {
+        sending = false
+        ctx.db.prepare("INSERT INTO messages (lead_id, account_id, direction, content, wa_msg_id) VALUES (?, ?, 'outbound', 'via CRM', ?)").run(ctx.lead.id, ctx.seed.account.id, ECHO_ID)
+      }
+    },
+    log: quietLog,
+  })
+  const n = await resolver.resolveEchoes(ctx.seed.account, ctx.instance, [{ messageId: ECHO_ID, phone: LEAD_PHONE }])
+  assert.equal(n, 0)
+  assert.equal(waits[0], 5000)
+  assert.ok(waits.length >= 3)
+  assert.equal(ctx.db.prepare('SELECT COUNT(*) AS n FROM messages').get().n, 1)
+})
+
+test('eco: enquanto o envio segue em andamento nao grava; passado o limite (45 s) desiste de esperar e confere', async () => {
+  const ctx = setup()
+  const waits = []
+  const resolver = createEchoResolver({ db: ctx.db, getProvider: () => ({ fetchMessageById: async (i, id, { phone }) => parseChatMessage(loadUzapiFixture('chats-get-echo.synthetic.json'), { phone, messageId: id }) }), handleInboundMessage: createTestInboundHandler(ctx.db).handler.handleInboundMessage, delayMs: 5000, pollMs: 1000, maxSendWaitMs: 45000, wait: async (ms) => { waits.push(ms) }, isSending: () => true, log: quietLog })
+  const n = await resolver.resolveEchoes(ctx.seed.account, ctx.instance, [{ messageId: ECHO_ID, phone: LEAD_PHONE }])
+  const extra = waits.slice(1).reduce((s, ms) => s + ms, 0)
+  assert.ok(extra >= 45000 && extra <= 47000, `esperou ${extra}`)
+  assert.equal(n, 1)
+})

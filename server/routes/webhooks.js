@@ -9,6 +9,7 @@ import { getProvider } from '../services/whatsapp/index.js'
 import { resolveInstanceByToken, resolveLegacyEvolutionInstance, processWebhook, webhookErrorStatus } from '../services/whatsapp/webhookFlow.js'
 import { createInstanceManager } from '../services/whatsapp/instanceManager.js'
 import { createEchoResolver } from '../services/whatsapp/uzapiEcho.js'
+import { uzapiPendingSends } from '../services/whatsapp/uzapi.js'
 import { leadIntake, handleInboundMessage, handleStatusUpdate } from '../services/inboundRuntime.js'
 
 const router = Router()
@@ -16,7 +17,7 @@ const router = Router()
 const { getOrCreateLead } = leadIntake
 
 const instanceManager = createInstanceManager({ db, getProvider })
-const echoResolver = createEchoResolver({ db, getProvider, handleInboundMessage })
+const echoResolver = createEchoResolver({ db, getProvider, handleInboundMessage, isSending: uzapiPendingSends.isSending })
 
 // Aviso de conexao/QR (UzAPI). Conectou sem telefone conhecido: busca o status para preencher phone_number.
 function handleConnection(instance, info) {

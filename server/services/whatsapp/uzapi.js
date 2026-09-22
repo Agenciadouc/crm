@@ -6,6 +6,7 @@ import { createUzapiClient, phonePath, reasonFromResponse } from './uzapiClient.
 import { tryReadUzapiConfig, readUzapiPhoneNumberId } from './providerConfig.js'
 import { parseMetaWebhook } from './metaFormat.js'
 import { createUzapiSession } from './uzapiSession.js'
+import { phoneCompareKey } from './normalize.js'
 
 export const UZAPI_CAPABILITIES = Object.freeze({
   qr: true, presence: false, readReceipts: false, numberCheck: false, templates: false, window24h: false, polling: false, typingDelay: true,
@@ -46,14 +47,43 @@ export function parseChatMessage(data, { phone, messageId }) {
   }
 }
 
-export function createUzapiAdapter({ fetch, env = process.env, FormData = NodeFormData, Blob = NodeBlob, getMediaTemp = () => null, log = console }) {
-  const client = createUzapiClient({ fetch, env })
+// Envios em andamento por instancia+telefone. Toda mensagem enviada pelo CRM tambem volta como status de eco;
+// o resolvedor de eco (uzapiEcho.js) espera o envio terminar (e o chamador gravar) antes de conferir o id.
+export function createPendingSends() {
+  const counts = new Map()
+  const key = (instanceId, phone) => `${instanceId}:${phoneCompareKey(phone)}`
+  return {
+    begin(instanceId, phone) {
+      const k = key(instanceId, phone)
+      counts.set(k, (counts.get(k) || 0) + 1)
+      let done = false
+      return () => {
+        if (done) return
+        done = true
+        const n = (counts.get(k) || 1) - 1
+        if (n > 0) counts.set(k, n)
+        else counts.delete(k)
+      }
+    },
+    isSending(instanceId, phone) {
+      return counts.has(key(instanceId, phone))
+    },
+  }
+}
+
+export const uzapiPendingSends = createPendingSends()
+
+// Margem do POST com digitando: a UzAPI segura a resposta ate terminar o "digitando" (delayTyping em segundos).
+const SEND_BASE_TIMEOUT_MS = 15000
+const SEND_EXTRA_TIMEOUT_MS = 5000
+
+export function createUzapiAdapter({ fetch, env = process.env, FormData = NodeFormData, Blob = NodeBlob, getMediaTemp = () => null, log = console, client = createUzapiClient({ fetch, env }), pendingSends = uzapiPendingSends }) {
   const config = (instance) => tryReadUzapiConfig(instance, env)
 
-  async function postMessage(instance, payload) {
+  async function postMessage(instance, payload, { timeout } = {}) {
     const { cfg, error } = config(instance)
     if (error) return { ok: false, messageId: null, reason: error }
-    const r = await client.request('POST', phonePath(cfg.phoneNumberId, 'messages'), { token: cfg.instanceToken, json: payload })
+    const r = await client.request('POST', phonePath(cfg.phoneNumberId, 'messages'), { token: cfg.instanceToken, json: payload, timeout })
     if (r.ok && r.data?.messageId) return { ok: true, messageId: String(r.data.messageId), raw: r.data }
     const reason = r.ok ? 'provider_no_message_id' : reasonFromResponse(r)
     if (reason === 'provider_auth') log.error(`[UzAPI] envio recusado com 401/403 (instancia ${instance.id}) — token do numero revogado?`)
@@ -71,6 +101,25 @@ export function createUzapiAdapter({ fetch, env = process.env, FormData = NodeFo
     return id ? { id: String(id) } : { id: null, reason: r.ok ? 'provider_no_media_id' : reasonFromResponse(r) }
   }
 
+  // base64 -> sobe em /media e envia por id; se a subida falhar, envia por link temporario do CRM (spec 4.5).
+  async function sendMediaNow(instance, phone, media = {}) {
+    const { type, base64, url, mimetype, fileName, caption } = media
+    const waType = MEDIA_TYPES.includes(type) ? type : 'document'
+    const extra = {}
+    if (caption && waType !== 'audio' && waType !== 'sticker') extra.caption = caption
+    if (waType === 'document' && fileName) extra.filename = fileName
+    if (url && !base64) return postMessage(instance, { to: phone, type: waType, [waType]: { link: url, ...extra } })
+    if (!base64) return { ok: false, messageId: null, reason: 'media_empty' }
+    const buffer = Buffer.from(String(base64).replace(/^data:[^;]+;base64,/, ''), 'base64')
+    const up = await uploadMedia(instance, buffer, mimetype, fileName)
+    if (up.id) return postMessage(instance, { to: phone, type: waType, [waType]: { id: up.id, ...extra } })
+    const mediaTemp = getMediaTemp()
+    if (!mediaTemp) return { ok: false, messageId: null, reason: up.reason || 'media_upload_failed' }
+    log.warn(`[UzAPI] subida de midia falhou (${up.reason}); enviando por link temporario`)
+    const link = mediaTemp.put(buffer, mimetype || 'application/octet-stream')
+    return postMessage(instance, { to: phone, type: waType, [waType]: { link, ...extra } })
+  }
+
   return {
     name: 'uzapi',
     capabilities: UZAPI_CAPABILITIES,
@@ -78,27 +127,26 @@ export function createUzapiAdapter({ fetch, env = process.env, FormData = NodeFo
 
     async sendText(instance, phone, text, opts = {}) {
       const payload = { to: phone, type: 'text', text: { body: text } }
-      if (opts && opts.delayTyping) payload.delayTyping = opts.delayTyping
-      return postMessage(instance, payload)
+      let timeout
+      if (opts && opts.delayTyping) {
+        payload.delayTyping = opts.delayTyping
+        timeout = SEND_BASE_TIMEOUT_MS + opts.delayTyping * 1000 + SEND_EXTRA_TIMEOUT_MS
+      }
+      const end = pendingSends.begin(instance?.id, phone)
+      try {
+        return await postMessage(instance, payload, { timeout })
+      } finally {
+        end()
+      }
     },
 
-    // base64 -> sobe em /media e envia por id; se a subida falhar, envia por link temporario do CRM (spec 4.5).
     async sendMedia(instance, phone, media = {}) {
-      const { type, base64, url, mimetype, fileName, caption } = media
-      const waType = MEDIA_TYPES.includes(type) ? type : 'document'
-      const extra = {}
-      if (caption && waType !== 'audio' && waType !== 'sticker') extra.caption = caption
-      if (waType === 'document' && fileName) extra.filename = fileName
-      if (url && !base64) return postMessage(instance, { to: phone, type: waType, [waType]: { link: url, ...extra } })
-      if (!base64) return { ok: false, messageId: null, reason: 'media_empty' }
-      const buffer = Buffer.from(String(base64).replace(/^data:[^;]+;base64,/, ''), 'base64')
-      const up = await uploadMedia(instance, buffer, mimetype, fileName)
-      if (up.id) return postMessage(instance, { to: phone, type: waType, [waType]: { id: up.id, ...extra } })
-      const mediaTemp = getMediaTemp()
-      if (!mediaTemp) return { ok: false, messageId: null, reason: up.reason || 'media_upload_failed' }
-      log.warn(`[UzAPI] subida de midia falhou (${up.reason}); enviando por link temporario`)
-      const link = mediaTemp.put(buffer, mimetype || 'application/octet-stream')
-      return postMessage(instance, { to: phone, type: waType, [waType]: { link, ...extra } })
+      const end = pendingSends.begin(instance?.id, phone)
+      try {
+        return await sendMediaNow(instance, phone, media)
+      } finally {
+        end()
+      }
     },
 
     // message.media_url guarda o id da midia gravado na chegada (mediaRef).

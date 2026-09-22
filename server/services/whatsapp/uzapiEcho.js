@@ -2,9 +2,25 @@
 // telefone do lead em contacts[0].wa_id). Aqui busca o conteudo e grava como mensagem ENVIADA (fromMe).
 // Espera delayMs antes de checar: o status da mensagem que o PROPRIO CRM acabou de enviar pode chegar
 // antes do INSERT do chamador; depois da espera, id ja existente = nao e eco.
-export function createEchoResolver({ db, getProvider, handleInboundMessage, delayMs = 5000, wait = (ms) => new Promise(r => setTimeout(r, ms)), log = console }) {
+// Envio lento (digitando ate 15 s + rede): enquanto houver envio do CRM em andamento para o telefone
+// (isSending, registro do adaptador), reespera ate maxSendWaitMs e so entao confere o id.
+export function createEchoResolver({
+  db, getProvider, handleInboundMessage, delayMs = 5000, wait = (ms) => new Promise(r => setTimeout(r, ms)), log = console,
+  isSending = () => false, pollMs = 1000, maxSendWaitMs = 45000,
+}) {
   const inFlight = new Set()
   const known = (accountId, id) => !!db.prepare('SELECT 1 FROM messages WHERE wa_msg_id = ? AND account_id = ?').get(id, accountId)
+  const sendingTo = (instance, e) => { try { return !!isSending(instance.id, e.phone) } catch { return false } }
+
+  async function waitPendingSends(instance, todo) {
+    let waited = 0
+    while (waited < maxSendWaitMs && todo.some(e => sendingTo(instance, e))) {
+      await wait(pollMs)
+      waited += pollMs
+    }
+    // o envio acabou de terminar: folga para o chamador gravar a mensagem com o id devolvido
+    if (waited > 0) await wait(pollMs)
+  }
 
   async function resolveEchoes(account, instance, echoes) {
     let provider
@@ -22,6 +38,7 @@ export function createEchoResolver({ db, getProvider, handleInboundMessage, dela
     let saved = 0
     try {
       await wait(delayMs)
+      await waitPendingSends(instance, todo)
       for (const e of todo) {
         if (known(account.id, e.messageId)) continue
         try {
