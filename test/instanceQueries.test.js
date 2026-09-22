@@ -65,3 +65,13 @@ test('checagem de hora em hora: erro da UzAPI nao muda nada', async () => {
   assert.equal(await sync.run(), 0)
   assert.equal(db.prepare('SELECT status FROM whatsapp_instances WHERE id = ?').get(uz.id).status, 'connected')
 })
+
+test('findInstanceByName: devolve id e provedor so da conta pedida', () => {
+  const db = createTestDb()
+  const seed = seedBasic(db)
+  const uz = insertUzapiInstance(db, seed.account.id, { instance_name: 'Loja UzAPI' })
+  assert.deepEqual(Q.findInstanceByName(db, seed.account.id, 'Loja UzAPI'), { id: uz.id, provider: 'uzapi' })
+  const evo = seed.instance
+  assert.equal(Q.findInstanceByName(db, seed.account.id, evo.instance_name).provider, 'evolution')
+  assert.equal(Q.findInstanceByName(db, seed.account.id + 999, 'Loja UzAPI'), undefined)
+})

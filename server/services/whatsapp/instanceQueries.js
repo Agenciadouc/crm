@@ -30,6 +30,11 @@ export function listWebhookReRegister(db) {
   return db.prepare(`SELECT * FROM whatsapp_instances WHERE status = 'connected' AND ${EVOLUTION_ONLY_SQL}`).all()
 }
 
+// Nome ja usado na conta (qualquer provedor): a rota de criacao da Evolution decide pelo provedor.
+export function findInstanceByName(db, accountId, instanceName) {
+  return db.prepare("SELECT id, COALESCE(provider, 'evolution') AS provider FROM whatsapp_instances WHERE account_id = ? AND instance_name = ?").get(accountId, instanceName)
+}
+
 export function listUzapiInstances(db) {
   return db.prepare("SELECT * FROM whatsapp_instances WHERE provider = 'uzapi'").all()
 }

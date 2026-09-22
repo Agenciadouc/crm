@@ -7,6 +7,7 @@ import { getPublicBaseUrl } from '../services/publicUrl.js'
 import { getProvider } from '../services/whatsapp/index.js'
 import { generateWebhookToken } from '../services/whatsapp/schema.js'
 import { createWebhookRegistrar } from '../services/whatsapp/webhookRegistration.js'
+import { findInstanceByName } from '../services/whatsapp/instanceQueries.js'
 import { createInstanceManager, listAvailableProviders, sanitizeInstance, ProviderError } from '../services/whatsapp/instanceManager.js'
 import { resumeBroadcastIfPaused } from './broadcasts.js'
 import { resumeFollowUpsIfPaused } from '../services/followUpSender.js'
@@ -138,7 +139,11 @@ router.post('/whatsapp', requireRole('super_admin', 'gerente', 'atendente'), asy
   const baseUrl = api_url.replace(/\/+$/, '')
 
   // Check if instance already exists in DB — re-register webhook to recover from past failures, then return
-  const existing = db.prepare('SELECT id FROM whatsapp_instances WHERE account_id = ? AND instance_name = ?').get(req.accountId, instance_name)
+  const existing = findInstanceByName(db, req.accountId, instance_name)
+  // Nome de um numero UzAPI: nao reaproveita a linha dele como Evolution
+  if (existing && existing.provider !== 'evolution') {
+    return res.status(409).json({ error: 'Já existe um número com esse nome nesta conta.', code: 'instance_name_taken' })
+  }
   if (existing) {
     db.prepare("UPDATE whatsapp_instances SET api_url = ?, api_key = ?, updated_at = datetime('now') WHERE id = ?").run(baseUrl, api_key, existing.id)
     const instance = db.prepare('SELECT * FROM whatsapp_instances WHERE id = ?').get(existing.id)
@@ -272,8 +277,12 @@ router.get('/whatsapp/:id/status', async (req, res) => {
   if (!instance) return
 
   if (isUzapi(instance)) {
-    const r = await manager.checkStatus(instance)
-    return res.json({ instance: safe(r.instance, req), state: r.state, error: r.error })
+    try {
+      const r = await manager.checkStatus(instance)
+      return res.json({ instance: safe(r.instance, req), state: r.state, error: r.error })
+    } catch (err) {
+      return sendProviderError(res, err)
+    }
   }
 
   try {
@@ -437,8 +446,12 @@ router.delete('/whatsapp/:id', requireRole('super_admin', 'gerente', 'atendente'
   if (!instance) return
 
   if (isUzapi(instance)) {
-    await manager.remove(instance)
-    return res.json({ ok: true })
+    try {
+      await manager.remove(instance)
+      return res.json({ ok: true })
+    } catch (err) {
+      return sendProviderError(res, err)
+    }
   }
   // Tenta apagar na Evolution tambem (best-effort com timeout de 8s).
   // Se Evolution responder 404 ou timeoutar, segue o jogo e apaga do banco assim mesmo
@@ -504,7 +517,10 @@ router.post('/whatsapp/:id/restart', requireRole('super_admin', 'gerente', 'aten
   if (isUzapi(instance)) {
     try {
       const r = await manager.restart(instance)
-      if (!r.ok) return res.status(502).json({ error: 'A UzAPI não reiniciou o número: ' + r.reason, code: 'provider_error' })
+      if (!r.ok) {
+        console.error(`[UzAPI reiniciar] ${instance.instance_name}: ${r.reason}`)
+        return res.status(502).json({ error: 'A UzAPI não conseguiu reiniciar o número. Tente de novo em instantes.', code: 'provider_error' })
+      }
       return res.json({ ok: true, response: r })
     } catch (err) {
       return sendProviderError(res, err)
@@ -540,8 +556,13 @@ router.post('/whatsapp/:id/test', requireRole('super_admin', 'gerente', 'atenden
   if (!instance) return
 
   if (isUzapi(instance)) {
-    const r = await manager.checkStatus(instance)
-    return res.json({ success: r.instance.status === 'connected', status: r.instance.status, error: r.error })
+    try {
+      const r = await manager.checkStatus(instance)
+      const status = r.instance?.status || null
+      return res.json({ success: status === 'connected', status, error: r.error })
+    } catch (err) {
+      return sendProviderError(res, err)
+    }
   }
 
   try {
