@@ -2,12 +2,12 @@ import { Router } from 'express'
 import db from '../db.js'
 import { requireRole } from '../middleware/auth.js'
 import { broadcastSSE } from '../sse.js'
-import { agentFollowUpLock } from '../services/followUpOwnership.js'
+import { agentFollowUpLock, agentIsActiveOwner } from '../services/followUpOwnership.js'
 
 const router = Router()
 
 function lockIfAgentOwned(fu, res) {
-  const agentExists = fu.agent_id ? !!db.prepare('SELECT 1 FROM ai_agents WHERE id = ? AND account_id = ? AND is_active = 1').get(fu.agent_id, fu.account_id) : false
+  const agentExists = agentIsActiveOwner(db, fu)
   const lock = agentFollowUpLock(fu, agentExists)
   if (lock) { res.status(lock.status).json({ error: lock.error, agent_id: lock.agent_id }); return true }
   return false
