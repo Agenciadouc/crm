@@ -7,6 +7,7 @@
 import db from '../db.js'
 import { getProvider } from './whatsapp/index.js'
 import { createSender } from './whatsapp/sender.js'
+import { renderHandoffTemplate } from './messageTemplateVars.js'
 
 function getNotifierInstanceId() {
   // 1o: tenta app_settings (configuravel via UI super_admin)
@@ -20,19 +21,6 @@ function getNotifierInstanceId() {
   // 2o: fallback pra env var (back-compat / setup inicial)
   const fromEnv = parseInt(process.env.NOTIFIER_INSTANCE_ID || '0')
   return (!isNaN(fromEnv) && fromEnv > 0) ? fromEnv : null
-}
-
-function renderTemplate(tpl, vars) {
-  if (!tpl) return ''
-  return tpl
-    .replace(/\{\{primeiro_nome\}\}/g, vars.lead_first_name || '')
-    .replace(/\{\{nome\}\}/g, vars.lead_name || '')
-    .replace(/\{\{vendedor\}\}/g, vars.user_name || '')
-    .replace(/\{\{vendedor_primeiro_nome\}\}/g, vars.user_first_name || '')
-    .replace(/\{\{cidade\}\}/g, vars.city || '')
-    .replace(/\{\{phone\}\}/g, vars.phone || '')
-    .replace(/\{\{etapa\}\}/g, vars.stage_name || '')
-    .replace(/\{\{funil\}\}/g, vars.funnel_name || '')
 }
 
 // Envio e anti-ban moram em whatsapp/sender.js (independente do provedor).
@@ -81,6 +69,7 @@ export async function notifyAndOpenLead(leadId, attendantUserId, opts = {}) {
       user_name: user.name || '',
       user_first_name: (user.name || '').split(' ')[0],
       city: lead.city || '',
+      empresa: lead.empresa || '',
       phone: lead.phone || '',
       stage_name: stageInfo?.stage_name || '',
       funnel_name: stageInfo?.funnel_name || '',
@@ -106,7 +95,7 @@ export async function notifyAndOpenLead(leadId, attendantUserId, opts = {}) {
         const funnelTpl = lead.funnel_id ? db.prepare('SELECT first_msg_template FROM funnels WHERE id=?').get(lead.funnel_id) : null
         const tpl = funnelTpl?.first_msg_template || vendInst.first_msg_template
         if (tpl && tpl.trim()) {
-          const text = renderTemplate(tpl, vars)
+          const text = renderHandoffTemplate(tpl, { ...vars, instance_name: vendInst.instance_name || '' })
           if (text.trim()) {
             const r = await sendViaInstance(vendInst, lead.phone, text, { leadId: lead.id })
             if (r.ok) {

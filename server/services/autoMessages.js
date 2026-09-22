@@ -1,26 +1,11 @@
 import fetch from 'node-fetch'
 import db from '../db.js'
 import { sendViaInstance } from './leadHandoff.js'
+import { applyAutoMessageVars } from './messageTemplateVars.js'
 
-// Aplica variaveis no texto da auto-mensagem
-function firstName(s) {
-  if (!s) return ''
-  return String(s).split(' ')[0] || s
-}
-
+// Aplica variaveis no texto da auto-mensagem (mesma lista da "Primeira mensagem" do numero)
 export function applyVars(text, lead, instance) {
-  if (!text) return text
-  return String(text)
-    .replace(/\{\{name\}\}/g, lead?.name || 'Cliente')
-    .replace(/\{\{primeiro_nome\}\}/g, firstName(lead?.name) || 'Cliente')
-    .replace(/\{\{first_name\}\}/g, firstName(lead?.name) || 'Cliente')
-    .replace(/\{\{phone\}\}/g, lead?.phone || '')
-    .replace(/\{\{empresa\}\}/g, lead?.empresa || '')
-    .replace(/\{\{cidade\}\}/g, lead?.city || '')
-    .replace(/\{\{instance\}\}/g, instance?.instance_name || '')
-    .replace(/\{\{atendente\}\}/g, lead?.attendant_name || 'nosso time')
-    .replace(/\{\{attendant\}\}/g, lead?.attendant_name || 'nosso time')
-    .replace(/\{\{atendente_nome\}\}/g, firstName(lead?.attendant_name) || 'nosso time')
+  return applyAutoMessageVars(text, lead, instance)
 }
 
 // Pega config da instancia (ou null se nao tiver)
