@@ -50,6 +50,9 @@ export default function WhatsAppCard({ accountId, instances, setInstances, reloa
   const [newMode, setNewMode] = useState<'open' | 'restricted'>('open')
   const [newProvider, setNewProvider] = useState<WhatsAppProviderId>('evolution')
   const [creating, setCreating] = useState(false)
+  // Trava de criacao: `creating` so vale no proximo render, entao dois Enter no mesmo
+  // instante criariam dois numeros. O ref muda na hora.
+  const creatingRef = useRef(false)
 
   const [activeQR, setActiveQR] = useState<number | null>(null)
   const [panelUrls, setPanelUrls] = useState<Record<number, string>>({})
@@ -69,8 +72,9 @@ export default function WhatsAppCard({ accountId, instances, setInstances, reloa
       setEvoKey(c.api_key || '')
       setEvoConfigured(typeof c.configured === 'boolean' ? c.configured : !!(c.api_url && c.api_key))
     }).catch(() => {})
-    // Provedor pre-selecionado: UzAPI quando disponivel, senao Evolution.
-    fetchWhatsAppProviders(accountId).then(list => { setProviders(list); setNewProvider(defaultProvider(list)) })
+    // A lista pode chegar depois; o provedor pre-selecionado e aplicado ao ABRIR o modal
+    // (openNewNumber), senao a lista atrasada sobrescreveria a escolha de quem ja abriu.
+    fetchWhatsAppProviders(accountId).then(setProviders)
   }, [accountId])
 
   // Enquanto um numero esta "connecting", confere o status a cada 5s (o QR da UzAPI pode chegar depois, pelo aviso).
@@ -109,6 +113,12 @@ export default function WhatsAppCard({ accountId, instances, setInstances, reloa
     setSavingConfig(false)
   }
 
+  // Provedor pre-selecionado: UzAPI quando disponivel, senao Evolution.
+  const openNewNumber = () => {
+    setNewProvider(defaultProvider(providers))
+    setShowNew(true)
+  }
+
   const openQr = async (inst: WhatsAppInstance) => {
     setActiveQR(inst.id)
     setQrLoading(inst.id)
@@ -121,23 +131,31 @@ export default function WhatsAppCard({ accountId, instances, setInstances, reloa
         else delete next[inst.id]
         return next
       })
-    } catch (e: any) { alert('Erro ao gerar o QR code: ' + e.message) }
+    } catch (e: any) {
+      // Sem QR nenhum, o painel ficaria aberto e vazio; fecha junto com o aviso do erro.
+      setActiveQR(cur => cur === inst.id ? null : cur)
+      alert('Erro ao gerar o QR code: ' + e.message)
+    }
     setQrLoading(null)
   }
 
   const handleCreate = async () => {
-    if (creating || !newName.trim()) return
+    if (creatingRef.current || !newName.trim()) return
+    creatingRef.current = true
     setCreating(true)
     try {
       const inst = await createWhatsAppInstance(accountId, { instance_name: newName.trim(), lead_intake_mode: newMode, provider: newProvider })
       const chosen = newProvider
-      setShowNew(false); setNewName(''); setNewMode('open'); setNewProvider(defaultProvider(providers))
+      setShowNew(false); setNewName(''); setNewMode('open')
       await reload()
       // UzAPI: sempre pede o QR ao servidor, que manda junto o endereco do painel.
       if ((inst.provider || chosen) !== 'evolution') await openQr(inst)
       else if (inst.qr_code) setActiveQR(inst.id)
     } catch (e: any) { alert('Erro: ' + e.message) }
-    setCreating(false)
+    finally {
+      creatingRef.current = false
+      setCreating(false)
+    }
   }
 
   const handleConnect = async (inst: WhatsAppInstance) => {
@@ -235,7 +253,7 @@ export default function WhatsAppCard({ accountId, instances, setInstances, reloa
               </button>
             )}
             {canCreate && (
-              <button className="btn btn-primary btn-sm" onClick={() => setShowNew(true)}><Plus size={14} /> Conectar número</button>
+              <button className="btn btn-primary btn-sm" onClick={openNewNumber}><Plus size={14} /> Conectar número</button>
             )}
           </div>
         </div>
