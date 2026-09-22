@@ -25,7 +25,7 @@ function clean(value) {
 export function loadInboundBlock(db, { accountId, leadId, fromMessageId }) {
   if (!accountId || !leadId || !fromMessageId) return []
   return db.prepare(`
-    SELECT id, content, media_type, transcription, wa_msg_id
+    SELECT id, content, media_type, transcription, wa_msg_id, media_url
     FROM messages
     WHERE lead_id = ? AND account_id = ? AND direction = 'inbound' AND id >= ?
     ORDER BY id ASC

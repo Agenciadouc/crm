@@ -591,7 +591,7 @@ export async function processInboundMessage(lead, msgContent, mediaType, instanc
 
       // Pega wa_msg_id da ultima msg de audio inbound do lead
       const lastAudio = db.prepare(`
-        SELECT wa_msg_id FROM messages
+        SELECT wa_msg_id, media_url FROM messages
         WHERE lead_id = ? AND direction = 'inbound' AND media_type = 'audio' AND wa_msg_id IS NOT NULL
         ORDER BY id DESC LIMIT 1
       `).get(lead.id)
@@ -603,7 +603,7 @@ export async function processInboundMessage(lead, msgContent, mediaType, instanc
       }
 
       try {
-        const { buffer, mimetype } = await fetchAudioBuffer(inst, lastAudio.wa_msg_id)
+        const { buffer, mimetype } = await fetchAudioBuffer(inst, lastAudio)
         const result = await transcribeAudio(buffer, { mimetype, language: 'pt-BR' })
         if (!result.ok) throw new Error(result.reason || 'unknown')
 

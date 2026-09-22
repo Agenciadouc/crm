@@ -28,7 +28,7 @@ export function resolveBlockMeta(prevMeta, base, findBlockStart) {
  * @param {number|null} deps.blockStartMessageId - id da 1a mensagem inbound do bloco
  * @param {{ content: string, mediaType: string }} deps.fallback - conteudo da ultima mensagem (caminho antigo)
  * @param {Function} deps.findAgent   - (lead, instanceId) => agente | null
- * @param {Function} deps.fetchAudio  - async (instance, waMsgId) => { buffer, mimetype }
+ * @param {Function} deps.fetchAudio  - async (instance, waMsgIdOrMessage) => { buffer, mimetype }
  * @param {Function} deps.transcribe  - async (buffer, opts) => { ok, transcript, durationSec, costUsd }
  * @param {Function} deps.process     - async (lead, content, mediaType, instanceId, opts) => any
  * @param {Function} [deps.broadcast] - (accountId, leadId) => void, chamado a cada transcricao salva
@@ -73,7 +73,9 @@ export async function runBlock(db, {
   const block = await transcribeBlock(db, {
     accountId: lead.account_id,
     messages,
-    fetchAudio: canTranscribe ? (msg => fetchAudio(inst, msg.wa_msg_id)) : null,
+    fetchAudio: canTranscribe
+      ? (msg => fetchAudio(inst, msg.media_url ? { wa_msg_id: msg.wa_msg_id, media_url: msg.media_url } : msg.wa_msg_id))
+      : null,
     transcribe: canTranscribe ? transcribe : null,
     onTranscribed: broadcast ? (() => broadcast(lead.account_id, lead.id)) : null,
   })

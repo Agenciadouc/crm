@@ -67,17 +67,19 @@ export async function transcribeAudio(audio, opts = {}) {
  * Mesmo download usado pelo player do Chat (GET /api/messages/:leadId/media/:msgId).
  *
  * @param {Object} instance - row de whatsapp_instances
- * @param {string} waMsgId - wa_msg_id da mensagem
+ * @param {string|Object} waMsgIdOrMessage - wa_msg_id ou a linha da mensagem ({ wa_msg_id, media_url })
  * @param {Object} [deps] - { getProvider } injetavel para teste
  * @returns {Promise<{ buffer: Buffer, mimetype: string }>}
  */
-export async function fetchAudioBuffer(instance, waMsgId, deps = {}) {
+export async function fetchAudioBuffer(instance, waMsgIdOrMessage, deps = {}) {
   const getProvider = deps.getProvider || defaultGetProvider
   const isEvolution = !!instance && (instance.provider || 'evolution') === 'evolution'
   if (!instance || (isEvolution && (!instance.api_url || !instance.api_key || !instance.instance_name))) {
     throw new Error('instance_missing_credentials')
   }
-  if (!waMsgId) throw new Error('wa_msg_id_required')
-  const media = await getProvider(instance).fetchMedia(instance, { wa_msg_id: waMsgId })
+  // UzAPI baixa pelo id da midia (media_url); Evolution so usa o wa_msg_id.
+  const message = (waMsgIdOrMessage && typeof waMsgIdOrMessage === 'object') ? waMsgIdOrMessage : { wa_msg_id: waMsgIdOrMessage }
+  if (!message.wa_msg_id) throw new Error('wa_msg_id_required')
+  const media = await getProvider(instance).fetchMedia(instance, message)
   return { buffer: media.buffer, mimetype: media.mimetype || 'audio/ogg' }
 }

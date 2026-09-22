@@ -57,3 +57,13 @@ test('fetchAudioBuffer valida credenciais da Evolution e wa_msg_id', async () =>
   await assert.rejects(() => fetchAudioBuffer(null, 'X', { getProvider }), /instance_missing_credentials/)
   await assert.rejects(() => fetchAudioBuffer({ api_url: 'u', api_key: 'k', instance_name: 'i' }, '', { getProvider }), /wa_msg_id_required/)
 })
+
+test('fetchAudioBuffer aceita a linha da mensagem (UzAPI precisa do media_url) e nao exige credencial da Evolution', async () => {
+  const inst = { id: 2, provider: 'uzapi', api_url: '', api_key: '', instance_name: 'uz' }
+  const calls = []
+  const getProvider = () => ({ fetchMedia: async (i, m) => { calls.push(m); return { buffer: Buffer.from('ogg'), mimetype: 'audio/ogg; codecs=opus' } } })
+  const r = await fetchAudioBuffer(inst, { wa_msg_id: 'AUD1', media_url: '582578164494741' }, { getProvider })
+  assert.deepEqual(calls, [{ wa_msg_id: 'AUD1', media_url: '582578164494741' }])
+  assert.equal(r.mimetype, 'audio/ogg; codecs=opus')
+  await assert.rejects(() => fetchAudioBuffer(inst, { media_url: 'X' }, { getProvider }), /wa_msg_id_required/)
+})

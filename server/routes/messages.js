@@ -182,7 +182,7 @@ router.get('/:leadId/media/:msgId', async (req, res) => {
     try {
       media = await getProvider(instance).fetchMedia(instance, message)
     } catch (e) {
-      if (e.code === 'media_not_found') return res.status(404).json({ error: 'Midia nao encontrada na Evolution' })
+      if (e.code === 'media_not_found') return res.status(404).json({ error: 'Mídia não encontrada no provedor do WhatsApp' })
       throw e
     }
 

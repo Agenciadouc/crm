@@ -216,3 +216,15 @@ test('bloco pega so as mensagens daquele lead/conta, do inicio do bloco em diant
 
   assert.equal(calls.process[0].content, 'comeco\nfim')
 })
+
+test('audio com media_url (UzAPI): fetchAudio recebe wa_msg_id e media_url', async () => {
+  const { db, seed, instanceId, deps, calls } = setup()
+  const first = Number(db.prepare(`
+    INSERT INTO messages (lead_id, account_id, direction, content, media_type, wa_msg_id, media_url)
+    VALUES (?, ?, 'inbound', '[Audio]', 'audio', 'A9', '582578164494741')
+  `).run(seed.leadId, seed.accountId).lastInsertRowid)
+
+  await runBlock(db, { leadId: seed.leadId, instanceId, blockStartMessageId: first, fallback: {}, ...deps })
+
+  assert.deepEqual(calls.fetchAudio[0].waMsgId, { wa_msg_id: 'A9', media_url: '582578164494741' })
+})
