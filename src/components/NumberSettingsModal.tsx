@@ -40,6 +40,9 @@ export default function NumberSettingsModal({ instance, accountId, canEditFirstM
   const [greetingCooldown, setGreetingCooldown] = useState(24)
   const [hours, setHours] = useState<ServiceHoursState>(() => resolveServiceHours({}))
   const [hoursTouched, setHoursTouched] = useState(false)
+  // Numero que nunca teve agenda de ausencia gravada: salvar a tela nao pode inventar uma
+  // (away_enabled = 1 com away_schedule_json NULL e inerte hoje; com agenda, passaria a responder).
+  const [hadAwaySchedule, setHadAwaySchedule] = useState(false)
   const [awayEnabled, setAwayEnabled] = useState(false)
   const [awayText, setAwayText] = useState('')
   const [awayCooldown, setAwayCooldown] = useState(4)
@@ -71,6 +74,7 @@ export default function NumberSettingsModal({ instance, accountId, canEditFirstM
       setGreetingCooldown(cfg.greeting_cooldown_hours || 24)
       setHours(resolveServiceHours({ away_schedule_json: cfg.away_schedule_json, business_hours_json: cfg.business_hours_json }))
       setHoursTouched(false)
+      setHadAwaySchedule(!!cfg.away_schedule_json)
       setAwayEnabled(!!cfg.away_enabled)
       setAwayText(cfg.away_text || '')
       setAwayCooldown(cfg.away_cooldown_hours || 4)
@@ -134,7 +138,9 @@ export default function NumberSettingsModal({ instance, accountId, canEditFirstM
         away_enabled: awayEnabled ? 1 : 0,
         away_text: awayText.trim() || null,
         away_cooldown_hours: awayCooldown,
-        away_schedule_json: hoursSave.away_schedule_json,
+        // So manda a agenda quando o dono mexeu nela nesta sessao ou quando o numero ja tinha
+        // uma gravada — senao, salvar a tela criaria horario de ausencia onde nao havia.
+        ...(hoursTouched || hadAwaySchedule ? { away_schedule_json: hoursSave.away_schedule_json } : {}),
         // So manda a trava anti-bloqueio quando o dono mexeu na caixa "Segurar envios..." ou na
         // agenda nesta sessao — sem o campo, o servidor mantem business_hours_json como esta.
         ...(hoursTouched ? { hold_sends_outside_hours: hoursSave.hold_sends_outside_hours } : {}),
