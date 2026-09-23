@@ -13,6 +13,8 @@ import { resumeBroadcastIfPaused } from './broadcasts.js'
 import { resumeFollowUpsIfPaused } from '../services/followUpSender.js'
 import { businessHoursUpdate } from '../services/serviceHours.js'
 import { canManageInstance, HOLD_SENDS_FORBIDDEN_MSG } from '../services/instanceOwnership.js'
+import { sendNumberStatus, setDefaultSendInstance } from '../services/whatsapp/resolveSendInstance.js'
+import { getAntibanSettings, saveAntibanSettings, decorateInstances } from '../services/antibanSettings.js'
 
 const router = Router()
 
@@ -89,16 +91,46 @@ router.get('/whatsapp', requireRole('super_admin', 'gerente', 'atendente'), (req
     if (!primaryId) return res.json({ instances: [] })
     const row = db.prepare('SELECT * FROM whatsapp_instances WHERE id = ? AND account_id = ?').get(primaryId, req.accountId)
     if (!row) return res.json({ instances: [] })
-    return res.json({ instances: [sanitizeInstance(row, 'atendente')] })
+    const decorated = decorateInstances(db, req.accountId, [row])[0]
+    return res.json({ instances: [{ ...sanitizeInstance(row, 'atendente'), role: decorated.role, is_default_send: decorated.is_default_send, reply_rate: decorated.reply_rate }] })
   }
 
   const rows = db.prepare('SELECT * FROM whatsapp_instances WHERE account_id = ? ORDER BY created_at DESC').all(req.accountId)
-  res.json({ instances: rows.map(r => safe(r, req)) })
+  res.json({ instances: decorateInstances(db, req.accountId, rows).map(r => ({ ...safe(r, req), role: r.role, is_default_send: r.is_default_send, reply_rate: r.reply_rate })) })
 })
 
 // ─── Provedores disponiveis para novos numeros (UzAPI so com credenciais da Dros no .env) ───
 router.get('/whatsapp/providers', requireRole('super_admin', 'gerente', 'atendente'), (req, res) => {
   res.json({ providers: listAvailableProviders(), default: 'evolution' })
+})
+
+// ─── Numero padrao de disparos (spec secoes 4 e 9) ───
+router.get('/whatsapp/send-number-status', requireRole('super_admin', 'gerente', 'atendente'), (req, res) => {
+  if (!req.accountId) return res.status(400).json({ error: 'account_id required' })
+  res.json(sendNumberStatus(db, req.accountId))
+})
+
+router.put('/whatsapp/default-send-instance', requireRole('super_admin', 'gerente'), (req, res) => {
+  if (!req.accountId) return res.status(400).json({ error: 'account_id required' })
+  const r = setDefaultSendInstance(db, req.accountId, Number(req.body && req.body.instance_id))
+  if (!r.ok) {
+    const msg = r.reason === 'not_send_role' ? 'Só números UzAPI ou Oficial podem ser o padrão de disparos' : 'Número não encontrado'
+    return res.status(400).json({ error: msg })
+  }
+  res.json({ ok: true, status: sendNumberStatus(db, req.accountId) })
+})
+
+// ─── Ajustes anti-ban da conta (spec secao 10) ───
+router.get('/antiban-settings', requireRole('super_admin', 'gerente', 'atendente'), (req, res) => {
+  if (!req.accountId) return res.status(400).json({ error: 'account_id required' })
+  res.json({ settings: getAntibanSettings(db, req.accountId) })
+})
+
+router.put('/antiban-settings', requireRole('super_admin', 'gerente'), (req, res) => {
+  if (!req.accountId) return res.status(400).json({ error: 'account_id required' })
+  const r = saveAntibanSettings(db, req.accountId, req.body || {})
+  if (!r.ok) return res.status(400).json({ error: r.error })
+  res.json({ settings: r.settings })
 })
 
 // Helper: registra no provedor o webhook exclusivo da instancia (URL por token, MESSAGES_UPSERT + MESSAGES_UPDATE)
