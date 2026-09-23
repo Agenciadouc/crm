@@ -7,6 +7,7 @@ import { ThemeProvider } from './context/ThemeContext'
 import Sidebar from './components/Sidebar'
 import DisconnectedInstancesAlert from './components/DisconnectedInstancesAlert'
 import ReleaseNotesModal from './components/ReleaseNotesModal'
+import SystemNoticeBanner from './components/SystemNoticeBanner'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
 import Projecao from './pages/Projecao'
@@ -79,6 +80,7 @@ function AppRoutes() {
   return (
     <AccountProvider>
     <SSEProvider>
+    <SystemNoticeBanner />
     <DisconnectedInstancesAlert />
     <ReleaseNotesModal />
     <div className="app-layout">

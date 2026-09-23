@@ -3,8 +3,38 @@ import fetch from 'node-fetch'
 import db from '../db.js'
 import { requireRole } from '../middleware/auth.js'
 import { getProvider } from '../services/whatsappProvider/index.js'
+import { setSystemNotice, clearSystemNotice, getSystemNotice } from '../sse.js'
 
 const router = Router()
+
+// ─── System notice (aviso global — popup em todo mundo logado) ────
+// GET /api/admin/system-notice — qualquer user logado le pra saber se tem aviso ativo
+router.get('/system-notice', (req, res) => {
+  res.json({ notice: getSystemNotice() })
+})
+
+// POST /api/admin/system-notice — super_admin dispara aviso global
+// Body: { message, type: 'info'|'warning'|'success', durationMinutes: number, title? }
+router.post('/system-notice', requireRole('super_admin'), (req, res) => {
+  const { message, type = 'info', durationMinutes = 5, title } = req.body || {}
+  if (!message || !String(message).trim()) return res.status(400).json({ error: 'message obrigatorio' })
+  const notice = {
+    id: Date.now(),
+    title: title ? String(title).slice(0, 100) : null,
+    message: String(message).slice(0, 500),
+    type: ['info', 'warning', 'success'].includes(type) ? type : 'info',
+    expiresAt: Date.now() + Math.max(1, Math.min(1440, Number(durationMinutes) || 5)) * 60000,
+    createdAt: Date.now(),
+  }
+  setSystemNotice(notice)
+  res.json({ ok: true, notice })
+})
+
+// DELETE /api/admin/system-notice — cancela aviso antes do tempo
+router.delete('/system-notice', requireRole('super_admin'), (req, res) => {
+  clearSystemNotice()
+  res.json({ ok: true })
+})
 
 // ─── Check + auto-reconnect TODAS as instancias WhatsApp (admin global)
 // Usado pelo botao "Verificar todas as instancias" no painel admin
