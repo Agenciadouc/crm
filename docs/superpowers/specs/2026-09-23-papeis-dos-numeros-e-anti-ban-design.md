@@ -16,6 +16,16 @@ E aplicar, em todo envio automático, as 4 regras de boas práticas da UzAPI (ap
 
 **Sucesso =** nenhum envio automático sai por número da Evolution; todo automático sai pelo número padrão de disparos; sem esse número, nada automático sai e o CRM avisa; follow-ups e disparos respeitam descadastro, intervalo e variação.
 
+### Conta com um número só (caso mais comum)
+
+Muitos clientes têm um celular só e nenhum outro vendedor. O papel continua vindo do provedor:
+
+| A conta tem | Resultado |
+|---|---|
+| Só Evolution própria | Lê e o humano responde pelo chat. **Envios automáticos desligados** por padrão (estado normal, não erro): as telas mostram "Envios automáticos desligados — conecte UzAPI ou Oficial para liberar". |
+| Só UzAPI ou só Oficial | O mesmo número faz **tudo**: leitura, resposta manual e automáticos. Ao conectar, ele vira o número padrão e os automáticos ficam **habilitados na hora da integração**. |
+| Evolution + UzAPI/Oficial | Evolution = leitura + manual; o número de disparo faz os automáticos. |
+
 ## 2. Decisões do dono (23/09/2026)
 
 1. Resposta **manual** digitada no chat do CRM sai pela Evolution (número da conversa).
@@ -26,6 +36,7 @@ E aplicar, em todo envio automático, as 4 regras de boas práticas da UzAPI (ap
 6. Agente de IA **só atende** quem escreve no número de disparo e responde por ele. Na Evolution quem responde é o vendedor.
 7. A "1ª mensagem" da passagem para o vendedor **vira tarefa** do vendedor (não é enviada sozinha).
 8. Os 7 itens anti-ban entram neste mesmo projeto.
+9. Cliente com um celular só: na Evolution própria não há disparos; com UzAPI ou Oficial os automáticos ficam habilitados já na integração.
 
 ## 3. Papel do número
 
@@ -67,7 +78,7 @@ Quem passa a usar o escolhedor com `kind: 'automatico'`:
 
 ## 7. "1ª mensagem" vira tarefa
 
-Em `leadHandoff.js`, quando hoje o CRM enviaria a 1ª mensagem pelo número do vendedor:
+Se o número do vendedor (`users.primary_instance_id`) for de **disparo** (UzAPI/Oficial), nada muda: a 1ª mensagem sai sozinha como hoje. Se for de **leitura** (Evolution), em `leadHandoff.js`, quando hoje o CRM enviaria a 1ª mensagem:
 - Cria uma `standalone_tasks` para o vendedor: título "Mandar 1ª mensagem para {lead}", descrição com o texto já montado (mesmo modelo de hoje: funil > número), vencimento agora.
 - Não envia nada. `first_msg_sent_at` só é marcado quando a tarefa for criada (evita tarefa repetida).
 - O aviso interno ao vendedor (etapa 2) continua igual.
@@ -85,7 +96,9 @@ Assim, qualquer caminho esquecido falha de forma segura em vez de sair pela Evol
 
 - **Follow-ups:** pausam com `paused_reason = 'no_send_number'`. Quando um número vira padrão ou reconecta, retomam (estende `resumeFollowUpsIfPaused` para buscar por conta, não mais por `follow_ups.instance_id`).
 - **Disparos:** não iniciam e ficam pausados com `paused_reason = 'no_send_number'`; retomam do mesmo jeito (`resumeBroadcastIfPaused`).
-- **Aviso na tela:** faixa "Conecte o número de disparos — os envios automáticos estão parados" em Disparos, Cadências e Follow-ups e Integrações. Rota `GET /api/whatsapp/send-number-status` devolve `{ ok, instance, reason }`.
+- **Aviso na tela** (Disparos, Cadências e Follow-ups, Integrações). Rota `GET /api/whatsapp/send-number-status` devolve `{ ok, instance, reason }`, e o texto depende do caso:
+  - conta **nunca teve** número de disparo (`reason: 'no_send_number'`): aviso neutro "Envios automáticos desligados — conecte UzAPI ou Oficial para liberar";
+  - número padrão **caiu** (`reason: 'send_number_offline'`): alerta "O número de disparos está desconectado — os envios automáticos estão parados".
 
 **API Oficial:** `numberRole` já trata `oficial` como disparo. Conector, templates aprovados pela Meta (criação e acompanhamento pelo CRM, sem abrir telas da Meta), Embedded Signup, Tech Provider e coexistência ficam no projeto da Oficial, junto com o Motor de Custo.
 
@@ -141,7 +154,8 @@ Com `better-sqlite3 :memory:`, no padrão dos testes de hoje:
 - Trava: automático com lead em número de leitura é recusado; manual passa; sem lead passa.
 - Cada caminho da tabela da seção 5 usa o escolhedor; follow-up e disparo pausam com `no_send_number` e retomam ao conectar.
 - Agente e ausência não rodam em número de leitura.
-- Passagem ao vendedor cria tarefa e não envia.
+- Passagem ao vendedor: número do vendedor na Evolution → cria tarefa e não envia; número do vendedor de disparo → envia como hoje.
+- Conta com um número só: só Evolution → automáticos desligados (`no_send_number`); só UzAPI → o número é padrão e faz manual + automático.
 - ① ② ③ ④ ⑥ ⑦: um teste por regra (palavras de saída e falsos positivos; cálculo da taxa com e sem mínimo; catraca com sorteio injetado).
 
 ## 13. Riscos e implantação
