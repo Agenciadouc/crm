@@ -8,6 +8,8 @@ import db from '../db.js'
 import { getProvider } from './whatsapp/index.js'
 import { createSender } from './whatsapp/sender.js'
 import { renderHandoffTemplate } from './messageTemplateVars.js'
+import { numberRole } from './whatsapp/numberRole.js'
+import { createFirstMessageTask } from './firstMessageTask.js'
 
 function getNotifierInstanceId() {
   // 1o: tenta app_settings (configuravel via UI super_admin)
@@ -97,19 +99,25 @@ export async function notifyAndOpenLead(leadId, attendantUserId, opts = {}) {
         if (tpl && tpl.trim()) {
           const text = renderHandoffTemplate(tpl, { ...vars, instance_name: vendInst.instance_name || '' })
           if (text.trim()) {
-            const r = await sendViaInstance(vendInst, lead.phone, text, { leadId: lead.id })
-            if (r.ok) {
-              db.prepare(`INSERT INTO messages (lead_id, account_id, direction, content, media_type, sender_name, wa_msg_id, instance_id)
-                          VALUES (?, ?, 'outbound', ?, 'text', ?, ?, ?)`)
-                .run(lead.id, lead.account_id, text, user.name, r.wamsgId, vendInst.id)
-              // CRITICO: muda last_instance_id pro chat abrir na inst certa
-              db.prepare("UPDATE leads SET last_instance_id=?, first_msg_sent_at=datetime('now'), updated_at=datetime('now') WHERE id=?")
-                .run(vendInst.id, lead.id)
-              db.prepare(`INSERT OR IGNORE INTO lead_instance_assignments (lead_id, instance_id, attendant_id) VALUES (?, ?, ?)`)
-                .run(lead.id, vendInst.id, user.id)
-              console.log(`[Handoff] 1a msg lead=${lead.id} via ${vendInst.instance_name} (vendedor=${user.name}) source=${opts.source || '?'}`)
+            if (numberRole(vendInst) === 'leitura') {
+              // Numero do vendedor e Evolution (leitura): nao envia sozinho, vira tarefa (spec secao 7).
+              createFirstMessageTask(db, { lead, user, text })
+              console.log(`[Handoff] 1a msg lead=${lead.id} virou tarefa para ${user.name} (numero de leitura)`)
             } else {
-              console.error(`[Handoff] 1a msg FALHOU lead=${lead.id}:`, r.reason || JSON.stringify(r.raw).substring(0, 150))
+              const r = await sendViaInstance(vendInst, lead.phone, text, { leadId: lead.id })
+              if (r.ok) {
+                db.prepare(`INSERT INTO messages (lead_id, account_id, direction, content, media_type, sender_name, wa_msg_id, instance_id)
+                            VALUES (?, ?, 'outbound', ?, 'text', ?, ?, ?)`)
+                  .run(lead.id, lead.account_id, text, user.name, r.wamsgId, vendInst.id)
+                // CRITICO: muda last_instance_id pro chat abrir na inst certa
+                db.prepare("UPDATE leads SET last_instance_id=?, first_msg_sent_at=datetime('now'), updated_at=datetime('now') WHERE id=?")
+                  .run(vendInst.id, lead.id)
+                db.prepare(`INSERT OR IGNORE INTO lead_instance_assignments (lead_id, instance_id, attendant_id) VALUES (?, ?, ?)`)
+                  .run(lead.id, vendInst.id, user.id)
+                console.log(`[Handoff] 1a msg lead=${lead.id} via ${vendInst.instance_name} (vendedor=${user.name}) source=${opts.source || '?'}`)
+              } else {
+                console.error(`[Handoff] 1a msg FALHOU lead=${lead.id}:`, r.reason || JSON.stringify(r.raw).substring(0, 150))
+              }
             }
           }
         }

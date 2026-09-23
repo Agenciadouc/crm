@@ -17,6 +17,7 @@ import {
 } from './salesAnalysis.js'
 import { createReplySuggestion, getPendingSuggestion } from './aiSuggestions.js'
 import { releaseLeadsFromAgent as releaseHeldLeads } from './agentShutdown.js'
+import { resolveSendInstance } from './whatsapp/resolveSendInstance.js'
 
 // ─── Helpers ──────────────────────────────────────────────────────────
 
@@ -909,17 +910,13 @@ export async function sendBotWelcomeForSheetsLead(leadId, instanceId) {
       return
     }
 
-    // Resolve instancia: prefere lead.instance_id, fallback pro arg
-    const targetInstId = lead.instance_id || instanceId
-    if (!targetInstId) {
-      console.log(`[Bot Welcome] SKIP lead=${leadId} — sem instancia`)
+    // Boas-vindas e envio automatico: sai pelo numero padrao de disparos (spec secao 5).
+    const resolved = resolveSendInstance(db, { accountId: lead.account_id, kind: 'automatico' })
+    if (!resolved.ok) {
+      console.log(`[Bot Welcome] SKIP lead=${leadId} — ${resolved.reason}`)
       return
     }
-    const inst = db.prepare("SELECT * FROM whatsapp_instances WHERE id = ? AND status = 'connected'").get(targetInstId)
-    if (!inst) {
-      console.warn(`[Bot Welcome] inst offline/inexistente lead=${leadId} inst=${targetInstId}`)
-      return
-    }
+    const inst = resolved.instance
 
     // Tags do lead pra contextualizar
     const tags = db.prepare(`
@@ -964,7 +961,7 @@ REGRAS:
       return
     }
 
-    // Envia via Evolution
+    // Envia pelo numero padrao de disparos da conta
     const sendResult = await sendViaInstance(inst, lead.phone, msgText, { leadId: lead.id })
     if (!sendResult.ok) {
       console.warn(`[Bot Welcome] envio falhou lead=${leadId}: ${sendResult.reason || 'unknown'}`)
