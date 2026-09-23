@@ -2,6 +2,7 @@ import { Router } from 'express'
 import fetch from 'node-fetch'
 import db from '../db.js'
 import { requireRole } from '../middleware/auth.js'
+import { getProvider } from '../services/whatsappProvider/index.js'
 
 const router = Router()
 
@@ -9,7 +10,7 @@ const router = Router()
 // Usado pelo botao "Verificar todas as instancias" no painel admin
 router.post('/instances/check-all', requireRole('super_admin'), async (req, res) => {
   const instances = db.prepare(`
-    SELECT w.id, w.instance_name, w.api_url, w.api_key, w.status, a.name as account_name
+    SELECT w.*, a.name as account_name
     FROM whatsapp_instances w
     JOIN accounts a ON a.id = w.account_id
     ORDER BY a.name, w.instance_name
@@ -19,14 +20,8 @@ router.post('/instances/check-all', requireRole('super_admin'), async (req, res)
   for (const inst of instances) {
     const r = { id: inst.id, account: inst.account_name, instance: inst.instance_name, action: '', state: '' }
     try {
-      // Checa estado real via connectionState (URL-encoded pra suportar acentos/espacos)
-      const encoded = encodeURIComponent(inst.instance_name)
-      const stateRes = await fetch(`${inst.api_url}/instance/connectionState/${encoded}`, {
-        headers: { apikey: inst.api_key },
-        timeout: 15000,
-      })
-      const stateData = await stateRes.json().catch(() => ({}))
-      const realState = stateData?.instance?.state || stateData?.state || ''
+      const provider = getProvider(inst)
+      const { state: realState } = await provider.connectionState(inst)
 
       if (realState === 'open' || realState === 'connected') {
         if (inst.status !== 'connected') {
@@ -36,17 +31,13 @@ router.post('/instances/check-all', requireRole('super_admin'), async (req, res)
         r.action = 'already_connected'
       } else if (realState === 'close' || realState === 'closed' || realState === 'disconnected') {
         // Tenta reconectar
-        const connRes = await fetch(`${inst.api_url}/instance/connect/${encoded}`, {
-          headers: { apikey: inst.api_key },
-          timeout: 20000,
-        })
-        const connData = await connRes.json().catch(() => ({}))
+        const { qrcode, raw: connData } = await provider.connectInstance(inst)
         const newState = connData?.instance?.state || connData?.state || ''
-        const hasQr = !!(connData?.qrcode?.base64 || connData?.base64 || (typeof connData?.qrcode === 'string' && connData.qrcode.startsWith('data:image')))
+        const hasQr = !!qrcode
 
         if (hasQr) {
           db.prepare("UPDATE whatsapp_instances SET status='connecting', qr_code=?, updated_at=datetime('now') WHERE id=?")
-            .run(connData?.qrcode?.base64 || connData?.base64 || connData?.qrcode || null, inst.id)
+            .run(qrcode, inst.id)
           r.state = 'needs_qr'
           r.action = 'qr_required'
         } else if (newState === 'open' || newState === 'connected') {
@@ -60,7 +51,7 @@ router.post('/instances/check-all', requireRole('super_admin'), async (req, res)
         }
       } else if (!realState) {
         r.state = 'no_response'
-        r.action = 'evolution_unreachable'
+        r.action = 'whatsapp_unreachable'
       } else {
         r.state = realState
         r.action = 'unknown_state'

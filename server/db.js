@@ -359,6 +359,10 @@ try {
 addColumnIfNotExists('whatsapp_instances', 'paused_at', 'TEXT')                              // datetime pausa (auto ou manual); null = ativa
 addColumnIfNotExists('whatsapp_instances', 'paused_reason', 'TEXT')                          // 'delivered_rate_low' | 'manual' | 'ghost_detected'
 addColumnIfNotExists('whatsapp_instances', 'health_check_window_min', 'INTEGER DEFAULT 120') // janela pra delivered_rate (default 2h)
+// Provider WhatsApp: 'evolution' (self-hosted, default) | 'uzapi' (SaaS, opt-in por cliente)
+addColumnIfNotExists('whatsapp_instances', 'provider', "TEXT NOT NULL DEFAULT 'evolution'")
+// Nome da session no painel uzapi (auto-derivado do slug da instance quando switch pra uzapi)
+addColumnIfNotExists('whatsapp_instances', 'uzapi_session', 'TEXT')
 // Backfill warm-up retroativo APENAS pra instancias recentes (created_at < 3 dias atras).
 // Instancias antigas nao sao afetadas — ja "esquentaram" naturalmente em prod.
 try {

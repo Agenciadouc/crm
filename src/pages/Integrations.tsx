@@ -4,7 +4,7 @@ import { useAuth } from '../context/AuthContext'
 import {
   fetchWhatsAppInstances, createWhatsAppInstance, connectWhatsAppInstance,
   checkWhatsAppStatus, refreshWhatsAppQR, disconnectWhatsApp, deleteWhatsAppInstance,
-  fetchEvolutionConfig, saveEvolutionConfig, setupWhatsAppWebhook, restartWhatsAppInstance, syncWhatsAppNow, setInstanceAttendant, setInstanceMode, fetchUsers, apiFetch,
+  fetchEvolutionConfig, saveEvolutionConfig, setupWhatsAppWebhook, restartWhatsAppInstance, syncWhatsAppNow, setInstanceAttendant, setInstanceMode, fetchUsers, apiFetch, switchWhatsAppProvider,
   updateMetaCapi, testMetaCapi, updateAiConfig, testAnthropic, updateInstanceFirstMsgTemplate,
   fetchTags, fetchTagInstanceMappings, upsertTagInstanceMapping, deleteTagInstanceMapping,
   fetchDefaultFormInstance, setDefaultFormInstance, fetchSheetsStatus, setSheetsDefaultTag,
@@ -342,6 +342,26 @@ export default function Integrations() {
     setRestarting(null)
   }
 
+  const handleSwitchProvider = async (inst: WhatsAppInstance, target: 'evolution' | 'uzapi') => {
+    if (!accountId) return
+    const current = inst.provider || 'evolution'
+    const msg = target === 'uzapi'
+      ? `Trocar "${inst.instance_name}" pra uzapi?\n\nIsso vai:\n1) Desconectar o WhatsApp atual (Evolution)\n2) Criar uma session nova na conta uzapi da agencia\n3) Voce vai precisar escanear um QR code novo\n\nMensagens em transito podem se perder por alguns segundos. Continuar?`
+      : `Voltar "${inst.instance_name}" pra Evolution?\n\nIsso vai desconectar do uzapi. Voce precisara reescanear o QR na Evolution.\n\nContinuar?`
+    if (!confirm(msg)) return
+    try {
+      const r = await switchWhatsAppProvider(inst.id, accountId, target)
+      await load()
+      if (r.needsQr) {
+        // Abre o painel de QR automaticamente pra escanear
+        setActiveQR(inst.id)
+        alert(`Provider trocado pra ${target}. Escaneie o QR code que abriu.`)
+      }
+    } catch (e: any) {
+      alert(`Erro trocando pra ${target}: ${e.message}`)
+    }
+  }
+
   const [syncing, setSyncing] = useState(false)
   const handleSyncNow = async () => {
     if (!accountId) return
@@ -457,7 +477,20 @@ export default function Integrations() {
                       <Smartphone size={18} style={{ color: getStatusColor(inst.status) }} />
                     </div>
                     <div>
-                      <div style={{ fontWeight: 600, fontSize: 15 }}>{inst.instance_name}</div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                        <span style={{ fontWeight: 600, fontSize: 15 }}>{inst.instance_name}</span>
+                        <span
+                          style={{
+                            fontSize: 10, padding: '2px 8px', borderRadius: 4, fontWeight: 700, letterSpacing: 0.3,
+                            background: (inst.provider || 'evolution') === 'uzapi' ? 'rgba(52,199,89,0.15)' : 'rgba(155,89,182,0.15)',
+                            color: (inst.provider || 'evolution') === 'uzapi' ? '#34C759' : '#B47DDB',
+                            border: `1px solid ${(inst.provider || 'evolution') === 'uzapi' ? 'rgba(52,199,89,0.35)' : 'rgba(155,89,182,0.35)'}`,
+                          }}
+                          title={(inst.provider || 'evolution') === 'uzapi' ? 'Rodando via uzapi.com.br (conta agencia)' : 'Rodando via Evolution API self-hosted'}
+                        >
+                          {(inst.provider || 'evolution').toUpperCase()}
+                        </span>
+                      </div>
                       {inst.phone_number && <div style={{ fontSize: 12, color: '#C8C4D4' }}>{inst.phone_number}</div>}
                       {(
                         <>
@@ -546,6 +579,27 @@ export default function Integrations() {
                           </>
                         )}
                       </>
+                    )}
+                    {isGerenteOuAdmin && (
+                      (inst.provider || 'evolution') === 'evolution' ? (
+                        <button
+                          className="btn btn-secondary btn-sm"
+                          onClick={() => handleSwitchProvider(inst, 'uzapi')}
+                          title="Migra essa inst pra uzapi.com.br (conta agencia). Vai desconectar Evolution e pedir QR novo."
+                          style={{ borderColor: 'rgba(52,199,89,0.4)', color: '#34C759' }}
+                        >
+                          ⇄ Mudar pra uzapi
+                        </button>
+                      ) : (
+                        <button
+                          className="btn btn-secondary btn-sm"
+                          onClick={() => handleSwitchProvider(inst, 'evolution')}
+                          title="Volta essa inst pra Evolution self-hosted. Vai desconectar uzapi e pedir QR novo."
+                          style={{ borderColor: 'rgba(155,89,182,0.4)', color: '#B47DDB' }}
+                        >
+                          ⇄ Voltar pra Evolution
+                        </button>
+                      )
                     )}
                     {(
                       <button className="btn btn-danger btn-sm btn-icon" onClick={() => handleDelete(inst)} title="Excluir"><Trash2 size={12} /></button>

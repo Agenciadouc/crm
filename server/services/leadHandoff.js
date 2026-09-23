@@ -6,6 +6,7 @@
 
 import db from '../db.js'
 import fetch from 'node-fetch'
+import { getProvider } from './whatsappProvider/index.js'
 
 function getNotifierInstanceId() {
   // 1o: tenta app_settings (configuravel via UI super_admin)
@@ -144,12 +145,10 @@ export async function markMessageAsRead(instance, lead) {
   try {
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), 3000)
-    await fetch(`${instance.api_url}/chat/markMessageAsRead/${instance.instance_name}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', apikey: instance.api_key },
-      body: JSON.stringify({ read_messages: [{ remoteJid, fromMe: false, id: lastMsg.wa_msg_id }] }),
+    await getProvider(instance).markAsRead(instance, {
+      readMessages: [{ remoteJid, fromMe: false, id: lastMsg.wa_msg_id }],
       signal: controller.signal,
-    }).catch(() => {})
+    })
     clearTimeout(timer)
   } catch {}
 }
@@ -223,17 +222,14 @@ async function simulateTyping(instance, phone, text) {
   const ms = Math.round(base * jitter)
 
   // Best-effort: cada chamada de presence pode falhar silenciosamente.
-  const sendPresence = (presence) => {
+  const provider = getProvider(instance)
+  const sendPresence = async (presence) => {
     try {
       const controller = new AbortController()
       const timer = setTimeout(() => controller.abort(), 3000)
-      return fetch(`${instance.api_url}/chat/sendPresence/${instance.instance_name}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', apikey: instance.api_key },
-        body: JSON.stringify({ number, presence, delay: 100 }),
-        signal: controller.signal,
-      }).catch(() => {}).finally(() => clearTimeout(timer))
-    } catch { return Promise.resolve() }
+      await provider.sendPresence(instance, { number, presence, delay: 100, signal: controller.signal })
+      clearTimeout(timer)
+    } catch { /* silencio */ }
   }
 
   // Sequencia humana completa: online -> digitando -> parou de digitar -> envia
@@ -262,25 +258,14 @@ export async function checkWhatsAppNumber(instance, phone) {
   try {
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), 3000) // 3s timeout
-    const res = await fetch(`${instance.api_url}/chat/whatsappNumbers/${instance.instance_name}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'apikey': instance.api_key },
-      body: JSON.stringify({ numbers: [number] }),
-      signal: controller.signal,
-    })
+    const data = await getProvider(instance).checkNumbers(instance, [number], { signal: controller.signal })
     clearTimeout(timer)
-    if (!res.ok) {
-      // 400/500 da Evolution = nao consegui validar; cacheia null curto pra evitar spam
-      _cachePut(cacheKey, null)
-      return null
-    }
-    const data = await res.json().catch(() => null)
-    // Evolution retorna array: [{ exists: bool, jid, number }]
     if (Array.isArray(data) && data.length > 0) {
       const exists = !!data[0].exists
       _cachePut(cacheKey, exists)
       return exists
     }
+    // Sem resposta valida — cacheia null curto pra evitar spam
     _cachePut(cacheKey, null)
     return null
   } catch (e) {
@@ -321,22 +306,8 @@ export async function checkWhatsAppNumbersBulk(instance, phones) {
   try {
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), 15000) // 15s pra lista grande
-    const res = await fetch(`${instance.api_url}/chat/whatsappNumbers/${instance.instance_name}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'apikey': instance.api_key },
-      body: JSON.stringify({ numbers: toQuery }),
-      signal: controller.signal,
-    })
+    const data = await getProvider(instance).checkNumbers(instance, toQuery, { signal: controller.signal })
     clearTimeout(timer)
-    if (!res.ok) {
-      // Nao consegui validar nenhum — marca todos como null
-      for (const n of toQuery) {
-        _cachePut(`${instance.id}:${n}`, null)
-        result.set(normalizedToOriginal.get(n), null)
-      }
-      return result
-    }
-    const data = await res.json().catch(() => null)
     if (Array.isArray(data)) {
       // Cria index por number normalizado
       const byNumber = new Map()
@@ -431,25 +402,8 @@ export async function sendViaInstance(instance, phone, text, opts = {}) {
   // Anti-ban: typing simulation antes do envio (skip pra chat manual humano)
   if (!opts.skipTyping) await simulateTyping(instance, phone, text)
 
-  try {
-    const res = await fetch(`${instance.api_url}/message/sendText/${instance.instance_name}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'apikey': instance.api_key },
-      // delay:2000 removido — typing simulation ja cobre o tempo de "digitacao"
-      body: JSON.stringify({ number, text }),
-    })
-    const data = await res.json().catch(() => ({}))
-    if (!data.key?.id) {
-      // Evolution recusou — capta motivo se vier
-      const reason = data?.response?.message?.[0]?.exists === false
-        ? 'number_not_on_whatsapp'
-        : (data?.error || data?.message || `http_${res.status}`)
-      return { ok: false, reason: String(reason).substring(0, 200), raw: data }
-    }
-    return { ok: true, wamsgId: data.key.id, raw: data }
-  } catch (e) {
-    return { ok: false, reason: e.message }
-  }
+  // Envio via provider (Evolution ou uzapi conforme instance.provider)
+  return await getProvider(instance).sendText(instance, { number, text })
 }
 
 const SOURCE_LABELS = {

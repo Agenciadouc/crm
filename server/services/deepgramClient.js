@@ -5,6 +5,7 @@
 // retorna { ok: false, reason } sem quebrar — aiAgent.js trata o fallback.
 
 import fetch from 'node-fetch'
+import { getProvider } from './whatsappProvider/index.js'
 
 const ENDPOINT = 'https://api.deepgram.com/v1/listen'
 const NOVA3_PRICE_PER_MIN = 0.0043
@@ -70,23 +71,18 @@ export async function transcribeAudio(audio, opts = {}) {
  * @returns {Promise<{ buffer: Buffer, mimetype: string }>}
  */
 export async function fetchAudioBuffer(instance, waMsgId) {
-  if (!instance?.api_url || !instance?.api_key || !instance?.instance_name) {
-    throw new Error('instance_missing_credentials')
-  }
+  if (!instance?.instance_name) throw new Error('instance_missing_credentials')
   if (!waMsgId) throw new Error('wa_msg_id_required')
 
-  const res = await fetch(`${instance.api_url}/chat/getBase64FromMediaMessage/${instance.instance_name}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'apikey': instance.api_key },
-    body: JSON.stringify({ message: { key: { id: waMsgId } }, convertToMp4: false }),
-    timeout: 20000,
+  const result = await getProvider(instance).getMediaBase64(instance, {
+    message: { key: { id: waMsgId } },
+    convertToMp4: false,
   })
-  const data = await res.json().catch(() => ({}))
-  if (!data.base64) {
-    throw new Error(`evolution_no_base64 (status=${res.status})`)
+  if (!result?.base64) {
+    throw new Error('provider_no_base64')
   }
   return {
-    buffer: Buffer.from(data.base64, 'base64'),
-    mimetype: data.mimetype || 'audio/ogg',
+    buffer: Buffer.from(result.base64, 'base64'),
+    mimetype: result.mimetype || 'audio/ogg',
   }
 }

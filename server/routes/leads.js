@@ -7,6 +7,7 @@ import { triggerCapiForStageChange } from '../services/metaCapi.js'
 import { notifyAndOpenLead } from '../services/leadHandoff.js'
 import { sendBotWelcomeForSheetsLead, processInboundMessage, diagnoseForceAi } from '../services/aiAgent.js'
 import { canAtendenteAccessLead } from '../services/leadAccess.js'
+import { getProvider } from '../services/whatsappProvider/index.js'
 
 const router = Router()
 
@@ -672,13 +673,8 @@ router.post('/:id/refresh-profile-pic', async (req, res) => {
     : db.prepare("SELECT * FROM whatsapp_instances WHERE account_id = ? AND status = 'connected' LIMIT 1").get(lead.account_id)
   if (!instance) return res.status(400).json({ error: 'Sem instancia WhatsApp' })
   try {
-    const r = await fetch(`${instance.api_url}/chat/fetchProfilePictureUrl/${instance.instance_name}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', apikey: instance.api_key },
-      body: JSON.stringify({ number: lead.phone }),
-    })
-    const data = await r.json()
-    const url = data?.profilePictureUrl || null
+    const result = await getProvider(instance).fetchProfilePicture(instance, lead.phone)
+    const url = result?.url || null
     db.prepare("UPDATE leads SET profile_pic_url = ?, profile_pic_updated_at = datetime('now') WHERE id = ?").run(url, lead.id)
     res.json({ profile_pic_url: url })
   } catch (err) {

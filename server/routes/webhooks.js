@@ -7,21 +7,17 @@ import { getInstanceConfig, wasAutoMsgSentRecently, sendAutoMessage, shouldSendA
 import { processInboundMessage, sendBotWelcomeForSheetsLead } from '../services/aiAgent.js'
 import { pickFromRoulette } from '../services/roulette.js'
 import { notifyAndOpenLead } from '../services/leadHandoff.js'
+import { getProvider } from '../services/whatsappProvider/index.js'
 
 const router = Router()
 
-// Helper: fetch profile picture URL from Evolution (async, fire-and-forget)
+// Helper: fetch profile picture URL via provider (async, fire-and-forget)
 async function fetchAndSaveProfilePic(instance, phone, leadId) {
   if (!instance || !phone || !leadId) return
   try {
-    const r = await fetch(`${instance.api_url}/chat/fetchProfilePictureUrl/${instance.instance_name}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', apikey: instance.api_key },
-      body: JSON.stringify({ number: phone }),
-    })
-    const data = await r.json()
-    if (data?.profilePictureUrl) {
-      db.prepare("UPDATE leads SET profile_pic_url = ?, profile_pic_updated_at = datetime('now') WHERE id = ?").run(data.profilePictureUrl, leadId)
+    const result = await getProvider(instance).fetchProfilePicture(instance, phone)
+    if (result?.url) {
+      db.prepare("UPDATE leads SET profile_pic_url = ?, profile_pic_updated_at = datetime('now') WHERE id = ?").run(result.url, leadId)
     }
   } catch {}
 }
@@ -166,6 +162,44 @@ function autoDetectStage(lead, messageText) {
     }
   }
 }
+
+// uzapi webhook — traduz shape uzapi pro shape interno (Baileys) e delega
+// pro mesmo handler da rota /evolution abaixo.
+//
+// IMPORTANTE: `translateUzapiToBaileys` ainda esta como esqueleto. Preencher
+// depois que Fase 1 (capturar 1 payload real de webhook uzapi) estiver feita.
+// Enquanto nao preenchido, essa rota apenas LOGA o body cru pro console
+// (com prefixo "[UZAPI-WEBHOOK-RAW]") e retorna 200 pra evitar retentativas.
+function translateUzapiToBaileys(uzapiBody) {
+  // TODO Fase 1: quando tiver 1 exemplo real de webhook inbound uzapi, mapear
+  // pro shape { event: 'messages.upsert', data: { key: {id, remoteJid, fromMe},
+  // message: { conversation | imageMessage | audioMessage | ... },
+  // messageTimestamp, pushName, ... } } que o handler Evolution abaixo entende.
+  //
+  // Tipos de evento a mapear:
+  //   inbound msg      -> { event: 'messages.upsert', data: {...Baileys shape} }
+  //   status update    -> { event: 'messages.update', data: [{key, status}] }
+  //   connection state -> { event: 'connection.update', data: {state} }
+  return null
+}
+
+router.post('/uzapi/:accountSlug', (req, res) => {
+  try {
+    const translated = translateUzapiToBaileys(req.body)
+    if (!translated) {
+      // Ainda nao implementado — loga cru pra podermos ver o shape real
+      console.log(`[UZAPI-WEBHOOK-RAW] slug=${req.params.accountSlug}`, JSON.stringify(req.body).slice(0, 2000))
+      return res.json({ ok: true, note: 'tradutor uzapi->baileys nao implementado ainda; body logado' })
+    }
+    // Substitui body pelo traduzido e delega pro handler Evolution abaixo (rota interna)
+    req.body = translated
+    req.url = `/evolution/${req.params.accountSlug}`
+    return router.handle(req, res)
+  } catch (err) {
+    console.error('[UZAPI Webhook]', err.message)
+    res.status(500).json({ error: err.message })
+  }
+})
 
 // Evolution API webhook
 router.post('/evolution/:accountSlug', (req, res) => {
