@@ -4,17 +4,19 @@ import {
   createWhatsAppInstance, connectWhatsAppInstance, checkWhatsAppStatus, refreshWhatsAppQR,
   disconnectWhatsApp, deleteWhatsAppInstance, fetchEvolutionConfig, saveEvolutionConfig,
   setupWhatsAppWebhook, restartWhatsAppInstance, syncWhatsAppNow, setInstanceAttendant, setInstanceMode,
-  fetchWhatsAppProviders,
-  type WhatsAppInstance, type User as UserType, type WhatsAppProviderId,
+  fetchWhatsAppProviders, setDefaultSendInstance, fetchAntibanSettings,
+  type WhatsAppInstance, type User as UserType, type WhatsAppProviderId, type AntibanSettings,
 } from '../../lib/api'
 import { providerLabel, qrImageSrc, defaultProvider } from '../../lib/whatsappProviders.js'
+import { roleLabel, formatReplyRate } from '../../lib/antiban.js'
 import {
   Plus, Wifi, WifiOff, Loader, Trash2, QrCode, Power, PowerOff, RefreshCw, Smartphone, Save, Check,
-  Settings, Webhook, RotateCw, Download, User, MessageSquare, ExternalLink,
+  Settings, Webhook, RotateCw, Download, User, MessageSquare, ExternalLink, Star,
 } from 'lucide-react'
 import NumberSettingsModal from '../../components/NumberSettingsModal'
 import { InlineNotice, useInlineNotice } from '../../components/InlineNotice'
 import ConfirmDialog from '../../components/ConfirmDialog'
+import SendNumberBanner from '../../components/SendNumberBanner'
 
 interface Props {
   accountId: number
@@ -75,6 +77,8 @@ export default function WhatsAppCard({ accountId, instances, setInstances, reloa
   const [restartTarget, setRestartTarget] = useState<WhatsAppInstance | null>(null)
   const [restrictTarget, setRestrictTarget] = useState<WhatsAppInstance | null>(null)
   const [retrying, setRetrying] = useState(false)
+  const [antiban, setAntiban] = useState<AntibanSettings | null>(null)
+  const [settingDefaultId, setSettingDefaultId] = useState<number | null>(null)
 
   // Avisos no lugar do alert(): um do card (com o lugar onde aparece) e um por modal aberto.
   const cardNotice = useInlineNotice()
@@ -96,6 +100,7 @@ export default function WhatsAppCard({ accountId, instances, setInstances, reloa
     // A lista pode chegar depois; o provedor pre-selecionado e aplicado ao ABRIR o modal
     // (openNewNumber), senao a lista atrasada sobrescreveria a escolha de quem ja abriu.
     fetchWhatsAppProviders(accountId).then(setProviders)
+    fetchAntibanSettings(accountId).then(setAntiban).catch(() => {})
   }, [accountId])
 
   // Enquanto um numero esta "connecting", confere o status a cada 5s (o QR da UzAPI pode chegar depois, pelo aviso).
@@ -260,6 +265,16 @@ export default function WhatsAppCard({ accountId, instances, setInstances, reloa
     try { await reload() } finally { setRetrying(false) }
   }
 
+  // Numero padrao de disparos (spec papeis dos numeros e anti-ban secao 5)
+  const handleSetDefault = async (inst: WhatsAppInstance) => {
+    setSettingDefaultId(inst.id)
+    try {
+      await setDefaultSendInstance(accountId, inst.id)
+      await reload()
+    } catch (e: any) { showErrorAt(inst.id, 'Erro ao definir número padrão', e) }
+    setSettingDefaultId(null)
+  }
+
   const qrInstance = instances.find(i => i.id === activeQR)
   const qrSrc = qrImageSrc(qrInstance?.qr_code)
   const panelUrl = qrInstance ? panelUrls[qrInstance.id] : undefined
@@ -283,6 +298,10 @@ export default function WhatsAppCard({ accountId, instances, setInstances, reloa
         </div>
 
         {noticeFor('top')}
+
+        <div style={{ marginBottom: 12 }}>
+          <SendNumberBanner accountId={accountId} />
+        </div>
 
         {loadError && (
           <div role="alert" style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', padding: '10px 12px', marginBottom: 12, borderRadius: 'var(--radius-sm)', background: 'var(--negative-bg)', border: '1px solid var(--negative)', fontSize: 13 }}>
@@ -345,8 +364,29 @@ export default function WhatsAppCard({ accountId, instances, setInstances, reloa
                       <span style={{ fontSize: 10, fontWeight: 600, padding: '2px 8px', borderRadius: 10, background: 'var(--bg-hover)', border: '1px solid var(--border-subtle)', color: 'var(--text-muted)' }}>
                         {providerLabel(inst.provider)}
                       </span>
+                      <span style={{
+                        fontSize: 10, fontWeight: 600, padding: '2px 8px', borderRadius: 10,
+                        background: inst.role === 'disparo' ? 'rgba(93,173,226,0.15)' : 'var(--bg-hover)',
+                        border: `1px solid ${inst.role === 'disparo' ? 'rgba(93,173,226,0.4)' : 'var(--border-subtle)'}`,
+                        color: inst.role === 'disparo' ? '#5DADE2' : 'var(--text-muted)',
+                      }}>
+                        {roleLabel(inst.role)}
+                      </span>
+                      {inst.is_default_send && (
+                        <span style={{ fontSize: 10, fontWeight: 600, padding: '2px 8px', borderRadius: 10, background: 'rgba(52,199,89,0.15)', border: '1px solid rgba(52,199,89,0.4)', color: '#34C759' }}>
+                          Padrão de disparos
+                        </span>
+                      )}
                     </div>
                     {inst.phone_number && <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{inst.phone_number}</div>}
+                    {formatReplyRate(inst.reply_rate) && (() => {
+                      const lowReply = !!antiban && inst.reply_rate?.rate != null && (inst.reply_rate.rate * 100) < antiban.reply_rate_alert_pct
+                      return (
+                        <div style={{ fontSize: 11, color: lowReply ? '#FBBC04' : 'var(--text-muted)', marginTop: 2 }}>
+                          {formatReplyRate(inst.reply_rate)}{lowReply ? ' — risco de bloqueio' : ''}
+                        </div>
+                      )
+                    })()}
                     <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 6, display: 'flex', alignItems: 'center', gap: 6 }}>
                       <User size={11} /> Leads novos vão para:
                       <select
@@ -401,6 +441,11 @@ export default function WhatsAppCard({ accountId, instances, setInstances, reloa
                   {(isGerenteOuAdmin || user?.primary_instance_id === inst.id) && (
                     <button className="btn btn-secondary btn-sm" onClick={() => setSettingsInstance(inst)} title="Primeira mensagem, horário de atendimento e ausência deste número">
                       <MessageSquare size={12} /> Mensagens do número
+                    </button>
+                  )}
+                  {isGerenteOuAdmin && inst.role === 'disparo' && !inst.is_default_send && (
+                    <button className="btn btn-secondary btn-sm" onClick={() => handleSetDefault(inst)} disabled={settingDefaultId === inst.id} title="Usar este número para disparos, follow-ups, agente e mensagens automáticas">
+                      {settingDefaultId === inst.id ? <Loader size={12} className="spinning" /> : <Star size={12} />} Tornar padrão
                     </button>
                   )}
                   <button className="btn btn-danger btn-sm btn-icon" onClick={() => { deleteNotice.clear(); setDeleteTarget(inst) }} title="Excluir"><Trash2 size={12} /></button>

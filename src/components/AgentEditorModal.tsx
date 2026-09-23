@@ -10,6 +10,7 @@ import {
   type AgentHandoffRule,
   type WhatsAppInstance, type Funnel, type User, type Tag,
 } from '../lib/api'
+import { isSendProvider } from '../lib/antiban.js'
 import { Bot, X, Save, Send, BookOpen, ArrowRightLeft, DollarSign, Play, AlertCircle, Plus, Trash2, MessageSquare } from 'lucide-react'
 
 const REQUIRED_FIELDS_OPTS = [
@@ -217,7 +218,8 @@ export default function AgentEditorModal({ agentId, accountId, initialTab, onClo
         welcome_extra_instructions: welcomeExtraInstructions.trim() || undefined,
         monthly_token_limit: monthlyTokenLimit,
         stage_ids: stageIds,
-        instance_ids: instanceIds,
+        // So reenvia numeros de disparo — numero de leitura que sobrou de config antiga cai fora aqui.
+        instance_ids: instanceIds.filter(id => isSendProvider(instances.find(i => i.id === id)?.provider)),
         handoff_rules: Object.values(handoffRules).filter(r => r),
       }
       let savedAgentId: number
@@ -418,8 +420,13 @@ export default function AgentEditorModal({ agentId, accountId, initialTab, onClo
 
             <div className="form-group">
               <label>Números de WhatsApp</label>
+              {instances.some(i => instanceIds.includes(i.id) && !isSendProvider(i.provider)) && (
+                <div style={{ fontSize: 11, color: '#FFB300', marginBottom: 6 }}>
+                  Este agente estava ligado a um número de leitura; agora ele só atende números de disparo
+                </div>
+              )}
               <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 200, overflowY: 'auto', padding: 8, border: '1px solid var(--border-medium)', borderRadius: 6 }}>
-                {instances.map(i => (
+                {instances.filter(i => isSendProvider(i.provider)).map(i => (
                   <label key={i.id} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, cursor: 'pointer' }}>
                     <input
                       type="checkbox"
@@ -429,6 +436,9 @@ export default function AgentEditorModal({ agentId, accountId, initialTab, onClo
                     {i.instance_name} {i.status === 'connected' ? '✓' : '✗ (offline)'}
                   </label>
                 ))}
+                {instances.filter(i => isSendProvider(i.provider)).length === 0 && (
+                  <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Conecte um número UzAPI ou Oficial para o agente atender</span>
+                )}
               </div>
             </div>
 

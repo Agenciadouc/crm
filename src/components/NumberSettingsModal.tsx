@@ -9,6 +9,7 @@ import {
   resolveServiceHours, buildServiceHoursSave, scheduleErrors, holdSendsError,
   type FirstMessageState, type ServiceHoursState, type DayKey,
 } from '../lib/numberSettings.js'
+import { isSendProvider } from '../lib/antiban.js'
 import { X, MessageSquare, Clock, Moon, Save, AlertTriangle, Smartphone, Info } from 'lucide-react'
 
 type SettingsTab = 'primeira' | 'horario' | 'ausencia'
@@ -30,6 +31,8 @@ const infoBox: CSSProperties = { background: 'rgba(91,173,226,0.06)', border: '1
 const warnBox: CSSProperties = { background: 'rgba(255,179,0,0.07)', border: '1px solid rgba(255,179,0,0.3)', borderRadius: 8, padding: '10px 12px', fontSize: 12, lineHeight: 1.5, marginBottom: 12, display: 'flex', gap: 8 }
 
 export default function NumberSettingsModal({ instance, accountId, canEditFirstMessage, canManageFunnels, onClose, onSaved }: Props) {
+  // Saudacao (onInbound) e ausencia so saem por numero de disparo (inboundHandler so chama sendAutoMessage quando numberRole === 'disparo').
+  const isSend = isSendProvider(instance.provider)
   const [tab, setTab] = useState<SettingsTab>('primeira')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -235,18 +238,21 @@ export default function NumberSettingsModal({ instance, accountId, canEditFirstM
                       <small style={{ ...hint, display: 'block', marginTop: 4 }}>{VARS_HELP}</small>
                     </div>
 
-                    <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 13, marginBottom: 8, cursor: 'pointer' }}>
-                      <input type="checkbox" checked={first.onInbound} onChange={e => setFirst(f => ({ ...f, onInbound: e.target.checked }))} style={{ marginTop: 3 }} />
+                    <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 13, marginBottom: 8, cursor: isSend ? 'pointer' : 'default', opacity: isSend ? 1 : 0.5 }}>
+                      <input type="checkbox" checked={first.onInbound} disabled={!isSend} onChange={e => setFirst(f => ({ ...f, onInbound: e.target.checked }))} style={{ marginTop: 3 }} />
                       <span>Quando um lead novo mandar a primeira mensagem para este número</span>
                     </label>
+                    {!isSend && (
+                      <p style={{ ...hint, marginLeft: 24, marginTop: -4 }}>Mensagens automáticas só saem pelo número de disparos</p>
+                    )}
                     <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 13, marginBottom: 8, cursor: canEditFirstMessage ? 'pointer' : 'default', opacity: canEditFirstMessage ? 1 : 0.5 }}>
                       <input type="checkbox" checked={first.onAssign} disabled={!canEditFirstMessage} onChange={e => setFirst(f => ({ ...f, onAssign: e.target.checked }))} style={{ marginTop: 3 }} />
                       <span>Quando um lead de formulário ou planilha for entregue a um vendedor que usa este número</span>
                     </label>
 
-                    <div className="form-group" style={{ marginTop: 8 }}>
+                    <div className="form-group" style={{ marginTop: 8, opacity: isSend ? 1 : 0.5 }}>
                       <label style={{ fontSize: 12 }}>Intervalo mínimo entre duas saudações para o mesmo lead (horas)</label>
-                      <input className="input" type="number" min={1} max={720} style={{ width: 100 }} value={greetingCooldown} onChange={e => setGreetingCooldown(parseInt(e.target.value) || 24)} />
+                      <input className="input" type="number" min={1} max={720} disabled={!isSend} style={{ width: 100 }} value={greetingCooldown} onChange={e => setGreetingCooldown(parseInt(e.target.value) || 24)} />
                     </div>
 
                     <div style={infoBox}>
@@ -329,9 +335,15 @@ export default function NumberSettingsModal({ instance, accountId, canEditFirstM
             )}
 
             {tab === 'ausencia' && (
-              <div>
-                <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, marginBottom: 8, cursor: 'pointer' }}>
-                  <input type="checkbox" checked={awayEnabled} onChange={e => setAwayEnabled(e.target.checked)} />
+              <div style={{ opacity: isSend ? 1 : 0.5 }}>
+                {!isSend && (
+                  <div style={warnBox}>
+                    <AlertTriangle size={14} style={{ color: '#FFB300', flexShrink: 0, marginTop: 2 }} />
+                    <div>Mensagens automáticas só saem pelo número de disparos</div>
+                  </div>
+                )}
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, marginBottom: 8, cursor: isSend ? 'pointer' : 'default' }}>
+                  <input type="checkbox" checked={awayEnabled} disabled={!isSend} onChange={e => setAwayEnabled(e.target.checked)} />
                   <strong>Responder automaticamente fora do horário de atendimento</strong>
                 </label>
                 <p style={hint}>Sai quando um lead manda mensagem fora das faixas definidas na aba Horário de atendimento.</p>
@@ -340,6 +352,7 @@ export default function NumberSettingsModal({ instance, accountId, canEditFirstM
                   <textarea
                     className="input"
                     rows={4}
+                    disabled={!isSend}
                     value={awayText}
                     onChange={e => setAwayText(e.target.value)}
                     placeholder="Ex.: Estamos fora do horário de atendimento. Respondemos a partir das 9h."
@@ -348,7 +361,7 @@ export default function NumberSettingsModal({ instance, accountId, canEditFirstM
                 </div>
                 <div className="form-group">
                   <label style={{ fontSize: 12 }}>Não repetir a ausência para o mesmo lead por (horas)</label>
-                  <input className="input" type="number" min={1} max={48} style={{ width: 100 }} value={awayCooldown} onChange={e => setAwayCooldown(parseInt(e.target.value) || 4)} />
+                  <input className="input" type="number" min={1} max={48} disabled={!isSend} style={{ width: 100 }} value={awayCooldown} onChange={e => setAwayCooldown(parseInt(e.target.value) || 4)} />
                 </div>
               </div>
             )}

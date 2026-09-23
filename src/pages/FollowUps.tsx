@@ -5,10 +5,14 @@ import {
   fetchFollowUps, createFollowUp, updateFollowUp, deleteFollowUp,
   fetchWhatsAppInstances, fetchFunnels, fetchUsers, fetchTags,
   fetchAvailableGlobalTemplates, applyGlobalFollowUpHere, fetchAgents,
+  fetchSendNumberStatus, type SendNumberStatus,
   type FollowUp, type FollowUpStep, type WhatsAppInstance, type Funnel, type User, type Tag,
   type GlobalFollowUpAvailable,
 } from '../lib/api'
-import { Zap, Plus, Edit3, Trash2, MessageSquare, Clock, Smartphone, Trash, Calendar, Activity, Layers, Download, ChevronDown, ChevronUp, Bot } from 'lucide-react'
+import { Zap, Plus, Edit3, Trash2, MessageSquare, Clock, Smartphone, Trash, Calendar, Activity, Layers, Download, ChevronDown, ChevronUp, Bot, AlertTriangle } from 'lucide-react'
+import SendNumberBanner from '../components/SendNumberBanner'
+import { InlineNotice, useInlineNotice } from '../components/InlineNotice'
+import { lacksQuestion, needsVariety } from '../lib/antiban.js'
 
 type StepDraft = {
   delay_value: number
@@ -77,7 +81,7 @@ export default function FollowUps({ embedded = false }: { embedded?: boolean } =
   const [type, setType] = useState<FollowUpType>('sequence')
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
-  const [instanceId, setInstanceId] = useState<number | ''>('')
+  const [optoutFooterEnabled, setOptoutFooterEnabled] = useState(false)
   const [stopOnReply, setStopOnReply] = useState(true)
   const [steps, setSteps] = useState<StepDraft[]>([{ ...BLANK_STEP_SEQ }])
   // Inactivity specific
@@ -120,7 +124,7 @@ export default function FollowUps({ embedded = false }: { embedded?: boolean } =
 
   const resetForm = () => {
     setType('sequence')
-    setName(''); setDescription(''); setInstanceId(''); setStopOnReply(true)
+    setName(''); setDescription(''); setOptoutFooterEnabled(false); setStopOnReply(true)
     setSteps([{ ...BLANK_STEP_SEQ }])
     setInactivityStageId(''); setInactivityValue(2); setInactivityUnit('days')
     setInactivityMode('sequence'); setVariationDelay(60)
@@ -131,8 +135,6 @@ export default function FollowUps({ embedded = false }: { embedded?: boolean } =
 
   const openNew = () => {
     resetForm()
-    const connected = instances.find(i => i.status === 'connected')
-    if (connected) setInstanceId(connected.id)
     setModalMode('new')
   }
 
@@ -141,7 +143,7 @@ export default function FollowUps({ embedded = false }: { embedded?: boolean } =
     setType(fuType)
     setName(fu.name)
     setDescription(fu.description || '')
-    setInstanceId(fu.instance_id)
+    setOptoutFooterEnabled(!!fu.optout_footer_enabled)
     setStopOnReply(fu.stop_on_reply === 1)
     setInactivityStageId(fu.inactivity_stage_id || '')
     // Carrega tempo: prefere inactivity_minutes; fallback days
@@ -226,7 +228,6 @@ export default function FollowUps({ embedded = false }: { embedded?: boolean } =
 
   const validate = (): string | null => {
     if (!name.trim()) return 'Nome obrigatório'
-    if (!instanceId) return 'Instância obrigatória'
     if (steps.length === 0) return 'Pelo menos 1 etapa obrigatória'
     if (type === 'inactivity') {
       if (!inactivityStageId) return 'Selecione a etapa do funil pra monitorar'
@@ -269,7 +270,7 @@ export default function FollowUps({ embedded = false }: { embedded?: boolean } =
         type,
         name: name.trim(),
         description: description.trim() || undefined,
-        instance_id: Number(instanceId),
+        optout_footer_enabled: optoutFooterEnabled,
         stop_on_reply: type === 'inactivity' ? true : stopOnReply,  // inactivity sempre pausa (precisa pra on-reply funcionar)
         steps: steps.map(s => ({
           delay_minutes: type === 'inactivity' ? toMinutes(s.delay_value, s.delay_unit) : toMinutes(s.delay_value, s.delay_unit),
@@ -313,6 +314,12 @@ export default function FollowUps({ embedded = false }: { embedded?: boolean } =
   // Follow-up de agente so fica travado (editavel so no agente) enquanto o agente estiver ativo;
   // agente apagado (soft delete) volta a ser editavel normal aqui.
   const isAgentOwned = (fu: FollowUp) => !!fu.agent_id && activeAgentIds.has(fu.agent_id)
+
+  // Inatividade em modo rotation e isenta da regra de variedade (mesma isencao do servidor)
+  const failsVariety = (fu: FollowUp) => {
+    if (fu.type === 'inactivity' && fu.inactivity_mode === 'rotation') return false
+    return (fu.steps || []).some(s => needsVariety({ message_template: s.message_template, variations: s.variations }))
+  }
 
   return (
     <div>
@@ -372,7 +379,6 @@ export default function FollowUps({ embedded = false }: { embedded?: boolean } =
         <ApplyGlobalFollowUpModal
           global={applyingGlobal}
           accountId={accountId || 0}
-          instances={instances}
           funnels={funnels}
           onClose={() => setApplyingGlobal(null)}
           onDone={() => { setApplyingGlobal(null); load() }}
@@ -410,7 +416,14 @@ export default function FollowUps({ embedded = false }: { embedded?: boolean } =
             <tbody>
               {followUps.map(fu => (
                 <tr key={fu.id}>
-                  <td><strong>{fu.name}</strong></td>
+                  <td>
+                    <strong>{fu.name}</strong>
+                    {failsVariety(fu) && (
+                      <div style={{ fontSize: 10, color: 'var(--negative)', fontWeight: 600, marginTop: 2, display: 'flex', alignItems: 'center', gap: 3 }}>
+                        <AlertTriangle size={10} /> Mensagem igual para todos — adicione uma variação ou {'{{nome}}'}
+                      </div>
+                    )}
+                  </td>
                   <td style={{ fontSize: 11 }}>
                     {isAgentOwned(fu) ? (
                       <span style={{ color: '#FFB300' }}><Bot size={10} style={{ verticalAlign: -1 }} /> Agente: {agentNames[fu.agent_id as number] || `#${fu.agent_id}`}</span>
@@ -456,6 +469,10 @@ export default function FollowUps({ embedded = false }: { embedded?: boolean } =
           <div className="modal" style={{ maxWidth: 720, maxHeight: '90vh', overflowY: 'auto' }}>
             <h2><Zap size={18} style={{ verticalAlign: -3, marginRight: 6 }} />{isEditing ? 'Editar Follow-up' : 'Novo Follow-up'}</h2>
 
+            <div style={{ marginBottom: 12 }}>
+              {accountId && <SendNumberBanner accountId={accountId} />}
+            </div>
+
             {/* Tipo do follow-up */}
             {!isEditing && (
               <div style={{ marginBottom: 16 }}>
@@ -491,13 +508,10 @@ export default function FollowUps({ embedded = false }: { embedded?: boolean } =
             </div>
 
             <div className="form-group">
-              <label>WhatsApp de envio *</label>
-              <select className="select" value={instanceId} onChange={e => setInstanceId(e.target.value ? +e.target.value : '')}>
-                <option value="">— escolha —</option>
-                {instances.map(i => (
-                  <option key={i.id} value={i.id}>{i.instance_name}{i.status === 'connected' ? ' ✓' : ' ✗ (offline)'}</option>
-                ))}
-              </select>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+                <input type="checkbox" checked={optoutFooterEnabled} onChange={e => setOptoutFooterEnabled(e.target.checked)} />
+                <span>Adicionar "Digite SAIR…" no fim das mensagens</span>
+              </label>
             </div>
 
             {/* Campos específicos de inactivity */}
@@ -719,6 +733,16 @@ export default function FollowUps({ embedded = false }: { embedded?: boolean } =
                     <small style={{ color: 'var(--text-muted)', fontSize: 10 }}>
                       Variáveis: <code>{'{{primeiro_nome}}'}</code>, <code>{'{{nome}}'}</code>
                     </small>
+                    {lacksQuestion(s.message_template) && (
+                      <p style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 4 }}>
+                        Mensagens que terminam com uma pergunta recebem mais respostas — e isso protege o número
+                      </p>
+                    )}
+                    {!isInactRot && needsVariety({ message_template: s.message_template, variations: s.variations }) && (
+                      <p style={{ fontSize: 10, color: 'var(--negative)', fontWeight: 600, marginTop: 4 }}>
+                        Mensagem igual para todos — adicione uma variação ou {'{{nome}}'}
+                      </p>
+                    )}
                   </div>
 
                   {/* Variações pra inactivity-sequence (cada step pode ter N variações) */}
@@ -774,36 +798,42 @@ export default function FollowUps({ embedded = false }: { embedded?: boolean } =
 // APPLY GLOBAL FOLLOW-UP MODAL — usado quando gerente clica "Usar aqui"
 // ============================================================
 
-function ApplyGlobalFollowUpModal({ global, accountId, instances, funnels, onClose, onDone }: {
+function ApplyGlobalFollowUpModal({ global, accountId, funnels, onClose, onDone }: {
   global: GlobalFollowUpAvailable
   accountId: number
-  instances: WhatsAppInstance[]
   funnels: Funnel[]
   onClose: () => void
   onDone: () => void
 }) {
-  const connected = instances.filter(i => i.status === 'connected')
-  const [instanceId, setInstanceId] = useState<number | ''>(connected[0]?.id || '')
+  const [sendStatus, setSendStatus] = useState<SendNumberStatus | null>(null)
   const [stageId, setStageId] = useState<number | ''>('')
   const [saving, setSaving] = useState(false)
+  const notice = useInlineNotice()
   const allStages = funnels.flatMap(f => f.stages || [])
 
   const needsStage = global.type === 'inactivity'
+  const sendInstanceId = sendStatus?.instance?.id
+
+  useEffect(() => {
+    let alive = true
+    fetchSendNumberStatus(accountId).then(s => { if (alive) setSendStatus(s) }).catch(() => {})
+    return () => { alive = false }
+  }, [accountId])
 
   const handleApply = async () => {
-    if (!instanceId) { alert('Selecione uma instancia'); return }
-    if (needsStage && !stageId) { alert('Follow-up de inatividade precisa de uma etapa do funil'); return }
+    if (!sendInstanceId) return
+    if (needsStage && !stageId) { notice.showError('Follow-up de inatividade precisa de uma etapa do funil'); return }
     setSaving(true)
     try {
       const r = await applyGlobalFollowUpHere(global.id, accountId, {
-        instance_id: +instanceId,
+        instance_id: sendInstanceId,
         inactivity_stage_id: stageId ? +stageId : null,
         overwrite: global.applied_here,
       })
       if (!r.ok) throw new Error(r.error || 'erro')
       onDone()
     } catch (e: any) {
-      alert('Erro: ' + (e?.message || 'unknown'))
+      notice.showError('Erro ao aplicar', e)
     } finally {
       setSaving(false)
     }
@@ -817,18 +847,11 @@ function ApplyGlobalFollowUpModal({ global, accountId, instances, funnels, onClo
           Vai copiar <strong>{global.name}</strong> ({global.steps.length} steps) pra sua conta. {global.applied_here && 'A cópia anterior será desativada.'}
         </p>
 
+        <InlineNotice notice={notice.notice} onClose={notice.clear} />
+
         <div className="form-group">
-          <label>Instância WhatsApp *</label>
-          {connected.length === 0 ? (
-            <div style={{ fontSize: 12, color: '#FF6B6B', padding: 8, background: 'rgba(255,107,107,0.05)', borderRadius: 6 }}>
-              ⚠ Nenhuma instância conectada. Conecte um WhatsApp em Integrações antes.
-            </div>
-          ) : (
-            <select className="select" value={instanceId} onChange={e => setInstanceId(e.target.value ? +e.target.value : '')}>
-              <option value="">Selecionar...</option>
-              {connected.map(i => <option key={i.id} value={i.id}>{i.instance_name}</option>)}
-            </select>
-          )}
+          <label>Número de saída</label>
+          <SendNumberBanner accountId={accountId} />
         </div>
 
         {needsStage && (
@@ -844,7 +867,7 @@ function ApplyGlobalFollowUpModal({ global, accountId, instances, funnels, onClo
 
         <div className="modal-actions">
           <button className="btn btn-secondary" onClick={onClose}>Cancelar</button>
-          <button className="btn btn-primary" onClick={handleApply} disabled={saving || connected.length === 0}>
+          <button className="btn btn-primary" onClick={handleApply} disabled={saving || !sendInstanceId}>
             <Download size={14} /> {saving ? 'Aplicando...' : global.applied_here ? 'Reaplicar' : 'Usar aqui'}
           </button>
         </div>

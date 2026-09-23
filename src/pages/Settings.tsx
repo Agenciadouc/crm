@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react'
 import { useAuth } from '../context/AuthContext'
 import { useAccount } from '../context/AccountContext'
-import { fetchFunnels, fetchUsers, apiFetch, fetchAppSettings, updateAppSetting, fetchAllInstancesAdmin, type Funnel, type User as UserType } from '../lib/api'
-import { Settings as SettingsIcon, RotateCw, Users, Save, Check, Bell } from 'lucide-react'
+import { fetchFunnels, fetchUsers, apiFetch, fetchAppSettings, updateAppSetting, fetchAllInstancesAdmin, fetchAntibanSettings, saveAntibanSettings, type Funnel, type User as UserType, type AntibanSettings } from '../lib/api'
+import { Settings as SettingsIcon, RotateCw, Users, Save, Check, Bell, ShieldAlert } from 'lucide-react'
+import { InlineNotice, useInlineNotice } from '../components/InlineNotice'
 
 interface DistRule { id?: number; funnel_id: number; type: 'round_robin' | 'manual'; active_attendants: number[] }
 
@@ -16,15 +17,39 @@ export default function SettingsPage() {
   const [saved, setSaved] = useState(false)
   // Super_admin: notifier instance global
   const isSuperAdmin = user?.role === 'super_admin'
+  const isGerenteOuAdmin = user?.role === 'gerente' || user?.role === 'super_admin'
   const [allInstances, setAllInstances] = useState<Array<{ id: number; instance_name: string; phone_number: string | null; status: string; account_name: string | null }>>([])
   const [notifierInstanceId, setNotifierInstanceId] = useState<string>('')
   const [savingNotifier, setSavingNotifier] = useState(false)
+
+  // Protecao contra bloqueio (anti-ban) — rodape de descadastro, resposta ao "sair" e alerta de taxa de resposta
+  const [antiban, setAntiban] = useState<AntibanSettings | null>(null)
+  const [savingAntiban, setSavingAntiban] = useState(false)
+  const antibanNotice = useInlineNotice()
 
   useEffect(() => {
     if (!isSuperAdmin) return
     fetchAppSettings().then(s => setNotifierInstanceId(s.notifier_instance_id || '')).catch(() => {})
     fetchAllInstancesAdmin().then(setAllInstances).catch(() => {})
   }, [isSuperAdmin])
+
+  useEffect(() => {
+    if (!accountId || !isGerenteOuAdmin) return
+    fetchAntibanSettings(accountId).then(setAntiban).catch(() => {})
+  }, [accountId, isGerenteOuAdmin])
+
+  const saveAntiban = async () => {
+    if (!accountId || !antiban) return
+    setSavingAntiban(true)
+    try {
+      const saved = await saveAntibanSettings(accountId, antiban)
+      setAntiban(saved)
+      antibanNotice.showSuccess('Configurações salvas.')
+    } catch (e: any) {
+      antibanNotice.showError('Erro ao salvar', e)
+    }
+    setSavingAntiban(false)
+  }
 
   useEffect(() => {
     if (!accountId) return
@@ -132,6 +157,57 @@ export default function SettingsPage() {
                 {savingNotifier ? 'Salvando...' : 'Salvar notifier'}
               </button>
             </div>
+          </div>
+        </section>
+      )}
+
+      {/* Protecao contra bloqueio (anti-ban) */}
+      {isGerenteOuAdmin && antiban && (
+        <section className="dash-section" style={{ marginBottom: 16 }}>
+          <div className="section-title"><ShieldAlert size={12} style={{ marginRight: 6 }} /> Proteção contra bloqueio</div>
+          <div className="card">
+            <InlineNotice notice={antibanNotice.notice} onClose={antibanNotice.clear} />
+            <div className="form-group">
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+                <input
+                  type="checkbox"
+                  checked={antiban.optout_footer_enabled}
+                  onChange={e => setAntiban(a => a && { ...a, optout_footer_enabled: e.target.checked })}
+                />
+                <span>Adicionar rodapé de saída nos disparos</span>
+              </label>
+              <input
+                className="input"
+                style={{ marginTop: 8 }}
+                value={antiban.optout_footer_text}
+                onChange={e => setAntiban(a => a && { ...a, optout_footer_text: e.target.value })}
+                placeholder="Digite SAIR para não receber mais mensagens."
+              />
+            </div>
+            <div className="form-group">
+              <label style={{ fontSize: 11, color: '#9B96B0' }}>Resposta quando o lead pede para sair</label>
+              <input
+                className="input"
+                value={antiban.optout_confirm_text}
+                onChange={e => setAntiban(a => a && { ...a, optout_confirm_text: e.target.value })}
+                placeholder="Pronto! Você não vai mais receber nossas mensagens automáticas."
+              />
+            </div>
+            <div className="form-group">
+              <label style={{ fontSize: 11, color: '#9B96B0' }}>Avisar quando a taxa de resposta ficar abaixo de (%)</label>
+              <input
+                className="input"
+                type="number"
+                min={1}
+                max={50}
+                style={{ width: 100 }}
+                value={antiban.reply_rate_alert_pct}
+                onChange={e => setAntiban(a => a && { ...a, reply_rate_alert_pct: Math.min(50, Math.max(1, parseInt(e.target.value) || 1)) })}
+              />
+            </div>
+            <button className="btn btn-primary btn-sm" onClick={saveAntiban} disabled={savingAntiban}>
+              {savingAntiban ? 'Salvando...' : <><Save size={14} /> Salvar</>}
+            </button>
           </div>
         </section>
       )}

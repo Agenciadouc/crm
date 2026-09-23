@@ -1,9 +1,11 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAccount } from '../context/AccountContext'
-import { fetchBroadcasts, fetchLeads, createBroadcast, sendBroadcast, cancelScheduledBroadcast, pauseBroadcast, resumeBroadcast, cancelBroadcast, fetchTags, fetchFunnels, fetchWhatsAppInstances, fetchBroadcastCloneData, fetchUsers, type Broadcast, type Lead, type Tag, type Funnel, type WhatsAppInstance, type User } from '../lib/api'
+import { fetchBroadcasts, fetchLeads, createBroadcast, sendBroadcast, cancelScheduledBroadcast, pauseBroadcast, resumeBroadcast, cancelBroadcast, fetchTags, fetchFunnels, fetchBroadcastCloneData, fetchUsers, fetchAntibanSettings, type Broadcast, type Lead, type Tag, type Funnel, type User, type AntibanSettings } from '../lib/api'
 import { MessageCircle, Plus, Send, CheckCircle, Clock, Trash2, Filter, Tag as TagIcon, GitBranch, Smartphone, AlertTriangle, Eye, PauseCircle, Copy, UserCog, Pause, Play, XCircle, Square } from 'lucide-react'
 import { parseSqlDate } from '../lib/dates'
+import SendNumberBanner from '../components/SendNumberBanner'
+import { lacksQuestion } from '../lib/antiban.js'
 
 const STATUS_MAP: Record<string, { label: string; color: string }> = {
   draft: { label: 'Rascunho', color: '#9B96B0' },
@@ -40,14 +42,14 @@ export default function Messages() {
   const [scheduledAt, setScheduledAt] = useState('') // datetime-local string (local time)
   const [newVariations, setNewVariations] = useState<string[]>(['', ''])
   const [newDelay, setNewDelay] = useState(DEFAULT_DELAY)
-  const [newInstanceId, setNewInstanceId] = useState<number | ''>('')
+  const [sendOk, setSendOk] = useState(false) // SendNumberBanner: numero padrao de disparos disponivel
+  const [antiban, setAntiban] = useState<AntibanSettings | null>(null)
   const [selectedLeads, setSelectedLeads] = useState<Lead[]>([])
   const [leadSearch, setLeadSearch] = useState('')
   const [searchResults, setSearchResults] = useState<Lead[]>([])
   const [step, setStep] = useState(1)
   const [tags, setTags] = useState<Tag[]>([])
   const [funnels, setFunnels] = useState<Funnel[]>([])
-  const [instances, setInstances] = useState<WhatsAppInstance[]>([])
   const [filterTags, setFilterTags] = useState<number[]>([])
   const [filterStages, setFilterStages] = useState<number[]>([])
   const [filterAttendants, setFilterAttendants] = useState<number[]>([])
@@ -69,17 +71,13 @@ export default function Messages() {
     return () => clearInterval(id)
   }, [broadcasts.map(b => `${b.id}:${b.status}:${b.sent_count}`).join(','), accountId])
 
-  // Carrega tags, funis, instancias ao abrir modal
+  // Carrega tags, funis e config anti-ban ao abrir modal
   useEffect(() => {
     if (showNew && accountId) {
       fetchTags(accountId).then(setTags).catch(() => {})
       fetchFunnels(accountId).then(setFunnels).catch(() => {})
       fetchUsers(accountId).then(us => setUsers(us.filter(u => u.is_active && (u.role === 'atendente' || u.role === 'gerente' || u.is_bot)))).catch(() => {})
-      fetchWhatsAppInstances(accountId).then(insts => {
-        setInstances(insts)
-        const connected = insts.find(i => i.status === 'connected')
-        if (connected && !newInstanceId) setNewInstanceId(connected.id)
-      }).catch(() => {})
+      fetchAntibanSettings(accountId).then(setAntiban).catch(() => {})
     }
   }, [showNew, accountId])
 
@@ -157,7 +155,7 @@ export default function Messages() {
 
   const resetForm = () => {
     setShowNew(false); setStep(1); setNewName(''); setNewTemplate('')
-    setNewVariations(['', '']); setNewDelay(DEFAULT_DELAY); setNewInstanceId('')
+    setNewVariations(['', '']); setNewDelay(DEFAULT_DELAY)
     setScheduleEnabled(false); setScheduledAt('')
     setSelectedLeads([]); setLeadSearch(''); setFilterTags([]); setFilterStages([])
     setCloneNotice(null)
@@ -171,7 +169,7 @@ export default function Messages() {
   })()
 
   const handleCreate = async () => {
-    if (!accountId || !newName || !newTemplate || selectedLeads.length === 0 || !newInstanceId) return
+    if (!accountId || !newName || !newTemplate || selectedLeads.length === 0 || !sendOk) return
     if (!enoughVariations) { alert(`Adicione pelo menos ${MIN_VARIATIONS - 1} variacoes (total ${MIN_VARIATIONS} mensagens diferentes).`); return }
     if (!validDelay) { alert(`Delay minimo: ${MIN_DELAY}s. Valores menores aumentam risco de bloqueio no WhatsApp.`); return }
     if (scheduleEnabled && !validSchedule) { alert('Agendamento invalido. Use uma data e hora pelo menos 1min no futuro.'); return }
@@ -183,7 +181,6 @@ export default function Messages() {
         name: newName, message_template: newTemplate,
         message_variations: newVariations.filter(v => v.trim()),
         delay_seconds: newDelay, lead_ids: selectedLeads.map(l => l.id),
-        instance_id: Number(newInstanceId),
         scheduled_at: scheduledISO,
       })
       resetForm(); load()
@@ -239,7 +236,6 @@ export default function Messages() {
       while (vars.length < 2) vars.push('')
       setNewVariations(vars)
       setNewDelay(data.clone.delay_seconds || DEFAULT_DELAY)
-      setNewInstanceId(data.clone.instance_id || '')
       setSelectedLeads(data.clone.leads)
       setShowSelectedList(true) // ja abre a lista expandida no step 2
       // Reseta filtros e busca pra evitar confusao no step 2
@@ -363,37 +359,12 @@ export default function Messages() {
 
             {step === 1 && (
               <>
-                {/* Numero de saida (instancia) */}
+                {/* Numero de saida (padrao de disparos da conta) */}
                 <div className="form-group">
                   <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                     <Smartphone size={12} /> Numero de saida do disparo
                   </label>
-                  {instances.length === 0 && (
-                    <div style={{ padding: 10, background: 'rgba(255,107,107,0.08)', borderRadius: 6, fontSize: 12, color: '#FF6B6B', display: 'flex', alignItems: 'center', gap: 6 }}>
-                      <AlertTriangle size={14} /> Nenhuma instancia WhatsApp cadastrada. Cadastre uma em Integracoes antes de criar disparos.
-                    </div>
-                  )}
-                  {instances.length === 1 && (
-                    <div style={{ padding: 10, background: instances[0].status === 'connected' ? 'rgba(52,199,89,0.08)' : 'rgba(255,107,107,0.08)', borderRadius: 6, fontSize: 12, color: instances[0].status === 'connected' ? '#34C759' : '#FF6B6B', display: 'flex', alignItems: 'center', gap: 6 }}>
-                      <Smartphone size={14} /> Disparando de <strong>{instances[0].instance_name}</strong>
-                      {instances[0].status === 'connected' ? ' (conectado)' : ' — DESCONECTADO. Conecte antes de enviar.'}
-                    </div>
-                  )}
-                  {instances.length > 1 && (
-                    <select className="select" value={newInstanceId} onChange={e => setNewInstanceId(Number(e.target.value))} style={{ width: '100%' }}>
-                      <option value="">Selecione um numero...</option>
-                      {instances.map(i => (
-                        <option key={i.id} value={i.id} disabled={i.status !== 'connected'}>
-                          {i.instance_name} {i.status === 'connected' ? '✓ conectado' : '✗ desconectado'}
-                        </option>
-                      ))}
-                    </select>
-                  )}
-                  {instances.length > 1 && newInstanceId && instances.find(i => i.id === newInstanceId)?.status !== 'connected' && (
-                    <div style={{ fontSize: 11, color: '#FF6B6B', marginTop: 4, display: 'flex', alignItems: 'center', gap: 4 }}>
-                      <AlertTriangle size={11} /> Esta instancia nao esta conectada. Voce pode criar como rascunho mas o envio sera bloqueado.
-                    </div>
-                  )}
+                  {accountId && <SendNumberBanner accountId={accountId} onStatus={s => setSendOk(s.ok)} />}
                 </div>
 
                 <div className="form-group"><label>Nome do disparo</label><input className="input" value={newName} onChange={e => setNewName(e.target.value)} placeholder="Ex: Promo Marco 2026" /></div>
@@ -403,6 +374,11 @@ export default function Messages() {
                   <div style={{ fontSize: 11, color: '#9B96B0', marginTop: 4 }}>
                     Variaveis disponiveis: <code style={{ color: '#FFB300' }}>{'{{nome}}'}</code> <code style={{ color: '#FFB300' }}>{'{{primeiro_nome}}'}</code> <code style={{ color: '#FFB300' }}>{'{{empresa}}'}</code> <code style={{ color: '#FFB300' }}>{'{{cidade}}'}</code> <code style={{ color: '#FFB300' }}>{'{{telefone}}'}</code>
                   </div>
+                  {lacksQuestion(newTemplate) && (
+                    <div style={{ fontSize: 11, color: '#9B96B0', marginTop: 4 }}>
+                      Mensagens que terminam com uma pergunta recebem mais respostas — e isso protege o número
+                    </div>
+                  )}
                 </div>
 
                 {/* Variacoes — minimo MIN_VARIATIONS - 1 = 2 */}
@@ -446,6 +422,11 @@ export default function Messages() {
                   <div style={{ marginTop: 8, padding: 12, background: 'rgba(255,255,255,0.03)', borderRadius: 8, fontSize: 12 }}>
                     <div style={{ color: '#9B96B0', marginBottom: 4 }}>Preview (msg principal):</div>
                     <div>{newTemplate.replace(/\{\{name\}\}/g, 'Joao Silva')}</div>
+                    {antiban?.optout_footer_enabled && (
+                      <div style={{ color: '#6B6580', marginTop: 6, fontSize: 11 }}>
+                        será adicionado: {antiban.optout_footer_text}
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -476,7 +457,7 @@ export default function Messages() {
 
                 <div className="modal-actions">
                   <button className="btn btn-secondary" onClick={resetForm}>Cancelar</button>
-                  <button className="btn btn-primary" onClick={() => setStep(2)} disabled={!newName || !newTemplate || !enoughVariations || !validDelay || !newInstanceId || (scheduleEnabled && !validSchedule)}>Proximo</button>
+                  <button className="btn btn-primary" onClick={() => setStep(2)} disabled={!newName || !newTemplate || !enoughVariations || !validDelay || !sendOk || (scheduleEnabled && !validSchedule)}>Proximo</button>
                 </div>
               </>
             )}
@@ -635,7 +616,7 @@ export default function Messages() {
                 <div className="card" style={{ marginBottom: 12 }}>
                   <div style={{ fontSize: 12, color: '#9B96B0', marginBottom: 8 }}>Resumo</div>
                   <div style={{ fontSize: 13 }}><strong>Nome:</strong> {newName}</div>
-                  <div style={{ fontSize: 13, marginTop: 4 }}><strong>Numero de saida:</strong> {instances.find(i => i.id === newInstanceId)?.instance_name || '—'}</div>
+                  <div style={{ fontSize: 13, marginTop: 4 }}><strong>Numero de saida:</strong> número padrão de disparos</div>
                   <div style={{ fontSize: 13, marginTop: 4 }}><strong>Destinatarios:</strong> {selectedLeads.length} leads</div>
                   <div style={{ fontSize: 13, marginTop: 4 }}><strong>Mensagens diferentes:</strong> {totalMessagesCount} (rotacionadas)</div>
                   <div style={{ fontSize: 13, marginTop: 4 }}><strong>Delay entre envios:</strong> ~{newDelay}s (variacao ±30%)</div>

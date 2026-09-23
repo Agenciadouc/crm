@@ -469,7 +469,7 @@ export const saveAntibanSettings = (accountId: number, data: Partial<AntibanSett
 // Broadcasts
 export const fetchBroadcasts = (accountId: number) => apiFetch<{ broadcasts: Broadcast[] }>(`/api/broadcasts?account_id=${accountId}`).then(d => d.broadcasts)
 export const fetchBroadcast = (id: number, accountId: number) => apiFetch<{ broadcast: Broadcast; recipients: BroadcastRecipient[] }>(`/api/broadcasts/${id}?account_id=${accountId}`)
-export const createBroadcast = (accountId: number, data: { name: string; message_template: string; message_variations?: string[]; delay_seconds?: number; lead_ids: number[]; instance_id: number; scheduled_at?: string | null }) => apiFetch(`/api/broadcasts?account_id=${accountId}`, { method: 'POST', body: JSON.stringify(data) })
+export const createBroadcast = (accountId: number, data: { name: string; message_template: string; message_variations?: string[]; delay_seconds?: number; lead_ids: number[]; instance_id?: number; scheduled_at?: string | null }) => apiFetch(`/api/broadcasts?account_id=${accountId}`, { method: 'POST', body: JSON.stringify(data) })
 export const sendBroadcast = (id: number, accountId: number) => apiFetch(`/api/broadcasts/${id}/send?account_id=${accountId}`, { method: 'POST' })
 export const resumeBroadcast = (id: number, accountId: number) => apiFetch(`/api/broadcasts/${id}/resume?account_id=${accountId}`, { method: 'POST' })
 export const cancelScheduledBroadcast = (id: number, accountId: number) => apiFetch<{ broadcast: Broadcast }>(`/api/broadcasts/${id}/cancel-schedule?account_id=${accountId}`, { method: 'POST' })
@@ -623,6 +623,7 @@ export interface FollowUp {
   on_reply_move_to_stage_id?: number | null;
   on_reply_add_tag_id?: number | null;
   agent_id?: number | null;  // se setado, follow-up agent-based (lead atendido pelo bot) em vez de stage-based
+  optout_footer_enabled?: number;
   steps?: FollowUpStep[]; steps_count?: number; active_leads?: number;
   created_by: number | null; created_by_name?: string | null;
   created_at: string; updated_at: string;
