@@ -29,6 +29,7 @@ import AudioRecorder from '../components/AudioRecorder'
 import { BlockedBanner } from '../components/BlockedBanner'
 import { applyMessageVars } from '../lib/messageVars'
 import { parseSqlDate, formatTime, formatDayLabel, localDayKey } from '../lib/dates'
+import { automationUrl } from '../lib/automationTabs'
 import { useIsMobile } from '../hooks/useIsMobile'
 
 function timeAgo(dateStr: string) {
@@ -1675,7 +1676,7 @@ export default function Chat() {
                         <button className="btn btn-secondary btn-sm" onClick={() => { setCadenceCollapsed(false); setShowCadenceMenu(!showCadenceMenu) }} style={{ padding: '2px 8px', fontSize: 10 }}>{leadCadence ? 'Trocar' : 'Atribuir'}</button>
                         {showCadenceMenu && (
                           <div style={{ position: 'absolute', right: 0, top: '100%', marginTop: 4, background: 'var(--bg-card)', border: '1px solid var(--border-medium)', borderRadius: 8, padding: 4, zIndex: 50, minWidth: 220, maxHeight: 320, overflowY: 'auto' }}>
-                            {cadences.length === 0 && globalCadences.length === 0 && <div style={{ padding: 8, fontSize: 11, color: 'var(--text-muted)' }}>Nenhuma cadencia. Crie em /cadences</div>}
+                            {cadences.length === 0 && globalCadences.length === 0 && <div style={{ padding: 8, fontSize: 11, color: 'var(--text-muted)' }}>Nenhuma cadência. Crie em Cadências e Follow-ups (aba Manuais)</div>}
                             {cadences.length > 0 && (
                               <>
                                 <div style={{ padding: '4px 10px', fontSize: 9, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 0.5 }}>Desta conta</div>
@@ -1708,7 +1709,7 @@ export default function Chat() {
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                           <div style={{ fontSize: 12, fontWeight: 600 }}>{leadCadence.cadence_name}</div>
                           <div style={{ display: 'flex', gap: 3 }}>
-                            <button className="btn btn-secondary btn-sm" style={{ padding: '2px 6px', fontSize: 9 }} onClick={() => { const base = import.meta.env.BASE_URL.replace(/\/$/, ''); window.open(`${base}/cadences`, '_blank') }}>Editar</button>
+                            <button className="btn btn-secondary btn-sm" style={{ padding: '2px 6px', fontSize: 9 }} onClick={() => { const base = import.meta.env.BASE_URL.replace(/\/$/, ''); window.open(`${base}${automationUrl('manuais')}`, '_blank') }}>Editar</button>
                             <button className="btn btn-danger btn-sm" style={{ padding: '2px 6px', fontSize: 9 }} onClick={async () => {
                               if (!accountId || !confirm('Remover cadencia deste lead?')) return
                               await removeLeadCadence(leadCadence.id, accountId)
@@ -1760,7 +1761,7 @@ export default function Chat() {
                           const globalSeq = globalFollowUps.filter(g => (g.type || 'sequence') === 'sequence')
                           return (
                             <div style={{ position: 'absolute', right: 0, top: '100%', marginTop: 4, background: 'var(--bg-card)', border: '1px solid var(--border-medium)', borderRadius: 8, padding: 4, zIndex: 50, minWidth: 240, maxHeight: 320, overflowY: 'auto' }}>
-                              {localSeq.length === 0 && globalSeq.length === 0 && <div style={{ padding: 8, fontSize: 11, color: 'var(--text-muted)' }}>Nenhum follow-up. Crie em /follow-ups</div>}
+                              {localSeq.length === 0 && globalSeq.length === 0 && <div style={{ padding: 8, fontSize: 11, color: 'var(--text-muted)' }}>Nenhum follow-up. Crie em Cadências e Follow-ups (aba Automáticas)</div>}
                               {localSeq.length > 0 && (
                                 <>
                                   <div style={{ padding: '4px 10px', fontSize: 9, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 0.5 }}>Desta conta</div>

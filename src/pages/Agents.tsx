@@ -41,7 +41,7 @@ export default function Agents() {
   }
   useEffect(load, [accountId])
 
-  // Abre o editor direto por link: /agents?editar=12&aba=atendimento (usado pela pagina Follow-ups)
+  // Abre o editor direto por link: /agents?editar=12&aba=atendimento (usado pela tela Cadencias e Follow-ups, aba Automaticas)
   useEffect(() => {
     const id = Number(searchParams.get('editar'))
     if (!id) return
