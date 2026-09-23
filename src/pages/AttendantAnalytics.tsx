@@ -518,7 +518,7 @@ export default function AttendantAnalytics() {
             <OverviewCard label="Erros críticos" value={overview?.cards.erros_criticos_count ?? 0} sub="alta gravidade" icon={AlertTriangle} color="var(--negative)" />
             <OverviewCard label="Próximas ações" value={overview?.cards.proximas_acoes_pendentes ?? 0} sub="alertas em aberto" icon={Bell} color="var(--accent)" />
             <OverviewCard label="Bot: taxa de resolução" value={overview?.cards.bot_taxa_resolucao != null ? `${overview.cards.bot_taxa_resolucao}%` : '—'} sub="respondeu corretamente" icon={CheckCircle} color="var(--info)" />
-            <OverviewCard label="Follow-ups atrasados" value={overview?.cards.follow_ups_atrasados ?? 0} sub="cadências em atraso" icon={Clock} color="var(--warning)" />
+            <OverviewCard label="Follow-ups atrasados" value={overview?.cards.follow_ups_atrasados ?? 0} sub="envios automáticos em atraso" icon={Clock} color="var(--warning)" />
           </div>
           {(!overview || overview.cards.conversas_analisadas === 0) && (
             <div style={{ marginTop: 16, padding: 16, background: 'var(--bg-hover)', borderRadius: 6, color: 'var(--text-muted)', fontSize: 13, textAlign: 'center' }}>
