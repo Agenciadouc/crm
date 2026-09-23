@@ -1551,51 +1551,6 @@ export default function Chat() {
                     ))}
                   </div>
 
-                  {/* Vendas — total + lista + botao adicionar */}
-                  <div className="card" style={{ padding: 12, marginBottom: 12 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                      <div style={{ fontSize: 10, color: '#9B96B0', textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: 3 }}>
-                        <DollarSign size={10} style={{ color: '#34C759' }} /> Vendas {sales.length > 0 && <span style={{ color: '#6B6580' }}>({sales.length})</span>}
-                      </div>
-                      <button className="btn btn-secondary btn-sm" onClick={openSaleModalStandalone} style={{ padding: '2px 6px' }} title="Registrar nova venda"><Plus size={10} /></button>
-                    </div>
-                    {salesTotal > 0 && (
-                      <div style={{ fontSize: 15, fontWeight: 700, color: '#34C759', marginBottom: 8 }}>
-                        R$ {salesTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                        <span style={{ fontSize: 9, color: '#6B6580', fontWeight: 400, marginLeft: 6 }}>total</span>
-                      </div>
-                    )}
-                    {sales.length === 0 ? (
-                      <div style={{ fontSize: 10, color: '#6B6580' }}>Sem vendas registradas</div>
-                    ) : (
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                        {sales.map(s => {
-                          const dt = new Date(s.sale_date.replace(' ', 'T') + 'Z')
-                          const dateStr = dt.toLocaleDateString('pt-BR') + ' ' + dt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
-                          const canDelete = user?.role === 'super_admin' || user?.role === 'gerente'
-                          return (
-                            <div key={s.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '5px 8px', background: 'rgba(52,199,89,0.06)', border: '1px solid rgba(52,199,89,0.15)', borderRadius: 6 }}>
-                              <div style={{ display: 'flex', flexDirection: 'column', gap: 1, flex: 1, minWidth: 0 }}>
-                                <div style={{ fontSize: 12, fontWeight: 600, color: '#34C759' }}>
-                                  R$ {Number(s.value).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                </div>
-                                <div style={{ fontSize: 9, color: '#9B96B0', display: 'flex', alignItems: 'center', gap: 4 }}>
-                                  <Clock size={8} /> {dateStr}
-                                  {s.created_by_name && <span>· {s.created_by_name}</span>}
-                                </div>
-                              </div>
-                              {canDelete && (
-                                <button onClick={() => handleDeleteSale(s.id)} title="Excluir venda" style={{ background: 'none', border: 'none', color: '#6B6580', cursor: 'pointer', padding: 2, display: 'flex', alignItems: 'center' }}>
-                                  <Trash2 size={10} />
-                                </button>
-                              )}
-                            </div>
-                          )
-                        })}
-                      </div>
-                    )}
-                  </div>
-
                   {/* Tags */}
                   <div className="card" style={{ padding: 12, marginBottom: 12 }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: tagsCollapsed ? 0 : 6 }}>
@@ -1933,6 +1888,51 @@ export default function Chat() {
                     }}>
                       <ListTodo size={10} /> {creatingTask ? 'Criando...' : 'Criar Tarefa'}
                     </button>
+                  </div>
+
+                  {/* Vendas — total + lista + botao adicionar */}
+                  <div className="card" style={{ padding: 12, marginTop: 12 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                      <div style={{ fontSize: 10, color: '#9B96B0', textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: 3 }}>
+                        <DollarSign size={10} style={{ color: '#34C759' }} /> Vendas {sales.length > 0 && <span style={{ color: '#6B6580' }}>({sales.length})</span>}
+                      </div>
+                      <button className="btn btn-secondary btn-sm" onClick={openSaleModalStandalone} style={{ padding: '2px 6px' }} title="Registrar nova venda"><Plus size={10} /></button>
+                    </div>
+                    {salesTotal > 0 && (
+                      <div style={{ fontSize: 15, fontWeight: 700, color: '#34C759', marginBottom: 8 }}>
+                        R$ {salesTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        <span style={{ fontSize: 9, color: '#6B6580', fontWeight: 400, marginLeft: 6 }}>total</span>
+                      </div>
+                    )}
+                    {sales.length === 0 ? (
+                      <div style={{ fontSize: 10, color: '#6B6580' }}>Sem vendas registradas</div>
+                    ) : (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                        {sales.map(s => {
+                          const dt = new Date(s.sale_date.replace(' ', 'T') + 'Z')
+                          const dateStr = dt.toLocaleDateString('pt-BR') + ' ' + dt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+                          const canDelete = user?.role === 'super_admin' || user?.role === 'gerente'
+                          return (
+                            <div key={s.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '5px 8px', background: 'rgba(52,199,89,0.06)', border: '1px solid rgba(52,199,89,0.15)', borderRadius: 6 }}>
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: 1, flex: 1, minWidth: 0 }}>
+                                <div style={{ fontSize: 12, fontWeight: 600, color: '#34C759' }}>
+                                  R$ {Number(s.value).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                </div>
+                                <div style={{ fontSize: 9, color: '#9B96B0', display: 'flex', alignItems: 'center', gap: 4 }}>
+                                  <Clock size={8} /> {dateStr}
+                                  {s.created_by_name && <span>· {s.created_by_name}</span>}
+                                </div>
+                              </div>
+                              {canDelete && (
+                                <button onClick={() => handleDeleteSale(s.id)} title="Excluir venda" style={{ background: 'none', border: 'none', color: '#6B6580', cursor: 'pointer', padding: 2, display: 'flex', alignItems: 'center' }}>
+                                  <Trash2 size={10} />
+                                </button>
+                              )}
+                            </div>
+                          )
+                        })}
+                      </div>
+                    )}
                   </div>
 
                   {/* Archive + Block */}
