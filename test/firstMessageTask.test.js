@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createTestDb, seedBasic, insertLead } from './helpers/db.js'
-import { createFirstMessageTask } from '../server/services/firstMessageTask.js'
+import { createFirstMessageTask, sellerFirstMessageInstance } from '../server/services/firstMessageTask.js'
 
 function withTasks(db) {
   db.exec(`CREATE TABLE standalone_tasks (
@@ -33,4 +33,18 @@ test('lead sem nome usa o telefone no titulo', () => {
   const lead = insertLead(db, { account_id: s.account.id, funnel_id: s.funnelId, stage_id: s.stage1, phone: '5547999990000' })
   const r = createFirstMessageTask(db, { lead, user: { id: null, name: '' }, text: 'x' })
   assert.equal(db.prepare('SELECT title FROM standalone_tasks WHERE id = ?').get(r.id).title, 'Mandar 1ª mensagem para 5547999990000')
+})
+
+test('sellerFirstMessageInstance: numero de leitura vira tarefa mesmo desconectado; disparo precisa estar conectado', () => {
+  const db = createTestDb(); const s = seedBasic(db) // s.instance = Evolution conectada
+  assert.equal(sellerFirstMessageInstance(db, s.instance.id).id, s.instance.id)
+  db.prepare("UPDATE whatsapp_instances SET status = 'disconnected' WHERE id = ?").run(s.instance.id)
+  assert.equal(sellerFirstMessageInstance(db, s.instance.id).id, s.instance.id)
+  const uz = db.prepare(`INSERT INTO whatsapp_instances (account_id, instance_name, api_url, api_key, status, provider)
+    VALUES (?, 'disp', 'http://x', 'K', 'disconnected', 'uzapi')`).run(s.account.id).lastInsertRowid
+  assert.equal(sellerFirstMessageInstance(db, uz), null)
+  db.prepare("UPDATE whatsapp_instances SET status = 'connected' WHERE id = ?").run(uz)
+  assert.equal(sellerFirstMessageInstance(db, uz).id, uz)
+  assert.equal(sellerFirstMessageInstance(db, 9999), null)
+  assert.equal(sellerFirstMessageInstance(db, null), null)
 })

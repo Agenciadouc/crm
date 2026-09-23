@@ -9,7 +9,7 @@ import { getProvider } from './whatsapp/index.js'
 import { createSender } from './whatsapp/sender.js'
 import { renderHandoffTemplate } from './messageTemplateVars.js'
 import { numberRole } from './whatsapp/numberRole.js'
-import { createFirstMessageTask } from './firstMessageTask.js'
+import { createFirstMessageTask, sellerFirstMessageInstance } from './firstMessageTask.js'
 
 function getNotifierInstanceId() {
   // 1o: tenta app_settings (configuravel via UI super_admin)
@@ -91,7 +91,8 @@ export async function notifyAndOpenLead(leadId, attendantUserId, opts = {}) {
     )
 
     if (shouldSendFirstMsg) {
-      const vendInst = db.prepare("SELECT * FROM whatsapp_instances WHERE id=? AND status='connected'").get(user.primary_instance_id)
+      // Leitura vira tarefa mesmo com o numero desconectado; disparo so envia conectado.
+      const vendInst = sellerFirstMessageInstance(db, user.primary_instance_id)
       if (vendInst) {
         // Template resolution: funnel.template (override) > instance.template
         const funnelTpl = lead.funnel_id ? db.prepare('SELECT first_msg_template FROM funnels WHERE id=?').get(lead.funnel_id) : null
