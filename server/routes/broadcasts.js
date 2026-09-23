@@ -5,7 +5,7 @@ import { requireRole } from '../middleware/auth.js'
 import { broadcastSSE } from '../sse.js'
 import { sendViaInstance, checkWhatsAppNumbersBulk } from '../services/leadHandoff.js'
 import { resolveSendInstance, getDefaultSendInstance } from '../services/whatsapp/resolveSendInstance.js'
-import { broadcastFooter, pauseReasonText, NO_SEND_REASONS, canStartBroadcast } from '../services/broadcastRouting.js'
+import { broadcastFooter, pauseReasonText, canStartBroadcast, skipOptedOutRecipient, pausedBroadcastsToResume, MANUAL_PAUSE_REASON } from '../services/broadcastRouting.js'
 import { appendOptOutFooter } from '../services/antiban.js'
 
 const router = Router()
@@ -249,7 +249,12 @@ async function runBroadcastLoopInner(broadcastId) {
     if (!r) break // todos processados
 
     try {
-      const lead = db.prepare('SELECT name, phone, empresa, city FROM leads WHERE id = ?').get(r.lead_id)
+      const lead = db.prepare('SELECT name, phone, empresa, city, opted_in_at, opted_out_at FROM leads WHERE id = ?').get(r.lead_id)
+      // Descadastrou com o disparo na fila: pula sem enviar e sem esperar o intervalo.
+      if (skipOptedOutRecipient(db, { broadcastId, recipientId: r.id, lead })) {
+        broadcastSSE(broadcast.account_id, 'broadcast:progress', { id: broadcastId })
+        continue
+      }
       const template = allTemplates[processedCount % allTemplates.length]
       const firstName = (lead?.name || '').split(' ')[0] || ''
       const text = String(template)
@@ -320,8 +325,7 @@ router.post('/:id/send', requireRole('super_admin', 'gerente'), async (req, res)
 export function resumeBroadcastIfPaused(instanceId) {
   const inst = db.prepare('SELECT account_id FROM whatsapp_instances WHERE id = ?').get(instanceId)
   if (!inst) return
-  const paused = db.prepare(`SELECT * FROM broadcasts WHERE account_id = ? AND status = 'sending' AND paused_at IS NOT NULL
-    AND (instance_id = ? OR paused_reason IN (?, ?))`).all(inst.account_id, instanceId, ...NO_SEND_REASONS)
+  const paused = pausedBroadcastsToResume(db, inst.account_id, instanceId)
   for (const b of paused) {
     console.log(`[Broadcast] Retomando disparo "${b.name}" (id=${b.id}) — numero ${instanceId} conectou`)
     runBroadcastLoop(b.id).catch(err => console.error('[Broadcast] Resume error:', err))
@@ -361,7 +365,7 @@ router.post('/:id/pause', requireRole('super_admin', 'gerente'), (req, res) => {
   if (!broadcast) return res.status(404).json({ error: 'Disparo nao encontrado' })
   if (broadcast.status !== 'sending') return res.status(400).json({ error: 'Disparo nao esta em andamento (status: ' + broadcast.status + ')' })
   if (broadcast.paused_at) return res.status(400).json({ error: 'Disparo ja esta pausado' })
-  db.prepare("UPDATE broadcasts SET paused_at = datetime('now'), paused_reason = ? WHERE id = ?").run('manual_user', broadcast.id)
+  db.prepare("UPDATE broadcasts SET paused_at = datetime('now'), paused_reason = ? WHERE id = ?").run(MANUAL_PAUSE_REASON, broadcast.id)
   const updated = db.prepare('SELECT * FROM broadcasts WHERE id = ?').get(broadcast.id)
   res.json({ broadcast: updated })
 })
