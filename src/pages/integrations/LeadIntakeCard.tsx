@@ -6,6 +6,8 @@ import {
 } from '../../lib/api'
 import { Plus, Loader, Trash2, Smartphone, Save, Check, FileSpreadsheet, Copy, AlertTriangle, Link as LinkIcon, GitBranch } from 'lucide-react'
 import { parseSqlDate } from '../../lib/dates'
+import { InlineNotice, useInlineNotice } from '../../components/InlineNotice'
+import ConfirmDialog from '../../components/ConfirmDialog'
 
 function sheetsTimeAgo(s: string | null) {
   if (!s) return null
@@ -40,6 +42,12 @@ export default function LeadIntakeCard({ accountId, account, instances, users }:
   const [routingTags, setRoutingTags] = useState<Tag[]>([])
   const [routingEdit, setRoutingEdit] = useState<{ tag_id: string; instance_id: string; attendant_id: string; isNew: boolean } | null>(null)
   const [routingSaving, setRoutingSaving] = useState(false)
+  const [deleteRuleTagId, setDeleteRuleTagId] = useState<number | null>(null)
+  const [deletingRule, setDeletingRule] = useState(false)
+  // Avisos no lugar do alert(): no bloco de roteamento, no modal da regra e no bloco do Google Planilhas.
+  const routingNotice = useInlineNotice()
+  const ruleModalNotice = useInlineNotice()
+  const sheetsNotice = useInlineNotice()
 
   useEffect(() => {
     fetchPublicConfig()
@@ -73,17 +81,18 @@ export default function LeadIntakeCard({ accountId, account, instances, users }:
       await setSheetsDefaultTag(accountId, tagId)
       setSheetsDefaultTagId(tagId)
     } catch (e: any) {
-      alert('Erro: ' + (e.message || 'falha ao salvar a tag automática'))
+      sheetsNotice.showError('Erro ao salvar a tag automática', e)
     }
     setSheetsTagSaving(false)
   }
 
   const handleChangeDefaultRouting = async (instanceId: number | null) => {
     try { await setDefaultFormInstance(accountId, instanceId); setRoutingDefaultId(instanceId) }
-    catch (e: any) { alert(e.message || 'Erro') }
+    catch (e: any) { routingNotice.showError('Erro ao salvar o número padrão', e) }
   }
 
   const startRoutingEdit = (existing?: TagInstanceMapping) => {
+    ruleModalNotice.clear()
     if (existing) {
       setRoutingEdit({
         tag_id: String(existing.tag_id),
@@ -107,14 +116,16 @@ export default function LeadIntakeCard({ accountId, account, instances, users }:
       })
       setRoutingEdit(null)
       await loadRouting()
-    } catch (e: any) { alert(e.message || 'Erro ao salvar regra') }
+    } catch (e: any) { ruleModalNotice.showError('Erro ao salvar a regra', e) }
     setRoutingSaving(false)
   }
 
   const handleDeleteRouting = async (tagId: number) => {
-    if (!confirm('Remover essa regra?')) return
+    setDeletingRule(true)
     try { await deleteTagInstanceMapping(accountId, tagId); await loadRouting() }
-    catch (e: any) { alert(e.message || 'Erro') }
+    catch (e: any) { routingNotice.showError('Erro ao remover a regra', e) }
+    setDeletingRule(false)
+    setDeleteRuleTagId(null)
   }
 
   const connectedInsts = instances.filter(i => i.status === 'connected')
@@ -132,6 +143,7 @@ export default function LeadIntakeCard({ accountId, account, instances, users }:
         <section className="dash-section" style={{ marginTop: 24 }}>
           <div className="section-title"><GitBranch size={14} /> Roteamento de leads (formulários)</div>
           <div className="card">
+            <InlineNotice notice={routingNotice.notice} onClose={routingNotice.clear} />
             <p style={{ fontSize: 12, color: '#9B96B0', marginBottom: 16 }}>
               Leads que chegam via Google Sheets, Meta Lead Form ou site não tem WhatsApp na origem.
               Configure pra qual número essas conversas vão.
@@ -205,7 +217,7 @@ export default function LeadIntakeCard({ accountId, account, instances, users }:
                           <td style={{ fontSize: 12 }}>{m.attendant_name || <span style={{ color: '#6B6580' }}>— (roleta)</span>}</td>
                           <td className="right">
                             <button className="btn btn-secondary btn-sm" style={{ fontSize: 10 }} onClick={() => startRoutingEdit(m)}>Editar</button>
-                            <button className="btn btn-secondary btn-sm" style={{ fontSize: 10, color: '#FF6B6B', marginLeft: 4 }} onClick={() => handleDeleteRouting(m.tag_id)}><Trash2 size={10} /></button>
+                            <button className="btn btn-secondary btn-sm" style={{ fontSize: 10, color: '#FF6B6B', marginLeft: 4 }} onClick={() => setDeleteRuleTagId(m.tag_id)}><Trash2 size={10} /></button>
                           </td>
                         </tr>
                       ))}
@@ -218,6 +230,22 @@ export default function LeadIntakeCard({ accountId, account, instances, users }:
         </section>
       )}
 
+      {deleteRuleTagId != null && (
+        <ConfirmDialog
+          title={<><Trash2 size={20} style={{ color: '#ef4444' }} /> Remover regra</>}
+          confirmLabel="Sim, remover"
+          busyLabel="Removendo..."
+          danger
+          busy={deletingRule}
+          onConfirm={() => handleDeleteRouting(deleteRuleTagId)}
+          onCancel={() => setDeleteRuleTagId(null)}
+        >
+          Remover a regra da tag <strong style={{ color: 'var(--text-primary)' }}>"{routingMappings.find(m => m.tag_id === deleteRuleTagId)?.tag_name || 'escolhida'}"</strong>?
+          <br /><br />
+          Leads de formulário com essa tag passam a ir para o número padrão.
+        </ConfirmDialog>
+      )}
+
       {/* Modal de criar/editar regra de roteamento */}
       {routingEdit && (
         <div className="modal-overlay" onClick={() => setRoutingEdit(null)}>
@@ -228,6 +256,7 @@ export default function LeadIntakeCard({ accountId, account, instances, users }:
             <p style={{ fontSize: 12, color: '#9B96B0', marginTop: 4, marginBottom: 12 }}>
               Quando lead de formulário receber a tag escolhida, vai pra esta instância (e atendente, se definido).
             </p>
+            <InlineNotice notice={ruleModalNotice.notice} onClose={ruleModalNotice.clear} />
             <div className="form-group">
               <label>Tag *</label>
               <select
@@ -283,6 +312,7 @@ export default function LeadIntakeCard({ accountId, account, instances, users }:
       <section className="dash-section" style={{ marginTop: 24 }}>
         <div className="section-title"><FileSpreadsheet size={14} /> Google Planilhas</div>
         <div className="card">
+          <InlineNotice notice={sheetsNotice.notice} onClose={sheetsNotice.clear} />
           {/* Status da integracao */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', borderRadius: 6, background: sheetsLastAt ? 'rgba(52,199,89,0.08)' : 'rgba(255,255,255,0.03)', border: `1px solid ${sheetsLastAt ? 'rgba(52,199,89,0.25)' : 'rgba(255,255,255,0.06)'}`, marginBottom: 12, fontSize: 12 }}>
             {sheetsLastAt ? (

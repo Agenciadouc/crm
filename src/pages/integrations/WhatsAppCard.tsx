@@ -13,6 +13,8 @@ import {
   Settings, Webhook, RotateCw, Download, User, MessageSquare, ExternalLink,
 } from 'lucide-react'
 import NumberSettingsModal from '../../components/NumberSettingsModal'
+import { InlineNotice, useInlineNotice } from '../../components/InlineNotice'
+import ConfirmDialog from '../../components/ConfirmDialog'
 
 interface Props {
   accountId: number
@@ -20,7 +22,12 @@ interface Props {
   setInstances: Dispatch<SetStateAction<WhatsAppInstance[]>>
   reload: () => Promise<void>
   users: UserType[]
+  // A lista de numeros falhou ao carregar (nao e "nenhum numero")
+  loadError?: boolean
 }
+
+// Onde o aviso aparece: no topo do card, nas credenciais da Evolution ou dentro do numero da acao.
+type NoticeTarget = 'top' | 'evo' | number
 
 const isEvolution = (inst: WhatsAppInstance) => (inst.provider || 'evolution') === 'evolution'
 
@@ -34,7 +41,7 @@ const statusIcon = (status: string) => {
 
 // Card "WhatsApp": numeros da conta, provedor de cada numero (UzAPI ou Evolution), QR / painel,
 // "leads novos vao para", modo de recebimento, mensagens do numero e credenciais da Evolution (recolhidas).
-export default function WhatsAppCard({ accountId, instances, setInstances, reload, users }: Props) {
+export default function WhatsAppCard({ accountId, instances, setInstances, reload, users, loadError = false }: Props) {
   const { user } = useAuth()
   const isGerenteOuAdmin = user?.role === 'gerente' || user?.role === 'super_admin'
 
@@ -65,6 +72,20 @@ export default function WhatsAppCard({ accountId, instances, setInstances, reloa
   const [reconfiguring, setReconfiguring] = useState<number | null>(null)
   const [restarting, setRestarting] = useState<number | null>(null)
   const [syncing, setSyncing] = useState(false)
+  const [restartTarget, setRestartTarget] = useState<WhatsAppInstance | null>(null)
+  const [restrictTarget, setRestrictTarget] = useState<WhatsAppInstance | null>(null)
+  const [retrying, setRetrying] = useState(false)
+
+  // Avisos no lugar do alert(): um do card (com o lugar onde aparece) e um por modal aberto.
+  const cardNotice = useInlineNotice()
+  const [noticeAt, setNoticeAt] = useState<NoticeTarget>('top')
+  const createNotice = useInlineNotice()
+  const deleteNotice = useInlineNotice()
+  const showErrorAt = (at: NoticeTarget, prefix: string, e?: unknown) => { setNoticeAt(at); cardNotice.showError(prefix, e) }
+  const showSuccessAt = (at: NoticeTarget, text: string) => { setNoticeAt(at); cardNotice.showSuccess(text) }
+  const noticeFor = (at: NoticeTarget) => noticeAt === at && cardNotice.notice
+    ? <InlineNotice notice={cardNotice.notice} onClose={cardNotice.clear} style={typeof at === 'number' ? { marginTop: 12, marginBottom: 0 } : undefined} />
+    : null
 
   useEffect(() => {
     fetchEvolutionConfig(accountId).then(c => {
@@ -109,13 +130,14 @@ export default function WhatsAppCard({ accountId, instances, setInstances, reloa
       setEvoConfigured(true)
       setEvoSaved(true)
       setTimeout(() => setEvoSaved(false), 2000)
-    } catch (e: any) { alert('Erro: ' + e.message) }
+    } catch (e: any) { showErrorAt('evo', 'Erro ao salvar as credenciais', e) }
     setSavingConfig(false)
   }
 
   // Provedor pre-selecionado: UzAPI quando disponivel, senao Evolution.
   const openNewNumber = () => {
     setNewProvider(defaultProvider(providers))
+    createNotice.clear()
     setShowNew(true)
   }
 
@@ -131,10 +153,12 @@ export default function WhatsAppCard({ accountId, instances, setInstances, reloa
         else delete next[inst.id]
         return next
       })
+      // Ex.: UzAPI recusou a credencial; o painel continua como alternativa.
+      if (r.error_message) showErrorAt('top', r.error_message)
     } catch (e: any) {
       // Sem QR nenhum, o painel ficaria aberto e vazio; fecha junto com o aviso do erro.
       setActiveQR(cur => cur === inst.id ? null : cur)
-      alert('Erro ao gerar o QR code: ' + e.message)
+      showErrorAt('top', 'Erro ao gerar o QR code', e)
     }
     setQrLoading(null)
   }
@@ -151,7 +175,7 @@ export default function WhatsAppCard({ accountId, instances, setInstances, reloa
       // UzAPI: sempre pede o QR ao servidor, que manda junto o endereco do painel.
       if ((inst.provider || chosen) !== 'evolution') await openQr(inst)
       else if (inst.qr_code) setActiveQR(inst.id)
-    } catch (e: any) { alert('Erro: ' + e.message) }
+    } catch (e: any) { createNotice.showError('Erro ao criar o número', e) }
     finally {
       creatingRef.current = false
       setCreating(false)
@@ -164,11 +188,11 @@ export default function WhatsAppCard({ accountId, instances, setInstances, reloa
       const updated = await connectWhatsAppInstance(inst.id, accountId)
       setInstances(prev => prev.map(i => i.id === updated.id ? { ...i, ...updated } : i))
       if (updated.qr_code) setActiveQR(updated.id)
-    } catch (e: any) { alert('Erro: ' + e.message) }
+    } catch (e: any) { showErrorAt(inst.id, 'Erro ao conectar', e) }
   }
 
   const handleDisconnect = async (inst: WhatsAppInstance) => {
-    try { await disconnectWhatsApp(inst.id, accountId) } catch (e: any) { alert('Erro: ' + e.message) }
+    try { await disconnectWhatsApp(inst.id, accountId) } catch (e: any) { showErrorAt(inst.id, 'Erro ao desconectar', e) }
     setActiveQR(null)
     await reload()
   }
@@ -181,7 +205,7 @@ export default function WhatsAppCard({ accountId, instances, setInstances, reloa
       setActiveQR(null)
       setDeleteTarget(null)
       await reload()
-    } catch (e: any) { alert('Erro ao excluir: ' + e.message) }
+    } catch (e: any) { deleteNotice.showError('Erro ao excluir', e) }
     setDeleting(false)
   }
 
@@ -189,19 +213,19 @@ export default function WhatsAppCard({ accountId, instances, setInstances, reloa
     setReconfiguring(inst.id)
     try {
       await setupWhatsAppWebhook(inst.id, accountId)
-      alert('Webhook reconfigurado. Os leads voltam a entrar em tempo real.')
-    } catch (e: any) { alert('Erro ao reconfigurar o webhook: ' + e.message) }
+      showSuccessAt(inst.id, 'Webhook reconfigurado. Os leads voltam a entrar em tempo real.')
+    } catch (e: any) { showErrorAt(inst.id, 'Erro ao reconfigurar o webhook', e) }
     setReconfiguring(null)
   }
 
   const handleRestart = async (inst: WhatsAppInstance) => {
-    if (!confirm(`Reiniciar a sessão do WhatsApp "${inst.instance_name}"? Use quando o número parece conectado mas não recebe mensagens.`)) return
+    setRestartTarget(null)
     setRestarting(inst.id)
     try {
       await restartWhatsAppInstance(inst.id, accountId)
-      alert('Sessão reiniciada. Aguarde 10 segundos e teste enviando uma mensagem.')
+      showSuccessAt(inst.id, 'Sessão reiniciada. Aguarde 10 segundos e teste enviando uma mensagem.')
       await reload()
-    } catch (e: any) { alert('Erro ao reiniciar: ' + e.message) }
+    } catch (e: any) { showErrorAt(inst.id, 'Erro ao reiniciar', e) }
     setRestarting(null)
   }
 
@@ -209,8 +233,8 @@ export default function WhatsAppCard({ accountId, instances, setInstances, reloa
     setSyncing(true)
     try {
       await syncWhatsAppNow(accountId)
-      alert('Sincronização feita. Confira o Chat: leads novos devem aparecer.')
-    } catch (e: any) { alert('Erro ao sincronizar: ' + e.message) }
+      showSuccessAt('top', 'Sincronização feita. Confira o Chat: leads novos devem aparecer.')
+    } catch (e: any) { showErrorAt('top', 'Erro ao sincronizar', e) }
     setSyncing(false)
   }
 
@@ -218,22 +242,22 @@ export default function WhatsAppCard({ accountId, instances, setInstances, reloa
     try {
       const { instance } = await setInstanceAttendant(inst.id, accountId, attendantId)
       setInstances(prev => prev.map(i => i.id === instance.id ? { ...i, ...instance } : i))
-    } catch (e: any) { alert('Erro: ' + e.message) }
+    } catch (e: any) { showErrorAt(inst.id, 'Erro ao trocar o atendente', e) }
   }
 
-  const handleModeChange = async (inst: WhatsAppInstance, mode: 'open' | 'restricted') => {
-    if (mode === 'restricted') {
-      const ok = confirm(
-        'Trocar para o modo RESTRITO?\n\n' +
-        'Mensagens de números desconhecidos serão IGNORADAS: só entram leads já cadastrados no CRM (formulário, planilha ou Novo chat).\n\n' +
-        'As conversas atuais continuam normais. Para voltar, troque o modo de novo.'
-      )
-      if (!ok) return
-    }
+  // Restrito pede confirmacao no modal (se cancelar, o select continua no valor salvo).
+  const handleModeChange = async (inst: WhatsAppInstance, mode: 'open' | 'restricted', confirmed = false) => {
+    if (mode === 'restricted' && !confirmed) { setRestrictTarget(inst); return }
+    setRestrictTarget(null)
     try {
       const { instance } = await setInstanceMode(inst.id, accountId, mode)
       setInstances(prev => prev.map(i => i.id === instance.id ? { ...i, ...instance } : i))
-    } catch (e: any) { alert('Erro: ' + e.message) }
+    } catch (e: any) { showErrorAt(inst.id, 'Erro ao trocar o modo', e) }
+  }
+
+  const handleRetryLoad = async () => {
+    setRetrying(true)
+    try { await reload() } finally { setRetrying(false) }
   }
 
   const qrInstance = instances.find(i => i.id === activeQR)
@@ -257,6 +281,17 @@ export default function WhatsAppCard({ accountId, instances, setInstances, reloa
             )}
           </div>
         </div>
+
+        {noticeFor('top')}
+
+        {loadError && (
+          <div role="alert" style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', padding: '10px 12px', marginBottom: 12, borderRadius: 'var(--radius-sm)', background: 'var(--negative-bg)', border: '1px solid var(--negative)', fontSize: 13 }}>
+            <span style={{ flex: 1, color: 'var(--text-primary)' }}>Não foi possível carregar os números.</span>
+            <button className="btn btn-secondary btn-sm" onClick={handleRetryLoad} disabled={retrying}>
+              {retrying ? <Loader size={12} className="spinning" /> : <RefreshCw size={12} />} Tentar de novo
+            </button>
+          </div>
+        )}
 
         {qrInstance && qrInstance.status !== 'connected' && (
           <div className="card" style={{ marginBottom: 16, textAlign: 'center', padding: 24 }}>
@@ -357,7 +392,7 @@ export default function WhatsAppCard({ accountId, instances, setInstances, reloa
                       <button className="btn btn-secondary btn-sm" onClick={() => handleReconfigureWebhook(inst)} disabled={reconfiguring === inst.id} title="Reenvia ao provedor o endereço de avisos deste número. Use se os leads pararem de entrar em tempo real.">
                         {reconfiguring === inst.id ? <Loader size={12} className="spinning" /> : <Webhook size={12} />} Webhook
                       </button>
-                      <button className="btn btn-secondary btn-sm" onClick={() => handleRestart(inst)} disabled={restarting === inst.id} title="Reinicia a sessão do WhatsApp no provedor. Use quando aparece Conectado mas não recebe nem envia.">
+                      <button className="btn btn-secondary btn-sm" onClick={() => setRestartTarget(inst)} disabled={restarting === inst.id} title="Reinicia a sessão do WhatsApp no provedor. Use quando aparece Conectado mas não recebe nem envia.">
                         {restarting === inst.id ? <Loader size={12} className="spinning" /> : <RotateCw size={12} />} Reiniciar sessão
                       </button>
                       <button className="btn btn-secondary btn-sm" onClick={() => handleDisconnect(inst)}><PowerOff size={12} /> Desconectar</button>
@@ -368,12 +403,13 @@ export default function WhatsAppCard({ accountId, instances, setInstances, reloa
                       <MessageSquare size={12} /> Mensagens do número
                     </button>
                   )}
-                  <button className="btn btn-danger btn-sm btn-icon" onClick={() => setDeleteTarget(inst)} title="Excluir"><Trash2 size={12} /></button>
+                  <button className="btn btn-danger btn-sm btn-icon" onClick={() => { deleteNotice.clear(); setDeleteTarget(inst) }} title="Excluir"><Trash2 size={12} /></button>
                 </div>
               </div>
+              {noticeFor(inst.id)}
             </div>
           ))}
-          {instances.length === 0 && (
+          {instances.length === 0 && !loadError && (
             <div className="empty-state" style={{ minHeight: 120 }}>
               <h3>Nenhum número conectado</h3>
               <p>{canCreate ? 'Clique em "Conectar número" para adicionar um número.' : 'Configure as credenciais da Evolution abaixo para começar.'}</p>
@@ -388,6 +424,7 @@ export default function WhatsAppCard({ accountId, instances, setInstances, reloa
             <Settings size={14} /> Credenciais da Evolution desta conta
             {evoConfigured && <span style={{ color: '#34C759', fontSize: 11, fontWeight: 500 }}>· configurada</span>}
           </summary>
+          <div style={{ marginTop: 12 }}>{noticeFor('evo')}</div>
           <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '12px 0' }}>URL e chave do servidor Evolution usadas pelos números desta conta que estão na Evolution. Números da UzAPI não usam estas credenciais.</p>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             <div style={{ flex: 1, minWidth: 200 }}>
@@ -412,6 +449,7 @@ export default function WhatsAppCard({ accountId, instances, setInstances, reloa
           <div className="modal" style={{ maxWidth: 560 }}>
             <h2>Conectar número de WhatsApp</h2>
             <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 16 }}>Dê um nome para identificar este número (ex.: Comercial, Suporte, Vendas).</p>
+            <InlineNotice notice={createNotice.notice} onClose={createNotice.clear} />
 
             {hasUzapi && (
               <div className="form-group">
@@ -493,6 +531,7 @@ export default function WhatsAppCard({ accountId, instances, setInstances, reloa
               <br /><br />
               Ele sai do CRM e do provedor ({providerLabel(deleteTarget.provider)}). As mensagens antigas continuam no histórico dos leads, mas <strong>este número não vai mais receber nem enviar mensagens</strong>. Não dá para desfazer.
             </p>
+            <InlineNotice notice={deleteNotice.notice} onClose={deleteNotice.clear} />
             <div className="modal-actions" style={{ marginTop: 20 }}>
               <button className="btn btn-secondary" onClick={() => setDeleteTarget(null)} disabled={deleting}>Cancelar</button>
               <button className="btn" disabled={deleting} onClick={confirmDelete} style={{ background: '#ef4444', color: 'white', border: 'none' }}>
@@ -501,6 +540,32 @@ export default function WhatsAppCard({ accountId, instances, setInstances, reloa
             </div>
           </div>
         </div>
+      )}
+
+      {restartTarget && (
+        <ConfirmDialog
+          title={<><RotateCw size={20} style={{ color: 'var(--accent)' }} /> Reiniciar sessão</>}
+          confirmLabel="Sim, reiniciar"
+          onConfirm={() => handleRestart(restartTarget)}
+          onCancel={() => setRestartTarget(null)}
+        >
+          Reiniciar a sessão do WhatsApp <strong style={{ color: 'var(--text-primary)' }}>"{restartTarget.instance_name}"</strong>?
+          <br /><br />
+          Use quando o número parece conectado mas não recebe mensagens.
+        </ConfirmDialog>
+      )}
+
+      {restrictTarget && (
+        <ConfirmDialog
+          title="Trocar para o modo restrito?"
+          confirmLabel="Sim, trocar para restrito"
+          onConfirm={() => handleModeChange(restrictTarget, 'restricted', true)}
+          onCancel={() => setRestrictTarget(null)}
+        >
+          Mensagens de números desconhecidos serão <strong style={{ color: 'var(--text-primary)' }}>ignoradas</strong>: só entram leads já cadastrados no CRM (formulário, planilha ou Novo chat).
+          <br /><br />
+          As conversas atuais continuam normais. Para voltar, troque o modo de novo.
+        </ConfirmDialog>
       )}
     </>
   )

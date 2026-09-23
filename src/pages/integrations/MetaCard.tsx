@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { updateMetaCapi, testMetaCapi, type Account } from '../../lib/api'
 import { Loader, Check, Save, RefreshCw, Eye, EyeOff, Activity, AlertTriangle } from 'lucide-react'
+import { InlineNotice, useInlineNotice } from '../../components/InlineNotice'
 
 interface Props {
   accountId: number
@@ -20,6 +21,8 @@ export default function MetaCard({ accountId, account, onAccountUpdated }: Props
   const [testingMeta, setTestingMeta] = useState(false)
   const [metaTestResult, setMetaTestResult] = useState<{ ok: boolean; msg: string } | null>(null)
   const [showTestMetaConfirm, setShowTestMetaConfirm] = useState(false)
+  // Aviso no lugar do alert(), logo acima dos botoes de salvar/testar.
+  const saveNotice = useInlineNotice()
 
   const metaPatch = (): Partial<Account> => ({
     meta_pixel_id: metaPixelId || null,
@@ -66,6 +69,7 @@ export default function MetaCard({ accountId, account, onAccountUpdated }: Props
             </div>
           </div>
 
+          <InlineNotice notice={saveNotice.notice} onClose={saveNotice.clear} />
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
             <button
               className="btn btn-primary btn-sm"
@@ -82,7 +86,7 @@ export default function MetaCard({ accountId, account, onAccountUpdated }: Props
                   onAccountUpdated(metaPatch())
                   setMetaSaved(true)
                   setTimeout(() => setMetaSaved(false), 2000)
-                } catch (e: any) { alert('Erro: ' + e.message) }
+                } catch (e: any) { saveNotice.showError('Erro ao salvar', e) }
                 setSavingMeta(false)
               }}
               disabled={savingMeta}

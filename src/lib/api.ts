@@ -426,14 +426,15 @@ export const fetchWhatsAppInstances = (accountId: number) => apiFetch<{ instance
 export const createWhatsAppInstance = (accountId: number, data: { instance_name: string; lead_intake_mode?: 'open' | 'restricted'; provider?: WhatsAppProviderId }) => apiFetch<{ instance: WhatsAppInstance }>(`/api/integrations/whatsapp?account_id=${accountId}`, { method: 'POST', body: JSON.stringify(data) }).then(d => d.instance)
 export const connectWhatsAppInstance = (id: number, accountId: number) => apiFetch<{ instance: WhatsAppInstance }>(`/api/integrations/whatsapp/${id}/connect?account_id=${accountId}`, { method: 'POST' }).then(d => d.instance)
 export const checkWhatsAppStatus = (id: number, accountId: number) => apiFetch<{ instance: WhatsAppInstance; state: string }>(`/api/integrations/whatsapp/${id}/status?account_id=${accountId}`)
-export interface QrCodeResult { qr_code: string | null; status: string; panel_url: string | null }
-// Contrato: { qr_code, status, panel_url? }. Aceita tambem o formato antigo { instance } por seguranca.
+export interface QrCodeResult { qr_code: string | null; status: string; panel_url: string | null; error_message?: string | null }
+// Contrato: { qr_code, status, panel_url?, error_message? }. Aceita tambem o formato antigo { instance } por seguranca.
 export const refreshWhatsAppQR = (id: number, accountId: number) =>
   apiFetch<any>(`/api/integrations/whatsapp/${id}/qrcode?account_id=${accountId}`, { method: 'POST' })
     .then((d): QrCodeResult => ({
       qr_code: d?.qr_code ?? d?.instance?.qr_code ?? null,
       status: d?.status ?? d?.instance?.status ?? 'connecting',
       panel_url: d?.panel_url ?? null,
+      error_message: d?.error_message ?? null,
     }))
 export const disconnectWhatsApp = (id: number, accountId: number) => apiFetch(`/api/integrations/whatsapp/${id}/disconnect?account_id=${accountId}`, { method: 'POST' })
 export const deleteWhatsAppInstance = (id: number, accountId: number) => apiFetch(`/api/integrations/whatsapp/${id}?account_id=${accountId}`, { method: 'DELETE' })

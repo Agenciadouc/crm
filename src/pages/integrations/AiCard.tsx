@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { updateAiConfig, testAnthropic, updateAccount, type Account } from '../../lib/api'
 import { Loader, Check, Save, RefreshCw, Eye, EyeOff, Activity, AlertTriangle, KeyRound } from 'lucide-react'
+import { InlineNotice, useInlineNotice } from '../../components/InlineNotice'
 
 interface Props {
   accountId: number
@@ -21,6 +22,9 @@ export default function AiCard({ accountId, account, isSuperAdmin, onAccountUpda
   const [anthropicTestResult, setAnthropicTestResult] = useState<{ ok: boolean; msg: string } | null>(null)
   const [keySource, setKeySource] = useState<'client' | 'dros'>(account.ai_key_source === 'dros' ? 'dros' : 'client')
   const [savingKeySource, setSavingKeySource] = useState(false)
+  // Avisos no lugar do alert(): um na origem da chave e um na chave Anthropic.
+  const keySourceNotice = useInlineNotice()
+  const keyNotice = useInlineNotice()
 
   const handleKeySourceChange = async (value: 'client' | 'dros') => {
     const previous = keySource
@@ -31,7 +35,7 @@ export default function AiCard({ accountId, account, isSuperAdmin, onAccountUpda
       onAccountUpdated({ ai_key_source: value })
     } catch (e: any) {
       setKeySource(previous)
-      alert('Erro ao salvar a origem da chave da IA: ' + (e?.message || ''))
+      keySourceNotice.showError('Erro ao salvar a origem da chave da IA', e)
     }
     setSavingKeySource(false)
   }
@@ -42,6 +46,7 @@ export default function AiCard({ accountId, account, isSuperAdmin, onAccountUpda
         <section className="dash-section">
           <div className="section-title"><KeyRound size={14} /> Origem da chave da IA (só admin Dros)</div>
           <div className="card">
+            <InlineNotice notice={keySourceNotice.notice} onClose={keySourceNotice.clear} />
             <select className="select" value={keySource} disabled={savingKeySource} onChange={e => handleKeySourceChange(e.target.value as 'client' | 'dros')} style={{ minWidth: 280 }}>
               <option value="client">Chave do cliente (cadastrada abaixo)</option>
               <option value="dros">Chave da Dros</option>
@@ -58,6 +63,8 @@ export default function AiCard({ accountId, account, isSuperAdmin, onAccountUpda
           <p style={{ fontSize: 12, color: '#9B96B0', marginBottom: 12 }}>
             Esta conta usa <strong>sua própria conta Anthropic</strong> em todas as funções de IA (agentes no WhatsApp, análise de atendimentos e coaching). <strong>Sem a chave, a IA não funciona</strong> — não há fallback. A transcrição de áudio continua por nossa conta.
           </p>
+
+          <InlineNotice notice={keyNotice.notice} onClose={keyNotice.clear} />
 
           {!anthropicKey.trim() && keySource !== 'dros' && (
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#FFB300', background: 'rgba(255,179,0,0.08)', padding: '8px 10px', borderRadius: 6, marginBottom: 12 }}>
@@ -92,7 +99,7 @@ export default function AiCard({ accountId, account, isSuperAdmin, onAccountUpda
                   onAccountUpdated({ anthropic_api_key: anthropicKey || null, analysis_token_limit: anthropicLimit || 200000 })
                   setAnthropicSaved(true)
                   setTimeout(() => setAnthropicSaved(false), 2000)
-                } catch (e: any) { alert('Erro: ' + e.message) }
+                } catch (e: any) { keyNotice.showError('Erro ao salvar a chave', e) }
                 setSavingAnthropic(false)
               }}
               disabled={savingAnthropic}
