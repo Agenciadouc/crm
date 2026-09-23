@@ -61,7 +61,7 @@ export interface DashboardStats {
   daily: { date: string; count: number }[]
 }
 export interface AgentStat { id: number; name: string; is_active: number; leads_period: number; leads_total: number; conversions: number }
-export interface WhatsAppInstance { id: number; account_id: number; instance_name: string; api_url: string; api_key: string; status: string; phone_number: string | null; qr_code: string | null; default_attendant_id: number | null; lead_intake_mode?: 'open' | 'restricted'; first_msg_template?: string | null; provider?: WhatsAppProviderId | string }
+export interface WhatsAppInstance { id: number; account_id: number; instance_name: string; api_url: string; api_key: string; status: string; phone_number: string | null; qr_code: string | null; default_attendant_id: number | null; lead_intake_mode?: 'open' | 'restricted'; first_msg_template?: string | null; provider?: WhatsAppProviderId | string; role?: 'leitura' | 'disparo'; is_default_send?: boolean; reply_rate?: { reached: number; replied: number; rate: number | null } | null }
 export interface Broadcast {
   id: number; account_id?: number; name: string; message_template: string; message_variations?: string | null
   status: string; sent_count: number; failed_count: number; total_count: number
@@ -444,6 +444,27 @@ export const setInstanceAttendant = (id: number, accountId: number, attendantId:
 export const setInstanceMode = (id: number, accountId: number, mode: 'open' | 'restricted') => apiFetch<{ instance: WhatsAppInstance }>(`/api/integrations/whatsapp/${id}/mode?account_id=${accountId}`, { method: 'PUT', body: JSON.stringify({ mode }) })
 export const syncWhatsAppNow = (accountId: number) => apiFetch<{ ok: boolean }>(`/api/integrations/whatsapp/sync-now?account_id=${accountId}`, { method: 'POST' })
 export const testWhatsAppConnection = (id: number, accountId: number) => apiFetch<{ success: boolean; status: string }>(`/api/integrations/whatsapp/${id}/test?account_id=${accountId}`, { method: 'POST' })
+
+// Numero de disparo padrao (spec papeis dos numeros e anti-ban) e configuracoes anti-ban da conta.
+export interface SendNumberStatus {
+  ok: boolean
+  reason: 'no_send_number' | 'send_number_offline' | null
+  instance: { id: number; instance_name: string; provider: string; status: string } | null
+}
+export interface AntibanSettings {
+  optout_footer_enabled: boolean
+  optout_footer_text: string
+  optout_confirm_text: string
+  reply_rate_alert_pct: number
+}
+export const fetchSendNumberStatus = (accountId: number) =>
+  apiFetch<SendNumberStatus>(`/api/integrations/whatsapp/send-number-status?account_id=${accountId}`)
+export const setDefaultSendInstance = (accountId: number, instanceId: number) =>
+  apiFetch<{ ok: true; status: SendNumberStatus }>(`/api/integrations/whatsapp/default-send-instance?account_id=${accountId}`, { method: 'PUT', body: JSON.stringify({ instance_id: instanceId }) })
+export const fetchAntibanSettings = (accountId: number) =>
+  apiFetch<{ settings: AntibanSettings }>(`/api/integrations/antiban-settings?account_id=${accountId}`).then(d => d.settings)
+export const saveAntibanSettings = (accountId: number, data: Partial<AntibanSettings>) =>
+  apiFetch<{ settings: AntibanSettings }>(`/api/integrations/antiban-settings?account_id=${accountId}`, { method: 'PUT', body: JSON.stringify(data) }).then(d => d.settings)
 
 // Broadcasts
 export const fetchBroadcasts = (accountId: number) => apiFetch<{ broadcasts: Broadcast[] }>(`/api/broadcasts?account_id=${accountId}`).then(d => d.broadcasts)
