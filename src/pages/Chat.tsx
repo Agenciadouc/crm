@@ -805,15 +805,19 @@ export default function Chat() {
   }, [lead?.id, accountId])
   useEffect(() => { loadSales() }, [loadSales])
 
+  const todayISO = () => {
+    const d = new Date()
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  }
   const openSaleModalForConversion = (stageId: number, stageName: string) => {
     if (!lead) return
     setSaleModal({ leadId: lead.id, stageId, leadName: lead.name || 'Lead', stageName })
-    setSaleValue(''); setSaleDate('')
+    setSaleValue(''); setSaleDate(todayISO())
   }
   const openSaleModalStandalone = () => {
     if (!lead) return
     setSaleModal({ leadId: lead.id, stageId: null, leadName: lead.name || 'Lead', stageName: null })
-    setSaleValue(''); setSaleDate('')
+    setSaleValue(''); setSaleDate(todayISO())
   }
 
   const doMoveStage = async (stageId: number) => {

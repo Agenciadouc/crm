@@ -9,10 +9,11 @@ import {
   fetchLeadCadence, fetchCadences, assignLeadCadence, advanceLeadCadence, removeLeadCadence,
   fetchReadyMessages, fetchLeadQualifications, answerQualification,
   archiveLead, unarchiveLead, optInLead, optOutLead,
+  fetchLeadSales, addLeadSale, deleteLeadSale, type LeadSale,
   type Lead, type Message, type StageHistoryEntry, type LeadNote, type Funnel, type User as UserType, type Tag,
   type LeadCadence, type Cadence, type ReadyMessage, type LeadQualification,
 } from '../lib/api'
-import { ArrowLeft, Phone, Mail, MapPin, MessageCircle, Send, Clock, User, GitBranch, Edit3, Save, X, Plus, StickyNote, Tag as TagIcon, ListOrdered, Zap, ClipboardList, ChevronRight, Check, Archive, ArchiveRestore, FileText } from 'lucide-react'
+import { ArrowLeft, Phone, Mail, MapPin, MessageCircle, Send, Clock, User, GitBranch, Edit3, Save, X, Plus, StickyNote, Tag as TagIcon, ListOrdered, Zap, ClipboardList, ChevronRight, Check, Archive, ArchiveRestore, FileText, DollarSign, Trash2 } from 'lucide-react'
 import MessageMedia from '../components/MessageMedia'
 import { parseSqlDate } from '../lib/dates'
 
@@ -109,7 +110,75 @@ export default function LeadDetail() {
     setNotes(prev => [note, ...prev]); setNoteText('')
   }
 
-  const handleStageChange = async (stageId: number) => { if (lead) { await moveLeadStage(lead.id, stageId); loadLead() } }
+  // ─── Vendas (multiple sales por lead) ───
+  const [sales, setSales] = useState<LeadSale[]>([])
+  const [salesTotal, setSalesTotal] = useState(0)
+  const [saleModal, setSaleModal] = useState<{ leadId: number; stageId: number | null; leadName: string; stageName: string | null } | null>(null)
+  const [saleValue, setSaleValue] = useState('')
+  const [saleDate, setSaleDate] = useState('')
+  const [saleSaving, setSaleSaving] = useState(false)
+
+  const loadSales = useCallback(async () => {
+    if (!lead || !accountId) return
+    try { const r = await fetchLeadSales(lead.id, accountId); setSales(r.sales); setSalesTotal(r.total) } catch {}
+  }, [lead?.id, accountId])
+  useEffect(() => { loadSales() }, [loadSales])
+
+  const todayISO = () => {
+    const d = new Date()
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  }
+  const openSaleModalForConversion = (stageId: number, stageName: string) => {
+    if (!lead) return
+    setSaleModal({ leadId: lead.id, stageId, leadName: lead.name || 'Lead', stageName })
+    setSaleValue(''); setSaleDate(todayISO())
+  }
+  const openSaleModalStandalone = () => {
+    if (!lead) return
+    setSaleModal({ leadId: lead.id, stageId: null, leadName: lead.name || 'Lead', stageName: null })
+    setSaleValue(''); setSaleDate(todayISO())
+  }
+  const doMoveStage = async (stageId: number) => {
+    if (!lead) return
+    await moveLeadStage(lead.id, stageId); loadLead()
+  }
+  const confirmSaleValue = async () => {
+    if (!saleModal || !accountId) return
+    const numeric = parseFloat(String(saleValue).replace(/\./g, '').replace(',', '.'))
+    if (!Number.isFinite(numeric) || numeric <= 0) return
+    setSaleSaving(true)
+    try {
+      const iso = saleDate ? `${saleDate}T12:00:00` : undefined
+      await addLeadSale(saleModal.leadId, accountId, { value: numeric, sale_date: iso })
+      await loadSales()
+      if (saleModal.stageId != null) await doMoveStage(saleModal.stageId)
+      setSaleModal(null); setSaleValue(''); setSaleDate('')
+    } catch (e: any) { alert('Erro: ' + (e?.message || 'falha')) }
+    finally { setSaleSaving(false) }
+  }
+  const skipSaleValue = async () => {
+    if (!saleModal) return
+    if (saleModal.stageId != null) await doMoveStage(saleModal.stageId)
+    setSaleModal(null); setSaleValue(''); setSaleDate('')
+  }
+  const handleDeleteSale = async (saleId: number) => {
+    if (!lead || !accountId) return
+    if (!confirm('Excluir essa venda? O total é ajustado.')) return
+    try { await deleteLeadSale(lead.id, saleId, accountId); await loadSales() }
+    catch (e: any) { alert('Erro: ' + (e?.message || 'falha')) }
+  }
+
+  const handleStageChange = async (stageId: number) => {
+    if (!lead) return
+    const allStages = funnels.flatMap(f => f.stages || [])
+    const targetStage = allStages.find(s => s.id === stageId)
+    const isConversion = !!(targetStage && (targetStage as any).is_conversion)
+    if (isConversion && stageId !== lead.stage_id) {
+      openSaleModalForConversion(stageId, targetStage!.name)
+      return
+    }
+    await doMoveStage(stageId)
+  }
   // Assign com modal de confirmacao + checkbox "enviar 1a msg"
   const [assignModal, setAssignModal] = useState<{ attId: number; userName: string } | null>(null)
   const [assignNotify, setAssignNotify] = useState(false)
@@ -297,6 +366,51 @@ export default function LeadDetail() {
               ) : (
                 <div style={{ fontSize: 11, color: '#6B6580' }}>Sem observacoes</div>
               )
+            )}
+          </div>
+
+          {/* Vendas */}
+          <div className="card" style={{ marginBottom: 16 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+              <div style={{ fontSize: 12, fontWeight: 600, color: '#9B96B0', textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: 4 }}>
+                <DollarSign size={12} style={{ color: '#34C759' }} /> Vendas {sales.length > 0 && <span style={{ color: '#6B6580' }}>({sales.length})</span>}
+              </div>
+              <button className="btn btn-secondary btn-sm" onClick={openSaleModalStandalone} title="Registrar nova venda"><Plus size={12} /></button>
+            </div>
+            {salesTotal > 0 && (
+              <div style={{ fontSize: 18, fontWeight: 700, color: '#34C759', marginBottom: 10 }}>
+                R$ {salesTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                <span style={{ fontSize: 10, color: '#6B6580', fontWeight: 400, marginLeft: 6 }}>total</span>
+              </div>
+            )}
+            {sales.length === 0 ? (
+              <div style={{ fontSize: 11, color: '#6B6580' }}>Sem vendas registradas</div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {sales.map(s => {
+                  const dt = new Date(s.sale_date.replace(' ', 'T') + 'Z')
+                  const dateStr = dt.toLocaleDateString('pt-BR') + ' ' + dt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+                  const canDelete = user?.role === 'super_admin' || user?.role === 'gerente'
+                  return (
+                    <div key={s.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 10px', background: 'rgba(52,199,89,0.06)', border: '1px solid rgba(52,199,89,0.15)', borderRadius: 8 }}>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 2, flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 13, fontWeight: 600, color: '#34C759' }}>
+                          R$ {Number(s.value).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </div>
+                        <div style={{ fontSize: 10, color: '#9B96B0', display: 'flex', alignItems: 'center', gap: 4 }}>
+                          <Clock size={9} /> {dateStr}
+                          {s.created_by_name && <span>· {s.created_by_name}</span>}
+                        </div>
+                      </div>
+                      {canDelete && (
+                        <button onClick={() => handleDeleteSale(s.id)} title="Excluir" style={{ background: 'none', border: 'none', color: '#6B6580', cursor: 'pointer', padding: 3, display: 'flex' }}>
+                          <Trash2 size={11} />
+                        </button>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
             )}
           </div>
 
@@ -533,6 +647,39 @@ export default function LeadDetail() {
                 {assignSaving ? 'Atribuindo...' : 'Confirmar atribuição'}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: registrar venda */}
+      {saleModal && (
+        <div onClick={() => !saleSaving && skipSaleValue()} style={{ position: 'fixed', inset: 0, background: 'rgba(10,10,20,0.72)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999, padding: 16, backdropFilter: 'blur(4px)' }}>
+          <div onClick={e => e.stopPropagation()} style={{ background: '#1a1428', border: '1px solid rgba(255,255,255,0.10)', borderRadius: 14, padding: 24, maxWidth: 460, width: '100%', boxShadow: '0 30px 80px rgba(0,0,0,0.5)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <div style={{ width: 36, height: 36, borderRadius: 10, background: 'rgba(52,199,89,0.16)', color: '#34C759', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><DollarSign size={18} /></div>
+                <h2 style={{ margin: 0, fontSize: 17, fontWeight: 700, color: '#F0EDF5' }}>{saleModal.stageId != null ? 'Registrar venda' : 'Nova venda'}</h2>
+              </div>
+              <button onClick={skipSaleValue} disabled={saleSaving} style={{ background: 'none', border: 'none', color: '#9B96B0', cursor: saleSaving ? 'default' : 'pointer', padding: 4 }}><X size={16} /></button>
+            </div>
+            <p style={{ fontSize: 13, color: '#B8B4C7', margin: '10px 0 18px', lineHeight: 1.5 }}>
+              {saleModal.stageId != null ? (<>Movendo <strong style={{ color: '#F0EDF5' }}>{saleModal.leadName}</strong> pra <strong style={{ color: '#34C759' }}>{saleModal.stageName}</strong>.<br />Qual foi o valor da compra?</>) : (<>Adicionar nova venda pra <strong style={{ color: '#F0EDF5' }}>{saleModal.leadName}</strong>.</>)}
+            </p>
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+              <div style={{ position: 'relative', flex: 2, minWidth: 180 }}>
+                <span style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)', color: '#9B96B0', fontWeight: 600, fontSize: 14 }}>R$</span>
+                <input autoFocus type="text" inputMode="decimal" className="input" value={saleValue} onChange={e => setSaleValue(e.target.value.replace(/[^\d.,]/g, ''))} onKeyDown={e => { if (e.key === 'Enter' && !saleSaving) confirmSaleValue() }} placeholder="0,00" style={{ paddingLeft: 42, fontSize: 18, fontWeight: 700, letterSpacing: 0.5, width: '100%' }} disabled={saleSaving} />
+              </div>
+              <div style={{ flex: 1, minWidth: 140 }}>
+                <input type="date" className="input" value={saleDate} onChange={e => setSaleDate(e.target.value)} style={{ width: '100%', fontSize: 13 }} disabled={saleSaving} />
+                <div style={{ fontSize: 9, color: '#6B6580', marginTop: 3 }}>Data da venda</div>
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 8, marginTop: 20, justifyContent: 'flex-end' }}>
+              <button className="btn btn-secondary" onClick={skipSaleValue} disabled={saleSaving} style={{ fontSize: 13 }}>{saleModal.stageId != null ? 'Pular' : 'Cancelar'}</button>
+              <button className="btn btn-primary" onClick={confirmSaleValue} disabled={saleSaving || !saleValue.trim()} style={{ fontSize: 13, background: '#34C759', borderColor: '#34C759' }}>{saleSaving ? 'Salvando...' : 'Confirmar venda'}</button>
+            </div>
+            {saleModal.stageId != null && (<div style={{ fontSize: 11, color: '#6B6580', marginTop: 12, lineHeight: 1.5 }}>O valor entra no painel <strong>Funil &amp; ROI Mensal</strong>. Se "Pular", o lead move sem valor.</div>)}
           </div>
         </div>
       )}
