@@ -572,102 +572,6 @@ export default function Integrations() {
         </div>
       )}
 
-      {/* Roteamento de leads de formulario (tag → instancia) — gerente/admin only */}
-      {isGerenteOuAdmin && evoConfigured && (() => {
-        const connectedInsts = instances.filter(i => i.status === 'connected')
-        const attendants = users.filter(u => (u.role === 'atendente' || u.role === 'gerente') && u.is_active)
-        if (connectedInsts.length === 0) return null
-        return (
-          <section className="dash-section" style={{ marginTop: 24 }}>
-            <div className="section-title"><GitBranch size={14} /> Roteamento de leads (formulários)</div>
-            <div className="card">
-              <p style={{ fontSize: 12, color: '#9B96B0', marginBottom: 16 }}>
-                Leads que chegam via Google Sheets, Meta Lead Form ou site não tem WhatsApp na origem.
-                Configure pra qual número essas conversas vão.
-              </p>
-
-              {/* Default — fallback */}
-              <div style={{ background: 'rgba(255,255,255,0.03)', padding: 12, borderRadius: 8, marginBottom: 16 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                  <Smartphone size={13} style={{ color: '#FFB300' }} />
-                  <strong style={{ fontSize: 13 }}>Número padrão</strong>
-                </div>
-                <p style={{ fontSize: 11, color: '#9B96B0', marginBottom: 8 }}>
-                  Todos os leads de formulário vão pra esse número, exceto os que tiverem regra específica por tag abaixo.
-                </p>
-                <select
-                  className="select"
-                  value={routingDefaultId ?? ''}
-                  onChange={e => handleChangeDefaultRouting(e.target.value ? Number(e.target.value) : null)}
-                  style={{ minWidth: 280, fontSize: 12 }}
-                >
-                  <option value="">— nenhuma (lead fica sem instância) —</option>
-                  {connectedInsts.map(i => (
-                    <option key={i.id} value={i.id}>{i.instance_name}{i.phone_number ? ` (${i.phone_number})` : ''}</option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Regras por tag */}
-              <div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-                  <strong style={{ fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <LinkIcon size={12} /> Regras especiais por tag
-                  </strong>
-                  <button className="btn btn-primary btn-sm" onClick={() => startRoutingEdit()} disabled={routingTags.length === 0}>
-                    <Plus size={12} /> Nova regra
-                  </button>
-                </div>
-                <p style={{ fontSize: 11, color: '#9B96B0', marginBottom: 8 }}>
-                  Quando uma regra bater com a tag do lead, ela tem prioridade sobre o número padrão.
-                </p>
-
-                {routingTags.length === 0 ? (
-                  <p style={{ fontSize: 11, color: '#9B96B0', textAlign: 'center', padding: 16 }}>
-                    Nenhuma tag criada na conta. Crie tags em <strong>Tags</strong> primeiro.
-                  </p>
-                ) : routingMappings.length === 0 ? (
-                  <div style={{ fontSize: 12, color: '#6B6580', textAlign: 'center', padding: 16, background: 'rgba(255,255,255,0.02)', borderRadius: 6 }}>
-                    Nenhuma regra configurada. Leads de formulário usam o número padrão acima.
-                  </div>
-                ) : (
-                  <div className="table-card">
-                    <table>
-                      <thead>
-                        <tr>
-                          <th>Tag</th>
-                          <th>Instância</th>
-                          <th>Atendente</th>
-                          <th className="right">Ações</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {routingMappings.map(m => (
-                          <tr key={m.id}>
-                            <td>
-                              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '4px 10px', background: `${m.tag_color}25`, color: m.tag_color, borderRadius: 4, fontSize: 12, fontWeight: 600 }}>
-                                <span style={{ width: 6, height: 6, borderRadius: '50%', background: m.tag_color }} />
-                                {m.tag_name}
-                              </span>
-                            </td>
-                            <td style={{ fontSize: 12 }}><Smartphone size={11} style={{ display: 'inline', marginRight: 4, color: '#34C759' }} />{m.instance_name}</td>
-                            <td style={{ fontSize: 12 }}>{m.attendant_name || <span style={{ color: '#6B6580' }}>— (roleta)</span>}</td>
-                            <td className="right">
-                              <button className="btn btn-secondary btn-sm" style={{ fontSize: 10 }} onClick={() => startRoutingEdit(m)}>Editar</button>
-                              <button className="btn btn-secondary btn-sm" style={{ fontSize: 10, color: '#FF6B6B', marginLeft: 4 }} onClick={() => handleDeleteRouting(m.tag_id)}><Trash2 size={10} /></button>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
-            </div>
-          </section>
-        )
-      })()}
-
       {/* Modal de criar/editar regra de roteamento */}
       {routingEdit && (
         <div className="modal-overlay" onClick={() => setRoutingEdit(null)}>
@@ -779,6 +683,81 @@ export default function Integrations() {
                 </p>
               )}
             </div>
+
+            {/* Regras de atribuição por tag (leads da planilha) */}
+            {(() => {
+              const connectedInsts = instances.filter(i => i.status === 'connected')
+              const canCreate = routingTags.length > 0 && connectedInsts.length > 0
+              return (
+                <div style={{ background: 'var(--bg-hover)', padding: 12, borderRadius: 8, marginBottom: 12, border: '1px solid var(--border-subtle)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8, flexWrap: 'wrap', gap: 8 }}>
+                    <div style={{ flex: 1, minWidth: 240 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                        <GitBranch size={13} style={{ color: '#FFB300' }} />
+                        <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>Regras de atribuição por tag (leads da planilha)</span>
+                      </div>
+                      <p style={{ fontSize: 11, color: 'var(--text-muted)', margin: 0 }}>
+                        Quando um lead chega da planilha com uma tag específica (ex: "Revendedor"), atribui direto pro vendedor definido aqui.
+                        Sem regra que bata, o lead cai no atendente/roleta padrão do número WhatsApp.
+                      </p>
+                    </div>
+                    <button
+                      className="btn btn-primary btn-sm"
+                      onClick={() => startRoutingEdit()}
+                      disabled={!canCreate}
+                      title={connectedInsts.length === 0 ? 'Conecte pelo menos 1 número WhatsApp acima primeiro' : (routingTags.length === 0 ? 'Crie tags primeiro' : '')}
+                    >
+                      <Plus size={12} /> Nova regra
+                    </button>
+                  </div>
+
+                  {routingTags.length === 0 ? (
+                    <p style={{ fontSize: 11, color: 'var(--text-muted)', textAlign: 'center', padding: 12, margin: 0 }}>
+                      Crie tags primeiro em <strong>Tags</strong> antes de configurar regras.
+                    </p>
+                  ) : connectedInsts.length === 0 ? (
+                    <p style={{ fontSize: 11, color: 'var(--text-muted)', textAlign: 'center', padding: 12, margin: 0 }}>
+                      Conecte pelo menos 1 número WhatsApp acima pra poder criar regras.
+                    </p>
+                  ) : routingMappings.length === 0 ? (
+                    <div style={{ fontSize: 11, color: 'var(--text-muted)', textAlign: 'center', padding: 12, background: 'rgba(255,255,255,0.02)', borderRadius: 6 }}>
+                      Nenhuma regra configurada. Leads da planilha vão pro atendente/roleta padrão do número.
+                    </div>
+                  ) : (
+                    <div className="table-card">
+                      <table>
+                        <thead>
+                          <tr>
+                            <th>Tag</th>
+                            <th>Número</th>
+                            <th>Atendente</th>
+                            <th className="right">Ações</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {routingMappings.map(m => (
+                            <tr key={m.id}>
+                              <td>
+                                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '4px 10px', background: `${m.tag_color}25`, color: m.tag_color, borderRadius: 4, fontSize: 12, fontWeight: 600 }}>
+                                  <span style={{ width: 6, height: 6, borderRadius: '50%', background: m.tag_color }} />
+                                  {m.tag_name}
+                                </span>
+                              </td>
+                              <td style={{ fontSize: 12 }}><Smartphone size={11} style={{ display: 'inline', marginRight: 4, color: '#34C759' }} />{m.instance_name}</td>
+                              <td style={{ fontSize: 12 }}>{m.attendant_name || <span style={{ color: '#6B6580' }}>— (roleta)</span>}</td>
+                              <td className="right">
+                                <button className="btn btn-secondary btn-sm" style={{ fontSize: 10 }} onClick={() => startRoutingEdit(m)}>Editar</button>
+                                <button className="btn btn-secondary btn-sm" style={{ fontSize: 10, color: '#FF6B6B', marginLeft: 4 }} onClick={() => handleDeleteRouting(m.tag_id)}><Trash2 size={10} /></button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              )
+            })()}
 
             <p style={{ fontSize: 12, color: '#9B96B0', marginBottom: 12 }}>
               Conecte uma planilha do Google Sheets ao CRM. Leads adicionados na planilha sao criados automaticamente no sistema.
