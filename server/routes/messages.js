@@ -120,6 +120,7 @@ router.post('/:leadId', async (req, res) => {
       sendRes = await sendViaInstance(instance, number, content, {
         skipTyping: true, skipQuota: true,
         skipBusinessHours: true, skipLeadCap: true, skipHealthCheck: true,
+        origin: 'manual',
       })
       if (sendRes.ok) break // success
       if (sendRes.validationFailed) break // numero invalido, nao adianta retentar
@@ -228,6 +229,7 @@ router.post('/:leadId/media', jsonBodyParser({ limit: '150mb' }), async (req, re
     // Mesmas checagens do texto do Chat (humano): skip anti-ban de volume; pre-flight de numero continua.
     const sendRes = await sendMediaViaInstance(instance, number, { type: mediaType, base64, mimetype: mime, fileName, caption }, {
       skipTyping: true, skipQuota: true, skipBusinessHours: true, skipLeadCap: true, skipHealthCheck: true,
+      origin: 'manual',
     })
 
     if (sendRes.validationFailed) {

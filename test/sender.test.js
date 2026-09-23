@@ -78,7 +78,7 @@ test('cap por lead usa 50 quando a instancia nao define', async () => {
   const lead = insertLead(db, { account_id: seed.account.id, funnel_id: seed.funnelId, stage_id: seed.stage1, phone: '5547991351835' })
   const ins = db.prepare("INSERT INTO messages (lead_id, account_id, direction, content, delivery_status) VALUES (?, ?, 'outbound', 'x', 'sent')")
   for (let i = 0; i < 49; i++) ins.run(lead.id, seed.account.id)
-  const inst = { ...seed.instance, lead_daily_msg_cap: null }
+  const inst = { ...seed.instance, provider: 'uzapi', lead_daily_msg_cap: null }
   const ok = await sender.sendViaInstance(inst, lead.phone, 'x', { leadId: lead.id, skipQuota: true, skipTyping: true })
   assert.equal(ok.ok, true)
   ins.run(lead.id, seed.account.id)
@@ -167,4 +167,34 @@ test('provedor com typingDelay (UzAPI): manda delayTyping no envio; Chat humano 
   await sender.sendViaInstance(seed.instance, '5547991351835', 'oi', humanChat)
   assert.deepEqual(r, { ok: true, wamsgId: 'U1', raw: {} })
   assert.deepEqual(opts, [{ delayTyping: 3 }, undefined])
+})
+
+test('trava: automatico com lead em numero de leitura (Evolution) e recusado', async () => {
+  const { seed, sender, calls } = setup()
+  const r = await sender.sendViaInstance(seed.instance, '5547991351835', 'oi', { ...humanChat, leadId: 1 })
+  assert.deepEqual(r, { ok: false, reason: 'auto_on_read_number' })
+  assert.equal(calls.sendText.length, 0)
+  const m = await sender.sendMediaViaInstance(seed.instance, '5547991351835', { type: 'image', caption: 'x' }, { ...humanChat, leadId: 1 })
+  assert.deepEqual(m, { ok: false, reason: 'auto_on_read_number' })
+  assert.equal(calls.sendMedia.length, 0)
+})
+
+test('trava: manual em numero de leitura passa', async () => {
+  const { seed, sender, calls } = setup()
+  const r = await sender.sendViaInstance(seed.instance, '5547991351835', 'oi', { ...humanChat, leadId: 1, origin: 'manual' })
+  assert.equal(r.ok, true)
+  assert.equal(calls.sendText.length, 1)
+})
+
+test('trava: sem lead (aviso interno ao vendedor) passa', async () => {
+  const { seed, sender } = setup()
+  const r = await sender.sendViaInstance(seed.instance, '5547991351835', 'aviso', humanChat)
+  assert.equal(r.ok, true)
+})
+
+test('trava: automatico em numero de disparo passa', async () => {
+  const { seed, sender } = setup()
+  const uz = { ...seed.instance, provider: 'uzapi' }
+  const r = await sender.sendViaInstance(uz, '5547991351835', 'oi', { ...humanChat, leadId: 1 })
+  assert.equal(r.ok, true)
 })

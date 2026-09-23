@@ -1,6 +1,7 @@
 // Envio de WhatsApp com protecoes anti-ban, independente do provedor.
 // Movido de leadHandoff.js. Dependencias injetadas para testar com better-sqlite3 :memory:.
 import { normalizeForSend } from './normalize.js'
+import { numberRole } from './numberRole.js'
 
 export const LEAD_DAILY_CAP_DEFAULT = 50
 
@@ -266,7 +267,18 @@ export function createSender({ db, getProvider, sleep = defaultSleep, random = M
     return { ok: true, wamsgId: r.messageId, raw: r.raw }
   }
 
+  // Trava (spec secao 8): envio automatico para lead nunca sai por numero de leitura (Evolution).
+  function readNumberBlock(instance, opts) {
+    if ((opts.origin || 'auto') === 'manual') return null
+    if (!opts.leadId) return null
+    if (numberRole(instance) !== 'leitura') return null
+    console.warn(`[Trava] envio automatico recusado inst=${instance && instance.instance_name} lead=${opts.leadId} (numero de leitura)`)
+    return { ok: false, reason: 'auto_on_read_number' }
+  }
+
   async function sendViaInstance(instance, phone, text, opts = {}) {
+    const blocked = readNumberBlock(instance, opts)
+    if (blocked) return blocked
     const guard = await runSendGuards(instance, phone, text, opts)
     if (!guard.ok) return guard.result
     const sendOpts = (!opts.skipTyping && guard.provider.capabilities?.typingDelay)
@@ -276,6 +288,8 @@ export function createSender({ db, getProvider, sleep = defaultSleep, random = M
   }
 
   async function sendMediaViaInstance(instance, phone, media, opts = {}) {
+    const blocked = readNumberBlock(instance, opts)
+    if (blocked) return blocked
     const guard = await runSendGuards(instance, phone, media?.caption || '', opts)
     if (!guard.ok) return guard.result
     if (!guard.provider.sendMedia) return { ok: false, reason: 'media_not_supported' }
