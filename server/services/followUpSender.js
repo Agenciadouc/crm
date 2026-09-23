@@ -10,6 +10,7 @@ import { applyMessageVars, templateNeedsAttendant, buildVarContext } from '../li
 import { planFollowUpSend, resumeAutomaticFollowUps } from './followUpRouting.js'
 import { appendOptOutFooter } from './antiban.js'
 import { followUpPacer } from './whatsapp/sendPacer.js'
+import { getDefaultSendInstance } from './whatsapp/resolveSendInstance.js'
 
 // Escolhe texto da variação se step.variations tem array. Fallback message_template.
 function pickVariationText(step) {
@@ -229,10 +230,14 @@ export function resumeFollowUpsIfAttendantNowAssigned() {
 }
 
 // Reativacao quando instancia volta a conectar (chamado por scheduler.checkWhatsAppInstances)
-// Agora por conta: qualquer numero de disparo da conta conectando retoma os pausados por falta/queda de numero padrao.
+// Por conta: qualquer numero de disparo da conta conectando retoma os pausados por falta/queda de numero padrao.
+// Falhas de envio (send_failed/send_error) só retomam quando quem conectou é o numero padrao ATUAL da conta
+// (senao um numero secundario conectando reativaria envios que falharam num numero diferente).
 export function resumeFollowUpsIfPaused(instanceId) {
   const inst = db.prepare('SELECT account_id FROM whatsapp_instances WHERE id = ?').get(instanceId)
   if (!inst) return
-  const n = resumeAutomaticFollowUps(db, inst.account_id)
+  const defaultInst = getDefaultSendInstance(db, inst.account_id)
+  const includeSendFailures = !!(defaultInst && defaultInst.id === instanceId)
+  const n = resumeAutomaticFollowUps(db, inst.account_id, { includeSendFailures })
   if (n > 0) console.log(`[FollowUp] Retomando ${n} follow-up(s) — numero ${instanceId} conectou (conta ${inst.account_id})`)
 }

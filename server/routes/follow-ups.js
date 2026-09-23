@@ -5,6 +5,7 @@ import { broadcastSSE } from '../sse.js'
 import { agentFollowUpLock, agentIsActiveOwner } from '../services/followUpOwnership.js'
 import { checkStepVariety } from '../services/antiban.js'
 import { getDefaultSendInstance } from '../services/whatsapp/resolveSendInstance.js'
+import { needsVarietyCheck } from '../services/followUpRouting.js'
 
 const router = Router()
 
@@ -197,8 +198,10 @@ router.post('/', requireRole('super_admin', 'gerente'), (req, res) => {
     const variationsJson = normalizeStepVariations(s)
     const hasTpl = s.message_template && s.message_template.trim()
     if (!variationsJson && !hasTpl) return res.status(400).json({ error: 'Toda etapa precisa de mensagem ou variações' })
-    const variety = checkStepVariety({ message_template: s.message_template, variations: variationsJson })
-    if (!variety.ok) return res.status(400).json({ error: `Etapa ${i + 1}: ${variety.error}` })
+    if (needsVarietyCheck({ type: finalType, inactivityMode: finalInactivityMode })) {
+      const variety = checkStepVariety({ message_template: s.message_template, variations: variationsJson })
+      if (!variety.ok) return res.status(400).json({ error: `Etapa ${i + 1}: ${variety.error}` })
+    }
     const stepMode = s.schedule_mode === 'absolute' ? 'absolute' : 'relative'
     let stepScheduledAt = null
     if (finalType === 'sequence' && stepMode === 'absolute') {
@@ -315,8 +318,10 @@ router.put('/:id', requireRole('super_admin', 'gerente'), (req, res) => {
       const variationsJson = normalizeStepVariations(s)
       const hasTpl = s.message_template && s.message_template.trim()
       if (!variationsJson && !hasTpl) return res.status(400).json({ error: 'Toda etapa precisa de mensagem ou variações' })
-      const variety = checkStepVariety({ message_template: s.message_template, variations: variationsJson })
-      if (!variety.ok) return res.status(400).json({ error: `Etapa ${i + 1}: ${variety.error}` })
+      if (needsVarietyCheck({ type: finalType, inactivityMode: finalInactivityMode })) {
+        const variety = checkStepVariety({ message_template: s.message_template, variations: variationsJson })
+        if (!variety.ok) return res.status(400).json({ error: `Etapa ${i + 1}: ${variety.error}` })
+      }
       const stepMode = s.schedule_mode === 'absolute' ? 'absolute' : 'relative'
       let stepScheduledAt = null
       if (finalType === 'sequence' && stepMode === 'absolute') {

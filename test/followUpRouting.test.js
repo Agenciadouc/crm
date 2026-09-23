@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createTestDb, seedBasic, insertLead } from './helpers/db.js'
-import { planFollowUpSend, resumeAutomaticFollowUps } from '../server/services/followUpRouting.js'
+import { planFollowUpSend, resumeAutomaticFollowUps, needsVarietyCheck } from '../server/services/followUpRouting.js'
 
 function uzapi(db, accountId, status = 'connected') {
   const id = db.prepare(`INSERT INTO whatsapp_instances (account_id, instance_name, api_url, api_key, status, provider)
@@ -49,4 +49,30 @@ test('retoma os pausados da conta quando o numero padrao esta conectado', () => 
   assert.equal(resumeAutomaticFollowUps(db, s.account.id), 1)
   const rows = db.prepare('SELECT status, paused_reason FROM lead_follow_ups ORDER BY id').all()
   assert.deepEqual(rows, [{ status: 'active', paused_reason: null }, { status: 'paused', paused_reason: 'lead_opted_out' }])
+})
+
+test('needsVarietyCheck: falso so pra inatividade em modo rotation', () => {
+  assert.equal(needsVarietyCheck({ type: 'inactivity', inactivityMode: 'rotation' }), false)
+  assert.equal(needsVarietyCheck({ type: 'inactivity', inactivityMode: 'sequence' }), true)
+  assert.equal(needsVarietyCheck({ type: 'sequence', inactivityMode: null }), true)
+})
+
+test('resumeAutomaticFollowUps nao retoma send_failed/send_error por padrao', () => {
+  const db = createTestDb(); const s = seedBasic(db)
+  uzapi(db, s.account.id)
+  const lead = insertLead(db, { account_id: s.account.id, funnel_id: s.funnelId, stage_id: s.stage1, phone: '1' })
+  db.prepare("INSERT INTO lead_follow_ups (lead_id, follow_up_id, status, paused_reason) VALUES (?, 1, 'paused', 'send_failed')").run(lead.id)
+  assert.equal(resumeAutomaticFollowUps(db, s.account.id), 0)
+  const row = db.prepare('SELECT status, paused_reason FROM lead_follow_ups WHERE lead_id = ?').get(lead.id)
+  assert.deepEqual(row, { status: 'paused', paused_reason: 'send_failed' })
+})
+
+test('resumeAutomaticFollowUps com includeSendFailures retoma send_failed/send_error', () => {
+  const db = createTestDb(); const s = seedBasic(db)
+  uzapi(db, s.account.id)
+  const lead = insertLead(db, { account_id: s.account.id, funnel_id: s.funnelId, stage_id: s.stage1, phone: '1' })
+  db.prepare("INSERT INTO lead_follow_ups (lead_id, follow_up_id, status, paused_reason) VALUES (?, 1, 'paused', 'send_failed')").run(lead.id)
+  assert.equal(resumeAutomaticFollowUps(db, s.account.id, { includeSendFailures: true }), 1)
+  const row = db.prepare('SELECT status, paused_reason FROM lead_follow_ups WHERE lead_id = ?').get(lead.id)
+  assert.deepEqual(row, { status: 'active', paused_reason: null })
 })

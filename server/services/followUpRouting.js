@@ -2,7 +2,18 @@
 import { resolveSendInstance } from './whatsapp/resolveSendInstance.js'
 import { isOptedOut, DEFAULT_OPTOUT_FOOTER } from './antiban.js'
 
-export const RESUMABLE_REASONS = ['no_send_number', 'send_number_offline', 'instance_offline', 'instance_removed', 'send_failed', 'send_error']
+// Motivos de conectividade (falta/queda de numero) — retomados pra conta toda quando o numero padrao conecta.
+export const RESUMABLE_REASONS = ['no_send_number', 'send_number_offline', 'instance_offline', 'instance_removed']
+// Falhas de envio (numero invalido, erro da API) — só retomadas quando o numero que reconectou
+// é o numero padrao atual da conta (nao retoma so por "algum numero de disparo conectou").
+export const SEND_FAILURE_REASONS = ['send_failed', 'send_error']
+
+// Follow-up de inatividade em modo 'rotation': cada step É uma variacao unica da mesma mensagem
+// (o proprio scanner exige >=3 steps — server/services/inactivityScanner.js:29-32), entao
+// a checagem de variedade por step nao se aplica. Todo o resto (sequence, non-inactivity) exige variacao.
+export function needsVarietyCheck({ type, inactivityMode }) {
+  return !(type === 'inactivity' && inactivityMode === 'rotation')
+}
 
 export function planFollowUpSend(db, { lead, followUp }) {
   if (isOptedOut(lead)) return { ok: false, pause: 'lead_opted_out' }
@@ -16,15 +27,16 @@ export function planFollowUpSend(db, { lead, followUp }) {
   return { ok: true, instance: r.instance, footer }
 }
 
-export function resumeAutomaticFollowUps(db, accountId) {
+export function resumeAutomaticFollowUps(db, accountId, { includeSendFailures = false } = {}) {
   const r = resolveSendInstance(db, { accountId, kind: 'automatico' })
   if (!r.ok) return 0
-  const ph = RESUMABLE_REASONS.map(() => '?').join(', ')
+  const reasons = includeSendFailures ? [...RESUMABLE_REASONS, ...SEND_FAILURE_REASONS] : RESUMABLE_REASONS
+  const ph = reasons.map(() => '?').join(', ')
   const res = db.prepare(`
     UPDATE lead_follow_ups SET status = 'active', paused_at = NULL, paused_reason = NULL,
       next_run_at = datetime('now'), updated_at = datetime('now')
     WHERE status = 'paused' AND paused_reason IN (${ph})
       AND lead_id IN (SELECT id FROM leads WHERE account_id = ?)
-  `).run(...RESUMABLE_REASONS, accountId)
+  `).run(...reasons, accountId)
   return res.changes
 }
