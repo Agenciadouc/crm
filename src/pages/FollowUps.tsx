@@ -316,16 +316,20 @@ export default function FollowUps({ embedded = false }: { embedded?: boolean } =
 
   return (
     <div>
-      <div className="page-header" style={embedded ? { justifyContent: 'flex-end' } : undefined}>
-        {!embedded && <h1><Zap size={22} style={{ verticalAlign: -4, marginRight: 6 }} />Follow-ups</h1>}
-        <button className="btn btn-primary" onClick={openNew}>
+      <div className="page-header">
+        {embedded
+          ? <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: 0 }}>Mensagens de WhatsApp enviadas sozinhas. <strong>Sequência</strong>: o atendente atribui ao lead e o sistema envia em ordem. <strong>Inatividade</strong>: o sistema acha leads parados numa etapa e envia automaticamente.</p>
+          : <h1><Zap size={22} style={{ verticalAlign: -4, marginRight: 6 }} />Follow-ups</h1>}
+        <button className={embedded ? 'btn btn-primary btn-sm' : 'btn btn-primary'} onClick={openNew}>
           <Plus size={14} /> Novo Follow-up
         </button>
       </div>
 
-      <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 16 }}>
-        Sequências de mensagens automáticas. <strong>Sequência</strong>: atendente atribui lead e sistema envia em ordem. <strong>Inatividade</strong>: sistema scan-eia leads inativos numa etapa e envia automaticamente.
-      </p>
+      {!embedded && (
+        <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 16 }}>
+          Sequências de mensagens automáticas. <strong>Sequência</strong>: o atendente atribui ao lead e o sistema envia em ordem. <strong>Inatividade</strong>: o sistema acha leads parados numa etapa e envia automaticamente.
+        </p>
+      )}
 
       {globals.length > 0 && (
         <section style={{ marginBottom: 16, padding: 12, background: 'rgba(126,231,135,0.04)', border: '1px solid rgba(126,231,135,0.15)', borderRadius: 8 }}>
