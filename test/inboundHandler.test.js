@@ -9,10 +9,24 @@ import { createInboundHandler, detectAdSource } from '../server/services/inbound
 const adapter = createEvolutionAdapter({ fetch: async () => { throw new Error('sem rede nos testes') } })
 const tick = () => new Promise(r => setImmediate(r))
 
+// Numero de disparo (UzAPI): o agente e as auto-mensagens so rodam nele (spec secao 6).
+function asSendNumber(db, seed) {
+  db.prepare("UPDATE whatsapp_instances SET provider = 'uzapi' WHERE id = ?").run(seed.instance.id)
+  seed.instance.provider = 'uzapi'
+}
+// Mesmo payload de texto da Evolution com outro conteudo e outro id.
+let seq = 0
+function textPayload(text) {
+  const p = JSON.parse(JSON.stringify(P.textConversation))
+  p.data.message.conversation = text
+  p.data.key.id = `3EB0OPTOUT${String(++seq).padStart(6, '0')}`
+  return p
+}
+
 function setup(seedOpts = {}, depOverrides = {}) {
   const db = createTestDb()
   const seed = seedBasic(db, seedOpts)
-  const calls = { sse: [], capi: [], ai: [], handoff: [], profilePic: [], autoMsg: [] }
+  const calls = { sse: [], capi: [], ai: [], handoff: [], profilePic: [], autoMsg: [], optout: [] }
   const intake = createLeadIntake({
     db,
     pickFromRoulette: () => null,
@@ -34,6 +48,7 @@ function setup(seedOpts = {}, depOverrides = {}) {
     getOrCreateLead: intake.getOrCreateLead,
     autoDetectStage: intake.autoDetectStage,
     fetchAndSaveProfilePic: (...a) => { calls.profilePic.push(a); return Promise.resolve() },
+    sendOptOutConfirmation: (...a) => { calls.optout.push(a); return Promise.resolve() },
     ...depOverrides,
   })
   const receive = (payload, opts = {}) => {
@@ -49,6 +64,7 @@ const msgs = (db) => db.prepare('SELECT * FROM messages ORDER BY id').all()
 
 test('texto de lead novo: lead, mensagem, contadores, atribuicao, SSE, CAPI, IA e foto', async () => {
   const { db, seed, calls, receive } = setup()
+  asSendNumber(db, seed)
   const r = receive(P.textConversation, { req: { headers: { 'x-forwarded-for': '127.0.0.1' }, ip: '127.0.0.1' } })
   assert.deepEqual(r, { ok: true })
   const [lead] = leads(db)
@@ -101,7 +117,8 @@ test('lead existente responde: sai de Novo Lead para Em Atendimento com CAPI', (
 })
 
 test('audio: media_type audio, conteudo [Audio], media_url e IA com mediaType audio', async () => {
-  const { db, calls, receive } = setup()
+  const { db, seed, calls, receive } = setup()
+  asSendNumber(db, seed)
   receive(P.audioPtt)
   const [m] = msgs(db)
   assert.equal(m.media_type, 'audio')
@@ -281,4 +298,72 @@ test('status com outboundOnly (UzAPI) nao mexe em mensagem RECEBIDA; sem o campo
   assert.equal(st('IN1'), 'sent')
   assert.equal(st('OUT1'), 'read')
   assert.equal(st('IN2'), 'read')
+})
+
+test('numero de leitura (Evolution): grava a mensagem mas nao chama o agente', async () => {
+  const { db, calls, receive } = setup()
+  receive(P.textConversation)
+  await tick()
+  assert.equal(calls.ai.length, 0)
+  assert.equal(msgs(db)[0].content, 'Oi, quero saber o preco')
+})
+
+test('numero de leitura: nao agenda boas-vindas nem ausencia', async () => {
+  const cfg = { greeting_enabled: 1, greeting_text: 'Ola', away_text: 'Fechado' }
+  const { calls, receive } = setup({}, { getInstanceConfig: () => cfg, shouldSendAway: () => true })
+  receive(P.textConversation)
+  await new Promise(r => setTimeout(r, 2100))
+  assert.equal(calls.autoMsg.length, 0)
+})
+
+test('numero de disparo: agenda boas-vindas e ausencia como antes', async () => {
+  const cfg = { greeting_enabled: 1, greeting_text: 'Ola', away_text: 'Fechado' }
+  const { db, seed, calls, receive } = setup({}, { getInstanceConfig: () => cfg, shouldSendAway: () => true })
+  asSendNumber(db, seed)
+  receive(P.textConversation)
+  await new Promise(r => setTimeout(r, 2100))
+  assert.deepEqual(calls.autoMsg.map(c => c[0].type).sort(), ['away', 'greeting'])
+})
+
+test('lead manda "Sair." no numero de disparo: descadastra, cancela follow-ups, confirma e nao chama o agente', async () => {
+  const { db, seed, calls, receive } = setup()
+  asSendNumber(db, seed)
+  receive(P.textConversation)
+  await tick()
+  const [lead] = leads(db)
+  db.prepare("INSERT INTO lead_follow_ups (lead_id, follow_up_id, status) VALUES (?, 1, 'active')").run(lead.id)
+  calls.ai.length = 0
+  const r = receive(textPayload('Sair.'))
+  assert.deepEqual(r, { ok: true, optedOut: true })
+  assert.ok(db.prepare('SELECT opted_out_at FROM leads WHERE id = ?').get(lead.id).opted_out_at)
+  assert.deepEqual(
+    db.prepare('SELECT status, paused_reason FROM lead_follow_ups WHERE lead_id = ?').get(lead.id),
+    { status: 'cancelled', paused_reason: 'lead_opted_out' },
+  )
+  assert.equal(calls.optout.length, 1)
+  assert.equal(calls.optout[0][0].text, 'Pronto! Você não vai mais receber nossas mensagens automáticas.')
+  assert.equal(calls.optout[0][0].instance.id, seed.instance.id)
+  await tick()
+  assert.equal(calls.ai.length, 0)
+})
+
+test('SAIR no numero de leitura: descadastra mas nao responde nada', async () => {
+  const { db, calls, receive } = setup()
+  receive(textPayload('SAIR'))
+  assert.ok(leads(db)[0].opted_out_at)
+  assert.equal(calls.optout.length, 0)
+})
+
+test('"vou sair agora" nao descadastra', async () => {
+  const { db, receive } = setup()
+  receive(textPayload('vou sair agora'))
+  assert.equal(leads(db)[0].opted_out_at, null)
+})
+
+test('confirmacao usa o texto da conta quando existe', async () => {
+  const { db, seed, calls, receive } = setup()
+  asSendNumber(db, seed)
+  db.prepare("UPDATE accounts SET optout_confirm_text = 'Ok, removido.' WHERE id = ?").run(seed.account.id)
+  receive(textPayload('parar'))
+  assert.equal(calls.optout[0][0].text, 'Ok, removido.')
 })

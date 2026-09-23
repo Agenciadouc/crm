@@ -3,7 +3,7 @@ import { createLeadIntake } from '../../server/services/leadIntake.js'
 import { createInboundHandler } from '../../server/services/inboundHandler.js'
 
 export function createTestInboundHandler(db) {
-  const calls = { sse: [], ai: [] }
+  const calls = { sse: [], ai: [], optout: [] }
   const intake = createLeadIntake({
     db,
     pickFromRoulette: () => null,
@@ -24,6 +24,7 @@ export function createTestInboundHandler(db) {
     getOrCreateLead: intake.getOrCreateLead,
     autoDetectStage: intake.autoDetectStage,
     fetchAndSaveProfilePic: () => Promise.resolve(),
+    sendOptOutConfirmation: (...a) => { calls.optout.push(a); return Promise.resolve() },
   })
   return { handler, calls }
 }

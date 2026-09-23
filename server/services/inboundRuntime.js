@@ -4,7 +4,7 @@ import db from '../db.js'
 import { broadcastSSE } from '../sse.js'
 import { triggerCapiForStageChange } from './metaCapi.js'
 import { pickFromRoulette } from './roulette.js'
-import { notifyAndOpenLead } from './leadHandoff.js'
+import { notifyAndOpenLead, sendViaInstance } from './leadHandoff.js'
 import { getInstanceConfig, wasAutoMsgSentRecently, sendAutoMessage, shouldSendAway } from './autoMessages.js'
 import { scheduleAiForInbound } from './copilotScheduler.js'
 import { getProvider } from './whatsapp/index.js'
@@ -39,6 +39,17 @@ function dispatchAiForInbound(lead, content, mediaType, instanceId) {
   return Promise.resolve()
 }
 
+// Confirmacao do descadastro (spec 10.2): uma mensagem, pelo numero de disparo onde o lead escreveu.
+async function sendOptOutConfirmation({ lead, instance, text }) {
+  const phone = lead.phone || String(lead.wa_remote_jid || '').replace(/@.*$/, '')
+  if (!phone) return
+  const r = await sendViaInstance(instance, phone, text, { leadId: lead.id, skipBusinessHours: true, skipLeadCap: true })
+  if (r.ok) {
+    db.prepare(`INSERT INTO messages (lead_id, account_id, direction, content, media_type, sender_name, wa_msg_id, instance_id)
+      VALUES (?, ?, 'outbound', ?, 'text', 'Descadastro auto', ?, ?)`).run(lead.id, lead.account_id, text, r.wamsgId || null, instance.id)
+  }
+}
+
 const handler = createInboundHandler({
   db,
   broadcastSSE,
@@ -53,6 +64,7 @@ const handler = createInboundHandler({
   getOrCreateLead: leadIntake.getOrCreateLead,
   autoDetectStage: leadIntake.autoDetectStage,
   fetchAndSaveProfilePic,
+  sendOptOutConfirmation,
 })
 
 export const handleInboundMessage = handler.handleInboundMessage

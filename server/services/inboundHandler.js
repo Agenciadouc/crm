@@ -2,6 +2,9 @@
 // Movida de routes/webhooks.js (bloco do messages.upsert e o callback de status do messages.update)
 // sem alterar a logica. Dependencias injetadas para teste.
 
+import { numberRole } from './whatsapp/numberRole.js'
+import { isOptOutMessage, DEFAULT_OPTOUT_CONFIRM } from './antiban.js'
+
 const STATUS_RANK = { sent: 1, delivered: 2, read: 3 }
 
 // Tipos que o polling ja importava (scheduler.js:213-222). Demais tipos continuam so pelo webhook.
@@ -38,6 +41,7 @@ export function createInboundHandler(deps) {
     getOrCreateLead,
     autoDetectStage,
     fetchAndSaveProfilePic,
+    sendOptOutConfirmation = () => Promise.resolve(),
   } = deps
 
   // Callback de status (delivered/read) do provedor. Idempotente: nunca regride (read > delivered > sent).
@@ -182,6 +186,8 @@ export function createInboundHandler(deps) {
     // Quando fromMe=true, o pushName e o nome de quem ENVIOU (atendente/operador da conta WhatsApp),
     // nao do lead. Nao podemos usar como nome do lead — fallback pra telefone.
     const leadName = fromMe ? '' : pushName
+    const isSendNumber = numberRole(waInstance) === 'disparo'
+    const optingOut = !fromMe && isOptOutMessage(content)
 
     // ───────── INICIO DO BLOCO MOVIDO (routes/webhooks.js) ─────────
     // Get or create lead
@@ -290,7 +296,7 @@ export function createInboundHandler(deps) {
 
     // Auto-mensagens: SAUDACAO (so lead novo) + AUSENCIA (toda msg inbound)
     // Se nada configurado, NAO altera o fluxo
-    if (!fromMe && waInstance) {
+    if (!fromMe && waInstance && isSendNumber && !optingOut) {
       try {
         const autoCfg = getInstanceConfig(waInstance.id)
         if (autoCfg) {
@@ -448,9 +454,23 @@ export function createInboundHandler(deps) {
       db.prepare('UPDATE leads SET name = ? WHERE id = ?').run(leadName, lead.id)
     }
 
+    // Descadastro pela palavra SAIR (spec 10.2): marca, cancela follow-ups e confirma so no numero de disparo.
+    if (optingOut && lead) {
+      db.prepare("UPDATE leads SET opted_out_at = datetime('now'), updated_at = datetime('now') WHERE id = ?").run(lead.id)
+      db.prepare(`UPDATE lead_follow_ups SET status = 'cancelled', paused_reason = 'lead_opted_out', next_run_at = NULL,
+        updated_at = datetime('now') WHERE lead_id = ? AND status IN ('active', 'paused')`).run(lead.id)
+      console.log(`[OptOut] lead=${lead.id} descadastrado pela palavra "${content}"`)
+      if (isSendNumber) {
+        const acc = db.prepare('SELECT optout_confirm_text FROM accounts WHERE id = ?').get(account.id)
+        const text = (acc && acc.optout_confirm_text && acc.optout_confirm_text.trim()) || DEFAULT_OPTOUT_CONFIRM
+        Promise.resolve(sendOptOutConfirmation({ lead, instance: waInstance, account, text }))
+          .catch(e => console.error('[OptOut] confirmacao:', e && e.message))
+      }
+    }
+
     // AI Agent: plug fire-and-forget pra bot responder leads inbound (se conta tiver feature)
     // Skip outbound, sem content, sem lead, ou se ja teve handoff pra humano
-    if (!fromMe && lead && (content || mediaType === 'audio')) {
+    if (!fromMe && lead && isSendNumber && !optingOut && (content || mediaType === 'audio')) {
       const freshLead = db.prepare('SELECT * FROM leads WHERE id = ?').get(lead.id)
       setImmediate(() => {
         processInboundMessage(freshLead, content || '', mediaType, waInstance?.id || null)
@@ -474,7 +494,7 @@ export function createInboundHandler(deps) {
     }
     // ───────── FIM DO BLOCO MOVIDO ─────────
 
-    return { ok: true }
+    return { ok: true, ...(optingOut && lead ? { optedOut: true } : {}) }
   }
 
   return { handleInboundMessage, handleStatusUpdate }
