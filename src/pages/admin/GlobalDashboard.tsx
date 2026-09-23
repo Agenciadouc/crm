@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
-import { fetchGlobalDashboard, fetchAiUsageGlobal, formatNumber, type AiUsageData } from '../../lib/api'
-import { Building2, Users, Calendar, Bot, Headphones, DollarSign } from 'lucide-react'
+import { fetchGlobalDashboard, fetchAiUsageGlobal, formatNumber, type AiUsageData, sendSystemNotice, clearSystemNotice, fetchSystemNotice, type SystemNotice } from '../../lib/api'
+import { Building2, Users, Calendar, Bot, Headphones, DollarSign, Megaphone, X } from 'lucide-react'
 
 export default function GlobalDashboard() {
   const [data, setData] = useState<any>(null)
@@ -19,12 +19,113 @@ export default function GlobalDashboard() {
     }).finally(() => setLoading(false))
   }, [aiPeriod])
 
+  // ─── System Notice (aviso global pra todos) ───
+  const [noticeModal, setNoticeModal] = useState(false)
+  const [noticeTitle, setNoticeTitle] = useState('Atualização em andamento')
+  const [noticeMessage, setNoticeMessage] = useState('Estamos fazendo uma atualização no CRM nesse momento. Pode ter uma instabilidade durante alguns minutos na conexão do WhatsApp mas já deve voltar ao normal.')
+  const [noticeType, setNoticeType] = useState<'info' | 'warning' | 'success'>('warning')
+  const [noticeDuration, setNoticeDuration] = useState(15)
+  const [noticeSending, setNoticeSending] = useState(false)
+  const [activeNotice, setActiveNotice] = useState<SystemNotice | null>(null)
+
+  useEffect(() => {
+    fetchSystemNotice().then(r => setActiveNotice(r.notice)).catch(() => {})
+  }, [])
+
+  const handleSendNotice = async () => {
+    if (!noticeMessage.trim()) return
+    setNoticeSending(true)
+    try {
+      const r = await sendSystemNotice({
+        title: noticeTitle.trim() || undefined,
+        message: noticeMessage.trim(),
+        type: noticeType,
+        durationMinutes: noticeDuration,
+      })
+      setActiveNotice(r.notice)
+      setNoticeModal(false)
+    } catch (e: any) {
+      alert('Erro ao enviar aviso: ' + e.message)
+    }
+    setNoticeSending(false)
+  }
+
+  const handleClearNotice = async () => {
+    if (!confirm('Cancelar o aviso agora?')) return
+    try {
+      await clearSystemNotice()
+      setActiveNotice(null)
+    } catch (e: any) {
+      alert('Erro: ' + e.message)
+    }
+  }
+
   if (loading) return <div className="loading-container"><div className="spinner" /></div>
   if (!data) return <div className="empty-state"><h3>Sem dados</h3></div>
 
   return (
     <div>
-      <div className="page-header"><h1>Dashboard Global</h1></div>
+      <div className="page-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+        <h1>Dashboard Global</h1>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          {activeNotice && (
+            <button className="btn btn-secondary btn-sm" onClick={handleClearNotice} style={{ color: '#ef4444' }}>
+              <X size={14} /> Cancelar aviso ativo
+            </button>
+          )}
+          <button className="btn btn-primary btn-sm" onClick={() => setNoticeModal(true)}>
+            <Megaphone size={14} /> Disparar aviso global
+          </button>
+        </div>
+      </div>
+
+      {/* Modal: disparar aviso */}
+      {noticeModal && (
+        <div className="modal-overlay" onClick={() => !noticeSending && setNoticeModal(false)}>
+          <div className="modal" style={{ maxWidth: 520 }} onClick={e => e.stopPropagation()}>
+            <h2 style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+              <Megaphone size={20} style={{ color: '#FFB300' }} />
+              Disparar aviso global
+            </h2>
+            <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 16, lineHeight: 1.5 }}>
+              Vai aparecer como banner no topo pra <strong>todos os usuários logados</strong> em tempo real (e pra quem entrar depois, até expirar).
+            </p>
+
+            <div className="form-group">
+              <label>Título (opcional)</label>
+              <input className="input" value={noticeTitle} onChange={e => setNoticeTitle(e.target.value)} placeholder="Ex: Atualização em andamento" maxLength={100} />
+            </div>
+
+            <div className="form-group">
+              <label>Mensagem *</label>
+              <textarea className="input" value={noticeMessage} onChange={e => setNoticeMessage(e.target.value)} rows={3} maxLength={500} style={{ resize: 'vertical', minHeight: 60 }} />
+              <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 2 }}>{noticeMessage.length}/500</div>
+            </div>
+
+            <div style={{ display: 'flex', gap: 12 }}>
+              <div className="form-group" style={{ flex: 1 }}>
+                <label>Tipo</label>
+                <select className="select" value={noticeType} onChange={e => setNoticeType(e.target.value as any)}>
+                  <option value="info">🔵 Info (azul)</option>
+                  <option value="warning">🟡 Alerta (amarelo)</option>
+                  <option value="success">🟢 Sucesso (verde)</option>
+                </select>
+              </div>
+              <div className="form-group" style={{ flex: 1 }}>
+                <label>Duração (min)</label>
+                <input className="input" type="number" min={1} max={1440} value={noticeDuration} onChange={e => setNoticeDuration(Math.max(1, Math.min(1440, Number(e.target.value) || 5)))} />
+              </div>
+            </div>
+
+            <div className="modal-actions" style={{ marginTop: 16 }}>
+              <button className="btn btn-secondary" onClick={() => setNoticeModal(false)} disabled={noticeSending}>Cancelar</button>
+              <button className="btn btn-primary" onClick={handleSendNotice} disabled={noticeSending || !noticeMessage.trim()}>
+                {noticeSending ? 'Enviando...' : <><Megaphone size={12} /> Disparar agora</>}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <section className="dash-section">
         <div className="metrics-grid">
