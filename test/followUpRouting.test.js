@@ -76,3 +76,19 @@ test('resumeAutomaticFollowUps com includeSendFailures retoma send_failed/send_e
   const row = db.prepare('SELECT status, paused_reason FROM lead_follow_ups WHERE lead_id = ?').get(lead.id)
   assert.deepEqual(row, { status: 'active', paused_reason: null })
 })
+
+test('resumeAutomaticFollowUps: pausa antiga (legado instance_offline) nao volta; recente e no_send_number voltam', () => {
+  const db = createTestDb(); const s = seedBasic(db)
+  uzapi(db, s.account.id)
+  const lead = insertLead(db, { account_id: s.account.id, funnel_id: s.funnelId, stage_id: s.stage1, phone: '1' })
+  const ins = db.prepare("INSERT INTO lead_follow_ups (lead_id, follow_up_id, status, paused_reason, paused_at) VALUES (?, 1, 'paused', ?, datetime('now', ?))")
+  const velho = ins.run(lead.id, 'instance_offline', '-30 days').lastInsertRowid
+  const velhoRemovido = ins.run(lead.id, 'instance_removed', '-30 days').lastInsertRowid
+  const recente = ins.run(lead.id, 'instance_offline', '-1 days').lastInsertRowid
+  const semNumeroVelho = ins.run(lead.id, 'no_send_number', '-30 days').lastInsertRowid
+  const offlineVelho = ins.run(lead.id, 'send_number_offline', '-30 days').lastInsertRowid
+  assert.equal(resumeAutomaticFollowUps(db, s.account.id), 3)
+  const st = (id) => db.prepare('SELECT status FROM lead_follow_ups WHERE id = ?').get(id).status
+  assert.equal(st(velho), 'paused'); assert.equal(st(velhoRemovido), 'paused')
+  assert.equal(st(recente), 'active'); assert.equal(st(semNumeroVelho), 'active'); assert.equal(st(offlineVelho), 'active')
+})
