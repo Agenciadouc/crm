@@ -1,12 +1,17 @@
 // Modal de release notes — aparece 1x por usuario (persiste dispensa em localStorage).
-// Ao adicionar uma nova release, incrementar RELEASE_KEY (ex: 'dros_crm_release_v424')
+// Ao adicionar uma nova release, incrementar RELEASE_KEY (ex: 'dros_crm_release_v425')
 // pra reabrir pra todos os usuarios da proxima vez que logarem.
-import { useEffect, useState } from 'react'
-import { X, Sparkles, ChevronRight, Info } from 'lucide-react'
+//
+// Alem disso, escuta SSE 'system:release' — quando super_admin dispara "Publicar
+// nova atualizacao" no Dashboard Global, o modal abre em tempo real pra todos
+// os clientes conectados (sem F5), respeitando quem ja dispensou.
+import { useCallback, useEffect, useState } from 'react'
+import { X, Sparkles, ChevronRight, Info, DollarSign, MessageCircle, Zap } from 'lucide-react'
+import { useSSE } from '../context/SSEContext'
 
-const RELEASE_KEY = 'dros_crm_release_v423_seen'
-const RELEASE_VERSION = 'v.423'
-const RELEASE_DATE = '04/08/2026'
+const RELEASE_KEY = 'dros_crm_release_v424_seen'
+const RELEASE_VERSION = 'v.424'
+const RELEASE_DATE = '23/09/2026'
 const RELEASE_AUTHOR = 'João Luiz Soares de Mattos'
 
 export default function ReleaseNotesModal() {
@@ -18,6 +23,25 @@ export default function ReleaseNotesModal() {
       if (!seen) setOpen(true)
     } catch { /* localStorage pode estar bloqueado; ignora */ }
   }, [])
+
+  // Escuta SSE — super_admin pode disparar pra abrir pra todos em tempo real.
+  // Ignora localStorage (forca abrir mesmo pra quem ja tinha dispensado antes),
+  // pra o disparo manual funcionar como notificacao.
+  const onReleaseBroadcast = useCallback((data: { version?: string; force?: boolean } | null) => {
+    if (!data) return
+    // Se o broadcast e sobre uma versao diferente da que o cliente tem carregada,
+    // sugere reload pra pegar o JS novo. Senao, so abre normalmente.
+    if (data.version && data.version !== RELEASE_VERSION) {
+      // Versao diferente — cliente com JS antigo. Mostra prompt de reload.
+      const doReload = window.confirm(`Nova atualização disponível (${data.version}). Recarregar agora pra ver o que mudou?`)
+      if (doReload) window.location.reload()
+      return
+    }
+    // Mesma versao (ou sem versao) — abre modal com o conteudo local
+    try { localStorage.removeItem(RELEASE_KEY) } catch {}
+    setOpen(true)
+  }, [])
+  useSSE('system:release', onReleaseBroadcast)
 
   const close = () => {
     try { localStorage.setItem(RELEASE_KEY, new Date().toISOString()) } catch {}
@@ -77,82 +101,78 @@ export default function ReleaseNotesModal() {
 
         {/* Body scrollavel */}
         <div style={{ padding: '18px 22px', overflowY: 'auto', flex: 1 }}>
-          {/* Bloco 1: novidades */}
+          {/* Bloco 1: Vendas por lead */}
           <div style={{ marginBottom: 22 }}>
-            <div style={{ fontSize: 13, fontWeight: 700, color: '#FFB300', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 10 }}>
-              O que mudou
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10 }}>
+              <DollarSign size={16} style={{ color: '#34C759' }} />
+              <div style={{ fontSize: 13, fontWeight: 700, color: '#34C759', textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                Múltiplas vendas por lead
+              </div>
             </div>
             <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: 12 }}>
-              <FeatureLi title="Novo painel Funil &amp; ROI Mensal no Dashboard">
-                Cascata Leads → Qualificados → Reunioes → Vendas do mes, com taxas de conversao entre etapas e cards de CPL, CAC, faturamento, ROAS e progresso da meta.
+              <FeatureLi title="Registro de venda ao mover pra “Venda”">
+                Ao mudar a etapa de um lead pra "Venda" (ou qualquer etapa marcada como conversão), abre um popup pedindo o valor da compra e a data. Você pode confirmar ou pular. Vale tanto no <strong>Chat</strong> quanto na tela detalhes do lead.
               </FeatureLi>
-              <FeatureLi title="Nova aba Projecao no menu (Gestao)">
-                Tabela de 3 meses passados + 3 meses futuros. Meses passados mostram dados reais. Meses futuros sao projetados usando as taxas medias historicas + investimento planejado.
+              <FeatureLi title="Nova seção “Vendas” na sidebar do lead">
+                Cada lead agora tem uma seção "Vendas" com o total agregado em verde, lista de cada venda (valor + data + quem registrou) e botão <strong>“+”</strong> pra adicionar novas a qualquer momento — recompras, upsells, vendas retroativas.
               </FeatureLi>
-              <FeatureLi title="Mensagens prontas preservam quebras de linha">
-                O campo de mensagem do chat agora e uma area de texto. Ready messages com varias linhas aparecem certas. Use Shift+Enter pra quebrar linha manualmente, Enter continua enviando.
+              <FeatureLi title="Data personalizada por venda">
+                Cada venda tem data própria. O painel <strong>Funil &amp; ROI Mensal</strong> agora agrega faturamento por mês baseado na data da venda, não na data do lead. Vendas retroativas caem no mês correto do histórico.
               </FeatureLi>
-              <FeatureLi title="Chat: so quem manda mensagem pra voce sobe pro topo">
-                Antes, qualquer mensagem (recebida ou enviada) subia o contato pro topo. Agora, so mensagens do cliente reordenam a lista. Suas respostas nao mexem na ordem.
+              <FeatureLi title="Gerente/Admin pode excluir vendas">
+                Ícone de lixeira ao lado de cada venda pra ajustar erros de digitação. Atendente vê a lista mas não exclui.
               </FeatureLi>
             </ul>
           </div>
 
-          {/* Bloco 2: como configurar */}
-          <div style={{ marginBottom: 22, padding: 14, background: 'rgba(255,179,0,0.06)', border: '1px solid rgba(255,179,0,0.25)', borderRadius: 8 }}>
+          {/* Bloco 2: uzapi (validação) */}
+          <div style={{ marginBottom: 22, padding: 14, background: 'rgba(52,199,89,0.06)', border: '1px solid rgba(52,199,89,0.25)', borderRadius: 8 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10 }}>
+              <Zap size={14} style={{ color: '#34C759' }} />
+              <div style={{ fontSize: 13, fontWeight: 700, color: '#34C759' }}>
+                Integração uzapi (em validação)
+              </div>
+            </div>
+            <div style={{ fontSize: 12, color: 'var(--text, #EBEBF5)', lineHeight: 1.6 }}>
+              Agora o CRM suporta um segundo provider de WhatsApp além do Evolution atual: <strong>uzapi.com.br</strong>. Cada instância pode ser alternada individualmente entre Evolution e uzapi pelo botão <strong>“⇄ Mudar pra uzapi”</strong> na tela de Integrações. A conexão continua sendo por QR code, mas a infra é SaaS gerenciada — menos manutenção do servidor e mais estabilidade em testes.
+              <br /><br />
+              <strong style={{ color: '#FFB300' }}>Status:</strong> disponível pra testes internos. Boa opção pra <strong>validação e homologação</strong> antes de escalar. Clientes existentes continuam no Evolution sem mudanças.
+            </div>
+          </div>
+
+          {/* Bloco 3: API oficial (produção) */}
+          <div style={{ marginBottom: 22, padding: 14, background: 'rgba(93,173,226,0.06)', border: '1px solid rgba(93,173,226,0.25)', borderRadius: 8 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10 }}>
+              <MessageCircle size={14} style={{ color: '#5DADE2' }} />
+              <div style={{ fontSize: 13, fontWeight: 700, color: '#5DADE2' }}>
+                API Oficial WhatsApp (produção)
+              </div>
+            </div>
+            <div style={{ fontSize: 12, color: 'var(--text, #EBEBF5)', lineHeight: 1.6 }}>
+              A gente está preparando a integração com a <strong>WhatsApp Cloud API oficial da Meta</strong>. Ela vai ser a recomendação pra <strong>produção real</strong> — sem risco de banimento, com CTWA nativo, ligações WhatsApp e maior estabilidade. Custo é por conversa (cobrado pela Meta), mas o benefício em confiabilidade compensa pra números com muito volume.
+              <br /><br />
+              <strong style={{ color: '#FFB300' }}>Status:</strong> em desenvolvimento. Vai ser habilitada por cliente conforme cada um migrar sua conta Meta Business Manager. Detalhes de custo e passo a passo a gente comunica quando for o momento de cada cliente.
+            </div>
+          </div>
+
+          {/* Bloco 4: como usar */}
+          <div style={{ padding: 14, background: 'rgba(255,179,0,0.06)', border: '1px solid rgba(255,179,0,0.25)', borderRadius: 8 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10 }}>
               <Info size={14} style={{ color: '#FFB300' }} />
               <div style={{ fontSize: 13, fontWeight: 700, color: '#FFB300' }}>
-                Passo obrigatorio pra o funil funcionar
-              </div>
-            </div>
-            <div style={{ fontSize: 12, color: 'var(--text, #EBEBF5)', marginBottom: 12, lineHeight: 1.5 }}>
-              O painel novo precisa saber quais etapas do seu funil sao Qualificado e Reuniao/Visita.
-              Sem isso o painel mostra um aviso amarelo e nao calcula as taxas.
-            </div>
-            <ol style={{ margin: 0, paddingLeft: 20, fontSize: 12, color: 'var(--text, #EBEBF5)', lineHeight: 1.7 }}>
-              <li>No menu, va em <strong>Funis</strong></li>
-              <li>Edita o funil da sua conta (o funil padrao)</li>
-              <li>Marca o checkbox <strong>Qual.</strong> na etapa "Qualificado" (ou equivalente)</li>
-              <li>Marca o checkbox <strong>Reun.</strong> na etapa "Reuniao/Visita" (ou equivalente)</li>
-              <li>Confere que <strong>Conv.</strong> esta marcado na etapa de "Venda"</li>
-              <li>Salva</li>
-            </ol>
-          </div>
-
-          {/* Bloco 3: como usar o ROAS */}
-          <div style={{ marginBottom: 22, padding: 14, background: 'rgba(93,173,226,0.06)', border: '1px solid rgba(93,173,226,0.25)', borderRadius: 8 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10 }}>
-              <Info size={14} style={{ color: '#5DADE2' }} />
-              <div style={{ fontSize: 13, fontWeight: 700, color: '#5DADE2' }}>
-                Pra ver CAC, ROAS e faturamento no dashboard
+                Como começar a usar as vendas
               </div>
             </div>
             <ol style={{ margin: 0, paddingLeft: 20, fontSize: 12, color: 'var(--text, #EBEBF5)', lineHeight: 1.7 }}>
-              <li>No <strong>Dashboard</strong>, dentro do painel "Funil &amp; ROI Mensal", clica em <strong>Configurar mes</strong> (canto direito, so aparece pra super_admin e gerente)</li>
-              <li>Preenche o <strong>investimento em ads</strong> gasto no mes (R$)</li>
-              <li>Preenche a <strong>meta de vendas</strong> do mes (numero)</li>
-              <li>Preenche o <strong>ticket medio</strong> por venda (R$)</li>
-              <li>Salva. Os cards CPL/CAC/ROAS/Faturamento/Meta atualizam automaticamente</li>
+              <li>No menu, abre o <strong>Chat</strong> ou <strong>Leads</strong></li>
+              <li>Clica num lead qualquer</li>
+              <li>Muda a etapa dele pra <strong>Venda</strong> pelo dropdown do topo</li>
+              <li>Preenche o valor + data no popup e confirma (ou pula pra mover sem valor)</li>
+              <li>Vai aparecer na sidebar do lead na seção <strong>Vendas</strong></li>
+              <li>Pra adicionar recompras depois, clica no botão <strong>“+”</strong> nessa seção</li>
             </ol>
             <div style={{ fontSize: 11, color: 'var(--text-muted, #9B96B0)', marginTop: 10, lineHeight: 1.5 }}>
-              Dica: o ticket medio salvo no mes sobrescreve o default da conta so pra aquele mes. Util quando o mix de vendas muda temporariamente.
-            </div>
-          </div>
-
-          {/* Bloco 4: onde ver a projecao */}
-          <div style={{ padding: 14, background: 'rgba(155,89,182,0.06)', border: '1px solid rgba(155,89,182,0.25)', borderRadius: 8 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10 }}>
-              <Info size={14} style={{ color: '#9B59B6' }} />
-              <div style={{ fontSize: 13, fontWeight: 700, color: '#9B59B6' }}>
-                Onde ver a projecao dos proximos meses
-              </div>
-            </div>
-            <div style={{ fontSize: 12, color: 'var(--text, #EBEBF5)', lineHeight: 1.5 }}>
-              No menu lateral, secao <strong>Gestao</strong>, clica em <strong>Projecao</strong>.
-              Voce ve uma tabela com os ultimos 3 meses (dados reais) e os proximos 3 meses (projetados
-              com base nas taxas medias historicas). Pra editar o investimento planejado dos meses
-              futuros, navega ate o mes no Dashboard e clica "Configurar mes".
+              Requer que a etapa "Venda" (ou equivalente) esteja marcada como <strong>Conv.</strong> no seu funil. Se não estiver, edita o funil em <strong>Funis</strong> e marca o checkbox Conv. na etapa certa.
             </div>
           </div>
         </div>

@@ -3,7 +3,7 @@ import fetch from 'node-fetch'
 import db from '../db.js'
 import { requireRole } from '../middleware/auth.js'
 import { getProvider } from '../services/whatsappProvider/index.js'
-import { setSystemNotice, clearSystemNotice, getSystemNotice } from '../sse.js'
+import { setSystemNotice, clearSystemNotice, getSystemNotice, broadcastSSEAll } from '../sse.js'
 
 const router = Router()
 
@@ -34,6 +34,16 @@ router.post('/system-notice', requireRole('super_admin'), (req, res) => {
 router.delete('/system-notice', requireRole('super_admin'), (req, res) => {
   clearSystemNotice()
   res.json({ ok: true })
+})
+
+// POST /api/admin/publish-release — dispara SSE 'system:release' pra todos os
+// usuarios logados. Cada cliente com JS na mesma versao abre o modal na hora.
+// Cliente com JS mais antigo recebe prompt de reload.
+// Body: { version?: string } — se omitido, cliente usa a versao local.
+router.post('/publish-release', requireRole('super_admin'), (req, res) => {
+  const version = req.body?.version ? String(req.body.version).slice(0, 30) : null
+  broadcastSSEAll('system:release', { version, at: Date.now() })
+  res.json({ ok: true, version, note: 'Broadcast disparado pra todos os clientes conectados.' })
 })
 
 // ─── Check + auto-reconnect TODAS as instancias WhatsApp (admin global)

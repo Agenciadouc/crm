@@ -26,7 +26,7 @@ export function SSEProvider({ children }: { children: ReactNode }) {
     es.onerror = () => setConnected(false)
 
     // Listen to all event types we care about
-    const eventTypes = ['lead:created', 'lead:updated', 'lead:message', 'lead:archived', 'lead:unarchived', 'lead:archived-activity', 'broadcast:completed', 'task:updated', 'task:due', 'lead:transfer-requested', 'lead:transfer-accepted', 'lead:transfer-rejected', 'system:notice']
+    const eventTypes = ['lead:created', 'lead:updated', 'lead:message', 'lead:archived', 'lead:unarchived', 'lead:archived-activity', 'broadcast:completed', 'task:updated', 'task:due', 'lead:transfer-requested', 'lead:transfer-accepted', 'lead:transfer-rejected', 'system:notice', 'system:release']
     for (const type of eventTypes) {
       es.addEventListener(type, (e) => {
         try {

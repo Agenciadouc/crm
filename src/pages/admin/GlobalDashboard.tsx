@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
-import { fetchGlobalDashboard, fetchAiUsageGlobal, formatNumber, type AiUsageData, sendSystemNotice, clearSystemNotice, fetchSystemNotice, type SystemNotice } from '../../lib/api'
-import { Building2, Users, Calendar, Bot, Headphones, DollarSign, Megaphone, X } from 'lucide-react'
+import { fetchGlobalDashboard, fetchAiUsageGlobal, formatNumber, type AiUsageData, sendSystemNotice, clearSystemNotice, fetchSystemNotice, publishRelease, type SystemNotice } from '../../lib/api'
+import { Building2, Users, Calendar, Bot, Headphones, DollarSign, Megaphone, X, Sparkles } from 'lucide-react'
 
 export default function GlobalDashboard() {
   const [data, setData] = useState<any>(null)
@@ -73,6 +73,19 @@ export default function GlobalDashboard() {
               <X size={14} /> Cancelar aviso ativo
             </button>
           )}
+          <button
+            className="btn btn-secondary btn-sm"
+            onClick={async () => {
+              if (!confirm('Publicar as novidades pra TODOS os usuários agora?\n\nO modal de novidades vai aparecer em tempo real pra todos que estão com o CRM aberto, sem precisar F5.')) return
+              try {
+                await publishRelease()
+                alert('Publicado! O modal apareceu pra todos que estão logados com a versão nova do JS. Quem tá com JS antigo recebe um prompt pra recarregar.')
+              } catch (e: any) { alert('Erro: ' + e.message) }
+            }}
+            style={{ borderColor: 'rgba(255,179,0,0.4)', color: '#FFB300' }}
+          >
+            <Sparkles size={14} /> Publicar novidades
+          </button>
           <button className="btn btn-primary btn-sm" onClick={() => setNoticeModal(true)}>
             <Megaphone size={14} /> Disparar aviso global
           </button>

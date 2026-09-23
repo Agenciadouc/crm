@@ -431,6 +431,8 @@ export const fetchSystemNotice = () => apiFetch<{ notice: SystemNotice | null }>
 export const sendSystemNotice = (data: { message: string; type?: 'info' | 'warning' | 'success'; durationMinutes?: number; title?: string }) =>
   apiFetch<{ ok: boolean; notice: SystemNotice }>(`/api/admin/system-notice`, { method: 'POST', body: JSON.stringify(data) })
 export const clearSystemNotice = () => apiFetch<{ ok: boolean }>(`/api/admin/system-notice`, { method: 'DELETE' })
+export const publishRelease = (version?: string) =>
+  apiFetch<{ ok: boolean; version: string | null }>(`/api/admin/publish-release`, { method: 'POST', body: JSON.stringify({ version }) })
 export const switchWhatsAppProvider = (id: number, accountId: number, target: 'evolution' | 'uzapi') =>
   apiFetch<{ instance: WhatsAppInstance; needsQr: boolean; target: string }>(`/api/integrations/whatsapp/${id}/switch-provider?account_id=${accountId}`, { method: 'POST', body: JSON.stringify({ target }) })
 export const setInstanceAttendant = (id: number, accountId: number, attendantId: number | null) => apiFetch<{ instance: WhatsAppInstance }>(`/api/integrations/whatsapp/${id}/attendant?account_id=${accountId}`, { method: 'PUT', body: JSON.stringify({ attendant_id: attendantId }) })
