@@ -172,7 +172,29 @@ router.post('/whatsapp/:id/connect', allowInstanceOwner, async (req, res) => {
   if (!instance) return
 
   try {
-    const { qrcode, raw: data } = await getProvider(instance).connectInstance(instance)
+    const provider = getProvider(instance)
+    let { qrcode, raw: data } = await provider.connectInstance(instance)
+
+    // Fallback pra sessao zumbi: se Evolution retornou {} vazio (sem QR + sem estado),
+    // significa que a sessao Baileys travou. Recria a instancia forcando QR novo,
+    // sem exigir intervencao do user via SSH.
+    const isZombie = !qrcode && (!data || (Object.keys(data || {}).length === 0))
+    if (isZombie && (instance.provider || 'evolution') === 'evolution') {
+      console.warn(`[Provider Connect] sessao zumbi detectada em ${instance.instance_name} — recriando`)
+      // 1) Delete no Evolution (best-effort — se ja nao existe, tudo bem)
+      try { await provider.deleteInstance(instance, { timeoutMs: 5000 }) } catch {}
+      await new Promise(r => setTimeout(r, 1500))
+      // 2) Create nova instancia com mesmo nome
+      const createResult = await (await import('../services/whatsappProvider/index.js')).evolution.createInstance({
+        baseUrl: instance.api_url,
+        apiKey: instance.api_key,
+        instanceName: instance.instance_name,
+      })
+      qrcode = createResult.qrcode
+      data = createResult.raw
+      console.log(`[Provider Connect] recriada — QR ${qrcode ? 'gerado' : 'ainda nao veio'}`)
+    }
+
     if (!qrcode) console.error('[Provider Connect] sem QR — payload:', JSON.stringify(data || {}).slice(0, 300))
 
     db.prepare("UPDATE whatsapp_instances SET qr_code = ?, status = 'connecting', updated_at = datetime('now') WHERE id = ?").run(qrcode, instance.id)
@@ -317,13 +339,28 @@ router.get('/whatsapp/:id/health', requireRole('super_admin', 'gerente'), (req, 
   })
 })
 
-// ─── Refresh QR code ─────────────────────────────────────────────
+// ─── Refresh QR code (mesma logica anti-zumbi do /connect) ───────
 router.post('/whatsapp/:id/qrcode', allowInstanceOwner, async (req, res) => {
   const instance = getOwnedInstance(req, res)
   if (!instance) return
 
   try {
-    const { qrcode, raw: data } = await getProvider(instance).connectInstance(instance)
+    const provider = getProvider(instance)
+    let { qrcode, raw: data } = await provider.connectInstance(instance)
+
+    const isZombie = !qrcode && (!data || (Object.keys(data || {}).length === 0))
+    if (isZombie && (instance.provider || 'evolution') === 'evolution') {
+      console.warn(`[Provider Refresh QR] sessao zumbi em ${instance.instance_name} — recriando`)
+      try { await provider.deleteInstance(instance, { timeoutMs: 5000 }) } catch {}
+      await new Promise(r => setTimeout(r, 1500))
+      const createResult = await (await import('../services/whatsappProvider/index.js')).evolution.createInstance({
+        baseUrl: instance.api_url,
+        apiKey: instance.api_key,
+        instanceName: instance.instance_name,
+      })
+      qrcode = createResult.qrcode
+      data = createResult.raw
+    }
     if (!qrcode) console.error('[Provider Refresh QR] sem QR — payload:', JSON.stringify(data || {}).slice(0, 300))
 
     db.prepare("UPDATE whatsapp_instances SET qr_code = ?, status = 'connecting', updated_at = datetime('now') WHERE id = ?").run(qrcode, instance.id)
