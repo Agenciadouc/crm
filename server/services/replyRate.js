@@ -6,10 +6,17 @@ const MIN_LEADS = 20
 export function computeReplyRate(db, instanceId, { days = 7, replyHours = 24 } = {}) {
   const row = db.prepare(`
     WITH first_auto AS (
-      SELECT lead_id, MIN(created_at) AS at FROM messages
-      WHERE instance_id = ? AND direction = 'outbound' AND sent_by_user_id IS NULL
-        AND delivery_status IN ('sent', 'delivered', 'read')
-        AND created_at >= datetime('now', ?)
+      SELECT lead_id, MIN(at) AS at FROM (
+        SELECT lead_id, created_at AS at FROM messages
+        WHERE instance_id = ? AND direction = 'outbound' AND sent_by_user_id IS NULL
+          AND delivery_status IN ('sent', 'delivered', 'read')
+          AND created_at >= datetime('now', ?)
+        UNION ALL
+        SELECT br.lead_id, br.sent_at AS at FROM broadcast_recipients br
+        JOIN broadcasts b ON b.id = br.broadcast_id
+        WHERE b.instance_id = ? AND br.status IN ('sent', 'delivered', 'read')
+          AND br.sent_at >= datetime('now', ?)
+      )
       GROUP BY lead_id
     )
     SELECT COUNT(*) AS reached,
@@ -18,7 +25,7 @@ export function computeReplyRate(db, instanceId, { days = 7, replyHours = 24 } =
           AND m.created_at > f.at AND m.created_at <= datetime(f.at, ?)
       ) THEN 1 ELSE 0 END) AS replied
     FROM first_auto f
-  `).get(instanceId, `-${days} days`, `+${replyHours} hours`)
+  `).get(instanceId, `-${days} days`, instanceId, `-${days} days`, `+${replyHours} hours`)
   const reached = row.reached || 0
   const replied = row.replied || 0
   return { reached, replied, rate: reached >= MIN_LEADS ? replied / reached : null }
@@ -29,7 +36,7 @@ export function checkReplyRates(db) {
   const insts = db.prepare(`
     SELECT wi.id, wi.account_id, wi.instance_name, COALESCE(a.reply_rate_alert_pct, 10) AS pct
     FROM whatsapp_instances wi JOIN accounts a ON a.id = wi.account_id
-    WHERE wi.provider IN (${ph})
+    WHERE wi.provider IN (${ph}) AND a.is_active = 1
   `).all(...SEND_PROVIDERS)
   const low = []
   for (const i of insts) {

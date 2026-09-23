@@ -63,4 +63,5 @@ export function migrateWhatsappProviderSchema(db) {
   addColumnIfNotExists(db, 'accounts', 'reply_rate_alert_pct', 'INTEGER NOT NULL DEFAULT 10')
   addColumnIfNotExists(db, 'leads', 'opted_out_at', 'TEXT')
   addColumnIfNotExists(db, 'follow_ups', 'optout_footer_enabled', 'INTEGER NOT NULL DEFAULT 0')
+  db.exec('CREATE INDEX IF NOT EXISTS idx_messages_instance_dir_created ON messages(instance_id, direction, created_at)')
 }
