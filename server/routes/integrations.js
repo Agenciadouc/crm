@@ -175,24 +175,32 @@ router.post('/whatsapp/:id/connect', allowInstanceOwner, async (req, res) => {
     const provider = getProvider(instance)
     let { qrcode, raw: data } = await provider.connectInstance(instance)
 
-    // Fallback pra sessao zumbi: se Evolution retornou {} vazio (sem QR + sem estado),
-    // significa que a sessao Baileys travou. Recria a instancia forcando QR novo,
-    // sem exigir intervencao do user via SSH.
-    const isZombie = !qrcode && (!data || (Object.keys(data || {}).length === 0))
-    if (isZombie && (instance.provider || 'evolution') === 'evolution') {
-      console.warn(`[Provider Connect] sessao zumbi detectada em ${instance.instance_name} — recriando`)
-      // 1) Delete no Evolution (best-effort — se ja nao existe, tudo bem)
-      try { await provider.deleteInstance(instance, { timeoutMs: 5000 }) } catch {}
-      await new Promise(r => setTimeout(r, 1500))
-      // 2) Create nova instancia com mesmo nome
-      const createResult = await (await import('../services/whatsappProvider/index.js')).evolution.createInstance({
-        baseUrl: instance.api_url,
-        apiKey: instance.api_key,
-        instanceName: instance.instance_name,
-      })
-      qrcode = createResult.qrcode
-      data = createResult.raw
-      console.log(`[Provider Connect] recriada — QR ${qrcode ? 'gerado' : 'ainda nao veio'}`)
+    // Fallback pra sessao zumbi. So dispara em 3 condicoes CUMULATIVAS:
+    // 1) Nao veio qrcode
+    // 2) Response veio SEM erro (senao pode ser timeout/rede — nao mexer)
+    // 3) O connectionState retornou 'close' (confirma sessao ta zumbi mesmo, nao so lenta)
+    // Isso protege sessoes boas contra deletion acidental por timeout/rede.
+    const noErrorInFetch = !data?.error && !data?.errno
+    const isMaybeZombie = !qrcode && noErrorInFetch && (!data || Object.keys(data || {}).length === 0)
+    if (isMaybeZombie && (instance.provider || 'evolution') === 'evolution') {
+      // Confirma via connectionState pra ter certeza que a sessao ta zumbi mesmo
+      const stateCheck = await provider.connectionState(instance)
+      const isReallyZombie = stateCheck.state === 'close' || stateCheck.state === 'closed' || !stateCheck.state
+      if (isReallyZombie && !stateCheck.error) {
+        console.warn(`[Provider Connect] sessao zumbi confirmada em ${instance.instance_name} (state=${stateCheck.state}) — recriando`)
+        try { await provider.deleteInstance(instance, { timeoutMs: 5000 }) } catch {}
+        await new Promise(r => setTimeout(r, 1500))
+        const createResult = await (await import('../services/whatsappProvider/index.js')).evolution.createInstance({
+          baseUrl: instance.api_url,
+          apiKey: instance.api_key,
+          instanceName: instance.instance_name,
+        })
+        qrcode = createResult.qrcode
+        data = createResult.raw
+        console.log(`[Provider Connect] recriada — QR ${qrcode ? 'gerado' : 'ainda nao veio'}`)
+      } else {
+        console.log(`[Provider Connect] ${instance.instance_name}: nao vou recriar (state=${stateCheck.state}, error=${stateCheck.error || 'none'})`)
+      }
     }
 
     if (!qrcode) console.error('[Provider Connect] sem QR — payload:', JSON.stringify(data || {}).slice(0, 300))
@@ -348,18 +356,24 @@ router.post('/whatsapp/:id/qrcode', allowInstanceOwner, async (req, res) => {
     const provider = getProvider(instance)
     let { qrcode, raw: data } = await provider.connectInstance(instance)
 
-    const isZombie = !qrcode && (!data || (Object.keys(data || {}).length === 0))
-    if (isZombie && (instance.provider || 'evolution') === 'evolution') {
-      console.warn(`[Provider Refresh QR] sessao zumbi em ${instance.instance_name} — recriando`)
-      try { await provider.deleteInstance(instance, { timeoutMs: 5000 }) } catch {}
-      await new Promise(r => setTimeout(r, 1500))
-      const createResult = await (await import('../services/whatsappProvider/index.js')).evolution.createInstance({
-        baseUrl: instance.api_url,
-        apiKey: instance.api_key,
-        instanceName: instance.instance_name,
-      })
-      qrcode = createResult.qrcode
-      data = createResult.raw
+    // Mesma protecao anti-delete-acidental do endpoint /connect
+    const noErrorInFetch = !data?.error && !data?.errno
+    const isMaybeZombie = !qrcode && noErrorInFetch && (!data || Object.keys(data || {}).length === 0)
+    if (isMaybeZombie && (instance.provider || 'evolution') === 'evolution') {
+      const stateCheck = await provider.connectionState(instance)
+      const isReallyZombie = stateCheck.state === 'close' || stateCheck.state === 'closed' || !stateCheck.state
+      if (isReallyZombie && !stateCheck.error) {
+        console.warn(`[Provider Refresh QR] sessao zumbi confirmada em ${instance.instance_name} — recriando`)
+        try { await provider.deleteInstance(instance, { timeoutMs: 5000 }) } catch {}
+        await new Promise(r => setTimeout(r, 1500))
+        const createResult = await (await import('../services/whatsappProvider/index.js')).evolution.createInstance({
+          baseUrl: instance.api_url,
+          apiKey: instance.api_key,
+          instanceName: instance.instance_name,
+        })
+        qrcode = createResult.qrcode
+        data = createResult.raw
+      }
     }
     if (!qrcode) console.error('[Provider Refresh QR] sem QR — payload:', JSON.stringify(data || {}).slice(0, 300))
 
