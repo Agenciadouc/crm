@@ -7,6 +7,10 @@ function baseUrl(instance) {
   return String(instance.api_url || '').replace(/\/+$/, '')
 }
 
+function name(instance) {
+  return encodeURIComponent(instance.instance_name || '')
+}
+
 function authHeader(instance) {
   return { apikey: instance.api_key }
 }
@@ -19,7 +23,7 @@ function jsonHeaders(instance) {
 
 export async function sendText(instance, { number, text }) {
   try {
-    const res = await fetch(`${baseUrl(instance)}/message/sendText/${instance.instance_name}`, {
+    const res = await fetch(`${baseUrl(instance)}/message/sendText/${name(instance)}`, {
       method: 'POST',
       headers: jsonHeaders(instance),
       body: JSON.stringify({ number, text }),
@@ -43,7 +47,7 @@ export async function sendMedia(instance, { number, mediatype, media, mimetype, 
   if (caption) body.caption = caption
   if (delay != null) body.delay = delay
   try {
-    const res = await fetch(`${baseUrl(instance)}/message/sendMedia/${encodeURIComponent(instance.instance_name)}`, {
+    const res = await fetch(`${baseUrl(instance)}/message/sendMedia/${name(instance)}`, {
       method: 'POST',
       headers: jsonHeaders(instance),
       body: JSON.stringify(body),
@@ -61,7 +65,7 @@ export async function sendAudio(instance, { number, audio, delay }) {
   const body = { number, audio }
   if (delay != null) body.delay = delay
   try {
-    const res = await fetch(`${baseUrl(instance)}/message/sendWhatsAppAudio/${encodeURIComponent(instance.instance_name)}`, {
+    const res = await fetch(`${baseUrl(instance)}/message/sendWhatsAppAudio/${name(instance)}`, {
       method: 'POST',
       headers: jsonHeaders(instance),
       body: JSON.stringify(body),
@@ -78,7 +82,7 @@ export async function sendAudio(instance, { number, audio, delay }) {
 // presence: 'available' | 'composing' | 'recording' | 'paused'
 export async function sendPresence(instance, { number, presence, delay = 100, signal }) {
   try {
-    await fetch(`${baseUrl(instance)}/chat/sendPresence/${instance.instance_name}`, {
+    await fetch(`${baseUrl(instance)}/chat/sendPresence/${name(instance)}`, {
       method: 'POST',
       headers: jsonHeaders(instance),
       body: JSON.stringify({ number, presence, delay }),
@@ -90,7 +94,7 @@ export async function sendPresence(instance, { number, presence, delay = 100, si
 // readMessages: [{ remoteJid, fromMe, id }]
 export async function markAsRead(instance, { readMessages, signal }) {
   try {
-    await fetch(`${baseUrl(instance)}/chat/markMessageAsRead/${instance.instance_name}`, {
+    await fetch(`${baseUrl(instance)}/chat/markMessageAsRead/${name(instance)}`, {
       method: 'POST',
       headers: jsonHeaders(instance),
       body: JSON.stringify({ read_messages: readMessages }),
@@ -102,7 +106,7 @@ export async function markAsRead(instance, { readMessages, signal }) {
 // numbers: array de strings. Retorna array [{ number, exists, jid }] ou null se falhou.
 export async function checkNumbers(instance, numbers, { signal } = {}) {
   try {
-    const res = await fetch(`${baseUrl(instance)}/chat/whatsappNumbers/${instance.instance_name}`, {
+    const res = await fetch(`${baseUrl(instance)}/chat/whatsappNumbers/${name(instance)}`, {
       method: 'POST',
       headers: jsonHeaders(instance),
       body: JSON.stringify({ numbers }),
@@ -119,7 +123,7 @@ export async function checkNumbers(instance, numbers, { signal } = {}) {
 // number: string. Retorna { url } | null
 export async function fetchProfilePicture(instance, number) {
   try {
-    const res = await fetch(`${baseUrl(instance)}/chat/fetchProfilePictureUrl/${instance.instance_name}`, {
+    const res = await fetch(`${baseUrl(instance)}/chat/fetchProfilePictureUrl/${name(instance)}`, {
       method: 'POST',
       headers: jsonHeaders(instance),
       body: JSON.stringify({ number }),
@@ -136,7 +140,7 @@ export async function fetchProfilePicture(instance, number) {
 // message: objeto Baileys-shape ({ key: {id, remoteJid, fromMe}, ... })
 export async function getMediaBase64(instance, { message, convertToMp4 = false }) {
   try {
-    const res = await fetch(`${baseUrl(instance)}/chat/getBase64FromMediaMessage/${instance.instance_name}`, {
+    const res = await fetch(`${baseUrl(instance)}/chat/getBase64FromMediaMessage/${name(instance)}`, {
       method: 'POST',
       headers: jsonHeaders(instance),
       body: JSON.stringify({ message, convertToMp4 }),
@@ -152,7 +156,7 @@ export async function getMediaBase64(instance, { message, convertToMp4 = false }
 
 export async function findMessages(instance, { where = {}, page = 1, offset = 20 } = {}) {
   try {
-    const res = await fetch(`${baseUrl(instance)}/chat/findMessages/${encodeURIComponent(instance.instance_name)}`, {
+    const res = await fetch(`${baseUrl(instance)}/chat/findMessages/${name(instance)}`, {
       method: 'POST',
       headers: jsonHeaders(instance),
       body: JSON.stringify({ where, page, offset }),
@@ -188,7 +192,7 @@ export async function createInstance({ baseUrl: url, apiKey, instanceName, integ
 // Retorna { qrcode: base64 | null, raw }
 export async function connectInstance(instance) {
   try {
-    const res = await fetch(`${baseUrl(instance)}/instance/connect/${instance.instance_name}`, {
+    const res = await fetch(`${baseUrl(instance)}/instance/connect/${name(instance)}`, {
       headers: authHeader(instance),
     })
     const data = await res.json().catch(() => ({}))
@@ -202,7 +206,7 @@ export async function connectInstance(instance) {
 // Retorna { state: 'open'|'connecting'|'close', raw }
 export async function connectionState(instance) {
   try {
-    const res = await fetch(`${baseUrl(instance)}/instance/connectionState/${instance.instance_name}`, {
+    const res = await fetch(`${baseUrl(instance)}/instance/connectionState/${name(instance)}`, {
       headers: authHeader(instance),
     })
     const data = await res.json().catch(() => ({}))
@@ -216,7 +220,7 @@ export async function connectionState(instance) {
 // Logout (mantem sessao no servidor, mas desconecta o WhatsApp)
 export async function logout(instance) {
   try {
-    await fetch(`${baseUrl(instance)}/instance/logout/${instance.instance_name}`, {
+    await fetch(`${baseUrl(instance)}/instance/logout/${name(instance)}`, {
       method: 'DELETE',
       headers: authHeader(instance),
     })
@@ -229,7 +233,7 @@ export async function logout(instance) {
 // Delete permanente. `timeoutMs`: timeout do fetch (default 8s).
 export async function deleteInstance(instance, { timeoutMs = 8000 } = {}) {
   try {
-    const res = await fetch(`${baseUrl(instance)}/instance/delete/${encodeURIComponent(instance.instance_name)}`, {
+    const res = await fetch(`${baseUrl(instance)}/instance/delete/${name(instance)}`, {
       method: 'DELETE',
       headers: authHeader(instance),
       signal: AbortSignal.timeout(timeoutMs),
@@ -243,7 +247,7 @@ export async function deleteInstance(instance, { timeoutMs = 8000 } = {}) {
 // Restart Baileys session (mais agressivo que connect — refaz do zero)
 export async function restartInstance(instance) {
   try {
-    const res = await fetch(`${baseUrl(instance)}/instance/restart/${encodeURIComponent(instance.instance_name)}`, {
+    const res = await fetch(`${baseUrl(instance)}/instance/restart/${name(instance)}`, {
       method: 'POST',
       headers: authHeader(instance),
     })
@@ -257,7 +261,7 @@ export async function restartInstance(instance) {
 // Configura webhook inbound. Evolution v2.3 shape.
 export async function setWebhook(instance, webhookUrl, events = ['MESSAGES_UPSERT']) {
   try {
-    await fetch(`${baseUrl(instance)}/webhook/set/${encodeURIComponent(instance.instance_name)}`, {
+    await fetch(`${baseUrl(instance)}/webhook/set/${name(instance)}`, {
       method: 'POST',
       headers: jsonHeaders(instance),
       body: JSON.stringify({ webhook: { url: webhookUrl, enabled: true, events } }),
@@ -271,7 +275,7 @@ export async function setWebhook(instance, webhookUrl, events = ['MESSAGES_UPSER
 // Retorna info de uma instancia (usado pra pegar ownerJid/phone_number).
 export async function fetchInstanceInfo(instance) {
   try {
-    const res = await fetch(`${baseUrl(instance)}/instance/fetchInstances?instanceName=${encodeURIComponent(instance.instance_name)}`, {
+    const res = await fetch(`${baseUrl(instance)}/instance/fetchInstances?instanceName=${name(instance)}`, {
       headers: authHeader(instance),
     })
     const data = await res.json().catch(() => null)
