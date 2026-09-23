@@ -308,3 +308,20 @@ test('refreshQr: UzAPI recusou a credencial (provider_auth) -> devolve o erro e 
   const r = await manager.refreshQr(inst)
   assert.deepEqual([r.error, r.error_message, r.panel_url], ['provider_auth', UZAPI_INSTANCE_AUTH_MESSAGE, 'https://painel.uzapi.test'])
 })
+
+test('remove: apagar o numero retoma os pausados pelo novo padrao conectado da conta', async () => {
+  const db = createTestDb()
+  const seed = seedBasic(db)
+  const { adapter } = fakeUzapi()
+  const calls = []
+  const manager = createInstanceManager({
+    db, getProvider: () => adapter, env: UZAPI_TEST_ENV, log: quietLog, removeTimeoutMs: 50,
+    resumeBroadcastIfPaused: (id) => calls.push(['b', id]), resumeFollowUpsIfPaused: (id) => calls.push(['f', id]),
+  })
+  const velho = insertUzapiInstance(db, seed.account.id)
+  const novo = insertUzapiInstance(db, seed.account.id, { instance_name: 'novo', webhook_token: 'd'.repeat(32), phoneNumberId: '100000000000077' })
+  db.prepare("UPDATE whatsapp_instances SET status = 'connected' WHERE id = ?").run(novo.id)
+  db.prepare('UPDATE accounts SET default_send_instance_id = ? WHERE id = ?').run(velho.id, seed.account.id)
+  await manager.remove(velho)
+  assert.deepEqual(calls, [['b', novo.id], ['f', novo.id]])
+})

@@ -6,6 +6,7 @@ import { buildInstanceWebhookUrl } from '../publicUrl.js'
 import { buildUzapiConfig, hasEncryptionKey, readUzapiPhoneNumberId } from './providerConfig.js'
 import { isUzapiConfigured, getUzapiEnv } from './uzapiClient.js'
 import { logConnectionEvent } from './connectionLog.js'
+import { resumeWithDefaultSendInstance } from './resolveSendInstance.js'
 
 export const PROVIDER_LABELS = Object.freeze({ evolution: 'Evolution', uzapi: 'UzAPI (estável)' })
 
@@ -215,6 +216,8 @@ export function createInstanceManager({
     if (!r.ok) log.error(`[UzAPI excluir] ${instance.instance_name} (phoneNumberId=${readUzapiPhoneNumberId(instance)}): ${r.reason}`)
     logConnectionEvent(db, instance, 'removed')
     db.prepare('DELETE FROM whatsapp_instances WHERE id = ?').run(instance.id)
+    // Se era o padrao, outro numero de disparo conectado assume: retoma o que estava parado.
+    resumeWithDefaultSendInstance(db, instance.account_id, { resumeBroadcastIfPaused, resumeFollowUpsIfPaused, log })
     return { ok: true, providerOk: !!r.ok }
   }
 

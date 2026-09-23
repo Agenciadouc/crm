@@ -13,7 +13,7 @@ import { resumeBroadcastIfPaused } from './broadcasts.js'
 import { resumeFollowUpsIfPaused } from '../services/followUpSender.js'
 import { businessHoursUpdate } from '../services/serviceHours.js'
 import { canManageInstance, HOLD_SENDS_FORBIDDEN_MSG } from '../services/instanceOwnership.js'
-import { sendNumberStatus, setDefaultSendInstance } from '../services/whatsapp/resolveSendInstance.js'
+import { sendNumberStatus, setDefaultSendInstance, resumeWithDefaultSendInstance } from '../services/whatsapp/resolveSendInstance.js'
 import { getAntibanSettings, saveAntibanSettings, decorateInstances } from '../services/antibanSettings.js'
 
 const router = Router()
@@ -117,6 +117,8 @@ router.put('/whatsapp/default-send-instance', requireRole('super_admin', 'gerent
     const msg = r.reason === 'not_send_role' ? 'Só números UzAPI ou Oficial podem ser o padrão de disparos' : 'Número não encontrado'
     return res.status(400).json({ error: msg })
   }
+  // Novo padrao ja conectado: retoma disparos e follow-ups parados por falta/queda de numero.
+  resumeWithDefaultSendInstance(db, req.accountId, { resumeBroadcastIfPaused, resumeFollowUpsIfPaused })
   res.json({ ok: true, status: sendNumberStatus(db, req.accountId) })
 })
 
@@ -508,6 +510,7 @@ router.delete('/whatsapp/:id', requireRole('super_admin', 'gerente', 'atendente'
     console.error(`[Evolution Delete Instance] ${instance.instance_name}: ${err.name === 'TimeoutError' ? 'timeout 8s' : err.message}`)
   }
   db.prepare('DELETE FROM whatsapp_instances WHERE id = ?').run(instance.id)
+  resumeWithDefaultSendInstance(db, instance.account_id, { resumeBroadcastIfPaused, resumeFollowUpsIfPaused })
   res.json({ ok: true })
 })
 

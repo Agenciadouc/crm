@@ -11,7 +11,7 @@ export function getDefaultSendInstance(db, accountId) {
       .get(acc.default_send_instance_id, accountId, ...SEND_PROVIDERS)
     if (chosen) return chosen
   }
-  return db.prepare(`SELECT * FROM whatsapp_instances WHERE account_id = ? AND provider IN (${PLACEHOLDERS}) ORDER BY id LIMIT 1`)
+  return db.prepare(`SELECT * FROM whatsapp_instances WHERE account_id = ? AND provider IN (${PLACEHOLDERS}) ORDER BY (status = 'connected') DESC, id LIMIT 1`)
     .get(accountId, ...SEND_PROVIDERS) || null
 }
 
@@ -42,4 +42,15 @@ export function sendNumberStatus(db, accountId) {
   const instance = { id: inst.id, instance_name: inst.instance_name, provider: inst.provider, status: inst.status }
   if (inst.status !== 'connected') return { ok: false, reason: 'send_number_offline', instance }
   return { ok: true, reason: null, instance }
+}
+
+// Troca/remocao do numero padrao (spec secao 9): quando o padrao resolvido da conta esta conectado,
+// retoma disparos e follow-ups pausados por falta/queda de numero. Retomadas injetadas (sem ciclo de import).
+// Erro de uma retomada nao impede a outra. Devolve o id do padrao usado, ou null quando nao retomou.
+export function resumeWithDefaultSendInstance(db, accountId, { resumeBroadcastIfPaused = () => {}, resumeFollowUpsIfPaused = () => {}, log = console } = {}) {
+  const inst = getDefaultSendInstance(db, accountId)
+  if (!inst || inst.status !== 'connected') return null
+  try { resumeBroadcastIfPaused(inst.id) } catch (e) { log.error('[Numero padrao] retomar disparos:', e.message) }
+  try { resumeFollowUpsIfPaused(inst.id) } catch (e) { log.error('[Numero padrao] retomar follow-ups:', e.message) }
+  return inst.id
 }

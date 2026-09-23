@@ -80,3 +80,49 @@ test('status para a tela', () => {
   assert.equal(sendNumberStatus(db, s.account.id).ok, true)
   assert.equal(sendNumberStatus(db, s.account.id).reason, null)
 })
+
+test('sem padrao escolhido: prefere o numero de disparo conectado ao de menor id', () => {
+  const db = createTestDb(); const s = seedBasic(db)
+  addInstance(db, s.account.id, { name: 'a', status: 'disconnected' })
+  const b = addInstance(db, s.account.id, { name: 'b', status: 'connected' })
+  assert.equal(getDefaultSendInstance(db, s.account.id).id, b.id)
+  const r = resolveSendInstance(db, { accountId: s.account.id, kind: 'automatico' })
+  assert.equal(r.ok, true); assert.equal(r.instance.id, b.id)
+})
+
+test('padrao escolhido desconectado continua sendo o padrao (send_number_offline)', () => {
+  const db = createTestDb(); const s = seedBasic(db)
+  const a = addInstance(db, s.account.id, { name: 'a', status: 'disconnected' })
+  addInstance(db, s.account.id, { name: 'b', status: 'connected' })
+  assert.deepEqual(setDefaultSendInstance(db, s.account.id, a.id), { ok: true })
+  assert.equal(getDefaultSendInstance(db, s.account.id).id, a.id)
+  assert.deepEqual(resolveSendInstance(db, { accountId: s.account.id, kind: 'automatico' }), { ok: false, reason: 'send_number_offline' })
+})
+
+test('resumeWithDefaultSendInstance: chama as retomadas com o padrao so quando ele esta conectado', async () => {
+  const { resumeWithDefaultSendInstance } = await import('../server/services/whatsapp/resolveSendInstance.js')
+  const db = createTestDb(); const s = seedBasic(db)
+  const calls = []
+  const deps = { resumeBroadcastIfPaused: (id) => calls.push(['b', id]), resumeFollowUpsIfPaused: (id) => calls.push(['f', id]) }
+  assert.equal(resumeWithDefaultSendInstance(db, s.account.id, deps), null) // so Evolution
+  const off = addInstance(db, s.account.id, { name: 'off', status: 'disconnected' })
+  assert.equal(resumeWithDefaultSendInstance(db, s.account.id, deps), null) // padrao desconectado
+  assert.deepEqual(calls, [])
+  db.prepare("UPDATE whatsapp_instances SET status = 'connected' WHERE id = ?").run(off.id)
+  assert.equal(resumeWithDefaultSendInstance(db, s.account.id, deps), off.id)
+  assert.deepEqual(calls, [['b', off.id], ['f', off.id]])
+})
+
+test('resumeWithDefaultSendInstance: erro numa retomada nao impede a outra', async () => {
+  const { resumeWithDefaultSendInstance } = await import('../server/services/whatsapp/resolveSendInstance.js')
+  const db = createTestDb(); const s = seedBasic(db)
+  const uz = addInstance(db, s.account.id)
+  const calls = []
+  const deps = {
+    resumeBroadcastIfPaused: () => { throw new Error('x') },
+    resumeFollowUpsIfPaused: (id) => calls.push(id),
+    log: { error() {} },
+  }
+  assert.equal(resumeWithDefaultSendInstance(db, s.account.id, deps), uz.id)
+  assert.deepEqual(calls, [uz.id])
+})
