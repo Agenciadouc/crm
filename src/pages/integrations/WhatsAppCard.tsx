@@ -300,7 +300,7 @@ export default function WhatsAppCard({ accountId, instances, setInstances, reloa
         {noticeFor('top')}
 
         <div style={{ marginBottom: 12 }}>
-          <SendNumberBanner accountId={accountId} />
+          <SendNumberBanner accountId={accountId} refreshKey={instances.map(i => `${i.id}:${i.status}:${i.is_default_send ? 1 : 0}`).join(',')} />
         </div>
 
         {loadError && (

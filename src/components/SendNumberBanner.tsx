@@ -5,13 +5,14 @@ import { fetchSendNumberStatus, type SendNumberStatus } from '../lib/api'
 import { sendStatusMessage } from '../lib/antiban.js'
 
 // Numero de saida dos envios automaticos (spec secoes 9 e 11). onStatus permite a tela bloquear o botao de envio.
-export default function SendNumberBanner({ accountId, onStatus }: { accountId: number; onStatus?: (s: SendNumberStatus) => void }) {
+// refreshKey: quando muda (ex.: numeros conectados/padrao trocado), busca o status de novo sem recarregar a pagina.
+export default function SendNumberBanner({ accountId, onStatus, refreshKey }: { accountId: number; onStatus?: (s: SendNumberStatus) => void; refreshKey?: string }) {
   const [status, setStatus] = useState<SendNumberStatus | null>(null)
   useEffect(() => {
     let alive = true
     fetchSendNumberStatus(accountId).then(s => { if (alive) { setStatus(s); onStatus?.(s) } }).catch(() => {})
     return () => { alive = false }
-  }, [accountId])
+  }, [accountId, refreshKey])
   if (!status) return null
   if (status.ok && status.instance) {
     return (
