@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createTestDb, seedBasic } from './helpers/db.js'
-import { createInstanceManager, listAvailableProviders, sanitizeInstance, ProviderError } from '../server/services/whatsapp/instanceManager.js'
+import { createInstanceManager, listAvailableProviders, sanitizeInstance, ProviderError, UZAPI_ACCOUNT_AUTH_MESSAGE, UZAPI_INSTANCE_AUTH_MESSAGE } from '../server/services/whatsapp/instanceManager.js'
 import { readUzapiConfig } from '../server/services/whatsapp/providerConfig.js'
 import { UZAPI_TEST_ENV, quietLog, insertUzapiInstance } from './helpers/uzapiFixtures.js'
 
@@ -16,7 +16,7 @@ function fakeUzapi(overrides = {}) {
     },
     async status(i) { calls.status.push(i.id); return overrides.status ? overrides.status(i) : { ok: true, status: 'connecting', phoneNumber: null, qr: null } },
     async disconnect(i) { calls.disconnect.push(i.id); return { ok: true } },
-    async restart(i) { calls.restart.push(i.id); return { ok: true } },
+    async restart(i) { calls.restart.push(i.id); return overrides.restart ? overrides.restart(i) : { ok: true } },
     async remove(i) { calls.remove.push(i.id); return overrides.remove ? overrides.remove(i) : { ok: true } },
   }
   return { adapter, calls }
@@ -274,4 +274,37 @@ test('criar numero UzAPI: dois cliques ao mesmo tempo com o mesmo nome -> o segu
   assert.equal(db.prepare("SELECT COUNT(*) AS n FROM whatsapp_instances WHERE provider = 'uzapi'").get().n, 1)
   // terminou: a trava sai (outra conta ou outro nome segue livre)
   await manager.createUzapiInstance({ accountId: seed.account.id, instanceName: 'Loja Norte' })
+})
+
+test('criar numero UzAPI: UzAPI recusou a credencial da conta (provider_auth) -> mensagem que manda conferir o .env; outros erros pedem para tentar de novo', async () => {
+  const fail = (code) => () => { const e = new Error(code); e.code = code; throw e }
+  const auth = setup({ createInstance: fail('provider_auth') })
+  await assert.rejects(
+    () => auth.manager.createUzapiInstance({ accountId: auth.seed.account.id, instanceName: 'Nova' }),
+    (e) => e instanceof ProviderError && e.code === 'provider_auth' && e.status === 502 && e.message === UZAPI_ACCOUNT_AUTH_MESSAGE,
+  )
+  assert.equal(UZAPI_ACCOUNT_AUTH_MESSAGE, 'A UzAPI recusou a credencial da conta Dros. Confira UZAPI_USERNAME e UZAPI_ACCOUNT_TOKEN no servidor.')
+  const other = setup({ createInstance: fail('uzapi_create_failed') })
+  await assert.rejects(
+    () => other.manager.createUzapiInstance({ accountId: other.seed.account.id, instanceName: 'Nova' }),
+    (e) => e.code === 'uzapi_create_failed' && /Tente de novo em instantes/.test(e.message),
+  )
+})
+
+test('restart: falha da UzAPI vira ProviderError 502 (provider_auth com mensagem propria; resto pede para tentar de novo)', async () => {
+  let r = { ok: true }
+  const { db, seed, manager } = setup({ restart: () => r })
+  const inst = insertUzapiInstance(db, seed.account.id, { status: 'connected' })
+  assert.deepEqual(await manager.restart(inst), { ok: true })
+  r = { ok: false, reason: 'provider_auth' }
+  await assert.rejects(() => manager.restart(inst), (e) => e instanceof ProviderError && e.code === 'provider_auth' && e.status === 502 && e.message === UZAPI_INSTANCE_AUTH_MESSAGE)
+  r = { ok: false, reason: 'provider_error' }
+  await assert.rejects(() => manager.restart(inst), (e) => e instanceof ProviderError && e.code === 'provider_error' && e.status === 502 && e.message === 'A UzAPI não conseguiu reiniciar o número. Tente de novo em instantes.')
+})
+
+test('refreshQr: UzAPI recusou a credencial (provider_auth) -> devolve o erro e a mensagem, mantendo o painel como alternativa', async () => {
+  const { db, seed, manager } = setup({ status: () => ({ ok: false, status: null, phoneNumber: null, qr: null, reason: 'provider_auth' }) })
+  const inst = insertUzapiInstance(db, seed.account.id, { status: 'connecting' })
+  const r = await manager.refreshQr(inst)
+  assert.deepEqual([r.error, r.error_message, r.panel_url], ['provider_auth', UZAPI_INSTANCE_AUTH_MESSAGE, 'https://painel.uzapi.test'])
 })

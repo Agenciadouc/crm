@@ -18,6 +18,11 @@ export class ProviderError extends Error {
   }
 }
 
+// 401/403 da UzAPI (reason/code provider_auth). Criar usa o token da CONTA da Dros (.env);
+// QR, status e reiniciar usam o token do NUMERO, entao a mensagem e outra.
+export const UZAPI_ACCOUNT_AUTH_MESSAGE = 'A UzAPI recusou a credencial da conta Dros. Confira UZAPI_USERNAME e UZAPI_ACCOUNT_TOKEN no servidor.'
+export const UZAPI_INSTANCE_AUTH_MESSAGE = 'A UzAPI recusou a credencial deste número. Confira UZAPI_USERNAME no servidor; se estiver certo, exclua e crie o número de novo.'
+
 export function listAvailableProviders(env = process.env) {
   const out = [{ id: 'evolution', label: PROVIDER_LABELS.evolution }]
   if (isUzapiConfigured(env)) out.push({ id: 'uzapi', label: PROVIDER_LABELS.uzapi })
@@ -80,6 +85,7 @@ export function createInstanceManager({
       created = await getProvider({ provider: 'uzapi' }).createInstance({ name: instanceName, webhookUrl })
     } catch (e) {
       log.error('[UzAPI criar numero]', e.code || '', e.message, e.phoneNumberId ? `phoneNumberId=${e.phoneNumberId}` : '')
+      if (e.code === 'provider_auth') throw new ProviderError('provider_auth', UZAPI_ACCOUNT_AUTH_MESSAGE, 502)
       throw new ProviderError(e.code || 'uzapi_create_failed', 'Não foi possível criar o número na UzAPI. Tente de novo em instantes.', 502)
     }
     // Do ponto aqui em diante o numero ja existe na UzAPI: se gravar no banco falhar (indice unico,
@@ -174,10 +180,12 @@ export function createInstanceManager({
     // panel_url vai em toda resposta nao conectada: o QR pode vir em texto cru ("2@...") que a tela
     // nao desenha, e o painel da UzAPI fica como alternativa para ler o QR.
     const panelUrl = getUzapiEnv(env).panelUrl
+    // Credencial recusada: a tela mostra o motivo (o painel continua como alternativa).
+    const authError = !st.ok && st.reason === 'provider_auth' ? { error: 'provider_auth', error_message: UZAPI_INSTANCE_AUTH_MESSAGE } : {}
     const qr = st.qr || current.qr_code || null
-    if (qr) return { instance: applyConnection(current, { qr }), qr_code: qr, status: 'connecting', panel_url: panelUrl }
+    if (qr) return { instance: applyConnection(current, { qr }), qr_code: qr, status: 'connecting', panel_url: panelUrl, ...authError }
     db.prepare("UPDATE whatsapp_instances SET status = 'connecting', updated_at = datetime('now') WHERE id = ?").run(current.id)
-    return { instance: byId(current.id), qr_code: null, status: 'connecting', panel_url: panelUrl }
+    return { instance: byId(current.id), qr_code: null, status: 'connecting', panel_url: panelUrl, ...authError }
   }
 
   async function checkStatus(instance) {
@@ -193,7 +201,11 @@ export function createInstanceManager({
   }
 
   async function restart(instance) {
-    return getProvider(instance).restart(instance)
+    const r = await getProvider(instance).restart(instance)
+    if (r.ok) return r
+    log.error(`[UzAPI reiniciar] ${instance.instance_name}: ${r.reason}`)
+    if (r.reason === 'provider_auth') throw new ProviderError('provider_auth', UZAPI_INSTANCE_AUTH_MESSAGE, 502)
+    throw new ProviderError('provider_error', 'A UzAPI não conseguiu reiniciar o número. Tente de novo em instantes.', 502)
   }
 
   // Best-effort como na Evolution: numero fantasma (so no CRM) nao pode travar o usuario.

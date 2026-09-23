@@ -522,11 +522,8 @@ router.post('/whatsapp/:id/restart', requireRole('super_admin', 'gerente', 'aten
 
   if (isUzapi(instance)) {
     try {
+      // Falha vira ProviderError no manager (provider_auth tem mensagem propria)
       const r = await manager.restart(instance)
-      if (!r.ok) {
-        console.error(`[UzAPI reiniciar] ${instance.instance_name}: ${r.reason}`)
-        return res.status(502).json({ error: 'A UzAPI não conseguiu reiniciar o número. Tente de novo em instantes.', code: 'provider_error' })
-      }
       return res.json({ ok: true, response: r })
     } catch (err) {
       return sendProviderError(res, err)
