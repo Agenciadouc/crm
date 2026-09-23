@@ -12,7 +12,7 @@ const tick = () => new Promise(r => setImmediate(r))
 function setup(seedOpts = {}) {
   const db = createTestDb()
   const seed = seedBasic(db, seedOpts)
-  const calls = { sse: [], capi: [], ai: [], handoff: [], profilePic: [], autoMsg: [], roulette: 0 }
+  const calls = { sse: [], capi: [], ai: [], handoff: [], profilePic: [], autoMsg: [], roulette: 0, optout: [] }
   const intake = createLeadIntake({ db, pickFromRoulette: () => null, notifyAndOpenLead: () => Promise.resolve(), triggerCapiForStageChange: () => {} })
   const handler = createInboundHandler({
     db,
@@ -29,6 +29,7 @@ function setup(seedOpts = {}) {
     getOrCreateLead: intake.getOrCreateLead,
     autoDetectStage: intake.autoDetectStage,
     fetchAndSaveProfilePic: (...a) => { calls.profilePic.push(a); return Promise.resolve() },
+    sendOptOutConfirmation: (...a) => { calls.optout.push(a); return Promise.resolve() },
   })
   const poll = (record, instance = seed.instance) => {
     const list = adapter.parsePolledRecord(instance, record)
@@ -116,4 +117,22 @@ test('imagem: legenda vira conteudo e media_url nao e gravada no polling', () =>
   poll(P.imageWithCaption.data)
   const m = db.prepare('SELECT media_type, content, media_url FROM messages').get()
   assert.deepEqual({ ...m }, { media_type: 'image', content: 'Esse modelo', media_url: null })
+})
+
+test('SAIR recuperado pelo polling: descadastra, cancela follow-up, sem confirmacao (Task 6 fix round 1)', () => {
+  const { db, seed, calls, poll } = setup()
+  const lead = insertLead(db, { account_id: seed.account.id, funnel_id: seed.funnelId, stage_id: seed.stage1, phone: '5547966665555', name: 'Lia', source: 'whatsapp' })
+  const fu = db.prepare('INSERT INTO follow_ups (account_id, instance_id) VALUES (?, ?)').run(seed.account.id, seed.instance.id).lastInsertRowid
+  db.prepare("INSERT INTO lead_follow_ups (lead_id, follow_up_id, status) VALUES (?, ?, 'active')").run(lead.id, fu)
+  const record = JSON.parse(JSON.stringify(P.polledRecordText))
+  record.key.id = '3EB0POLLOPTOUT001'
+  record.message.conversation = 'SAIR'
+  poll(record)
+  const row = db.prepare('SELECT * FROM leads WHERE id = ?').get(lead.id)
+  assert.ok(row.opted_out_at)
+  assert.deepEqual(
+    db.prepare('SELECT status, paused_reason FROM lead_follow_ups WHERE lead_id = ?').get(lead.id),
+    { status: 'cancelled', paused_reason: 'lead_opted_out' },
+  )
+  assert.equal(calls.optout.length, 0)
 })

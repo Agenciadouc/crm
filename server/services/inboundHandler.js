@@ -44,6 +44,16 @@ export function createInboundHandler(deps) {
     sendOptOutConfirmation = () => Promise.resolve(),
   } = deps
 
+  // Marca o descadastro pela palavra SAIR (spec 10.2): opted_out_at + cancela follow-ups ativos/pausados.
+  // Compartilhado entre o webhook e o polling (Task 6 fix round 1) — a confirmacao NAO entra aqui,
+  // so o caminho do webhook manda (numero de disparo); o polling e mensagem atrasada/backfill.
+  function markOptOut(lead, content) {
+    db.prepare("UPDATE leads SET opted_out_at = datetime('now'), updated_at = datetime('now') WHERE id = ?").run(lead.id)
+    db.prepare(`UPDATE lead_follow_ups SET status = 'cancelled', paused_reason = 'lead_opted_out', next_run_at = NULL,
+      updated_at = datetime('now') WHERE lead_id = ? AND status IN ('active', 'paused')`).run(lead.id)
+    console.log(`[OptOut] lead=${lead.id} descadastrado pela palavra "${content}"`)
+  }
+
   // Callback de status (delivered/read) do provedor. Idempotente: nunca regride (read > delivered > sent).
   // Filtra por conta: um wa_msg_id so atualiza mensagem da conta que recebeu o webhook.
   function handleStatusUpdate(account, waInstance, statuses) {
@@ -160,6 +170,12 @@ export function createInboundHandler(deps) {
       INSERT OR IGNORE INTO lead_instance_assignments (lead_id, instance_id, attendant_id)
       VALUES (?, ?, (SELECT default_attendant_id FROM whatsapp_instances WHERE id = ?))
     `).run(lead.id, inst.id, inst.id)
+
+    // SAIR recuperado pelo polling (Task 6 fix round 1): marca e cancela follow-ups, sem confirmacao
+    // (mensagem atrasada/backfill, nao um envio automatico em tempo real).
+    if (!fromMe && isOptOutMessage(content)) {
+      markOptOut(lead, content)
+    }
 
     broadcastSSE(account.id, 'lead:message', { lead_id: lead.id })
     return { ok: true, imported: true }
@@ -456,10 +472,7 @@ export function createInboundHandler(deps) {
 
     // Descadastro pela palavra SAIR (spec 10.2): marca, cancela follow-ups e confirma so no numero de disparo.
     if (optingOut && lead) {
-      db.prepare("UPDATE leads SET opted_out_at = datetime('now'), updated_at = datetime('now') WHERE id = ?").run(lead.id)
-      db.prepare(`UPDATE lead_follow_ups SET status = 'cancelled', paused_reason = 'lead_opted_out', next_run_at = NULL,
-        updated_at = datetime('now') WHERE lead_id = ? AND status IN ('active', 'paused')`).run(lead.id)
-      console.log(`[OptOut] lead=${lead.id} descadastrado pela palavra "${content}"`)
+      markOptOut(lead, content)
       if (isSendNumber) {
         const acc = db.prepare('SELECT optout_confirm_text FROM accounts WHERE id = ?').get(account.id)
         const text = (acc && acc.optout_confirm_text && acc.optout_confirm_text.trim()) || DEFAULT_OPTOUT_CONFIRM
