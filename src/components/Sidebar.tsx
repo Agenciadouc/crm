@@ -5,10 +5,11 @@ import { useAccount } from '../context/AccountContext'
 import { useSSE } from '../context/SSEContext'
 import { useTheme } from '../context/ThemeContext'
 import { apiFetch, fetchTaskCounts, fetchPendingTransferRequests, fetchAlerts } from '../lib/api'
+import { AUTOMATION_PATH } from '../lib/automationTabs'
 import {
   LayoutDashboard, Kanban, Users, MessageCircle, UserCog, GitBranch,
   Plug, Settings, Building2, LogOut, UsersRound, Menu, X,
-  ListOrdered, MessageSquarePlus, ClipboardList, Rocket, ListTodo, ExternalLink, Tag as TagIcon, FileText, FileSignature, ArrowRightLeft, Zap, Bot, Sun, Moon, BarChart3, Layers, TrendingUp,
+  ListOrdered, MessageSquarePlus, ClipboardList, Rocket, ListTodo, ExternalLink, Tag as TagIcon, FileText, FileSignature, ArrowRightLeft, Bot, Sun, Moon, BarChart3, Layers, TrendingUp,
 } from 'lucide-react'
 
 function getInitials(name: string): string {
@@ -207,8 +208,7 @@ export default function Sidebar() {
               <NavLink to="/integrations" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`} onClick={closeMobile}><Plug size={16} /> Integracoes</NavLink>
               <NavLink to="/settings" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`} onClick={closeMobile}><Settings size={16} /> Configuracoes</NavLink>
               <div className="nav-section">Automacao</div>
-              <NavLink to="/cadences" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`} onClick={closeMobile}><ListOrdered size={16} /> Cadencias</NavLink>
-              <NavLink to="/follow-ups" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`} onClick={closeMobile}><Zap size={16} /> Follow-ups</NavLink>
+              <NavLink to={AUTOMATION_PATH} className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`} onClick={closeMobile}><ListOrdered size={16} /> Cadências e Follow-ups</NavLink>
               {(isAdmin || (user as any)?.account_ai_agents_enabled === 1) && (
                 <NavLink to="/agents" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`} onClick={closeMobile}><Bot size={16} /> Agentes de IA</NavLink>
               )}

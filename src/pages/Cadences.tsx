@@ -18,7 +18,7 @@ const ACTION_TYPES = [
   { value: 'visita', label: 'Visita', icon: MapPin },
 ]
 
-export default function Cadences() {
+export default function Cadences({ embedded = false }: { embedded?: boolean } = {}) {
   const { accountId } = useAccount()
   const { user } = useAuth()
   const isSuperAdmin = user?.role === 'super_admin'
@@ -123,10 +123,12 @@ export default function Cadences() {
   return (
     <div>
       <div className="page-header">
-        <h1>Cadencias de Atendimento</h1>
+        {embedded
+          ? <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: 0 }}>Roteiro de passos que o vendedor executa (ligação, e-mail, visita...). Nada é enviado sozinho: cada passo vira tarefa.</p>
+          : <h1>Cadencias de Atendimento</h1>}
         <div style={{ display: 'flex', gap: 8 }}>
-          <button className="btn btn-secondary btn-sm" onClick={() => setShowVars(true)} title="Ver variaveis disponiveis para mensagens"><HelpCircle size={14} /> Variaveis</button>
-          <button className="btn btn-primary btn-sm" onClick={() => setShowNew(true)}><Plus size={14} /> Nova Cadencia</button>
+          <button className="btn btn-secondary btn-sm" onClick={() => setShowVars(true)} title="Ver variáveis disponíveis para mensagens"><HelpCircle size={14} /> Variáveis</button>
+          <button className="btn btn-primary btn-sm" onClick={() => setShowNew(true)}><Plus size={14} /> Nova Cadência</button>
         </div>
       </div>
 

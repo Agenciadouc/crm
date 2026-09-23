@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { useEffect } from 'react'
 import { AuthProvider, useAuth } from './context/AuthContext'
 import { AccountProvider } from './context/AccountContext'
@@ -22,9 +22,9 @@ import Team from './pages/Team'
 import Funnels from './pages/Funnels'
 import Integrations from './pages/Integrations'
 import SettingsPage from './pages/Settings'
-import Cadences from './pages/Cadences'
 import GlobalTemplates from './pages/GlobalTemplates'
-import FollowUps from './pages/FollowUps'
+import CadencesAndFollowUps from './pages/CadencesAndFollowUps'
+import { AUTOMATION_PATH, legacyAutomationRedirect } from './lib/automationTabs'
 import Agents from './pages/Agents'
 import ReadyMessages from './pages/ReadyMessages'
 import Qualifications from './pages/Qualifications'
@@ -42,6 +42,12 @@ import AgentBriefingSummary from './pages/AgentBriefingSummary'
 
 // Fix global: impede modal de fechar quando user arrasta seleção de texto
 // de dentro do input pra fora do modal (mousedown dentro, mouseup no overlay)
+// /cadences e /follow-ups viraram abas de uma tela so; links antigos caem na aba certa.
+function LegacyAutomationRedirect() {
+  const { pathname, search } = useLocation()
+  return <Navigate to={legacyAutomationRedirect(pathname, search)} replace />
+}
+
 function useModalDragFix() {
   useEffect(() => {
     let mousedownInsideModal = false
@@ -111,8 +117,9 @@ function AppRoutes() {
             <Route path="/team" element={<Team />} />
             <Route path="/funnels" element={<Funnels />} />
             <Route path="/settings" element={<SettingsPage />} />
-            <Route path="/cadences" element={<Cadences />} />
-            <Route path="/follow-ups" element={<FollowUps />} />
+            <Route path={AUTOMATION_PATH} element={<CadencesAndFollowUps />} />
+            <Route path="/cadences" element={<LegacyAutomationRedirect />} />
+            <Route path="/follow-ups" element={<LegacyAutomationRedirect />} />
             <Route path="/agents" element={<Agents />} />
             <Route path="/agents/interview" element={<AgentInterview />} />
             <Route path="/agents/interview/:briefingId" element={<AgentInterview />} />

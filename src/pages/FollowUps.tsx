@@ -56,7 +56,7 @@ const BLANK_STEP_SEQ: StepDraft = { delay_value: 10, delay_unit: 'minutes', mess
 const BLANK_STEP_INACT: StepDraft = { delay_value: 0, delay_unit: 'minutes', message_template: '', schedule_mode: 'relative', scheduled_at: '', variations: [] }
 const BLANK_STEP_INACT_SEQ: StepDraft = { delay_value: 0, delay_unit: 'hours', message_template: '', schedule_mode: 'relative', scheduled_at: '', variations: ['', '', ''] }
 
-export default function FollowUps() {
+export default function FollowUps({ embedded = false }: { embedded?: boolean } = {}) {
   const { accountId } = useAccount()
   const navigate = useNavigate()
   const [agentNames, setAgentNames] = useState<Record<number, string>>({})
@@ -316,8 +316,8 @@ export default function FollowUps() {
 
   return (
     <div>
-      <div className="page-header">
-        <h1><Zap size={22} style={{ verticalAlign: -4, marginRight: 6 }} />Follow-ups</h1>
+      <div className="page-header" style={embedded ? { justifyContent: 'flex-end' } : undefined}>
+        {!embedded && <h1><Zap size={22} style={{ verticalAlign: -4, marginRight: 6 }} />Follow-ups</h1>}
         <button className="btn btn-primary" onClick={openNew}>
           <Plus size={14} /> Novo Follow-up
         </button>
