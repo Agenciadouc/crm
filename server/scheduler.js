@@ -48,19 +48,22 @@ async function checkWhatsAppInstances() {
         }
       }
 
-      // AUTO-RECONNECT: if was connected but now disconnected/closed, try to reconnect
-      if (inst.status === 'connected' && (newStatus === 'disconnected' || state === 'close' || state === 'closed')) {
-        console.log(`[Health] ${inst.instance_name} — connection lost, attempting auto-reconnect...`)
+      // AUTO-RECONNECT: if was connected/connecting but now disconnected/closed, try to reconnect
+      if ((inst.status === 'connected' || inst.status === 'connecting') && (newStatus === 'disconnected' || state === 'close' || state === 'closed')) {
+        console.log(`[Health] ${inst.instance_name} — connection lost/pending, attempting auto-reconnect...`)
         try {
-          const { raw: reconnectData } = await provider.connectInstance(inst)
-          if (reconnectData?.instance?.state === 'open' || reconnectData?.instance?.state === 'connecting') {
-            db.prepare("UPDATE whatsapp_instances SET status = 'connecting', updated_at = datetime('now') WHERE id = ?").run(inst.id)
-            console.log(`[Health] ${inst.instance_name} — reconnect initiated successfully`)
+          const conn = await provider.connectInstance(inst)
+          const reconnectData = conn?.raw || {}
+          const hasQr = !!conn?.qrcode
+          if (reconnectData?.instance?.state === 'open' || reconnectData?.instance?.state === 'connecting' || hasQr) {
+            db.prepare("UPDATE whatsapp_instances SET status = 'connecting', qr_code = COALESCE(?, qr_code), updated_at = datetime('now') WHERE id = ?").run(conn?.qrcode || null, inst.id)
+            console.log(`[Health] ${inst.instance_name} — reconnect initiated (${hasQr ? 'needs QR' : 'no QR needed'})`)
           } else {
-            console.log(`[Health] ${inst.instance_name} — reconnect response:`, JSON.stringify(reconnectData).substring(0, 150))
+            const summary = JSON.stringify(reconnectData || {}).substring(0, 150)
+            console.log(`[Health] ${inst.instance_name} — reconnect response:`, summary || '(vazio)')
           }
         } catch (reconnectErr) {
-          console.error(`[Health] ${inst.instance_name} — reconnect failed:`, reconnectErr.message)
+          console.error(`[Health] ${inst.instance_name} — reconnect failed:`, reconnectErr?.message || reconnectErr)
         }
       }
     } catch (err) {

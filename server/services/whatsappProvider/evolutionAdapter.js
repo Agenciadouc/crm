@@ -185,7 +185,7 @@ export async function createInstance({ baseUrl: url, apiKey, instanceName, integ
     const qrcode = data?.qrcode?.base64 || data?.base64 || null
     return { qrcode, raw: data }
   } catch (e) {
-    return { qrcode: null, error: e.message }
+    return { qrcode: null, raw: {}, error: e.message }
   }
 }
 
@@ -199,7 +199,7 @@ export async function connectInstance(instance) {
     const qrcode = data?.qrcode?.base64 || data?.base64 || null
     return { qrcode, raw: data }
   } catch (e) {
-    return { qrcode: null, error: e.message }
+    return { qrcode: null, raw: {}, error: e.message }
   }
 }
 
@@ -213,7 +213,7 @@ export async function connectionState(instance) {
     const state = data?.instance?.state || data?.state || 'close'
     return { state, raw: data }
   } catch (e) {
-    return { state: 'close', error: e.message }
+    return { state: 'close', raw: {}, error: e.message }
   }
 }
 
@@ -226,7 +226,7 @@ export async function logout(instance) {
     })
     return { ok: true }
   } catch (e) {
-    return { ok: false, error: e.message }
+    return { ok: false, raw: {}, error: e.message }
   }
 }
 
@@ -240,7 +240,7 @@ export async function deleteInstance(instance, { timeoutMs = 8000 } = {}) {
     })
     return { ok: res.ok || res.status === 404, status: res.status }
   } catch (e) {
-    return { ok: false, error: e.name === 'TimeoutError' ? 'timeout' : e.message }
+    return { ok: false, raw: {}, error: e.name === "TimeoutError" ? "timeout" : e.message }
   }
 }
 
@@ -254,7 +254,7 @@ export async function restartInstance(instance) {
     const data = await res.json().catch(() => ({}))
     return { ok: res.ok, raw: data }
   } catch (e) {
-    return { ok: false, error: e.message }
+    return { ok: false, raw: {}, error: e.message }
   }
 }
 
@@ -268,7 +268,7 @@ export async function setWebhook(instance, webhookUrl, events = ['MESSAGES_UPSER
     })
     return { ok: true }
   } catch (e) {
-    return { ok: false, error: e.message }
+    return { ok: false, raw: {}, error: e.message }
   }
 }
 
