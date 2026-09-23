@@ -7,6 +7,9 @@ import db from '../db.js'
 import { broadcastSSE } from '../sse.js'
 import { sendViaInstance } from './leadHandoff.js'
 import { applyMessageVars, templateNeedsAttendant, buildVarContext } from '../lib/messageVars.js'
+import { planFollowUpSend, resumeAutomaticFollowUps } from './followUpRouting.js'
+import { appendOptOutFooter } from './antiban.js'
+import { followUpPacer } from './whatsapp/sendPacer.js'
 
 // Escolhe texto da variação se step.variations tem array. Fallback message_template.
 function pickVariationText(step) {
@@ -82,18 +85,14 @@ export async function sendFollowUpMessage(leadFollowUpId) {
       return
     }
 
-    const instance = followUp.instance_id
-      ? db.prepare("SELECT * FROM whatsapp_instances WHERE id = ?").get(followUp.instance_id)
-      : null
-
-    if (!instance) {
-      pauseLeadFollowUp(leadFollowUpId, 'instance_removed')
+    // Numero de saida = numero padrao de disparos da conta (spec secao 5); descadastro pausa (spec 10.1).
+    const plan = planFollowUpSend(db, { lead, followUp })
+    if (!plan.ok) {
+      pauseLeadFollowUp(leadFollowUpId, plan.pause)
+      console.log(`[FollowUp] Pausado lead=${lead.id} — ${plan.pause}`)
       return
     }
-    if (instance.status !== 'connected') {
-      pauseLeadFollowUp(leadFollowUpId, 'instance_offline')
-      return
-    }
+    const instance = plan.instance
 
     // Renderiza msg (escolhe variação aleatoria se step.variations existe, senao usa message_template)
     const rawText = pickVariationText(step)
@@ -118,7 +117,12 @@ export async function sendFollowUpMessage(leadFollowUpId) {
       return
     }
 
-    const text = applyMessageVars(rawText, buildVarContext(lead, attendant))
+    const text = plan.footer
+      ? appendOptOutFooter(applyMessageVars(rawText, buildVarContext(lead, attendant)), plan.footer)
+      : applyMessageVars(rawText, buildVarContext(lead, attendant))
+
+    // Catraca anti-ban (spec 10.7): 5 a 20s entre follow-ups no mesmo numero.
+    await followUpPacer.wait(instance.id)
 
     // Envia via sendViaInstance (pre-flight de numero + cache + tratamento consistente)
     const sendRes = await sendViaInstance(instance, lead.phone, text, { leadId: lead.id })
@@ -225,17 +229,10 @@ export function resumeFollowUpsIfAttendantNowAssigned() {
 }
 
 // Reativacao quando instancia volta a conectar (chamado por scheduler.checkWhatsAppInstances)
+// Agora por conta: qualquer numero de disparo da conta conectando retoma os pausados por falta/queda de numero padrao.
 export function resumeFollowUpsIfPaused(instanceId) {
-  const paused = db.prepare(`
-    SELECT lfu.id FROM lead_follow_ups lfu
-    JOIN follow_ups fu ON fu.id = lfu.follow_up_id
-    WHERE fu.instance_id = ?
-      AND lfu.status = 'paused'
-      AND lfu.paused_reason IN ('instance_offline', 'instance_removed', 'send_failed', 'send_error')
-  `).all(instanceId)
-  if (paused.length === 0) return
-  console.log(`[FollowUp] Retomando ${paused.length} follow-up(s) — instancia ${instanceId} reconectou`)
-  for (const p of paused) {
-    db.prepare("UPDATE lead_follow_ups SET status='active', paused_at=NULL, paused_reason=NULL, next_run_at=datetime('now'), updated_at=datetime('now') WHERE id=?").run(p.id)
-  }
+  const inst = db.prepare('SELECT account_id FROM whatsapp_instances WHERE id = ?').get(instanceId)
+  if (!inst) return
+  const n = resumeAutomaticFollowUps(db, inst.account_id)
+  if (n > 0) console.log(`[FollowUp] Retomando ${n} follow-up(s) — numero ${instanceId} conectou (conta ${inst.account_id})`)
 }

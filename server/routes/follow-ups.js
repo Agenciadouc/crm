@@ -3,6 +3,8 @@ import db from '../db.js'
 import { requireRole } from '../middleware/auth.js'
 import { broadcastSSE } from '../sse.js'
 import { agentFollowUpLock, agentIsActiveOwner } from '../services/followUpOwnership.js'
+import { checkStepVariety } from '../services/antiban.js'
+import { getDefaultSendInstance } from '../services/whatsapp/resolveSendInstance.js'
 
 const router = Router()
 
@@ -130,13 +132,19 @@ function normalizeStepVariations(s) {
 // ─── POST criar (com steps) ────────────────────────────────────────────
 router.post('/', requireRole('super_admin', 'gerente'), (req, res) => {
   if (!req.accountId) return res.status(400).json({ error: 'account_id required' })
-  const { name, description, instance_id, stop_on_reply, steps, type, inactivity_stage_id, inactivity_days, inactivity_minutes, inactivity_mode, variation_delay_seconds, agent_id } = req.body
-  if (!name || !instance_id) return res.status(400).json({ error: 'name e instance_id obrigatorios' })
+  const { name, description, instance_id, stop_on_reply, steps, type, inactivity_stage_id, inactivity_days, inactivity_minutes, inactivity_mode, variation_delay_seconds, agent_id, optout_footer_enabled } = req.body
+  if (!name) return res.status(400).json({ error: 'name obrigatorio' })
+  // Historico: grava o numero padrao de disparos (o envio usa sempre o padrao do momento — spec secao 5).
+  const sendInst = getDefaultSendInstance(db, req.accountId)
+  const finalInstanceId = instance_id || (sendInst && sendInst.id) || null
+  if (!finalInstanceId) return res.status(400).json({ error: 'Envios automáticos desligados — conecte UzAPI ou Oficial para liberar' })
   if (!Array.isArray(steps) || steps.length === 0) return res.status(400).json({ error: 'pelo menos 1 step obrigatorio' })
 
   // Valida instance pertence a conta
-  const inst = db.prepare('SELECT id FROM whatsapp_instances WHERE id = ? AND account_id = ?').get(instance_id, req.accountId)
-  if (!inst) return res.status(400).json({ error: 'Instancia invalida pra essa conta' })
+  if (instance_id) {
+    const inst = db.prepare('SELECT id FROM whatsapp_instances WHERE id = ? AND account_id = ?').get(instance_id, req.accountId)
+    if (!inst) return res.status(400).json({ error: 'Instancia invalida pra essa conta' })
+  }
 
   // Valida agente (se vinculado) pertence a conta — usado pra follow-up agent-based
   let finalAgentId = null
@@ -185,10 +193,12 @@ router.post('/', requireRole('super_admin', 'gerente'), (req, res) => {
 
   // Valida cada step
   const normalizedSteps = []
-  for (const s of steps) {
+  for (const [i, s] of steps.entries()) {
     const variationsJson = normalizeStepVariations(s)
     const hasTpl = s.message_template && s.message_template.trim()
     if (!variationsJson && !hasTpl) return res.status(400).json({ error: 'Toda etapa precisa de mensagem ou variações' })
+    const variety = checkStepVariety({ message_template: s.message_template, variations: variationsJson })
+    if (!variety.ok) return res.status(400).json({ error: `Etapa ${i + 1}: ${variety.error}` })
     const stepMode = s.schedule_mode === 'absolute' ? 'absolute' : 'relative'
     let stepScheduledAt = null
     if (finalType === 'sequence' && stepMode === 'absolute') {
@@ -206,9 +216,9 @@ router.post('/', requireRole('super_admin', 'gerente'), (req, res) => {
 
   const trans = db.transaction(() => {
     const result = db.prepare(`
-      INSERT INTO follow_ups (account_id, name, description, instance_id, stop_on_reply, created_by, type, inactivity_stage_id, inactivity_days, inactivity_minutes, inactivity_mode, variation_delay_seconds, on_reply_action, on_reply_user_id, on_reply_move_to_stage_id, on_reply_add_tag_id, agent_id)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(req.accountId, name, description || null, instance_id, stop_on_reply ? 1 : 0, req.user.id, finalType, finalInactivityStage, finalInactivityDays, finalInactivityMinutes, finalInactivityMode, finalVariationDelay, onReply.action, onReply.userId, onReply.stageId, onReply.tagId, finalAgentId)
+      INSERT INTO follow_ups (account_id, name, description, instance_id, stop_on_reply, created_by, type, inactivity_stage_id, inactivity_days, inactivity_minutes, inactivity_mode, variation_delay_seconds, on_reply_action, on_reply_user_id, on_reply_move_to_stage_id, on_reply_add_tag_id, agent_id, optout_footer_enabled)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(req.accountId, name, description || null, finalInstanceId, stop_on_reply ? 1 : 0, req.user.id, finalType, finalInactivityStage, finalInactivityDays, finalInactivityMinutes, finalInactivityMode, finalVariationDelay, onReply.action, onReply.userId, onReply.stageId, onReply.tagId, finalAgentId, optout_footer_enabled ? 1 : 0)
 
     const fuId = result.lastInsertRowid
     const stmt = db.prepare('INSERT INTO follow_up_steps (follow_up_id, position, delay_minutes, message_template, schedule_mode, scheduled_at, variations) VALUES (?, ?, ?, ?, ?, ?, ?)')
@@ -230,7 +240,7 @@ router.put('/:id', requireRole('super_admin', 'gerente'), (req, res) => {
   if (!fu) return res.status(404).json({ error: 'Follow-up nao encontrado' })
   if (lockIfAgentOwned(fu, res)) return
 
-  const { name, description, instance_id, stop_on_reply, is_active, steps, inactivity_stage_id, inactivity_days, inactivity_minutes, inactivity_mode, variation_delay_seconds } = req.body
+  const { name, description, instance_id, stop_on_reply, is_active, steps, inactivity_stage_id, inactivity_days, inactivity_minutes, inactivity_mode, variation_delay_seconds, optout_footer_enabled } = req.body
   // Tipo nao muda em edit (pra simplificar — se quiser mudar de sequence pra inactivity, cria outro)
   if (instance_id) {
     const inst = db.prepare('SELECT id FROM whatsapp_instances WHERE id = ? AND account_id = ?').get(instance_id, req.accountId)
@@ -301,10 +311,12 @@ router.put('/:id', requireRole('super_admin', 'gerente'), (req, res) => {
   let normalizedSteps = null
   if (Array.isArray(steps)) {
     normalizedSteps = []
-    for (const s of steps) {
+    for (const [i, s] of steps.entries()) {
       const variationsJson = normalizeStepVariations(s)
       const hasTpl = s.message_template && s.message_template.trim()
       if (!variationsJson && !hasTpl) return res.status(400).json({ error: 'Toda etapa precisa de mensagem ou variações' })
+      const variety = checkStepVariety({ message_template: s.message_template, variations: variationsJson })
+      if (!variety.ok) return res.status(400).json({ error: `Etapa ${i + 1}: ${variety.error}` })
       const stepMode = s.schedule_mode === 'absolute' ? 'absolute' : 'relative'
       let stepScheduledAt = null
       if (finalType === 'sequence' && stepMode === 'absolute') {
@@ -327,6 +339,7 @@ router.put('/:id', requireRole('super_admin', 'gerente'), (req, res) => {
         name = ?, description = ?, instance_id = ?, stop_on_reply = ?, is_active = ?,
         inactivity_stage_id = ?, inactivity_days = ?, inactivity_minutes = ?, inactivity_mode = ?,
         variation_delay_seconds = ?, on_reply_action = ?, on_reply_user_id = ?, on_reply_move_to_stage_id = ?, on_reply_add_tag_id = ?,
+        optout_footer_enabled = ?,
         updated_at = datetime('now')
       WHERE id = ?
     `).run(
@@ -337,6 +350,7 @@ router.put('/:id', requireRole('super_admin', 'gerente'), (req, res) => {
       is_active !== undefined ? (is_active ? 1 : 0) : fu.is_active,
       finalInactivityStage, finalInactivityDays, finalInactivityMinutes, finalInactivityMode,
       finalVariationDelay, onReplyAction, onReplyUserId, onReplyStageId, onReplyTagId,
+      optout_footer_enabled !== undefined ? (optout_footer_enabled ? 1 : 0) : fu.optout_footer_enabled,
       fu.id
     )
 
