@@ -4,6 +4,9 @@ import db from '../db.js'
 import { requireRole } from '../middleware/auth.js'
 import { broadcastSSE } from '../sse.js'
 import { sendViaInstance, checkWhatsAppNumbersBulk } from '../services/leadHandoff.js'
+import { resolveSendInstance, getDefaultSendInstance } from '../services/whatsapp/resolveSendInstance.js'
+import { broadcastFooter, pauseReasonText, NO_SEND_REASONS } from '../services/broadcastRouting.js'
+import { appendOptOutFooter } from '../services/antiban.js'
 
 const router = Router()
 
@@ -30,10 +33,10 @@ router.post('/', requireRole('super_admin', 'gerente'), (req, res) => {
   const { name, message_template, message_variations, media_url, lead_ids, delay_seconds, instance_id, scheduled_at } = req.body
   if (!name || !message_template) return res.status(400).json({ error: 'name e message_template obrigatorios' })
 
-  // Valida instancia (deve existir e pertencer a conta)
-  if (!instance_id) return res.status(400).json({ error: 'Selecione um numero de saida (instancia WhatsApp)' })
-  const instance = db.prepare('SELECT * FROM whatsapp_instances WHERE id = ? AND account_id = ?').get(instance_id, req.accountId)
-  if (!instance) return res.status(400).json({ error: 'Instancia invalida pra esta conta' })
+  // Numero de saida = numero padrao de disparos (spec secao 5). O instance_id do body e ignorado.
+  const sendInst = getDefaultSendInstance(db, req.accountId)
+  if (!sendInst) return res.status(400).json({ error: pauseReasonText('no_send_number') })
+  const instance = sendInst
 
   // Valida minimo de variacoes (principal + N variacoes >= MIN_VARIATIONS mensagens diferentes)
   const variationsArr = Array.isArray(message_variations) ? message_variations.filter(v => v && v.trim()) : []
@@ -63,7 +66,7 @@ router.post('/', requireRole('super_admin', 'gerente'), (req, res) => {
   const result = db.prepare(`
     INSERT INTO broadcasts (account_id, name, message_template, message_variations, delay_seconds, media_url, total_count, created_by, instance_id, status, scheduled_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(req.accountId, name, message_template, variationsJson, delay, media_url || null, lead_ids?.length || 0, req.user.id, instance_id, initialStatus, scheduledAtISO)
+  `).run(req.accountId, name, message_template, variationsJson, delay, media_url || null, lead_ids?.length || 0, req.user.id, instance.id, initialStatus, scheduledAtISO)
 
   // Add recipients (only opted-in leads)
   let skippedNoOptin = 0
@@ -163,17 +166,18 @@ async function runBroadcastLoopInner(broadcastId) {
   if (!broadcast) return
   if (broadcast.status !== 'sending') return // apenas se esta marcado como enviando
 
-  const instance = broadcast.instance_id
-    ? db.prepare('SELECT * FROM whatsapp_instances WHERE id = ?').get(broadcast.instance_id)
-    : null
-
-  if (!instance || instance.status !== 'connected') {
-    // Pausa: sem instancia ou desconectada
-    const reason = !instance ? 'Instancia removida' : `Instancia ${instance.instance_name} desconectada`
+  const resolved = resolveSendInstance(db, { accountId: broadcast.account_id, kind: 'automatico' })
+  if (!resolved.ok) {
+    const reason = pauseReasonText(resolved.reason)
     db.prepare("UPDATE broadcasts SET paused_at = datetime('now'), paused_reason = ? WHERE id = ?").run(reason, broadcastId)
     broadcastSSE(broadcast.account_id, 'broadcast:paused', { id: broadcastId, reason })
     return
   }
+  const instance = resolved.instance
+  if (broadcast.instance_id !== instance.id) {
+    db.prepare('UPDATE broadcasts SET instance_id = ? WHERE id = ?').run(instance.id, broadcastId)
+  }
+  const footer = broadcastFooter(db, broadcast.account_id)
 
   // Marca started_at no primeiro disparo
   if (!broadcast.started_at) {
@@ -231,13 +235,14 @@ async function runBroadcastLoopInner(broadcastId) {
     }
 
     // Re-checa instancia conectada antes de cada envio
-    const liveInstance = db.prepare('SELECT * FROM whatsapp_instances WHERE id = ?').get(broadcast.instance_id)
-    if (!liveInstance || liveInstance.status !== 'connected') {
-      const reason = !liveInstance ? 'Instancia removida' : `Instancia ${liveInstance.instance_name} desconectada`
+    const live = resolveSendInstance(db, { accountId: broadcast.account_id, kind: 'automatico' })
+    if (!live.ok) {
+      const reason = pauseReasonText(live.reason)
       db.prepare("UPDATE broadcasts SET paused_at = datetime('now'), paused_reason = ? WHERE id = ?").run(reason, broadcastId)
       broadcastSSE(broadcast.account_id, 'broadcast:paused', { id: broadcastId, reason })
       return
     }
+    const liveInstance = live.instance
 
     // Pega proximo recipient pendente
     const r = db.prepare("SELECT * FROM broadcast_recipients WHERE broadcast_id = ? AND status = 'pending' ORDER BY id ASC LIMIT 1").get(broadcastId)
@@ -256,9 +261,10 @@ async function runBroadcastLoopInner(broadcastId) {
         .replace(/\{\{cidade\}\}/g, lead?.city || '')
         .replace(/\{\{phone\}\}/g, lead?.phone || '')
         .replace(/\{\{telefone\}\}/g, lead?.phone || '')
+      const finalText = footer ? appendOptOutFooter(text, footer) : text
       // skipValidation=true porque o pre-flight bulk ja rodou antes do while.
       // leadId pra cap por lead/dia.
-      const sendRes = await sendViaInstance(liveInstance, r.phone, text, { skipValidation: true, leadId: r.lead_id })
+      const sendRes = await sendViaInstance(liveInstance, r.phone, finalText, { skipValidation: true, leadId: r.lead_id })
 
       if (sendRes.ok && sendRes.wamsgId) {
         db.prepare("UPDATE broadcast_recipients SET status = 'sent', wa_msg_id = ?, sent_at = datetime('now') WHERE id = ?").run(sendRes.wamsgId, r.id)
@@ -314,9 +320,12 @@ router.post('/:id/send', requireRole('super_admin', 'gerente'), async (req, res)
 
 // Retoma broadcast pausado (usado pelo scheduler quando instancia reconecta)
 export function resumeBroadcastIfPaused(instanceId) {
-  const paused = db.prepare("SELECT * FROM broadcasts WHERE instance_id = ? AND status = 'sending' AND paused_at IS NOT NULL").all(instanceId)
+  const inst = db.prepare('SELECT account_id FROM whatsapp_instances WHERE id = ?').get(instanceId)
+  if (!inst) return
+  const paused = db.prepare(`SELECT * FROM broadcasts WHERE account_id = ? AND status = 'sending' AND paused_at IS NOT NULL
+    AND (instance_id = ? OR paused_reason IN (?, ?))`).all(inst.account_id, instanceId, ...NO_SEND_REASONS)
   for (const b of paused) {
-    console.log(`[Broadcast] Retomando disparo "${b.name}" (id=${b.id}) — instancia ${instanceId} reconectou`)
+    console.log(`[Broadcast] Retomando disparo "${b.name}" (id=${b.id}) — numero ${instanceId} conectou`)
     runBroadcastLoop(b.id).catch(err => console.error('[Broadcast] Resume error:', err))
   }
 }
