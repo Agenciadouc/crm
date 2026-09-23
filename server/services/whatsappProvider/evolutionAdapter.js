@@ -2,6 +2,7 @@
 // espalhadas em leadHandoff.js, messages.js, integrations.js, scheduler.js, etc.
 // Assinaturas identicas ao uzapiAdapter pra o dispatcher poder trocar transparente.
 // NENHUMA mudanca de comportamento vs codigo atual — so muda o LUGAR de onde a chamada sai.
+import fetch from 'node-fetch'
 
 function baseUrl(instance) {
   return String(instance.api_url || '').replace(/\/+$/, '')
