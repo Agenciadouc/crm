@@ -342,24 +342,30 @@ export default function Integrations() {
     setRestarting(null)
   }
 
-  const handleSwitchProvider = async (inst: WhatsAppInstance, target: 'evolution' | 'uzapi') => {
+  const [switchModal, setSwitchModal] = useState<{ inst: WhatsAppInstance; target: 'evolution' | 'uzapi' } | null>(null)
+  const [switching, setSwitching] = useState(false)
+
+  const handleSwitchProvider = (inst: WhatsAppInstance, target: 'evolution' | 'uzapi') => {
     if (!accountId) return
-    const current = inst.provider || 'evolution'
-    const msg = target === 'uzapi'
-      ? `Trocar "${inst.instance_name}" pra uzapi?\n\nIsso vai:\n1) Desconectar o WhatsApp atual (Evolution)\n2) Criar uma session nova na conta uzapi da agencia\n3) Voce vai precisar escanear um QR code novo\n\nMensagens em transito podem se perder por alguns segundos. Continuar?`
-      : `Voltar "${inst.instance_name}" pra Evolution?\n\nIsso vai desconectar do uzapi. Voce precisara reescanear o QR na Evolution.\n\nContinuar?`
-    if (!confirm(msg)) return
+    setSwitchModal({ inst, target })
+  }
+
+  const confirmSwitchProvider = async () => {
+    if (!switchModal || !accountId) return
+    const { inst, target } = switchModal
+    setSwitching(true)
     try {
       const r = await switchWhatsAppProvider(inst.id, accountId, target)
       await load()
+      setSwitchModal(null)
       if (r.needsQr) {
         // Abre o painel de QR automaticamente pra escanear
         setActiveQR(inst.id)
-        alert(`Provider trocado pra ${target}. Escaneie o QR code que abriu.`)
       }
     } catch (e: any) {
       alert(`Erro trocando pra ${target}: ${e.message}`)
     }
+    setSwitching(false)
   }
 
   const [syncing, setSyncing] = useState(false)
@@ -1368,6 +1374,65 @@ function onChange(e) {
           </div>
         </div>
       )}
+
+      {/* Modal: trocar provider (Evolution <-> uzapi) */}
+      {switchModal && (() => {
+        const { inst, target } = switchModal
+        const isToUzapi = target === 'uzapi'
+        const accentColor = isToUzapi ? '#34C759' : '#B47DDB'
+        const accentBg = isToUzapi ? 'rgba(52,199,89,0.12)' : 'rgba(155,89,182,0.12)'
+        return (
+          <div className="modal-overlay" onClick={() => !switching && setSwitchModal(null)}>
+            <div className="modal" style={{ maxWidth: 500 }} onClick={e => e.stopPropagation()}>
+              <h2 style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                <span style={{ fontSize: 22 }}>⇄</span>
+                Trocar provider WhatsApp
+              </h2>
+              <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 14, lineHeight: 1.55 }}>
+                Migrar <strong style={{ color: 'var(--text)' }}>"{inst.instance_name}"</strong> de{' '}
+                <span style={{ padding: '1px 8px', borderRadius: 4, fontSize: 11, fontWeight: 700, background: 'rgba(155,89,182,0.15)', color: '#B47DDB', border: '1px solid rgba(155,89,182,0.35)' }}>
+                  {(inst.provider || 'evolution').toUpperCase()}
+                </span>
+                {' → '}
+                <span style={{ padding: '1px 8px', borderRadius: 4, fontSize: 11, fontWeight: 700, background: accentBg, color: accentColor, border: `1px solid ${accentColor}55` }}>
+                  {target.toUpperCase()}
+                </span>
+              </p>
+
+              <div style={{ background: accentBg, border: `1px solid ${accentColor}33`, borderRadius: 8, padding: '12px 14px', marginBottom: 14 }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: accentColor, marginBottom: 8 }}>O que vai acontecer:</div>
+                <ol style={{ margin: 0, paddingLeft: 18, fontSize: 12, lineHeight: 1.7, color: 'var(--text)' }}>
+                  <li>Desconectar o WhatsApp atual ({(inst.provider || 'evolution') === 'uzapi' ? 'uzapi' : 'Evolution'})</li>
+                  <li>
+                    {isToUzapi
+                      ? 'Criar uma session nova na conta uzapi da agência'
+                      : 'Reativar a sessão Evolution existente'}
+                  </li>
+                  <li>Painel de QR abre pra você escanear com o celular</li>
+                </ol>
+              </div>
+
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4, fontStyle: 'italic' }}>
+                ⚠ Mensagens em trânsito podem se perder por alguns segundos durante a troca.
+              </div>
+
+              <div className="modal-actions" style={{ marginTop: 20 }}>
+                <button className="btn btn-secondary" onClick={() => setSwitchModal(null)} disabled={switching}>
+                  Cancelar
+                </button>
+                <button
+                  className="btn"
+                  disabled={switching}
+                  onClick={confirmSwitchProvider}
+                  style={{ background: accentColor, color: 'white', border: 'none' }}
+                >
+                  {switching ? 'Trocando...' : `Sim, mudar pra ${target}`}
+                </button>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
     </div>
   )
 }
