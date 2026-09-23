@@ -189,7 +189,8 @@ router.post('/whatsapp/:id/connect', allowInstanceOwner, async (req, res) => {
       if (isReallyZombie && !stateCheck.error) {
         console.warn(`[Provider Connect] sessao zumbi confirmada em ${instance.instance_name} (state=${stateCheck.state}) — recriando`)
         try { await provider.deleteInstance(instance, { timeoutMs: 5000 }) } catch {}
-        await new Promise(r => setTimeout(r, 1500))
+        // Evolution v2.3 precisa de ~3s pra completar delete no Baileys+Postgres
+        await new Promise(r => setTimeout(r, 3000))
         const createResult = await (await import('../services/whatsappProvider/index.js')).evolution.createInstance({
           baseUrl: instance.api_url,
           apiKey: instance.api_key,
@@ -197,7 +198,17 @@ router.post('/whatsapp/:id/connect', allowInstanceOwner, async (req, res) => {
         })
         qrcode = createResult.qrcode
         data = createResult.raw
-        console.log(`[Provider Connect] recriada — QR ${qrcode ? 'gerado' : 'ainda nao veio'}`)
+
+        // Se CREATE ainda nao trouxe QR (Baileys inicializando), espera + retry via CONNECT
+        // Ate 3 tentativas com 2s de intervalo (total ~6s adicional)
+        for (let i = 0; !qrcode && i < 3; i++) {
+          await new Promise(r => setTimeout(r, 2000))
+          const retryResult = await provider.connectInstance(instance)
+          qrcode = retryResult.qrcode
+          data = retryResult.raw
+          console.log(`[Provider Connect] retry ${i + 1}/3 — QR ${qrcode ? 'gerado' : 'ainda nao'}`)
+        }
+        console.log(`[Provider Connect] recriada — QR ${qrcode ? 'GERADO ✓' : 'FALHOU apos retries'}`)
       } else {
         console.log(`[Provider Connect] ${instance.instance_name}: nao vou recriar (state=${stateCheck.state}, error=${stateCheck.error || 'none'})`)
       }
@@ -365,7 +376,7 @@ router.post('/whatsapp/:id/qrcode', allowInstanceOwner, async (req, res) => {
       if (isReallyZombie && !stateCheck.error) {
         console.warn(`[Provider Refresh QR] sessao zumbi confirmada em ${instance.instance_name} — recriando`)
         try { await provider.deleteInstance(instance, { timeoutMs: 5000 }) } catch {}
-        await new Promise(r => setTimeout(r, 1500))
+        await new Promise(r => setTimeout(r, 3000))
         const createResult = await (await import('../services/whatsappProvider/index.js')).evolution.createInstance({
           baseUrl: instance.api_url,
           apiKey: instance.api_key,
@@ -373,6 +384,12 @@ router.post('/whatsapp/:id/qrcode', allowInstanceOwner, async (req, res) => {
         })
         qrcode = createResult.qrcode
         data = createResult.raw
+        for (let i = 0; !qrcode && i < 3; i++) {
+          await new Promise(r => setTimeout(r, 2000))
+          const retryResult = await provider.connectInstance(instance)
+          qrcode = retryResult.qrcode
+          data = retryResult.raw
+        }
       }
     }
     if (!qrcode) console.error('[Provider Refresh QR] sem QR — payload:', JSON.stringify(data || {}).slice(0, 300))
