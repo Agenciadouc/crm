@@ -2,6 +2,7 @@ import fetch from 'node-fetch'
 import db from './db.js'
 import { broadcastSSE } from './sse.js'
 import { resumeBroadcastIfPaused, runBroadcastLoop } from './routes/broadcasts.js'
+import { canStartBroadcast } from './services/broadcastRouting.js'
 import { sendFollowUpMessage, resumeFollowUpsIfPaused, resumeFollowUpsIfAttendantNowAssigned } from './services/followUpSender.js'
 import { processInactivityFollowUps } from './services/inactivityScanner.js'
 import { getProvider } from './services/whatsapp/index.js'
@@ -137,10 +138,10 @@ async function processScheduledBroadcasts() {
   `).all()
 
   for (const b of due) {
-    // Confere se a instancia ta conectada — se nao, deixa scheduled mesmo (proximo tick tenta de novo)
-    const instance = db.prepare("SELECT status, instance_name FROM whatsapp_instances WHERE id = ?").get(b.instance_id)
-    if (!instance || instance.status !== 'connected') {
-      console.log(`[Scheduler] Broadcast #${b.id} (${b.name}) — instancia ${instance?.instance_name || b.instance_id} desconectada, aguardando proximo tick`)
+    // Confere se ha numero padrao de disparos conectado pra conta — se nao, deixa scheduled mesmo (proximo tick tenta de novo)
+    const start = canStartBroadcast(db, b.account_id)
+    if (!start.ok) {
+      console.log(`[Scheduler] Broadcast #${b.id} (${b.name}) — ${start.reasonText}, aguardando proximo tick`)
       continue
     }
     console.log(`[Scheduler] Disparando broadcast agendado #${b.id}: ${b.name}`)

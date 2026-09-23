@@ -5,7 +5,7 @@ import { requireRole } from '../middleware/auth.js'
 import { broadcastSSE } from '../sse.js'
 import { sendViaInstance, checkWhatsAppNumbersBulk } from '../services/leadHandoff.js'
 import { resolveSendInstance, getDefaultSendInstance } from '../services/whatsapp/resolveSendInstance.js'
-import { broadcastFooter, pauseReasonText, NO_SEND_REASONS } from '../services/broadcastRouting.js'
+import { broadcastFooter, pauseReasonText, NO_SEND_REASONS, canStartBroadcast } from '../services/broadcastRouting.js'
 import { appendOptOutFooter } from '../services/antiban.js'
 
 const router = Router()
@@ -304,10 +304,8 @@ router.post('/:id/send', requireRole('super_admin', 'gerente'), async (req, res)
   if (broadcast.status === 'scheduled') return res.status(400).json({ error: 'Disparo esta agendado. Cancele o agendamento antes de enviar agora.' })
   if (broadcast.status !== 'draft') return res.status(400).json({ error: 'Disparo ja enviado ou em andamento' })
 
-  if (!broadcast.instance_id) return res.status(400).json({ error: 'Disparo sem instancia configurada' })
-  const instance = db.prepare('SELECT * FROM whatsapp_instances WHERE id = ?').get(broadcast.instance_id)
-  if (!instance) return res.status(400).json({ error: 'Instancia nao encontrada' })
-  if (instance.status !== 'connected') return res.status(400).json({ error: `Instancia "${instance.instance_name}" nao esta conectada. Conecte antes de enviar.` })
+  const start = canStartBroadcast(db, broadcast.account_id)
+  if (!start.ok) return res.status(400).json({ error: start.reasonText })
 
   db.prepare("UPDATE broadcasts SET status = 'sending', started_at = datetime('now') WHERE id = ?").run(broadcast.id)
 
@@ -373,6 +371,8 @@ router.post('/:id/resume', requireRole('super_admin', 'gerente'), async (req, re
   const broadcast = db.prepare('SELECT * FROM broadcasts WHERE id = ?').get(req.params.id)
   if (!broadcast) return res.status(404).json({ error: 'Disparo nao encontrado' })
   if (broadcast.status !== 'sending') return res.status(400).json({ error: 'Disparo nao esta em andamento' })
+  const start = canStartBroadcast(db, broadcast.account_id)
+  if (!start.ok) return res.status(400).json({ error: start.reasonText })
   // Limpa pause se houver
   db.prepare("UPDATE broadcasts SET paused_at = NULL, paused_reason = NULL WHERE id = ?").run(broadcast.id)
   res.json({ ok: true })
