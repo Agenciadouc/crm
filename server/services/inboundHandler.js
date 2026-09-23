@@ -3,7 +3,7 @@
 // sem alterar a logica. Dependencias injetadas para teste.
 
 import { numberRole } from './whatsapp/numberRole.js'
-import { isOptOutMessage, DEFAULT_OPTOUT_CONFIRM } from './antiban.js'
+import { isOptOutMessage, isOptedOut, DEFAULT_OPTOUT_CONFIRM } from './antiban.js'
 
 const STATUS_RANK = { sent: 1, delivered: 2, read: 3 }
 
@@ -472,8 +472,10 @@ export function createInboundHandler(deps) {
 
     // Descadastro pela palavra SAIR (spec 10.2): marca, cancela follow-ups e confirma so no numero de disparo.
     if (optingOut && lead) {
+      // Ja descadastrado antes deste SAIR: remarca (idempotente) mas nao confirma de novo.
+      const alreadyOptedOut = isOptedOut(db.prepare('SELECT opted_in_at, opted_out_at FROM leads WHERE id = ?').get(lead.id))
       markOptOut(lead, content)
-      if (isSendNumber) {
+      if (isSendNumber && !alreadyOptedOut) {
         const acc = db.prepare('SELECT optout_confirm_text FROM accounts WHERE id = ?').get(account.id)
         const text = (acc && acc.optout_confirm_text && acc.optout_confirm_text.trim()) || DEFAULT_OPTOUT_CONFIRM
         Promise.resolve(sendOptOutConfirmation({ lead, instance: waInstance, account, text }))

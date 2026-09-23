@@ -367,3 +367,27 @@ test('confirmacao usa o texto da conta quando existe', async () => {
   receive(textPayload('parar'))
   assert.equal(calls.optout[0][0].text, 'Ok, removido.')
 })
+
+test('SAIR repetido no numero de disparo: nao manda a confirmacao de novo', async () => {
+  const { db, seed, calls, receive } = setup()
+  asSendNumber(db, seed)
+  receive(P.textConversation)
+  await tick()
+  // opt-in da criacao do lead no passado (mesmo segundo do SAIR empataria o carimbo)
+  db.prepare("UPDATE leads SET opted_in_at = datetime('now', '-1 day')").run()
+  receive(textPayload('SAIR'))
+  assert.equal(calls.optout.length, 1)
+  const r = receive(textPayload('sair'))
+  assert.deepEqual(r, { ok: true, optedOut: true })
+  assert.ok(leads(db)[0].opted_out_at)
+  assert.equal(calls.optout.length, 1)
+})
+
+test('SAIR depois de voltar a aceitar mensagens (opt-in mais novo): confirma de novo', async () => {
+  const { db, seed, calls, receive } = setup()
+  asSendNumber(db, seed)
+  receive(textPayload('SAIR'))
+  db.prepare("UPDATE leads SET opted_out_at = datetime('now', '-1 day'), opted_in_at = datetime('now', '-1 hour')").run()
+  receive(textPayload('SAIR'))
+  assert.equal(calls.optout.length, 2)
+})
