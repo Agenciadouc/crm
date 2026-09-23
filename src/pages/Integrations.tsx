@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, type ReactNode } from 'react'
+import { useState, useEffect, useCallback, useRef, type ReactNode } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useAccount } from '../context/AccountContext'
 import { useAuth } from '../context/AuthContext'
@@ -9,6 +9,7 @@ import WhatsAppCard from './integrations/WhatsAppCard'
 import LeadIntakeCard from './integrations/LeadIntakeCard'
 import MetaCard from './integrations/MetaCard'
 import AiCard from './integrations/AiCard'
+import { whatsappTileStatus, createLatestRequest } from '../lib/integrationsStatus.js'
 
 type CardId = 'whatsapp' | 'leads' | 'meta' | 'ia'
 
@@ -26,14 +27,33 @@ export default function Integrations() {
   const [users, setUsers] = useState<UserType[]>([])
   const [account, setAccount] = useState<Account | null>(null)
   const [loading, setLoading] = useState(true)
+  // A lista de numeros falhou: a tela avisa em vez de dizer "Nenhum número".
+  const [instancesError, setInstancesError] = useState(false)
+
+  // So a ultima requisicao da conta atual vale: resposta atrasada de outra conta e ignorada.
+  const accountIdRef = useRef(accountId)
+  accountIdRef.current = accountId
+  const instancesRequest = useRef(createLatestRequest<number | null | undefined>())
 
   const reloadInstances = useCallback(async () => {
     if (!accountId) return
-    try { setInstances(await fetchWhatsAppInstances(accountId)) } catch {}
+    const ticket = instancesRequest.current.begin(accountId)
+    try {
+      const list = await fetchWhatsAppInstances(accountId)
+      if (!instancesRequest.current.isLatest(ticket, accountIdRef.current)) return
+      setInstances(list)
+      setInstancesError(false)
+    } catch (e: any) {
+      if (!instancesRequest.current.isLatest(ticket, accountIdRef.current)) return
+      console.error('[Integrações] falha ao carregar os números:', e?.message || e)
+      setInstancesError(true)
+    }
   }, [accountId])
 
   useEffect(() => {
     if (!accountId) return
+    setInstances([])
+    setInstancesError(false)
     setLoading(true)
     Promise.all([
       reloadInstances(),
@@ -47,10 +67,9 @@ export default function Integrations() {
   if (!accountId) return <div className="loading-container"><span>Selecione uma conta</span></div>
   if (loading) return <div className="loading-container"><div className="spinner" /></div>
 
-  const connected = instances.filter(i => i.status === 'connected').length
   const hasAiKey = !!(account?.anthropic_api_key || account?.ai_key_source === 'dros')
   const tiles: CardTile[] = [
-    { id: 'whatsapp', label: 'WhatsApp', icon: <Smartphone size={16} />, status: instances.length === 0 ? 'Nenhum número' : `${connected} de ${instances.length} conectado(s)`, visible: true },
+    { id: 'whatsapp', label: 'WhatsApp', icon: <Smartphone size={16} />, status: whatsappTileStatus({ instances, loadError: instancesError }), visible: true },
     { id: 'leads', label: 'Entrada de leads', icon: <GitBranch size={16} />, status: 'Formulários e Google Planilhas', visible: isGerenteOuAdmin && !!account },
     { id: 'meta', label: 'Meta', icon: <Activity size={16} />, status: account?.meta_capi_enabled ? 'Pixel ativo' : 'Pixel desligado', visible: isGerenteOuAdmin && !!account },
     { id: 'ia', label: 'IA', icon: <Bot size={16} />, status: hasAiKey ? 'Chave configurada' : 'Falta a chave', visible: isGerenteOuAdmin && !!account && !!account.ai_agents_enabled },
@@ -89,7 +108,7 @@ export default function Integrations() {
       )}
 
       {current === 'whatsapp' && (
-        <WhatsAppCard accountId={accountId} instances={instances} setInstances={setInstances} reload={reloadInstances} users={users} />
+        <WhatsAppCard accountId={accountId} instances={instances} setInstances={setInstances} reload={reloadInstances} users={users} loadError={instancesError} />
       )}
       {current === 'leads' && account && (
         <LeadIntakeCard accountId={accountId} account={account} instances={instances} users={users} />
