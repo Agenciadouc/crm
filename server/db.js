@@ -1280,6 +1280,24 @@ db.exec(`
     FOREIGN KEY (instance_id) REFERENCES whatsapp_instances(id) ON DELETE CASCADE,
     FOREIGN KEY (attendant_id) REFERENCES users(id) ON DELETE SET NULL
   );
+
+  -- Vendas registradas por lead. Cada lead pode ter varias vendas (recompras, upsells, etc).
+  -- Pergunta valor cada vez que move pra stage is_conversion=1. Total agregado alimenta o ROI mensal.
+  CREATE TABLE IF NOT EXISTS lead_sales (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id    INTEGER NOT NULL,
+    lead_id       INTEGER NOT NULL,
+    value         REAL NOT NULL,
+    sale_date     TEXT NOT NULL DEFAULT (datetime('now')),
+    notes         TEXT,
+    created_by    INTEGER,
+    created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE,
+    FOREIGN KEY (lead_id) REFERENCES leads(id) ON DELETE CASCADE,
+    FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_lead_sales_lead ON lead_sales(lead_id, sale_date DESC);
+  CREATE INDEX IF NOT EXISTS idx_lead_sales_account_date ON lead_sales(account_id, sale_date DESC);
 `)
 
 // Instância padrão pra leads de formulário

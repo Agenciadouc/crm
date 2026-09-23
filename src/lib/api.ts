@@ -1087,3 +1087,12 @@ export const markProposalSent = (leadId: number, accountId: number) =>
   apiFetch(`/api/dashboard/leads/${leadId}/mark-proposal-sent?account_id=${accountId}`, { method: 'POST' })
 export const updateLeadValue = (leadId: number, accountId: number, value: number) =>
   apiFetch(`/api/dashboard/leads/${leadId}/value?account_id=${accountId}`, { method: 'PUT', body: JSON.stringify({ value_estimated: value }) })
+
+// Vendas multiplas por lead
+export interface LeadSale { id: number; lead_id: number; value: number; sale_date: string; notes: string | null; created_by: number | null; created_by_name: string | null; created_at: string }
+export const fetchLeadSales = (leadId: number, accountId: number) =>
+  apiFetch<{ sales: LeadSale[]; total: number }>(`/api/leads/${leadId}/sales?account_id=${accountId}`)
+export const addLeadSale = (leadId: number, accountId: number, data: { value: number; sale_date?: string; notes?: string }) =>
+  apiFetch<{ sale: LeadSale; total: number }>(`/api/leads/${leadId}/sales?account_id=${accountId}`, { method: 'POST', body: JSON.stringify(data) })
+export const deleteLeadSale = (leadId: number, saleId: number, accountId: number) =>
+  apiFetch<{ ok: boolean; total: number }>(`/api/leads/${leadId}/sales/${saleId}?account_id=${accountId}`, { method: 'DELETE' })
