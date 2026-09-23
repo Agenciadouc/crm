@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createTestDb, seedBasic, insertLead } from './helpers/db.js'
-import { planFollowUpSend, resumeAutomaticFollowUps, needsVarietyCheck } from '../server/services/followUpRouting.js'
+import { planFollowUpSend, resumeAutomaticFollowUps, needsVarietyCheck, stillSendable } from '../server/services/followUpRouting.js'
 
 function uzapi(db, accountId, status = 'connected') {
   const id = db.prepare(`INSERT INTO whatsapp_instances (account_id, instance_name, api_url, api_key, status, provider)
@@ -91,4 +91,48 @@ test('resumeAutomaticFollowUps: pausa antiga (legado instance_offline) nao volta
   const st = (id) => db.prepare('SELECT status FROM lead_follow_ups WHERE id = ?').get(id).status
   assert.equal(st(velho), 'paused'); assert.equal(st(velhoRemovido), 'paused')
   assert.equal(st(recente), 'active'); assert.equal(st(semNumeroVelho), 'active'); assert.equal(st(offlineVelho), 'active')
+})
+
+function lfuSetup() {
+  const db = createTestDb(); const s = seedBasic(db)
+  const uz = uzapi(db, s.account.id)
+  const lead = insertLead(db, { account_id: s.account.id, funnel_id: s.funnelId, stage_id: s.stage1, phone: '1' })
+  const lfuId = db.prepare("INSERT INTO lead_follow_ups (lead_id, follow_up_id, current_step_id, status) VALUES (?, 1, 7, 'active')").run(lead.id).lastInsertRowid
+  return { db, s, uz, lead, lfuId }
+}
+
+test('stillSendable: nada mudou durante a espera -> pode enviar pelo numero padrao', () => {
+  const { db, uz, lfuId } = lfuSetup()
+  const r = stillSendable(db, { leadFollowUpId: lfuId, stepId: 7 })
+  assert.equal(r.ok, true); assert.equal(r.instance.id, uz.id)
+})
+
+test('stillSendable: follow-up cancelado (lead respondeu) durante a espera -> nao envia', () => {
+  const { db, lfuId } = lfuSetup()
+  db.prepare("UPDATE lead_follow_ups SET status = 'cancelled', current_step_id = NULL WHERE id = ?").run(lfuId)
+  assert.deepEqual(stillSendable(db, { leadFollowUpId: lfuId, stepId: 7 }), { ok: false, reason: 'lfu_changed' })
+})
+
+test('stillSendable: step mudou durante a espera -> nao envia', () => {
+  const { db, lfuId } = lfuSetup()
+  db.prepare('UPDATE lead_follow_ups SET current_step_id = 8 WHERE id = ?').run(lfuId)
+  assert.deepEqual(stillSendable(db, { leadFollowUpId: lfuId, stepId: 7 }), { ok: false, reason: 'lfu_changed' })
+})
+
+test('stillSendable: lead mandou SAIR durante a espera -> nao envia', () => {
+  const { db, lead, lfuId } = lfuSetup()
+  db.prepare("UPDATE leads SET opted_out_at = datetime('now') WHERE id = ?").run(lead.id)
+  assert.deepEqual(stillSendable(db, { leadFollowUpId: lfuId, stepId: 7 }), { ok: false, reason: 'lead_opted_out' })
+})
+
+test('stillSendable: numero padrao caiu durante a espera -> nao envia', () => {
+  const { db, uz, lfuId } = lfuSetup()
+  db.prepare("UPDATE whatsapp_instances SET status = 'disconnected' WHERE id = ?").run(uz.id)
+  assert.deepEqual(stillSendable(db, { leadFollowUpId: lfuId, stepId: 7 }), { ok: false, reason: 'send_number_offline' })
+})
+
+test('stillSendable: follow-up apagado -> nao envia', () => {
+  const { db, lfuId } = lfuSetup()
+  db.prepare('DELETE FROM lead_follow_ups WHERE id = ?').run(lfuId)
+  assert.deepEqual(stillSendable(db, { leadFollowUpId: lfuId, stepId: 7 }), { ok: false, reason: 'lfu_changed' })
 })

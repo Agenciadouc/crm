@@ -31,6 +31,19 @@ export function planFollowUpSend(db, { lead, followUp }) {
   return { ok: true, instance: r.instance, footer }
 }
 
+// Re-checagem depois da espera da catraca anti-ban (5-20s por envio; com fila grande, minutos):
+// o lead pode ter respondido/mandado SAIR, o follow-up pode ter sido cancelado/avancado e o numero
+// padrao pode ter caido. Devolve o numero de saida atual, ou o motivo para nao enviar agora.
+export function stillSendable(db, { leadFollowUpId, stepId }) {
+  const lfu = db.prepare('SELECT status, current_step_id, lead_id FROM lead_follow_ups WHERE id = ?').get(leadFollowUpId)
+  if (!lfu || lfu.status !== 'active' || lfu.current_step_id !== stepId) return { ok: false, reason: 'lfu_changed' }
+  const lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(lfu.lead_id)
+  if (!lead) return { ok: false, reason: 'lead_missing' }
+  const plan = planFollowUpSend(db, { lead, followUp: null })
+  if (!plan.ok) return { ok: false, reason: plan.pause }
+  return { ok: true, instance: plan.instance }
+}
+
 export function resumeAutomaticFollowUps(db, accountId, { includeSendFailures = false } = {}) {
   const r = resolveSendInstance(db, { accountId, kind: 'automatico' })
   if (!r.ok) return 0

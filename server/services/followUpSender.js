@@ -7,7 +7,7 @@ import db from '../db.js'
 import { broadcastSSE } from '../sse.js'
 import { sendViaInstance } from './leadHandoff.js'
 import { applyMessageVars, templateNeedsAttendant, buildVarContext } from '../lib/messageVars.js'
-import { planFollowUpSend, resumeAutomaticFollowUps } from './followUpRouting.js'
+import { planFollowUpSend, resumeAutomaticFollowUps, stillSendable } from './followUpRouting.js'
 import { appendOptOutFooter } from './antiban.js'
 import { followUpPacer } from './whatsapp/sendPacer.js'
 import { getDefaultSendInstance } from './whatsapp/resolveSendInstance.js'
@@ -125,6 +125,14 @@ export async function sendFollowUpMessage(leadFollowUpId) {
     // Catraca anti-ban (spec 10.7): 5 a 20s entre follow-ups no mesmo numero.
     await followUpPacer.wait(instance.id)
 
+    // A espera pode levar minutos com fila: re-checa follow-up, descadastro e numero padrao antes de enviar.
+    // Se algo mudou, nao envia nem mexe no status (o proximo tick decide: pausa, cancela ou reenvia).
+    const again = stillSendable(db, { leadFollowUpId, stepId: step.id })
+    if (!again.ok || again.instance.id !== instance.id) {
+      console.log(`[FollowUp] Envio abortado apos a espera lead=${lead.id} — ${again.ok ? 'numero padrao trocou' : again.reason}`)
+      return
+    }
+
     // Envia via sendViaInstance (pre-flight de numero + cache + tratamento consistente)
     const sendRes = await sendViaInstance(instance, lead.phone, text, { leadId: lead.id })
     if (!sendRes.ok) {
@@ -160,7 +168,7 @@ export async function sendFollowUpMessage(leadFollowUpId) {
           last_executed_step_id = ?,
           next_run_at = NULL,
           updated_at = datetime('now')
-        WHERE id = ?
+        WHERE id = ? AND status = 'active'
       `).run(step.id, leadFollowUpId)
       try { broadcastSSE(lead.account_id, 'followup:completed', { lead_id: lead.id, follow_up_id: followUp.id }) } catch {}
       try { broadcastSSE(lead.account_id, 'lead:message', { lead_id: lead.id }) } catch {}
@@ -186,7 +194,7 @@ export async function sendFollowUpMessage(leadFollowUpId) {
           last_executed_step_id = ?,
           next_run_at = ?,
           updated_at = datetime('now')
-        WHERE id = ?
+        WHERE id = ? AND status = 'active'
       `).run(nextStep.id, step.id, nextRun, leadFollowUpId)
       try { broadcastSSE(lead.account_id, 'followup:advanced', { lead_id: lead.id, follow_up_id: followUp.id, current_step_id: nextStep.id }) } catch {}
     } else {
@@ -199,7 +207,7 @@ export async function sendFollowUpMessage(leadFollowUpId) {
           last_executed_step_id = ?,
           next_run_at = NULL,
           updated_at = datetime('now')
-        WHERE id = ?
+        WHERE id = ? AND status = 'active'
       `).run(step.id, leadFollowUpId)
       try { broadcastSSE(lead.account_id, 'followup:completed', { lead_id: lead.id, follow_up_id: followUp.id }) } catch {}
     }
