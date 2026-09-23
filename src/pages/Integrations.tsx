@@ -599,17 +599,23 @@ export default function Integrations() {
               {!routingEdit.isNew && <p style={{ fontSize: 10, color: '#6B6580', marginTop: 4 }}>Tag não editável — pra trocar de tag, remove e cria nova.</p>}
             </div>
             <div className="form-group">
-              <label>Instância WhatsApp *</label>
+              <label>Número WhatsApp *</label>
               <select
                 className="select"
                 value={routingEdit.instance_id}
                 onChange={e => setRoutingEdit(p => p ? { ...p, instance_id: e.target.value } : null)}
               >
                 <option value="">— escolha —</option>
-                {instances.filter(i => i.status === 'connected').map(i => (
-                  <option key={i.id} value={i.id}>{i.instance_name}{i.phone_number ? ` (${i.phone_number})` : ''}</option>
+                {instances.map(i => (
+                  <option key={i.id} value={i.id}>
+                    {i.instance_name}{i.phone_number ? ` (${i.phone_number})` : ''}
+                    {i.status !== 'connected' ? ' — desconectado' : ''}
+                  </option>
                 ))}
               </select>
+              <p style={{ fontSize: 10, color: '#6B6580', marginTop: 4 }}>
+                Status de conexão não importa aqui — a regra é lógica de banco. O número precisa só existir na conta.
+              </p>
             </div>
             <div className="form-group">
               <label>Atendente padrão (opcional)</label>
@@ -686,8 +692,7 @@ export default function Integrations() {
 
             {/* Regras de atribuição por tag (leads da planilha) */}
             {(() => {
-              const connectedInsts = instances.filter(i => i.status === 'connected')
-              const canCreate = routingTags.length > 0 && connectedInsts.length > 0
+              const canCreate = routingTags.length > 0 && instances.length > 0
               return (
                 <div style={{ background: 'var(--bg-hover)', padding: 12, borderRadius: 8, marginBottom: 12, border: '1px solid var(--border-subtle)' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8, flexWrap: 'wrap', gap: 8 }}>
@@ -705,7 +710,7 @@ export default function Integrations() {
                       className="btn btn-primary btn-sm"
                       onClick={() => startRoutingEdit()}
                       disabled={!canCreate}
-                      title={connectedInsts.length === 0 ? 'Conecte pelo menos 1 número WhatsApp acima primeiro' : (routingTags.length === 0 ? 'Crie tags primeiro' : '')}
+                      title={instances.length === 0 ? 'Crie pelo menos 1 número WhatsApp acima primeiro' : (routingTags.length === 0 ? 'Crie tags primeiro' : '')}
                     >
                       <Plus size={12} /> Nova regra
                     </button>
@@ -715,9 +720,9 @@ export default function Integrations() {
                     <p style={{ fontSize: 11, color: 'var(--text-muted)', textAlign: 'center', padding: 12, margin: 0 }}>
                       Crie tags primeiro em <strong>Tags</strong> antes de configurar regras.
                     </p>
-                  ) : connectedInsts.length === 0 ? (
+                  ) : instances.length === 0 ? (
                     <p style={{ fontSize: 11, color: 'var(--text-muted)', textAlign: 'center', padding: 12, margin: 0 }}>
-                      Conecte pelo menos 1 número WhatsApp acima pra poder criar regras.
+                      Crie pelo menos 1 número WhatsApp acima pra poder criar regras.
                     </p>
                   ) : routingMappings.length === 0 ? (
                     <div style={{ fontSize: 11, color: 'var(--text-muted)', textAlign: 'center', padding: 12, background: 'rgba(255,255,255,0.02)', borderRadius: 6 }}>
