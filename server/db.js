@@ -373,8 +373,6 @@ try {
   `).run()
   if (r.changes > 0) console.log(`[db] migration: warmup_until set for ${r.changes} recent instances`)
 } catch (e) { console.warn('[db] warmup backfill:', e.message) }
-// Provedor de WhatsApp por numero: provider (default evolution), provider_config e webhook_token por instancia
-migrateWhatsappProviderSchema(db)
 // leads: instance_id to track which WhatsApp number received this lead
 addColumnIfNotExists('leads', 'instance_id', 'INTEGER REFERENCES whatsapp_instances(id) ON DELETE SET NULL')
 // accounts: Evolution API credentials (shared across all instances)
@@ -1118,6 +1116,9 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_lead_followups_pending ON lead_follow_ups(status, next_run_at);
   CREATE INDEX IF NOT EXISTS idx_lead_followups_by_lead ON lead_follow_ups(lead_id, status);
 `)
+// Provedor de WhatsApp por numero: provider (default evolution), provider_config e webhook_token por instancia
+// Chamada movida para apos follow_ups e leads existirem (spec 2026-09-23 task 1)
+migrateWhatsappProviderSchema(db)
 // whatsapp_instances.lead_intake_mode: 'open' (atual, qualquer msg cria lead) | 'restricted' (so processa leads ja cadastrados no CRM)
 addColumnIfNotExists('whatsapp_instances', 'lead_intake_mode', "TEXT NOT NULL DEFAULT 'open'")
 // leads.is_blocked: bloqueio total (lead some do CRM e mensagens futuras sao silenciosamente ignoradas pelo webhook)

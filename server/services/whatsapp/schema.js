@@ -55,4 +55,12 @@ export function migrateWhatsappProviderSchema(db) {
       UPDATE whatsapp_instances SET webhook_token = lower(hex(randomblob(16))) WHERE id = NEW.id;
     END;
   `)
+  // Papeis dos numeros + anti-ban (spec 2026-09-23). opted_out_at ja existe em producao (db.js); aqui garante nos testes.
+  addColumnIfNotExists(db, 'accounts', 'default_send_instance_id', 'INTEGER')
+  addColumnIfNotExists(db, 'accounts', 'optout_footer_enabled', 'INTEGER NOT NULL DEFAULT 1')
+  addColumnIfNotExists(db, 'accounts', 'optout_footer_text', 'TEXT')
+  addColumnIfNotExists(db, 'accounts', 'optout_confirm_text', 'TEXT')
+  addColumnIfNotExists(db, 'accounts', 'reply_rate_alert_pct', 'INTEGER NOT NULL DEFAULT 10')
+  addColumnIfNotExists(db, 'leads', 'opted_out_at', 'TEXT')
+  addColumnIfNotExists(db, 'follow_ups', 'optout_footer_enabled', 'INTEGER NOT NULL DEFAULT 0')
 }
