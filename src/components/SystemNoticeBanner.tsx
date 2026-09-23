@@ -57,6 +57,17 @@ export default function SystemNoticeBanner() {
     return () => clearTimeout(timer)
   }, [notice])
 
+  // Empurra o body pra baixo enquanto banner esta visivel — evita sobrescrever sidebar/conteudo
+  useEffect(() => {
+    const isVisible = notice && !dismissed
+    if (isVisible) {
+      const prevPaddingTop = document.body.style.paddingTop
+      document.body.style.paddingTop = '68px'
+      document.body.style.transition = 'padding-top 0.3s ease-out'
+      return () => { document.body.style.paddingTop = prevPaddingTop }
+    }
+  }, [notice, dismissed])
+
   if (!notice || dismissed) return null
 
   const config = {
