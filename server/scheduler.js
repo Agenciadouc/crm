@@ -16,6 +16,7 @@ import { aggregateAllAccounts } from './services/attendantMetrics.js'
 import { analyzeAllAccounts } from './services/conversationAnalyzer.js'
 import { generateAllCoachings, isoMonday } from './services/coachingAnalyzer.js'
 import { runAutoRescue } from './services/botAutoRescue.js'
+import { checkReplyRates } from './services/replyRate.js'
 
 // Roda a cada 1min — precisao do agendamento <= 60s. Custo desprezivel (1 SELECT/min).
 const INTERVAL_MS = 60 * 1000
@@ -230,6 +231,11 @@ export async function runNightlyAnalysis() {
     const yesterday = new Date(Date.now() - 86400000)
     const dateStr = yesterday.toISOString().slice(0, 10)
     console.log(`[Nightly] Iniciando agregacao + analise (date=${dateStr})...`)
+
+    try {
+      const low = checkReplyRates(db)
+      if (low.length) console.log(`[ReplyRate] ${low.length} numero(s) de disparo com pouca resposta`)
+    } catch (e) { console.error('[ReplyRate] erro:', e.message) }
 
     // 1. Agrega metricas operacionais (SQL puro, rapido)
     const metricsResult = aggregateAllAccounts(dateStr)
