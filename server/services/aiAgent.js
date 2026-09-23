@@ -18,6 +18,7 @@ import {
 import { createReplySuggestion, getPendingSuggestion } from './aiSuggestions.js'
 import { releaseLeadsFromAgent as releaseHeldLeads } from './agentShutdown.js'
 import { resolveSendInstance } from './whatsapp/resolveSendInstance.js'
+import { agentInstanceBlocker } from './whatsapp/numberRole.js'
 
 // ─── Helpers ──────────────────────────────────────────────────────────
 
@@ -80,6 +81,9 @@ export function findAgentForLead(lead, instanceId, _opts = {}) {
   // 1. Lead pode receber bot?
   if (lead.is_blocked || lead.is_archived || !lead.is_active) return null
 
+  // 1b. Agente so atende numero de disparo (spec secao 6) — vale para resgate automatico e Forcar IA.
+  if (agentInstanceBlocker(db, instanceId)) return null
+
   // 2-3. Lead com humano (handoff anterior ou atendente humano): so agentes copilot/sdr seguem, como Copiloto.
   //      A decisao fica em agentAcceptsLead (copilotMode.js).
   const attendantIsHuman = leadHasHumanAttendant(lead)
@@ -132,6 +136,9 @@ export function diagnoseForceAi(lead, instanceId) {
     }
   }
   if (lead.ai_paused_at) blockers.push('IA pausada nesta conversa (use Retomar IA no Chat)')
+
+  const roleBlocker = agentInstanceBlocker(db, instanceId)
+  if (roleBlocker) blockers.push(roleBlocker)
 
   // Verifica agentes
   const agents = db.prepare("SELECT * FROM ai_agents WHERE account_id = ? AND is_active = 1 ORDER BY id ASC").all(lead.account_id)
@@ -865,7 +872,9 @@ export async function processInboundMessage(lead, msgContent, mediaType, instanc
 // Opt-in por agente (ai_agents.send_welcome_for_sheets_leads). Idempotente via leads.ai_first_msg_sent_at.
 // Fire-and-forget: qualquer erro so loga, nao quebra o webhook que ja respondeu 200.
 
-export async function sendBotWelcomeForSheetsLead(leadId, instanceId) {
+// instanceId (numero do mapeamento da planilha) fica na assinatura por compatibilidade; o envio e a escolha
+// do agente usam o numero padrao de disparos da conta.
+export async function sendBotWelcomeForSheetsLead(leadId, instanceId) { // eslint-disable-line no-unused-vars
   try {
     const lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(leadId)
     if (!lead) return
@@ -885,8 +894,17 @@ export async function sendBotWelcomeForSheetsLead(leadId, instanceId) {
       return
     }
 
+    // Boas-vindas e envio automatico: sai pelo numero padrao de disparos (spec secao 5) — e o agente
+    // e escolhido por ESSE numero, nao pelo numero do mapeamento da planilha (que pode ser de leitura).
+    const resolved = resolveSendInstance(db, { accountId: lead.account_id, kind: 'automatico' })
+    if (!resolved.ok) {
+      console.log(`[Bot Welcome] SKIP lead=${leadId} — ${resolved.reason}`)
+      return
+    }
+    const inst = resolved.instance
+
     // FILTRO 4: agente elegivel (reusa toda logica de findAgentForLead)
-    const agent = findAgentForLead(lead, instanceId)
+    const agent = findAgentForLead(lead, inst.id)
     if (!agent) {
       console.log(`[Bot Welcome] SKIP lead=${leadId} — sem agente elegivel`)
       return
@@ -909,14 +927,6 @@ export async function sendBotWelcomeForSheetsLead(leadId, instanceId) {
       console.log(`[Bot Welcome] SKIP lead=${leadId} agent=${agent.id} — limite mensal atingido`)
       return
     }
-
-    // Boas-vindas e envio automatico: sai pelo numero padrao de disparos (spec secao 5).
-    const resolved = resolveSendInstance(db, { accountId: lead.account_id, kind: 'automatico' })
-    if (!resolved.ok) {
-      console.log(`[Bot Welcome] SKIP lead=${leadId} — ${resolved.reason}`)
-      return
-    }
-    const inst = resolved.instance
 
     // Tags do lead pra contextualizar
     const tags = db.prepare(`

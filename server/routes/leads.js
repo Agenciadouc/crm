@@ -7,6 +7,7 @@ import { notifyAndOpenLead } from '../services/leadHandoff.js'
 import { getProvider } from '../services/whatsapp/index.js'
 import { sendBotWelcomeForSheetsLead, processInboundMessage, diagnoseForceAi } from '../services/aiAgent.js'
 import { canAtendenteAccessLead } from '../services/leadAccess.js'
+import { SEND_PROVIDERS } from '../services/whatsapp/numberRole.js'
 
 const router = Router()
 
@@ -829,13 +830,14 @@ router.post('/:id/force-ai-respond', requireRole('super_admin'), async (req, res
     const inst = db.prepare(`
       SELECT wi.id FROM whatsapp_instances wi
       WHERE wi.account_id = ? AND wi.status = 'connected'
+        AND wi.provider IN (${SEND_PROVIDERS.map(() => '?').join(', ')})
         AND EXISTS (
           SELECT 1 FROM ai_agent_instances aai
           JOIN ai_agents ag ON ag.id = aai.agent_id
           WHERE aai.instance_id = wi.id AND ag.is_active = 1 AND ag.account_id = wi.account_id
         )
       ORDER BY wi.id LIMIT 1
-    `).get(lead.account_id)
+    `).get(lead.account_id, ...SEND_PROVIDERS)
     instanceId = inst?.id || null
   }
   if (!instanceId) return res.status(400).json({ error: 'Nenhuma instancia disponivel pra essa conta' })

@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { numberRole, isSendRole, SEND_PROVIDERS } from '../server/services/whatsapp/numberRole.js'
-import { createTestDb } from './helpers/db.js'
+import { numberRole, isSendRole, SEND_PROVIDERS, agentInstanceBlocker, READ_NUMBER_AGENT_BLOCKER } from '../server/services/whatsapp/numberRole.js'
+import { createTestDb, seedBasic } from './helpers/db.js'
 
 test('papel pelo provedor', () => {
   assert.equal(numberRole({ provider: 'evolution' }), 'leitura')
@@ -28,4 +28,17 @@ test('migracao cria as colunas novas (idempotente)', () => {
   const row = db.prepare('SELECT optout_footer_enabled, reply_rate_alert_pct FROM accounts WHERE id = ?').get(acc)
   assert.equal(row.optout_footer_enabled, 1)
   assert.equal(row.reply_rate_alert_pct, 10)
+})
+
+test('agentInstanceBlocker: agente so atende numero de disparo', () => {
+  const db = createTestDb(); const s = seedBasic(db) // s.instance = Evolution (leitura)
+  assert.equal(agentInstanceBlocker(db, s.instance.id), READ_NUMBER_AGENT_BLOCKER)
+  assert.equal(READ_NUMBER_AGENT_BLOCKER, 'Número de leitura: o agente só atende números de disparo')
+  const uz = db.prepare(`INSERT INTO whatsapp_instances (account_id, instance_name, api_url, api_key, status, provider)
+    VALUES (?, 'disp', 'http://x', 'K', 'connected', 'uzapi')`).run(s.account.id).lastInsertRowid
+  assert.equal(agentInstanceBlocker(db, uz), null)
+  db.prepare("UPDATE whatsapp_instances SET provider = 'cloud_api' WHERE id = ?").run(uz)
+  assert.equal(agentInstanceBlocker(db, uz), null)
+  assert.equal(agentInstanceBlocker(db, 9999), 'Número de WhatsApp não encontrado')
+  assert.equal(agentInstanceBlocker(db, null), null) // sem numero: sem filtro de numero (como antes)
 })
