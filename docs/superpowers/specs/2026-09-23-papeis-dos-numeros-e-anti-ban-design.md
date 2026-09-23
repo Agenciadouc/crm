@@ -42,7 +42,7 @@ Muitos clientes têm um celular só e nenhum outro vendedor. O papel continua vi
 
 Função pura `numberRole(instance)` em `server/services/whatsapp/numberRole.js`:
 - `provider` vazio ou `evolution` → `'leitura'`
-- `uzapi` ou `oficial` → `'disparo'`
+- `uzapi` ou `cloud_api` (API Oficial) → `'disparo'`
 - qualquer outro → `'leitura'` (lado seguro)
 
 ## 4. Número padrão de disparos
@@ -50,7 +50,7 @@ Função pura `numberRole(instance)` em `server/services/whatsapp/numberRole.js`
 - Nova coluna `accounts.default_send_instance_id` (INTEGER, pode ser NULL).
 - Quando um número de disparo **conecta** e a conta não tem padrão (ou o padrão foi removido), ele vira o padrão automaticamente.
 - Ao **remover** o número padrão: se houver outro número de disparo na conta, o de menor id vira padrão; senão fica NULL.
-- Em Integrações, o card do número padrão mostra o selo **"Padrão de disparos"**. Outros números de disparo mostram o botão **"Tornar padrão"** (rota `PUT /api/whatsapp/default-send-instance`, só admin/gerente).
+- Em Integrações, o card do número padrão mostra o selo **"Padrão de disparos"**. Outros números de disparo mostram o botão **"Tornar padrão"** (rota `PUT /api/integrations/whatsapp/default-send-instance`, só admin/gerente).
 
 ## 5. Escolhedor de número de saída
 
@@ -96,11 +96,11 @@ Assim, qualquer caminho esquecido falha de forma segura em vez de sair pela Evol
 
 - **Follow-ups:** pausam com `paused_reason = 'no_send_number'`. Quando um número vira padrão ou reconecta, retomam (estende `resumeFollowUpsIfPaused` para buscar por conta, não mais por `follow_ups.instance_id`).
 - **Disparos:** não iniciam e ficam pausados com `paused_reason = 'no_send_number'`; retomam do mesmo jeito (`resumeBroadcastIfPaused`).
-- **Aviso na tela** (Disparos, Cadências e Follow-ups, Integrações). Rota `GET /api/whatsapp/send-number-status` devolve `{ ok, instance, reason }`, e o texto depende do caso:
+- **Aviso na tela** (Disparos, Cadências e Follow-ups, Integrações). Rota `GET /api/integrations/whatsapp/send-number-status` devolve `{ ok, instance, reason }`, e o texto depende do caso:
   - conta **nunca teve** número de disparo (`reason: 'no_send_number'`): aviso neutro "Envios automáticos desligados — conecte UzAPI ou Oficial para liberar";
   - número padrão **caiu** (`reason: 'send_number_offline'`): alerta "O número de disparos está desconectado — os envios automáticos estão parados".
 
-**API Oficial:** `numberRole` já trata `oficial` como disparo. Conector, templates aprovados pela Meta (criação e acompanhamento pelo CRM, sem abrir telas da Meta), Embedded Signup, Tech Provider e coexistência ficam no projeto da Oficial, junto com o Motor de Custo.
+**API Oficial:** `numberRole` já trata `cloud_api` (Oficial) como disparo. Conector, templates aprovados pela Meta (criação e acompanhamento pelo CRM, sem abrir telas da Meta), Embedded Signup, Tech Provider e coexistência ficam no projeto da Oficial, junto com o Motor de Custo.
 
 ## 10. Regras anti-banimento
 
@@ -148,7 +148,7 @@ Ao salvar um passo de follow-up: exige **2 ou mais variações** ou uma variáve
 ## 12. Testes
 
 Com `better-sqlite3 :memory:`, no padrão dos testes de hoje:
-- `numberRole`: evolution/vazio/desconhecido → leitura; uzapi/oficial → disparo.
+- `numberRole`: evolution/vazio/desconhecido → leitura; uzapi/cloud_api → disparo.
 - `resolveSendInstance`: manual → número da conversa; automático → padrão; padrão desconectado ou de leitura → `no_send_number`.
 - Número padrão: primeiro número de disparo conectado vira padrão; remover o padrão promove outro ou deixa NULL.
 - Trava: automático com lead em número de leitura é recusado; manual passa; sem lead passa.
