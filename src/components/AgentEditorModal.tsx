@@ -69,6 +69,10 @@ export default function AgentEditorModal({ agentId, accountId, initialTab, onClo
   const [tab, setTab] = useState<Tab>(initialTab || 'geral')
   const [openingInterview, setOpeningInterview] = useState(false)
   const [loading, setLoading] = useState(!isNew)
+  // Instancias (pra filtrar por isSendProvider ao salvar) carregam em paralelo ao agente;
+  // sem essa trava, `loading` vira false quando fetchAgent resolve mas `instances` ainda esta [],
+  // e o filtro de instance_ids no save (abaixo) descartaria numeros de disparo validos.
+  const [instancesLoading, setInstancesLoading] = useState(true)
   const [saving, setSaving] = useState(false)
 
   // Form
@@ -135,7 +139,7 @@ export default function AgentEditorModal({ agentId, accountId, initialTab, onClo
       fetchTags(accountId),
     ]).then(([i, f, u, t]) => {
       setInstances(i); setFunnels(f); setUsers(u.filter(x => x.is_active && !(x as any).is_bot)); setTags(t)
-    })
+    }).finally(() => setInstancesLoading(false))
 
     if (!isNew && typeof agentId === 'number') {
       fetchAgent(agentId, accountId).then(a => {
@@ -219,7 +223,12 @@ export default function AgentEditorModal({ agentId, accountId, initialTab, onClo
         monthly_token_limit: monthlyTokenLimit,
         stage_ids: stageIds,
         // So reenvia numeros de disparo — numero de leitura que sobrou de config antiga cai fora aqui.
-        instance_ids: instanceIds.filter(id => isSendProvider(instances.find(i => i.id === id)?.provider)),
+        // Mantem ids que nao aparecem em `instances` (lista pode nao ter carregado ainda por algum motivo)
+        // pra nao apagar numeros de disparo validos por engano; só descarta os que SABEMOS ser leitura.
+        instance_ids: instanceIds.filter(id => {
+          const inst = instances.find(i => i.id === id)
+          return !inst || isSendProvider(inst.provider)
+        }),
         handoff_rules: Object.values(handoffRules).filter(r => r),
       }
       let savedAgentId: number
@@ -310,7 +319,7 @@ export default function AgentEditorModal({ agentId, accountId, initialTab, onClo
     }))
   }
 
-  if (loading) return (
+  if (loading || instancesLoading) return (
     <div className="modal-overlay">
       <div className="modal" style={{ maxWidth: 500 }}>
         <div className="loading-container"><div className="spinner" /></div>

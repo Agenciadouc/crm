@@ -155,7 +155,7 @@ export default function Messages() {
 
   const resetForm = () => {
     setShowNew(false); setStep(1); setNewName(''); setNewTemplate('')
-    setNewVariations(['', '']); setNewDelay(DEFAULT_DELAY)
+    setNewVariations(['', '']); setNewDelay(DEFAULT_DELAY); setSendOk(false)
     setScheduleEnabled(false); setScheduledAt('')
     setSelectedLeads([]); setLeadSearch(''); setFilterTags([]); setFilterStages([])
     setCloneNotice(null)

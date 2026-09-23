@@ -3,10 +3,10 @@ import { useNavigate } from 'react-router-dom'
 import { useAccount } from '../context/AccountContext'
 import {
   fetchFollowUps, createFollowUp, updateFollowUp, deleteFollowUp,
-  fetchWhatsAppInstances, fetchFunnels, fetchUsers, fetchTags,
+  fetchFunnels, fetchUsers, fetchTags,
   fetchAvailableGlobalTemplates, applyGlobalFollowUpHere, fetchAgents,
   fetchSendNumberStatus, type SendNumberStatus,
-  type FollowUp, type FollowUpStep, type WhatsAppInstance, type Funnel, type User, type Tag,
+  type FollowUp, type FollowUpStep, type Funnel, type User, type Tag,
   type GlobalFollowUpAvailable,
 } from '../lib/api'
 import { Zap, Plus, Edit3, Trash2, MessageSquare, Clock, Smartphone, Trash, Calendar, Activity, Layers, Download, ChevronDown, ChevronUp, Bot, AlertTriangle } from 'lucide-react'
@@ -66,7 +66,6 @@ export default function FollowUps({ embedded = false }: { embedded?: boolean } =
   const [agentNames, setAgentNames] = useState<Record<number, string>>({})
   const [activeAgentIds, setActiveAgentIds] = useState<Set<number>>(new Set())
   const [followUps, setFollowUps] = useState<FollowUp[]>([])
-  const [instances, setInstances] = useState<WhatsAppInstance[]>([])
   const [funnels, setFunnels] = useState<Funnel[]>([])
   const [users, setUsers] = useState<User[]>([])
   const [tags, setTags] = useState<Tag[]>([])
@@ -103,15 +102,13 @@ export default function FollowUps({ embedded = false }: { embedded?: boolean } =
     setLoading(true)
     Promise.all([
       fetchFollowUps(accountId),
-      fetchWhatsAppInstances(accountId),
       fetchFunnels(accountId),
       fetchUsers(accountId),
       fetchTags(accountId),
       fetchAvailableGlobalTemplates(accountId).then(d => d.follow_ups).catch(() => []),
       fetchAgents(accountId).then(d => d.agents).catch(() => []),
-    ]).then(([fus, insts, fns, usrs, tgs, globs, agents]) => {
+    ]).then(([fus, fns, usrs, tgs, globs, agents]) => {
       setFollowUps(fus)
-      setInstances(insts)
       setFunnels(fns)
       setUsers(usrs.filter(u => u.is_active === 1))
       setTags(tgs)
