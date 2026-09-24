@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { MapPin } from 'lucide-react'
+import { MapPin, X, ChevronUp } from 'lucide-react'
 import { fetchLeadCities, fetchLeadStates, type CityOption, type StateOption } from '../lib/api'
 import { parseGeo, encodeGeo, geoLabel } from '../lib/geoFilter.js'
 
@@ -37,18 +37,42 @@ export default function CityFilter({ accountId, value, onChange }: Props) {
   const [states, setStates] = useState<StateOption[]>([])
   const [semEstado, setSemEstado] = useState(0)
   const [cities, setCities] = useState<CityOption[]>([])
+  // Fechado: so o botao "Mais filtros..." (pedido do dono, 24/09/2026); aberto: Estado + Cidade
+  const [open, setOpen] = useState(false)
   const { uf, city } = parseGeo(value)
 
+  // As listas so carregam quando o filtro e aberto
   useEffect(() => {
-    if (!accountId) { setStates([]); return }
+    if (!accountId || !open) return
     fetchLeadStates(accountId).then(d => { setStates(d.states || []); setSemEstado(d.sem_estado || 0) }).catch(() => setStates([]))
-  }, [accountId])
+  }, [accountId, open])
 
   // Com estado escolhido, a lista de cidades mostra so as dele
   useEffect(() => {
-    if (!accountId) { setCities([]); return }
+    if (!accountId || !open) return
     fetchLeadCities(accountId, uf || null).then(setCities).catch(() => setCities([]))
-  }, [accountId, uf])
+  }, [accountId, uf, open])
+
+  if (!open) {
+    return (
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+        <button
+          type="button"
+          className={`btn btn-sm ${value ? 'btn-primary' : 'btn-secondary'}`}
+          onClick={() => setOpen(true)}
+          title="Filtrar por estado ou cidade do lead"
+          style={{ whiteSpace: 'nowrap' }}
+        >
+          <MapPin size={12} /> {value ? geoLabel(value) : 'Mais filtros...'}
+        </button>
+        {value && (
+          <button type="button" className="btn btn-secondary btn-sm" onClick={() => onChange('')} title="Limpar estado/cidade" aria-label="Limpar estado/cidade" style={{ padding: '4px 6px' }}>
+            <X size={12} />
+          </button>
+        )}
+      </span>
+    )
+  }
 
   const totalStates = states.reduce((s, o) => s + o.count, 0) + semEstado
   const totalCities = cities.reduce((s, o) => s + o.count, 0)
@@ -76,6 +100,9 @@ export default function CityFilter({ accountId, value, onChange }: Props) {
           </option>
         ))}
       </select>
+      <button type="button" className="btn btn-secondary btn-sm" onClick={() => setOpen(false)} title="Fechar filtros" aria-label="Fechar filtros" style={{ padding: '4px 6px' }}>
+        <ChevronUp size={12} />
+      </button>
     </span>
   )
 }
