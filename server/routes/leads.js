@@ -8,6 +8,7 @@ import { getProvider } from '../services/whatsapp/index.js'
 import { sendBotWelcomeForSheetsLead, processInboundMessage, diagnoseForceAi } from '../services/aiAgent.js'
 import { canAtendenteAccessLead } from '../services/leadAccess.js'
 import { SEND_PROVIDERS } from '../services/whatsapp/numberRole.js'
+import { resolveCity, cityKey } from '../services/city.js'
 
 const router = Router()
 
@@ -94,7 +95,8 @@ router.get('/', (req, res) => {
   }
   if (funnel_id) { where.push('l.funnel_id = ?'); params.push(funnel_id) }
   if (source) { where.push('l.source = ?'); params.push(source) }
-  if (city) { where.push('l.city LIKE ?'); params.push(`%${city}%`) }
+  // Cidade escolhida no filtro: compara sem acento/maiuscula (city_key registrada em db.js)
+  if (city) { where.push('city_key(l.city) = ?'); params.push(cityKey(city)) }
   if (search) { where.push("(l.name LIKE ? OR l.phone LIKE ? OR l.email LIKE ?)"); params.push(`%${search}%`, `%${search}%`, `%${search}%`) }
   if (date_from) { where.push('l.created_at >= ?'); params.push(date_from) }
   if (date_to) { where.push('l.created_at <= ?'); params.push(date_to + ' 23:59:59') }
@@ -203,7 +205,7 @@ router.post('/', (req, res) => {
   const result = db.prepare(`
     INSERT INTO leads (account_id, funnel_id, stage_id, attendant_id, instance_id, name, phone, email, city, source, source_detail, notes, empresa, cpf_cnpj, instagram, trabalha_anuncio, investimento_anuncios, opted_in_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
-  `).run(req.accountId, fid, firstStage.id, attendant_id || null, instance_id || null, name, phone, email, city, source || 'manual', source_detail, notes, empresa || null, cpf_cnpj || null, instagram || null, trabalha_anuncio ? 1 : 0, investimento_anuncios || null)
+  `).run(req.accountId, fid, firstStage.id, attendant_id || null, instance_id || null, name, phone, email, resolveCity(db, req.accountId, city), source || 'manual', source_detail, notes, empresa || null, cpf_cnpj || null, instagram || null, trabalha_anuncio ? 1 : 0, investimento_anuncios || null)
 
   // Log stage history
   const histRes = db.prepare('INSERT INTO stage_history (lead_id, to_stage_id, trigger_type, triggered_by) VALUES (?, ?, ?, ?)').run(
@@ -506,7 +508,7 @@ router.put('/:id', (req, res) => {
   if (name !== undefined) { sets.push('name = ?'); params.push(name) }
   if (phone !== undefined) { sets.push('phone = ?'); params.push(phone) }
   if (email !== undefined) { sets.push('email = ?'); params.push(email) }
-  if (city !== undefined) { sets.push('city = ?'); params.push(city) }
+  if (city !== undefined) { sets.push('city = ?'); params.push(resolveCity(db, lead.account_id, city)) }
   if (notes !== undefined) { sets.push('notes = ?'); params.push(notes) }
   if (custom_fields !== undefined) { sets.push('custom_fields = ?'); params.push(JSON.stringify(custom_fields)) }
   if (empresa !== undefined) { sets.push('empresa = ?'); params.push(empresa || null) }

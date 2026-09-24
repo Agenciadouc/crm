@@ -1,10 +1,12 @@
 // Banco SQLite em memoria para testes. NAO importa server/db.js (ele abre o banco real).
 import Database from 'better-sqlite3'
+import { registerCityFunctions } from '../../server/services/city.js'
 import { applyCopilotSchema } from '../../server/services/copilotSchema.js'
 import { applyAgentBriefingSchema } from '../../server/services/agentBriefingSchema.js'
 
 export function createTestDb() {
   const db = new Database(':memory:')
+  registerCityFunctions(db)
   db.pragma('foreign_keys = ON')
   db.exec(`
     CREATE TABLE accounts (

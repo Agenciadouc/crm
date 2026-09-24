@@ -1,8 +1,10 @@
 import Database from 'better-sqlite3'
+import { registerCityFunctions } from '../../server/services/city.js'
 import { migrateWhatsappProviderSchema } from '../../server/services/whatsapp/schema.js'
 
 export function createTestDb({ migrate = true } = {}) {
   const db = new Database(':memory:')
+  registerCityFunctions(db)
   db.exec(`
     CREATE TABLE accounts (
       id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, slug TEXT NOT NULL UNIQUE,

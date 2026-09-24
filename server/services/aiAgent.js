@@ -19,6 +19,7 @@ import { createReplySuggestion, getPendingSuggestion } from './aiSuggestions.js'
 import { releaseLeadsFromAgent as releaseHeldLeads } from './agentShutdown.js'
 import { resolveSendInstance } from './whatsapp/resolveSendInstance.js'
 import { agentInstanceBlocker, agentServesInstance, numberRole } from './whatsapp/numberRole.js'
+import { resolveCity } from './city.js'
 
 // ─── Helpers ──────────────────────────────────────────────────────────
 
@@ -460,7 +461,8 @@ async function executeTool(toolUse, agent, lead, instanceId, availableTags, avai
     } else if (name === 'update_lead_info') {
       const allowed = ['name', 'email', 'city', 'empresa', 'instagram']
       if (allowed.includes(input.field) && input.value) {
-        db.prepare(`UPDATE leads SET ${input.field} = ? WHERE id = ?`).run(String(input.value).substring(0, 200), lead.id)
+        const value = input.field === 'city' ? resolveCity(db, lead.account_id, String(input.value).substring(0, 200)) : String(input.value).substring(0, 200)
+        db.prepare(`UPDATE leads SET ${input.field} = ? WHERE id = ?`).run(value, lead.id)
         console.log(`[AI Agent] update_lead_info lead=${lead.id} ${input.field}="${input.value}"`)
       }
     } else if (name === 'add_tag') {

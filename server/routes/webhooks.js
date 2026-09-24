@@ -6,6 +6,7 @@ import { triggerCapiForStageChange } from '../services/metaCapi.js'
 import { sendBotWelcomeForSheetsLead } from '../services/aiAgent.js'
 import { notifyAndOpenLead } from '../services/leadHandoff.js'
 import { getProvider } from '../services/whatsapp/index.js'
+import { resolveCity } from '../services/city.js'
 import { resolveInstanceByToken, resolveLegacyEvolutionInstance, processWebhook, webhookErrorStatus } from '../services/whatsapp/webhookFlow.js'
 import { createInstanceManager } from '../services/whatsapp/instanceManager.js'
 import { createEchoResolver } from '../services/whatsapp/uzapiEcho.js'
@@ -122,7 +123,7 @@ router.post('/meta-leads/:accountSlug', async (req, res) => {
             state = COALESCE(state, NULLIF(?, '')),
             zip = COALESCE(zip, NULLIF(?, ''))
           WHERE id = ?
-        `).run(leadgenId, formId, adId, campaignId, email, city, state, zip, lead.id)
+        `).run(leadgenId, formId, adId, campaignId, email, resolveCity(db, account.id, city) || '', state, zip, lead.id)
 
         console.log(`[Meta Lead Form] lead=${lead.id} leadgen_id=${leadgenId} form=${formId} ad=${adId} campaign=${campaignId} isNew=${isNew}`)
 
@@ -186,7 +187,7 @@ router.post('/site/:accountSlug', (req, res) => {
         client_user_agent = COALESCE(client_user_agent, NULLIF(?, ''))
       WHERE id = ?
     `).run(
-      email || '', city || '', state || '', zip || '',
+      email || '', resolveCity(db, account.id, city) || '', state || '', zip || '',
       fbp || '', fbcFinal || '', ctwa_clid || '',
       ad_id || '', campaign_id || '', form_id || '',
       (reqIp && reqIp !== '::1' && reqIp !== '127.0.0.1') ? reqIp : '',
@@ -220,7 +221,7 @@ router.post('/sheets/:accountSlug', (req, res) => {
     const phoneRaw = body.phone || body.phone_number || body.telefone || body.whatsapp || body.celular || ''
     let phone = String(phoneRaw).replace(/^\s*p\s*:\s*/i, '').replace(/[^\d+]/g, '').replace(/^\+/, '')
     const email = body.email || ''
-    const city = body.city || body.cidade || ''
+    const city = resolveCity(db, account.id, body.city || body.cidade || '')
     const empresa = body.empresa || ''
     const cpf_cnpj = body.cpf_cnpj || body.cpf || body.cnpj || ''
     const instagram = body.instagram || ''
