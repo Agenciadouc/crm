@@ -216,7 +216,15 @@ router.post('/whatsapp/:id/connect', allowInstanceOwner, async (req, res) => {
 
     if (!qrcode) console.error('[Provider Connect] sem QR — payload:', JSON.stringify(data || {}).slice(0, 300))
 
-    db.prepare("UPDATE whatsapp_instances SET qr_code = ?, status = 'connecting', updated_at = datetime('now') WHERE id = ?").run(qrcode, instance.id)
+    // Pra uzapi, o QR chega via webhook — nao sobrescreve qr_code com null se
+    // connectInstance nao devolveu. Preserva o que ja esta no BD (pode ter vindo
+    // antes por webhook) e apenas marca status=connecting pra UI mostrar spinner.
+    const isUzapi = (instance.provider || 'evolution') === 'uzapi'
+    if (isUzapi && !qrcode) {
+      db.prepare("UPDATE whatsapp_instances SET status = 'connecting', updated_at = datetime('now') WHERE id = ?").run(instance.id)
+    } else {
+      db.prepare("UPDATE whatsapp_instances SET qr_code = ?, status = 'connecting', updated_at = datetime('now') WHERE id = ?").run(qrcode, instance.id)
+    }
 
     // Re-register webhook em todo connect pra recuperar de resets do lado do provider
     const account = db.prepare('SELECT slug FROM accounts WHERE id = ?').get(instance.account_id)
@@ -271,6 +279,15 @@ router.get('/whatsapp/:id/status', async (req, res) => {
     if (state === 'open' || state === 'connected') status = 'connected'
     else if (state === 'connecting') status = 'connecting'
 
+    // Protecao anti-flapping: se a inst ja tem QR aguardando scan no BD e o
+    // provider ainda retorna 'close' (uzapi retorna close ate autenticar),
+    // manter status='connecting' pra UI nao regredir pro botao Conectar.
+    // Se realmente desconectou (sem QR), aceita disconnected.
+    if (status === 'disconnected' && instance.qr_code) {
+      status = 'connecting'
+      console.log(`[Status] flapping close ignorado (tem QR ativo) — inst=${instance.id}`)
+    }
+
     // Auto-popula phone_number se estiver vazio (executado tambem quando o status check roda — frontend pinga)
     if (status === 'connected' && !instance.phone_number) {
       await syncInstancePhoneIfMissing(instance)
@@ -289,7 +306,11 @@ router.get('/whatsapp/:id/status', async (req, res) => {
     const updated = db.prepare('SELECT * FROM whatsapp_instances WHERE id = ?').get(instance.id)
     res.json({ instance: updated, state })
   } catch (err) {
-    db.prepare("UPDATE whatsapp_instances SET status = 'disconnected' WHERE id = ?").run(instance.id)
+    // So marca disconnected se realmente nao ha QR aguardando. Preserva estado connecting
+    // enquanto o pareamento estiver em andamento (evita voltar pro botao Conectar por timeout).
+    if (!instance.qr_code) {
+      db.prepare("UPDATE whatsapp_instances SET status = 'disconnected' WHERE id = ?").run(instance.id)
+    }
     res.json({ instance: db.prepare('SELECT * FROM whatsapp_instances WHERE id = ?').get(instance.id), error: err.message })
   }
 })
@@ -394,7 +415,13 @@ router.post('/whatsapp/:id/qrcode', allowInstanceOwner, async (req, res) => {
     }
     if (!qrcode) console.error('[Provider Refresh QR] sem QR — payload:', JSON.stringify(data || {}).slice(0, 300))
 
-    db.prepare("UPDATE whatsapp_instances SET qr_code = ?, status = 'connecting', updated_at = datetime('now') WHERE id = ?").run(qrcode, instance.id)
+    // Mesma protecao do /connect: uzapi entrega QR via webhook, nao anula o BD
+    const isUzapi = (instance.provider || 'evolution') === 'uzapi'
+    if (isUzapi && !qrcode) {
+      db.prepare("UPDATE whatsapp_instances SET status = 'connecting', updated_at = datetime('now') WHERE id = ?").run(instance.id)
+    } else {
+      db.prepare("UPDATE whatsapp_instances SET qr_code = ?, status = 'connecting', updated_at = datetime('now') WHERE id = ?").run(qrcode, instance.id)
+    }
     const updated = db.prepare('SELECT * FROM whatsapp_instances WHERE id = ?').get(instance.id)
     res.json({ instance: updated })
   } catch (err) {
