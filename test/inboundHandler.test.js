@@ -301,11 +301,13 @@ test('status com outboundOnly (UzAPI) nao mexe em mensagem RECEBIDA; sem o campo
   assert.equal(st('IN2'), 'read')
 })
 
-test('numero de leitura (Evolution): grava a mensagem mas nao chama o agente', async () => {
+// Dono (24/09/2026): na Evolution a IA roda so como Copiloto (sugestao). Quem filtra o agente e forca
+// o modo sugestao e o agendador (findAgentForLead + resolveEffectiveMode); aqui so entregamos a mensagem.
+test('numero de leitura (Evolution): grava a mensagem e entrega ao agendador (so Copiloto roda la)', async () => {
   const { db, calls, receive } = setup()
   receive(P.textConversation)
   await tick()
-  assert.equal(calls.ai.length, 0)
+  assert.equal(calls.ai.length, 1)
   assert.equal(msgs(db)[0].content, 'Oi, quero saber o preco')
 })
 

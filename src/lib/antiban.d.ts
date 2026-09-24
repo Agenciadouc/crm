@@ -1,4 +1,5 @@
 export function isSendProvider(provider: string | null | undefined): boolean
+export function agentCanUseProvider(mode: string | null | undefined, provider: string | null | undefined): boolean
 export function roleLabel(role: 'leitura' | 'disparo' | string | null | undefined): 'Leitura' | 'Disparo'
 export function sendStatusMessage(reason: string | null | undefined): string | null
 export function lacksQuestion(text: string | null | undefined): boolean

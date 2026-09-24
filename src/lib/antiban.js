@@ -10,6 +10,11 @@ export function isSendProvider(provider) {
   return SEND_PROVIDERS.includes(provider)
 }
 
+// Numero de leitura (Evolution) so aceita agente em modo Copiloto: la a IA so sugere, nunca envia.
+export function agentCanUseProvider(mode, provider) {
+  return isSendProvider(provider) || mode === 'copilot'
+}
+
 export function roleLabel(role) {
   return role === 'disparo' ? 'Disparo' : 'Leitura'
 }

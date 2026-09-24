@@ -484,8 +484,10 @@ export function createInboundHandler(deps) {
     }
 
     // AI Agent: plug fire-and-forget pra bot responder leads inbound (se conta tiver feature)
-    // Skip outbound, sem content, sem lead, ou se ja teve handoff pra humano
-    if (!fromMe && lead && isSendNumber && !optingOut && (content || mediaType === 'audio')) {
+    // Skip outbound, sem content, sem lead, ou se ja teve handoff pra humano.
+    // Numero de leitura tambem entra: la so o agente em modo Copiloto roda, e so sugere (findAgentForLead
+    // + resolveEffectiveMode forcam isso); nada automatico sai pela Evolution.
+    if (!fromMe && lead && !optingOut && (content || mediaType === 'audio')) {
       const freshLead = db.prepare('SELECT * FROM leads WHERE id = ?').get(lead.id)
       setImmediate(() => {
         processInboundMessage(freshLead, content || '', mediaType, waInstance?.id || null)

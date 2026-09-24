@@ -18,7 +18,7 @@ import {
 import { createReplySuggestion, getPendingSuggestion } from './aiSuggestions.js'
 import { releaseLeadsFromAgent as releaseHeldLeads } from './agentShutdown.js'
 import { resolveSendInstance } from './whatsapp/resolveSendInstance.js'
-import { agentInstanceBlocker } from './whatsapp/numberRole.js'
+import { agentInstanceBlocker, agentServesInstance, numberRole } from './whatsapp/numberRole.js'
 
 // ─── Helpers ──────────────────────────────────────────────────────────
 
@@ -82,7 +82,9 @@ export function findAgentForLead(lead, instanceId, _opts = {}) {
   if (lead.is_blocked || lead.is_archived || !lead.is_active) return null
 
   // 1b. Agente so atende numero de disparo (spec secao 6) — vale para resgate automatico e Forcar IA.
-  if (agentInstanceBlocker(db, instanceId)) return null
+  //     Excecao: no numero de leitura so o agente em modo Copiloto (sugere, nunca envia).
+  const instanceRow = instanceId ? db.prepare('SELECT provider FROM whatsapp_instances WHERE id = ?').get(instanceId) : null
+  if (instanceId && !instanceRow) return null
 
   // 2-3. Lead com humano (handoff anterior ou atendente humano): so agentes copilot/sdr seguem, como Copiloto.
   //      A decisao fica em agentAcceptsLead (copilotMode.js).
@@ -100,6 +102,7 @@ export function findAgentForLead(lead, instanceId, _opts = {}) {
       const hasInstance = db.prepare('SELECT 1 FROM ai_agent_instances WHERE agent_id = ? AND instance_id = ?').get(agent.id, instanceId)
       if (!hasInstance) continue
     }
+    if (instanceRow && !agentServesInstance(agent, instanceRow)) continue
     // Filtro tag obrigatoria
     if (agent.required_tag_id && !leadHasTag(lead.id, agent.required_tag_id)) continue
 
@@ -137,7 +140,7 @@ export function diagnoseForceAi(lead, instanceId) {
   }
   if (lead.ai_paused_at) blockers.push('IA pausada nesta conversa (use Retomar IA no Chat)')
 
-  const roleBlocker = agentInstanceBlocker(db, instanceId)
+  const roleBlocker = agentInstanceBlocker(db, instanceId, lead.account_id)
   if (roleBlocker) blockers.push(roleBlocker)
 
   // Verifica agentes
@@ -151,7 +154,12 @@ export function diagnoseForceAi(lead, instanceId) {
   // (sem cair em handoff silencioso por max_messages ou token limit)
   let anyAgentViable = false
   const issuesPerAgent = []
+  const diagInstance = instanceId ? db.prepare('SELECT provider FROM whatsapp_instances WHERE id = ?').get(instanceId) : null
   for (const agent of agents) {
+    if (diagInstance && !agentServesInstance(agent, diagInstance)) {
+      issuesPerAgent.push(`"${agent.name}": número de leitura, só o modo Copiloto atende aqui`)
+      continue
+    }
     const stageOk = !!db.prepare('SELECT 1 FROM ai_agent_stages WHERE agent_id = ? AND stage_id = ?').get(agent.id, lead.stage_id)
     const instanceOk = !instanceId || !!db.prepare('SELECT 1 FROM ai_agent_instances WHERE agent_id = ? AND instance_id = ?').get(agent.id, instanceId)
     const tagOk = !agent.required_tag_id || leadHasTag(lead.id, agent.required_tag_id)
@@ -525,7 +533,10 @@ export async function processInboundMessage(lead, msgContent, mediaType, instanc
     console.log(`[AI Agent DEBUG] agente encontrado: id=${agent.id} name=${agent.name}`)
 
     // 1b. Modo efetivo neste lead (auto | copilot | sdr) e se usa regras de venda + analise + trava
-    const mode = resolveEffectiveMode(agent, lead, leadHasHumanAttendant(lead))
+    //     Numero de leitura (Evolution): so sugere, nunca envia — qualquer que seja o modo.
+    const convInstance = instanceId ? db.prepare('SELECT provider FROM whatsapp_instances WHERE id = ?').get(instanceId) : null
+    const readNumber = !!convInstance && numberRole(convInstance) === 'leitura'
+    const mode = resolveEffectiveMode(agent, lead, leadHasHumanAttendant(lead), readNumber)
     const salesEngine = usesSalesEngine(agent)
     const delivery = deliveryActionForMode(mode)
 

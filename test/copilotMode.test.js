@@ -55,3 +55,10 @@ test('agentAcceptsLead: lead com humano ou ja passado so aceita copilot/sdr', ()
 test('agentAcceptsLead: copilot ignora o modo de ativacao', () => {
   assert.equal(agentAcceptsLead({ mode: 'copilot', activation_mode: 'manual', user_id: 9 }, { attendant_id: null }, false), true)
 })
+
+test('resolveEffectiveMode: numero de leitura forca copilot (nunca envia pela Evolution)', () => {
+  assert.equal(resolveEffectiveMode({ mode: 'auto' }, {}, false, true), 'copilot')
+  assert.equal(resolveEffectiveMode({ mode: 'sdr' }, {}, false, true), 'copilot')
+  assert.equal(resolveEffectiveMode({ mode: 'copilot' }, {}, false, true), 'copilot')
+  assert.equal(resolveEffectiveMode({ mode: 'auto' }, {}, false, false), 'auto')
+})

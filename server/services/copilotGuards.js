@@ -9,6 +9,7 @@
 // Este modulo recebe o db por parametro (nao importa server/db.js) para ser testavel.
 
 import { normalizeAgentMode } from './copilotMode.js'
+import { SEND_PROVIDERS } from './whatsapp/numberRole.js'
 
 // Agente que pode agir sozinho (mandar mensagem ao lead sem o vendedor).
 export function agentSendsWithoutSeller(agent) {
@@ -46,6 +47,17 @@ export function findAutoRescueCandidates(db, { cooldownMin = 25, limit = 100 } =
           AND ag.account_id = l.account_id
           AND ag.is_active = 1
           AND ag.mode = 'copilot'
+      )
+      -- Conversa em numero de leitura (Evolution): la so o Copiloto roda, e ele nao e resgatado.
+      -- Numero da conversa = o da ultima inbound; sem ele, o ultimo numero do lead.
+      AND NOT EXISTS (
+        SELECT 1 FROM whatsapp_instances wi
+        WHERE wi.id = COALESCE(
+            (SELECT m_last.instance_id FROM messages m_last
+              WHERE m_last.lead_id = l.id AND m_last.direction = 'inbound'
+              ORDER BY m_last.id DESC LIMIT 1),
+            l.last_instance_id)
+          AND COALESCE(wi.provider, '') NOT IN (${SEND_PROVIDERS.map(p => `'${p}'`).join(', ')})
       )
       AND EXISTS (
         SELECT 1 FROM messages m_in

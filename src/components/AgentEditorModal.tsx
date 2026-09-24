@@ -10,7 +10,7 @@ import {
   type AgentHandoffRule,
   type WhatsAppInstance, type Funnel, type User, type Tag,
 } from '../lib/api'
-import { isSendProvider } from '../lib/antiban.js'
+import { isSendProvider, agentCanUseProvider } from '../lib/antiban.js'
 import { Bot, X, Save, Send, BookOpen, ArrowRightLeft, DollarSign, Play, AlertCircle, Plus, Trash2, MessageSquare } from 'lucide-react'
 
 const REQUIRED_FIELDS_OPTS = [
@@ -222,12 +222,12 @@ export default function AgentEditorModal({ agentId, accountId, initialTab, onClo
         welcome_extra_instructions: welcomeExtraInstructions.trim() || undefined,
         monthly_token_limit: monthlyTokenLimit,
         stage_ids: stageIds,
-        // So reenvia numeros de disparo — numero de leitura que sobrou de config antiga cai fora aqui.
+        // Numero de leitura so fica se o agente for Copiloto (la ele so sugere) — o resto cai fora aqui.
         // Mantem ids que nao aparecem em `instances` (lista pode nao ter carregado ainda por algum motivo)
         // pra nao apagar numeros de disparo validos por engano; só descarta os que SABEMOS ser leitura.
         instance_ids: instanceIds.filter(id => {
           const inst = instances.find(i => i.id === id)
-          return !inst || isSendProvider(inst.provider)
+          return !inst || agentCanUseProvider(mode, inst.provider)
         }),
         handoff_rules: Object.values(handoffRules).filter(r => r),
       }
@@ -429,13 +429,18 @@ export default function AgentEditorModal({ agentId, accountId, initialTab, onClo
 
             <div className="form-group">
               <label>Números de WhatsApp</label>
-              {instances.some(i => instanceIds.includes(i.id) && !isSendProvider(i.provider)) && (
+              {instances.some(i => instanceIds.includes(i.id) && !agentCanUseProvider(mode, i.provider)) && (
                 <div style={{ fontSize: 11, color: '#FFB300', marginBottom: 6 }}>
-                  Este agente estava ligado a um número de leitura; agora ele só atende números de disparo
+                  Este agente estava ligado a um número de leitura; fora do modo Copiloto ele só atende números de disparo
+                </div>
+              )}
+              {mode === 'copilot' && instances.some(i => !isSendProvider(i.provider)) && (
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 6 }}>
+                  Nos números de leitura o Copiloto só sugere a resposta no Chat — nada é enviado sozinho
                 </div>
               )}
               <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 200, overflowY: 'auto', padding: 8, border: '1px solid var(--border-medium)', borderRadius: 6 }}>
-                {instances.filter(i => isSendProvider(i.provider)).map(i => (
+                {instances.filter(i => agentCanUseProvider(mode, i.provider)).map(i => (
                   <label key={i.id} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, cursor: 'pointer' }}>
                     <input
                       type="checkbox"
@@ -443,9 +448,10 @@ export default function AgentEditorModal({ agentId, accountId, initialTab, onClo
                       onChange={e => setInstanceIds(prev => e.target.checked ? [...prev, i.id] : prev.filter(x => x !== i.id))}
                     />
                     {i.instance_name} {i.status === 'connected' ? '✓' : '✗ (offline)'}
+                    {!isSendProvider(i.provider) && <span style={{ color: 'var(--text-muted)' }}>(leitura — só sugestões)</span>}
                   </label>
                 ))}
-                {instances.filter(i => isSendProvider(i.provider)).length === 0 && (
+                {instances.filter(i => agentCanUseProvider(mode, i.provider)).length === 0 && (
                   <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Conecte um número UzAPI ou Oficial para o agente atender</span>
                 )}
               </div>

@@ -5,7 +5,7 @@
 import db from '../db.js'
 import { processInboundMessage, diagnoseForceAi } from './aiAgent.js'
 import { findAutoRescueCandidates } from './copilotGuards.js'
-import { SEND_PROVIDERS } from './whatsapp/numberRole.js'
+import { SEND_PROVIDERS, numberRole } from './whatsapp/numberRole.js'
 
 const RESCUE_COOLDOWN_MIN = 25       // nao tenta de novo mesmo lead dentro de N min
 const RESCUE_MAX_PER_TICK = 100      // cap por tick — evita rajada se backlog grande
@@ -54,6 +54,9 @@ export async function runAutoRescue() {
         instanceId = inst?.id || null
       }
       if (!instanceId) { skipped++; continue }
+      // Numero de leitura: la so roda o Copiloto, que nao e resgatado (a busca ja filtra; aqui e a trava).
+      const convInst = db.prepare('SELECT provider FROM whatsapp_instances WHERE id = ?').get(instanceId)
+      if (!convInst || numberRole(convInst) !== 'disparo') { skipped++; continue }
 
       // Diagnostico — se ha blockers (etapa errada, tag faltando, instancia nao
       // configurada, etc), pula silenciosamente. Cron e defensivo.

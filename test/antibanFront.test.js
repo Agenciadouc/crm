@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { isSendProvider, roleLabel, sendStatusMessage, lacksQuestion, needsVariety, formatReplyRate } from '../src/lib/antiban.js'
+import { isSendProvider, agentCanUseProvider, roleLabel, sendStatusMessage, lacksQuestion, needsVariety, formatReplyRate } from '../src/lib/antiban.js'
 
 test('provedor de disparo', () => {
   assert.equal(isSendProvider('uzapi'), true)
@@ -35,4 +35,11 @@ test('taxa de resposta para o selo', () => {
   assert.equal(formatReplyRate(null), null)
   assert.equal(formatReplyRate({ reached: 5, replied: 1, rate: null }), null)
   assert.equal(formatReplyRate({ reached: 40, replied: 10, rate: 0.25 }), '25% responderam (7 dias)')
+})
+
+test('agente e numero: leitura (Evolution) so no modo Copiloto', () => {
+  assert.equal(agentCanUseProvider('copilot', 'evolution'), true)
+  assert.equal(agentCanUseProvider('auto', 'evolution'), false)
+  assert.equal(agentCanUseProvider('sdr', 'evolution'), false)
+  for (const m of ['auto', 'copilot', 'sdr']) assert.equal(agentCanUseProvider(m, 'uzapi'), true)
 })

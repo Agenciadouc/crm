@@ -11,6 +11,8 @@ function addAttendanceTables(db) {
     ALTER TABLE leads ADD COLUMN is_archived INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE leads ADD COLUMN is_blocked INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE leads ADD COLUMN last_rescue_attempt_at TEXT;
+    ALTER TABLE leads ADD COLUMN last_instance_id INTEGER;
+    ALTER TABLE whatsapp_instances ADD COLUMN provider TEXT;
     CREATE TABLE IF NOT EXISTS messages (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       lead_id INTEGER NOT NULL,
@@ -139,4 +141,19 @@ test('follow-up: modo desconhecido ou nulo cai no auto (nao trava o legado)', ()
   assert.equal(agentSendsWithoutSeller({ mode: null }), true)
   assert.equal(agentSendsWithoutSeller({ mode: 'sdr' }), true)
   assert.equal(agentSendsWithoutSeller(null), false)
+})
+
+// Numero de leitura (Evolution): la so o Copiloto roda, que nao e resgatado. Sem este filtro esses
+// leads ocupariam o limite de 100 por rodada sem nunca serem processados.
+test('auto-rescue: lead cuja ultima mensagem chegou por numero de leitura nao entra', () => {
+  const s = setup({ mode: 'auto' })
+  const evo = Number(s.db.prepare("INSERT INTO whatsapp_instances (account_id, instance_name, status, provider) VALUES (?, 'evo', 'connected', 'evolution')").run(s.accountId).lastInsertRowid)
+  const uz = Number(s.db.prepare("INSERT INTO whatsapp_instances (account_id, instance_name, status, provider) VALUES (?, 'uz', 'connected', 'uzapi')").run(s.accountId).lastInsertRowid)
+  const inboundOn = (leadId, instId) =>
+    s.db.prepare("INSERT INTO messages (lead_id, account_id, direction, content, instance_id, created_at) VALUES (?, ?, 'inbound', 'oi', ?, '2026-09-15 10:00:00')").run(leadId, s.accountId, instId)
+  const noEvo = s.newLead({ attendant_id: s.userId }); inboundOn(noEvo, evo)
+  const noUz = s.newLead({ attendant_id: s.userId }); inboundOn(noUz, uz)
+  const semInst = s.newLead({ attendant_id: s.userId, last_instance_id: evo }); s.inbound(semInst)
+  const semNada = s.newLead({ attendant_id: s.userId }); s.inbound(semNada)
+  assert.deepEqual(s.ids(), [noUz, semNada])
 })

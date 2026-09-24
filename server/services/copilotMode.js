@@ -9,7 +9,9 @@ export function normalizeAgentMode(value) {
   return AGENT_MODES.includes(value) ? value : 'auto'
 }
 
-export function resolveEffectiveMode(agent, lead, attendantIsHuman = false) {
+// readNumber: conversa num numero de leitura (Evolution) — ali a IA so sugere, em qualquer modo.
+export function resolveEffectiveMode(agent, lead, attendantIsHuman = false, readNumber = false) {
+  if (readNumber) return 'copilot'
   const mode = normalizeAgentMode(agent && agent.mode)
   if (mode === 'copilot') return 'copilot'
   if (mode === 'sdr') {

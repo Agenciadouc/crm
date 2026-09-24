@@ -5,6 +5,7 @@ import db from '../db.js'
 import { broadcastSSE } from '../sse.js'
 import { findAgentForLead, processInboundMessage, leadHasHumanAttendant } from './aiAgent.js'
 import { resolveEffectiveMode } from './copilotMode.js'
+import { numberRole } from './whatsapp/numberRole.js'
 import { createDebouncer } from './leadDebouncer.js'
 import { expirePendingForLead } from './aiSuggestions.js'
 import { transcribeAudio, fetchAudioBuffer } from './deepgramClient.js'
@@ -60,7 +61,10 @@ export function scheduleAiForInbound(lead, content, mediaType, instanceId) {
     }
 
     const agent = findAgentForLead(lead, instanceId)
-    const mode = agent ? resolveEffectiveMode(agent, lead, leadHasHumanAttendant(lead)) : 'auto'
+    // Numero de leitura (Evolution): o agente so roda como Copiloto (bloco + sugestao, nunca envia)
+    const inst = instanceId ? db.prepare('SELECT provider FROM whatsapp_instances WHERE id = ?').get(instanceId) : null
+    const readNumber = !!inst && numberRole(inst) === 'leitura'
+    const mode = agent ? resolveEffectiveMode(agent, lead, leadHasHumanAttendant(lead), readNumber) : 'auto'
     if (mode === 'copilot') {
       // O meta guarda o inicio do bloco: so e criado quando o bloco comeca (prevMeta null)
       // e sobrevive aos reagendamentos das mensagens seguintes.
