@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import Database from 'better-sqlite3'
-import { normalizeCity, cityKey, registerCityFunctions, normalizeExistingCities, cityWhere, resolveCity, leadCityExists } from '../server/services/city.js'
+import { normalizeCity, cityKey, registerCityFunctions, normalizeExistingCities, cityWhere, resolveCity, leadCityExists, hasGeo } from '../server/services/city.js'
 
 test('normalizeCity: tira espacos e ajusta maiusculas; preposicoes em minusculo', () => {
   assert.equal(normalizeCity('  são   paulo '), 'São Paulo')
@@ -79,4 +79,24 @@ test('leadCityExists: filtra tabela ligada ao lead pela cidade', () => {
   const w = leadCityExists('ins.lead_id', 'itajai')
   assert.deepEqual(db.prepare(`SELECT id FROM ins WHERE 1=1${w.sql}`).all(...w.params).map(r => r.id), [1])
   assert.deepEqual(leadCityExists('x', null), { sql: '', params: [] })
+})
+
+test('cityWhere/leadCityExists aceitam estado (uf) e cidade juntos; hasGeo', () => {
+  const db = new Database(':memory:')
+  registerCityFunctions(db)
+  db.exec('CREATE TABLE leads (id INTEGER PRIMARY KEY, city TEXT, uf TEXT); CREATE TABLE ins (id INTEGER PRIMARY KEY, lead_id INTEGER)')
+  db.prepare("INSERT INTO leads (id, city, uf) VALUES (1, 'Bom Jesus', 'RS'), (2, 'Bom Jesus', 'SC'), (3, 'Torres', 'RS')").run()
+  db.prepare('INSERT INTO ins (lead_id) VALUES (1), (2), (3)').run()
+  const ids = (geo) => { const w = cityWhere('l', geo); return db.prepare(`SELECT id FROM leads l WHERE 1=1${w.sql} ORDER BY id`).all(...w.params).map(r => r.id) }
+  assert.deepEqual(ids({ uf: 'rs' }), [1, 3])
+  assert.deepEqual(ids({ city: 'bom jesus' }), [1, 2])
+  assert.deepEqual(ids({ city: 'Bom Jesus', uf: 'SC' }), [2])
+  assert.deepEqual(ids('Torres'), [3]) // texto = so cidade (compativel)
+  assert.deepEqual(ids({ uf: 'X1' }), [1, 2, 3]) // uf invalida e ignorada
+  const e = leadCityExists('ins.lead_id', { uf: 'RS' })
+  assert.deepEqual(db.prepare(`SELECT lead_id FROM ins WHERE 1=1${e.sql} ORDER BY id`).all(...e.params).map(r => r.lead_id), [1, 3])
+  assert.equal(hasGeo({ uf: 'SC' }), true)
+  assert.equal(hasGeo({ city: 'x' }), true)
+  assert.equal(hasGeo({}), false)
+  assert.equal(hasGeo('  '), false)
 })

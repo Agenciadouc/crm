@@ -6,6 +6,7 @@ import { migrateWhatsappProviderSchema } from './services/whatsapp/schema.js'
 import { applyCopilotSchema } from './services/copilotSchema.js'
 import { applyAgentBriefingSchema } from './services/agentBriefingSchema.js'
 import { registerCityFunctions, normalizeExistingCities } from './services/city.js'
+import { applyGeoSchema } from './services/geo.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const dbPath = resolve(__dirname, 'data', 'crm.db')
@@ -1466,6 +1467,11 @@ applyAgentBriefingSchema(db)
 {
   const n = normalizeExistingCities(db)
   if (n > 0) console.log(`[DB] cidades padronizadas: ${n} leads`)
+}
+// Estado (UF) do lead: coluna leads.uf calculada (estado informado > cidade IBGE > DDD) e mantida por gatilho.
+{
+  const n = applyGeoSchema(db)
+  if (n > 0) console.log(`[DB] estado (uf) calculado: ${n} leads`)
 }
 
 export default db

@@ -1,4 +1,5 @@
 import { normalizeProviders, type WhatsAppProviderId } from './whatsappProviders.js'
+import { geoQuery } from './geoFilter.js'
 export type { WhatsAppProviderId }
 
 const getToken = () => localStorage.getItem('dros_crm_token')
@@ -31,6 +32,7 @@ export interface Tag { id: number; account_id: number; name: string; color: stri
 export interface Lead {
   id: number; account_id: number; funnel_id: number; stage_id: number; attendant_id: number | null
   name: string | null; phone: string | null; email: string | null; city: string | null
+  uf?: string | null // estado calculado (estado informado > cidade IBGE > DDD)
   source: string | null; source_detail: string | null; notes: string | null
   wa_remote_jid: string | null; instance_id: number | null; last_instance_id?: number | null; profile_pic_url: string | null; is_active: number; created_at: string; updated_at: string
   is_archived?: number; archived_at?: string | null; has_new_after_archive?: number
@@ -109,7 +111,7 @@ export const updateFunnelFirstMessage = (funnelId: number, accountId: number, te
   apiFetch(`/api/funnels/${funnelId}?account_id=${accountId}`, { method: 'PUT', body: JSON.stringify({ first_msg_template: template }) })
 
 // Leads
-export interface LeadFilters { stage_id?: number | string; attendant_id?: number | string; instance_id?: number | string; funnel_id?: number; source?: string; city?: string; tag?: number | string; search?: string; date_from?: string; date_to?: string; show_archived?: '1' | 'all'; page?: number; limit?: number }
+export interface LeadFilters { stage_id?: number | string; attendant_id?: number | string; instance_id?: number | string; funnel_id?: number; source?: string; city?: string; uf?: string; tag?: number | string; search?: string; date_from?: string; date_to?: string; show_archived?: '1' | 'all'; page?: number; limit?: number }
 export const fetchLeads = (accountId: number, filters: LeadFilters = {}) => {
   const params = new URLSearchParams({ account_id: String(accountId) })
   Object.entries(filters).forEach(([k, v]) => { if (v !== undefined && v !== '') params.set(k, String(v)) })
@@ -252,10 +254,12 @@ export const approveContract = (id: number, email?: string) => apiFetch<{ contra
 export const syncContractHub = (id: number) => apiFetch<{ ok: boolean; client_id?: number; reason?: string; message?: string }>(`/api/contracts/${id}/sync-hub`, { method: 'POST' })
 
 // Dashboard
-// Filtro por cidade dos relatorios: &city= so quando ha cidade escolhida
-const cityQ = (city?: string | null) => city ? `&city=${encodeURIComponent(city)}` : ''
-export interface CityOption { value: string; count: number }
-export const fetchLeadCities = (accountId: number) => apiFetch<{ cities: CityOption[] }>(`/api/leads/cities?account_id=${accountId}`).then(d => d.cities || [])
+// Filtro de estado/cidade dos relatorios: o valor e o texto "UF|Cidade" (ver lib/geoFilter.js)
+const cityQ = (geo?: string | null) => geoQuery(geo)
+export interface CityOption { value: string; uf: string | null; count: number }
+export interface StateOption { value: string; name: string; count: number }
+export const fetchLeadCities = (accountId: number, uf?: string | null) => apiFetch<{ cities: CityOption[] }>(`/api/leads/cities?account_id=${accountId}${uf ? `&uf=${encodeURIComponent(uf)}` : ''}`).then(d => d.cities || [])
+export const fetchLeadStates = (accountId: number) => apiFetch<{ states: StateOption[]; sem_estado: number }>(`/api/leads/states?account_id=${accountId}`)
 export const fetchDashboardStats = (accountId: number, days = 7, city?: string | null) => apiFetch<DashboardStats>(`/api/dashboard/stats?account_id=${accountId}&days=${days}${cityQ(city)}`)
 export const fetchAgentStats = (accountId: number, days = 7, city?: string | null) => apiFetch<{ agents: AgentStat[] }>(`/api/dashboard/agents?account_id=${accountId}&days=${days}${cityQ(city)}`).then(d => d.agents)
 export const fetchGlobalDashboard = () => apiFetch<{ accounts: any[]; totalLeads: number; leadsToday: number }>('/api/dashboard/global')

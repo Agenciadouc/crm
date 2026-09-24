@@ -9,6 +9,7 @@ import { sendBotWelcomeForSheetsLead, processInboundMessage, diagnoseForceAi } f
 import { canAtendenteAccessLead } from '../services/leadAccess.js'
 import { SEND_PROVIDERS } from '../services/whatsapp/numberRole.js'
 import { resolveCity, cityKey, cityWhere } from '../services/city.js'
+import { UF_NAMES } from '../services/geo.js'
 
 const router = Router()
 
@@ -96,7 +97,8 @@ router.get('/', (req, res) => {
   if (funnel_id) { where.push('l.funnel_id = ?'); params.push(funnel_id) }
   if (source) { where.push('l.source = ?'); params.push(source) }
   // Cidade escolhida no filtro: compara sem acento/maiuscula (city_key registrada em db.js)
-  if (city) { where.push('city_key(l.city) = ?'); params.push(cityKey(city)) }
+  // Cidade/estado escolhidos no filtro (?city= sem acento, ?uf= sigla)
+  { const g = cityWhere('l', req.query); if (g.sql) { where.push(g.sql.replace(/^ AND /, '')); params.push(...g.params) } }
   if (search) { where.push("(l.name LIKE ? OR l.phone LIKE ? OR l.email LIKE ?)"); params.push(`%${search}%`, `%${search}%`, `%${search}%`) }
   if (date_from) { where.push('l.created_at >= ?'); params.push(date_from) }
   if (date_to) { where.push('l.created_at <= ?'); params.push(date_to + ' 23:59:59') }
@@ -266,29 +268,46 @@ router.get('/sources', (req, res) => {
   res.json({ sources: rows.map(r => ({ value: r.source, count: r.n })) })
 })
 
-// GET /cities — cidades dos leads da conta com contagem, para o filtro por cidade dos relatorios.
-// Agrupa sem acento/maiuscula; mostra a forma mais usada (a padronizacao ja unifica quase tudo).
+// GET /cities[?uf=SC] — cidades dos leads da conta com contagem e estado, para o filtro dos relatorios.
+// Agrupa sem acento/maiuscula por cidade+estado (cidades homonimas de estados diferentes ficam separadas).
 router.get('/cities', (req, res) => {
   if (!req.accountId) return res.json({ cities: [] })
+  const uf = String(req.query.uf || '').trim().toUpperCase()
+  const byUf = /^[A-Z]{2}$/.test(uf)
   const rows = db.prepare(`
-    SELECT city, city_key(city) AS k, COUNT(*) AS n
+    SELECT city, uf, city_key(city) AS k, COUNT(*) AS n
     FROM leads
-    WHERE account_id = ? AND city IS NOT NULL AND city != '' AND is_blocked = 0
-    GROUP BY city
-  `).all(req.accountId)
-  const byKey = new Map()
+    WHERE account_id = ? AND city IS NOT NULL AND city != '' AND is_blocked = 0${byUf ? ' AND uf = ?' : ''}
+    GROUP BY city, uf
+  `).all(...(byUf ? [req.accountId, uf] : [req.accountId]))
+  const groups = new Map()
   for (const r of rows) {
-    const cur = byKey.get(r.k)
-    if (!cur) byKey.set(r.k, { value: r.city, count: r.n, top: r.n })
+    const g = `${r.k}|${r.uf || ''}`
+    const cur = groups.get(g)
+    if (!cur) groups.set(g, { value: r.city, uf: r.uf || null, count: r.n, top: r.n })
     else {
       cur.count += r.n
       if (r.n > cur.top) { cur.value = r.city; cur.top = r.n }
     }
   }
-  const cities = [...byKey.values()]
-    .map(c => ({ value: c.value, count: c.count }))
+  const cities = [...groups.values()]
+    .map(c => ({ value: c.value, uf: c.uf, count: c.count }))
     .sort((a, b) => (b.count - a.count) || a.value.localeCompare(b.value, 'pt-BR'))
   res.json({ cities })
+})
+
+// GET /states — estados (UF) dos leads da conta com contagem; `sem_estado` = leads sem estado descoberto.
+router.get('/states', (req, res) => {
+  if (!req.accountId) return res.json({ states: [], sem_estado: 0 })
+  const rows = db.prepare(`
+    SELECT uf, COUNT(*) AS n FROM leads
+    WHERE account_id = ? AND is_blocked = 0
+    GROUP BY uf
+  `).all(req.accountId)
+  const states = rows.filter(r => r.uf)
+    .map(r => ({ value: r.uf, name: UF_NAMES[r.uf] || r.uf, count: r.n }))
+    .sort((a, b) => (b.count - a.count) || a.name.localeCompare(b.name, 'pt-BR'))
+  res.json({ states, sem_estado: rows.find(r => !r.uf)?.n || 0 })
 })
 
 // ─── Pedidos de transferencia de lead entre atendentes ─────────────
@@ -787,7 +806,7 @@ router.get('/export', requireRole('super_admin', 'gerente'), (req, res) => {
   if (date_from) { where.push('l.created_at >= ?'); params.push(date_from) }
   if (date_to) { where.push('l.created_at <= ?'); params.push(date_to + ' 23:59:59') }
   if (funnel_id) { where.push('l.funnel_id = ?'); params.push(funnel_id) }
-  if (req.query.city) { where.push('city_key(l.city) = ?'); params.push(cityKey(req.query.city)) }
+  { const g = cityWhere('l', req.query); if (g.sql) { where.push(g.sql.replace(/^ AND /, '')); params.push(...g.params) } }
 
   const leads = db.prepare(`
     SELECT l.name, l.phone, l.email, l.city, l.source, fs.name as etapa, u.name as atendente, l.notes, l.created_at, l.updated_at
@@ -1098,7 +1117,7 @@ router.get('/pipeline/metrics', (req, res) => {
   const { funnel_id } = req.query
   if (!funnel_id) return res.json({ metrics: [] })
   // ?city= opcional (sem acento). O funil precisa ser da conta (antes nao conferia).
-  const cw = cityWhere('l', req.query.city)
+  const cw = cityWhere('l', req.query)
 
   const metrics = db.prepare(`
     SELECT fs.id as stage_id, fs.name, fs.color, fs.position, fs.is_conversion,

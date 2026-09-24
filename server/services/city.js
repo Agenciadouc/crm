@@ -32,11 +32,27 @@ export function registerCityFunctions(db) {
   db.function('city_key', { deterministic: true }, (v) => cityKey(v))
 }
 
-// Pedaco de WHERE para filtrar pela cidade escolhida. `alias` = alias da tabela leads na query.
-export function cityWhere(alias, city) {
-  const key = cityKey(city)
-  if (!key) return { sql: '', params: [] }
-  return { sql: ` AND city_key(${alias}.city) = ?`, params: [key] }
+// Filtro geografico escolhido na tela: texto = so cidade (compativel); objeto = { city, uf } (ex.: req.query).
+function geoOf(geo) {
+  if (geo === null || geo === undefined) return { key: '', uf: '' }
+  if (typeof geo === 'string') return { key: cityKey(geo), uf: '' }
+  const uf = String(geo.uf || '').trim().toUpperCase()
+  return { key: cityKey(geo.city), uf: /^[A-Z]{2}$/.test(uf) ? uf : '' }
+}
+
+export function hasGeo(geo) {
+  const g = geoOf(geo)
+  return !!(g.key || g.uf)
+}
+
+// Pedaco de WHERE para o filtro de cidade/estado. `alias` = alias da tabela leads na query.
+export function cityWhere(alias, geo) {
+  const g = geoOf(geo)
+  let sql = ''
+  const params = []
+  if (g.key) { sql += ` AND city_key(${alias}.city) = ?`; params.push(g.key) }
+  if (g.uf) { sql += ` AND ${alias}.uf = ?`; params.push(g.uf) }
+  return { sql, params }
 }
 
 // Forma de exibicao preferida entre variacoes: a mais usada; empate -> a com acento; depois alfabetica.
@@ -86,10 +102,10 @@ export function resolveCity(db, accountId, value) {
   return row ? row.city : city
 }
 
-// Para tabelas ligadas ao lead por lead_id (insights da IA, erros, alertas): "o lead e dessa cidade".
-// `leadIdExpr` = coluna com o id do lead, ex.: 'ci.lead_id'. Sem cidade: nada.
-export function leadCityExists(leadIdExpr, city) {
-  const key = cityKey(city)
-  if (!key) return { sql: '', params: [] }
-  return { sql: ` AND EXISTS (SELECT 1 FROM leads lc WHERE lc.id = ${leadIdExpr} AND city_key(lc.city) = ?)`, params: [key] }
+// Para tabelas ligadas ao lead por lead_id (insights da IA, erros, alertas): "o lead e dessa cidade/estado".
+// `leadIdExpr` = coluna com o id do lead, ex.: 'ci.lead_id'. Sem filtro: nada.
+export function leadCityExists(leadIdExpr, geo) {
+  const w = cityWhere('lc', geo)
+  if (!w.sql) return { sql: '', params: [] }
+  return { sql: ` AND EXISTS (SELECT 1 FROM leads lc WHERE lc.id = ${leadIdExpr}${w.sql})`, params: w.params }
 }

@@ -20,6 +20,8 @@ import {
 } from '../lib/api'
 import EditTaskModal from '../components/EditTaskModal'
 import FilterDropdown, { type FilterValue } from '../components/FilterDropdown'
+import CityFilter, { useCityFilter } from '../components/CityFilter'
+import { geoParams, leadMatchesGeo } from '../lib/geoFilter.js'
 import {
   MessageCircle, Search, Send, Phone, User, Edit3, Save, X, Plus,
   StickyNote, Tag as TagIcon, GitBranch, Smartphone, ListOrdered, ChevronRight, Check, Clock, Archive, Ban, ListTodo, ChevronDown, ChevronUp, Trash2, Paperclip, FileText, MessageSquarePlus, Copy, Zap, Pause, Play, Bot,
@@ -123,6 +125,7 @@ export default function Chat() {
   const [tagFilter, setTagFilter] = useState<FilterValue[]>([])
   const [attendantFilter, setAttendantFilter] = useState<FilterValue[]>([])
   const [stageFilter, setStageFilter] = useState<FilterValue[]>([])
+  const [geoFilter, setGeoFilter] = useCityFilter(accountId)
   const [showArchived, setShowArchived] = useState(false)
   const [msgText, setMsgText] = useState('')
   const [readyMessages, setReadyMessages] = useState<ReadyMessage[]>([])
@@ -276,9 +279,10 @@ export default function Chat() {
     if (attCsv) filters.attendant_id = attCsv
     const instCsv = toCsv(instanceFilter)
     if (instCsv) filters.instance_id = instCsv
+    Object.assign(filters, geoParams(geoFilter))
 
     fetchLeads(accountId, filters).then(data => setLeads(data.leads))
-  }, [accountId, instanceFilter, tagFilter, stageFilter, attendantFilter, showArchived, debouncedSearch])
+  }, [accountId, instanceFilter, tagFilter, stageFilter, attendantFilter, showArchived, debouncedSearch, geoFilter])
   useEffect(() => { loadLeadsList() }, [loadLeadsList])
 
   // Race token: cada chamada de loadLead recebe um id incremental.
@@ -706,6 +710,8 @@ export default function Chat() {
       const wantedStageIds = stageFilter.filter((v): v is number => typeof v === 'number')
       result = result.filter(l => l.stage_id != null && wantedStageIds.includes(l.stage_id))
     }
+    // Estado/cidade: a lista ja vem filtrada do servidor; aqui cobre lead que chega em tempo real
+    if (geoFilter) result = result.filter(l => leadMatchesGeo(l, geoFilter))
     if (search.trim()) {
       const s = search.toLowerCase()
       result = result.filter(l => (l.name || '').toLowerCase().includes(s) || (l.phone || '').includes(s))
@@ -722,7 +728,7 @@ export default function Chat() {
       const bTs = b.last_inbound_at || b.updated_at || ''
       return bTs.localeCompare(aTs)
     })
-  }, [leads, search, tagFilter, attendantFilter, stageFilter, recentlyReadIds])
+  }, [leads, search, tagFilter, attendantFilter, stageFilter, recentlyReadIds, geoFilter])
 
   // Title da aba: soma total de unread → mostra "(N) Dros CRM"
   useEffect(() => {
@@ -1137,7 +1143,7 @@ export default function Chat() {
       {/* Top bar: instance selector */}
       <div className="chat-header">
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <h1 style={{ fontSize: 20, margin: 0 }}><MessageCircle size={20} style={{ verticalAlign: -4, marginRight: 6 }} />Chat</h1>
+          <h1 style={{ fontSize: 20, margin: 0, whiteSpace: 'nowrap' }}><MessageCircle size={20} style={{ verticalAlign: -4, marginRight: 6 }} />Chat</h1>
           <FilterDropdown
             label="instancias"
             width={200}
@@ -1174,6 +1180,7 @@ export default function Chat() {
               onChange={setAttendantFilter}
             />
           )}
+          <CityFilter accountId={accountId} value={geoFilter} onChange={setGeoFilter} />
           <button onClick={() => setShowArchived(s => !s)} className={`btn btn-sm ${showArchived ? 'btn-primary' : 'btn-secondary'}`} style={{ fontSize: 11 }} title="Mostrar leads arquivados">
             <Archive size={12} /> {showArchived ? 'Ocultar arquivados' : 'Mostrar arquivados'}
           </button>

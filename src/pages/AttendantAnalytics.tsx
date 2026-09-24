@@ -473,7 +473,7 @@ export default function AttendantAnalytics() {
       </div>
 
       <CityNotice city={city}>
-        Conversas analisadas, notas, conversas críticas, alertas e objeções são da cidade. Tempo de resposta (SLA), contagens por atendente e o coaching semanal são guardados da conta inteira e não aparecem por cidade.
+        Conversas analisadas, notas, conversas críticas, alertas e objeções são do local escolhido. Tempo de resposta (SLA), contagens por atendente e o coaching semanal são guardados da conta inteira e não aparecem por cidade ou estado.
       </CityNotice>
 
       {/* Tabs */}

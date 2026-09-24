@@ -100,7 +100,7 @@ export default function Projecao() {
           </div>
 
           <CityNotice city={city}>
-            Leads, etapas, vendas e faturamento são da cidade. Investimento, meta e ticket são da conta inteira: CPL, CAC, ROAS e a projeção dos meses futuros não aparecem por cidade.
+            Leads, etapas, vendas e faturamento são do local escolhido. Investimento, meta e ticket são da conta inteira: CPL, CAC, ROAS e a projeção dos meses futuros não aparecem por cidade ou estado.
           </CityNotice>
 
           <div className="card" style={{ padding: 0, overflow: 'hidden' }}>

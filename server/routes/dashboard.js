@@ -4,7 +4,7 @@ import { requireRole } from '../middleware/auth.js'
 import { analyzeConversationsBatch, getAnalyzeEstimate } from '../services/conversationAnalyzer.js'
 import { aggregateAllAccounts } from '../services/attendantMetrics.js'
 import { generateCoachingForUser, isoMonday } from '../services/coachingAnalyzer.js'
-import { cityWhere, leadCityExists } from '../services/city.js'
+import { cityWhere, leadCityExists, hasGeo } from '../services/city.js'
 
 const router = Router()
 
@@ -36,8 +36,8 @@ router.get('/stats', (req, res) => {
   const prevSinceStr = prevSince.toISOString().slice(0, 19).replace('T', ' ')
 
   // Filtro opcional por cidade do lead (?city=), comparado sem acento
-  const cw = cityWhere('leads', req.query.city)
-  const cwl = cityWhere('l', req.query.city)
+  const cw = cityWhere('leads', req.query)
+  const cwl = cityWhere('l', req.query)
 
   // Total leads in period
   const totalLeads = db.prepare(`SELECT COUNT(*) as c FROM leads WHERE account_id = ? AND is_archived = 0 AND is_blocked = 0 AND created_at >= ?${cw.sql}`).get(req.accountId, sinceStr, ...cw.params).c
@@ -97,8 +97,8 @@ router.get('/agents', requireRole('super_admin', 'gerente'), (req, res) => {
   since.setDate(since.getDate() - d)
   const sinceStr = since.toISOString().slice(0, 19).replace('T', ' ')
 
-  const cw = cityWhere('leads', req.query.city)
-  const cwl = cityWhere('l', req.query.city)
+  const cw = cityWhere('leads', req.query)
+  const cwl = cityWhere('l', req.query)
   const agents = db.prepare(`
     SELECT u.id, u.name, u.is_active,
       (SELECT COUNT(*) FROM leads WHERE attendant_id = u.id AND is_archived = 0 AND is_blocked = 0 AND created_at >= ?${cw.sql}) as leads_period,
@@ -223,8 +223,8 @@ router.get('/attendants', requireRole('super_admin', 'gerente'), requireAnalytic
   if (!req.accountId) return res.status(400).json({ error: 'account_id required' })
   const days = Math.max(1, Math.min(365, parseInt(req.query.days) || 30))
   const sinceDate = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10)
-  const byCity = !!cityWhere('l', req.query.city).sql
-  const lce = leadCityExists('ci.lead_id', req.query.city)
+  const byCity = hasGeo(req.query)
+  const lce = leadCityExists('ci.lead_id', req.query)
 
   // Agrega métricas dos últimos N dias por user
   const rows = db.prepare(`
@@ -467,9 +467,9 @@ router.get('/overview-v2', requireRole('super_admin', 'gerente'), requireAnalyti
   const since = new Date(Date.now() - days * 86400 * 1000).toISOString().slice(0, 19).replace('T', ' ')
 
   // ?city= opcional: so conversas/erros/alertas de leads dessa cidade. SLA vem do agregado sem cidade -> nulo.
-  const byCity = !!cityWhere('l', req.query.city).sql
-  const lci = leadCityExists('conversation_insights.lead_id', req.query.city)
-  const cwl = cityWhere('l', req.query.city)
+  const byCity = hasGeo(req.query)
+  const lci = leadCityExists('conversation_insights.lead_id', req.query)
+  const cwl = cityWhere('l', req.query)
 
   const conversasAnalisadas = db.prepare(`
     SELECT COUNT(*) as n FROM conversation_insights
@@ -523,12 +523,12 @@ router.get('/overview-v2', requireRole('super_admin', 'gerente'), requireAnalyti
 
   const errosCriticos = db.prepare(`
     SELECT COUNT(*) as n FROM conversation_errors
-    WHERE account_id = ? AND created_at >= ? AND gravity = 'critica'${leadCityExists('conversation_errors.lead_id', req.query.city).sql}
-  `).get(req.accountId, since, ...leadCityExists('conversation_errors.lead_id', req.query.city).params)?.n || 0
+    WHERE account_id = ? AND created_at >= ? AND gravity = 'critica'${leadCityExists('conversation_errors.lead_id', req.query).sql}
+  `).get(req.accountId, since, ...leadCityExists('conversation_errors.lead_id', req.query).params)?.n || 0
 
   const alertasOpen = db.prepare(`
-    SELECT COUNT(*) as n FROM analyst_alerts WHERE account_id = ? AND status = 'open'${leadCityExists('analyst_alerts.lead_id', req.query.city).sql}
-  `).get(req.accountId, ...leadCityExists('analyst_alerts.lead_id', req.query.city).params)?.n || 0
+    SELECT COUNT(*) as n FROM analyst_alerts WHERE account_id = ? AND status = 'open'${leadCityExists('analyst_alerts.lead_id', req.query).sql}
+  `).get(req.accountId, ...leadCityExists('analyst_alerts.lead_id', req.query).params)?.n || 0
 
   // Bot taxa de resolução: % de bot_analysis.respondeu_corretamente
   const botRow = db.prepare(`
@@ -576,8 +576,8 @@ router.get('/ranking-v2', requireRole('super_admin', 'gerente'), requireAnalytic
   const days = Math.min(365, Math.max(1, parseInt(req.query.days || '30')))
   const since = new Date(Date.now() - days * 86400 * 1000).toISOString().slice(0, 19).replace('T', ' ')
   const sinceDate = since.slice(0, 10)
-  const byCity = !!cityWhere('l', req.query.city).sql
-  const lce = leadCityExists('ci.lead_id', req.query.city)
+  const byCity = hasGeo(req.query)
+  const lce = leadCityExists('ci.lead_id', req.query)
 
   const rows = db.prepare(`
     SELECT
@@ -603,15 +603,15 @@ router.get('/ranking-v2', requireRole('super_admin', 'gerente'), requireAnalytic
   // Pra cada user: principal_erro e principal_forte
   const principalErrorStmt = db.prepare(`
     SELECT code, COUNT(*) as n FROM conversation_errors
-    WHERE account_id = ? AND attendant_user_id = ? AND created_at >= ?${leadCityExists('conversation_errors.lead_id', req.query.city).sql}
+    WHERE account_id = ? AND attendant_user_id = ? AND created_at >= ?${leadCityExists('conversation_errors.lead_id', req.query).sql}
     GROUP BY code ORDER BY n DESC LIMIT 1
   `)
   const principalStrengthStmt = db.prepare(`
     SELECT code, COUNT(*) as n FROM conversation_strengths
-    WHERE account_id = ? AND attendant_user_id = ? AND created_at >= ?${leadCityExists('conversation_strengths.lead_id', req.query.city).sql}
+    WHERE account_id = ? AND attendant_user_id = ? AND created_at >= ?${leadCityExists('conversation_strengths.lead_id', req.query).sql}
     GROUP BY code ORDER BY n DESC LIMIT 1
   `)
-  const cityParams = leadCityExists('x', req.query.city).params
+  const cityParams = leadCityExists('x', req.query).params
   const enriched = rows.map(r => ({
     ...r,
     score_v2: r.score_v2 ? Math.round(r.score_v2) : null,
@@ -634,7 +634,7 @@ router.get('/critical-conversations', requireRole('super_admin', 'gerente'), req
   const days = Math.min(365, Math.max(1, parseInt(req.query.days || '30')))
   const limit = Math.min(100, Math.max(1, parseInt(req.query.limit || '50')))
   const since = new Date(Date.now() - days * 86400 * 1000).toISOString().slice(0, 19).replace('T', ' ')
-  const cwl = cityWhere('l', req.query.city)
+  const cwl = cityWhere('l', req.query)
 
   const rows = db.prepare(`
     SELECT ci.lead_id, l.name as lead_name, l.phone as lead_phone,
@@ -714,7 +714,7 @@ router.get('/alerts', requireRole('super_admin', 'gerente'), requireAnalyticsEna
   if (!req.accountId) return res.status(400).json({ error: 'account_id required' })
   const status = req.query.status || 'open'
   // Com cidade: so alertas de leads dessa cidade (alerta sem lead fica de fora)
-  const cwl = cityWhere('l', req.query.city)
+  const cwl = cityWhere('l', req.query)
   const rows = db.prepare(`
     SELECT a.*, l.name as lead_name, l.phone as lead_phone, u.name as assigned_to_name
     FROM analyst_alerts a
@@ -806,8 +806,8 @@ router.get('/market-intelligence', requireRole('super_admin', 'gerente'), requir
   const rows = db.prepare(`
     SELECT objecoes_detectadas, motivos_perda, riscos_detectados
     FROM conversation_insights
-    WHERE account_id = ? AND analyzed_at >= ? AND insights_version >= 2${leadCityExists('conversation_insights.lead_id', req.query.city).sql}
-  `).all(req.accountId, since, ...leadCityExists('conversation_insights.lead_id', req.query.city).params)
+    WHERE account_id = ? AND analyzed_at >= ? AND insights_version >= 2${leadCityExists('conversation_insights.lead_id', req.query).sql}
+  `).all(req.accountId, since, ...leadCityExists('conversation_insights.lead_id', req.query).params)
 
   function countArr(field) {
     const counts = new Map()
@@ -902,7 +902,7 @@ function loadMonthConfig(accountId, yearMonth) {
 // Um lead conta como "qualificado" se JA passou por algum stage com is_qualified=1 OU is_meeting=1
 // OU is_conversion=1 (progressao acumulativa). "reuniao" idem em is_meeting/is_conversion. "won" so
 // em is_conversion. Isso reflete o fluxo (mesmo se o lead voltou pra um stage anterior, o marco fica).
-// city (opcional): so leads dessa cidade (comparacao sem acento).
+// city (opcional): cidade (texto) ou { city, uf } — so leads dessa cidade/estado.
 function computeFunnelCascade(accountId, yearMonth, city = null) {
   const b = monthBounds(yearMonth)
   if (!b) return null
@@ -1003,7 +1003,7 @@ function computeFunnelCascade(accountId, yearMonth, city = null) {
 router.get('/funil-mensal/:month', requireRole('super_admin', 'gerente', 'atendente'), (req, res) => {
   if (!req.accountId) return res.status(400).json({ error: 'account_id required' })
   const month = req.params.month === 'current' ? currentYearMonth() : req.params.month
-  const city = req.query.city || null
+  const city = { city: req.query.city, uf: req.query.uf } // filtro de cidade/estado
   const cascade = computeFunnelCascade(req.accountId, month, city)
   if (!cascade) return res.status(400).json({ error: 'formato de mes invalido (use YYYY-MM ou current)' })
 
@@ -1017,7 +1017,7 @@ router.get('/funil-mensal/:month', requireRole('super_admin', 'gerente', 'atende
 
   // Investimento e meta sao da conta inteira (nao tem cidade): com cidade escolhida, CPL/CAC/ROAS e
   // progresso da meta ficam nulos e a tela avisa (decisao do dono, 24/09/2026).
-  const byCity = !!(city && String(city).trim())
+  const byCity = hasGeo(city)
   const cpl  = !byCity && cascade.total > 0 ? investment / cascade.total : null
   const cac  = !byCity && cascade.won > 0 ? investment / cascade.won : null
   const roas = !byCity && investment > 0 ? estimatedRevenue / investment : null
@@ -1087,8 +1087,8 @@ router.get('/projecao', requireRole('super_admin', 'gerente'), (req, res) => {
   const future = Math.min(24, Math.max(0, parseInt(req.query.futuros) || 3))
   // Com cidade: so meses reais da cidade; CPL/CAC/ROAS e projecao futura (dependem do investimento
   // da conta inteira) ficam nulos e a tela avisa (decisao do dono, 24/09/2026).
-  const city = req.query.city || null
-  const byCity = !!(city && String(city).trim())
+  const city = { city: req.query.city, uf: req.query.uf } // filtro de cidade/estado
+  const byCity = hasGeo(city)
 
   // Gera lista de YYYY-MM: [past atras ... atual ... future adiante]
   const list = []

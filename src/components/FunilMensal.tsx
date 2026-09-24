@@ -103,7 +103,7 @@ export default function FunilMensalPanel({ accountId, city = '' }: Props) {
       )}
 
       <CityNotice city={city}>
-        Leads, etapas, vendas e faturamento são da cidade. Investimento e meta são da conta inteira, então CPL, CAC, ROAS e o progresso da meta não aparecem por cidade.
+        Leads, etapas, vendas e faturamento são do local escolhido. Investimento e meta são da conta inteira, então CPL, CAC, ROAS e o progresso da meta não aparecem por cidade ou estado.
       </CityNotice>
 
       {/* Cascata visual */}
@@ -162,7 +162,7 @@ export default function FunilMensalPanel({ accountId, city = '' }: Props) {
         <div className="metric-card">
           <div className="metric-header"><span className="metric-label">Meta de Vendas</span><div className="metric-icon" style={{ background: '#FF6B8A20', color: '#FF6B8A' }}><Target size={16} /></div></div>
           <div className="metric-value" style={{ fontSize: 20 }}>{city ? c.won : `${c.won} / ${cfg.sales_target || '-'}`}</div>
-          {city && <div className="metric-sub" style={{ fontSize: 11, color: '#6B6580' }}>Vendas na cidade (meta é da conta)</div>}
+          {city && <div className="metric-sub" style={{ fontSize: 11, color: '#6B6580' }}>Vendas no local (meta é da conta)</div>}
           {calc.target_progress != null && (
             <div className="metric-sub" style={{ fontSize: 11, color: calc.target_progress >= 100 ? '#34C759' : calc.target_progress >= 70 ? '#FFB300' : '#FF6B6B' }}>
               {calc.target_progress.toFixed(0)}% da meta {calc.target_remaining > 0 ? `(faltam ${calc.target_remaining})` : '(batida!)'}

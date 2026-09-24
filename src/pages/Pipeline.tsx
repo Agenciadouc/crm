@@ -4,6 +4,7 @@ import { useAccount } from '../context/AccountContext'
 import AccountSelector from '../components/AccountSelector'
 import FilterDropdown, { type FilterValue } from '../components/FilterDropdown'
 import CityFilter, { useCityFilter } from '../components/CityFilter'
+import { geoParams } from '../lib/geoFilter.js'
 import { useSSE } from '../context/SSEContext'
 import { fetchFunnels, fetchLeads, fetchTags, fetchUsers, moveLeadStage, fetchPipelineMetrics, archiveLead, updateLeadValue, type Funnel, type Lead, type PipelineMetric, type Tag, type User as ApiUser } from '../lib/api'
 import { Phone, MessageCircle, User, Clock, ChevronDown, ChevronRight, ArrowRight, Smartphone, Archive, DollarSign, X } from 'lucide-react'
@@ -65,7 +66,7 @@ export default function Pipeline() {
       setFunnel(active || null)
       if (active) {
         const [data, m] = await Promise.all([
-          fetchLeads(accountId, { funnel_id: active.id, limit: 500, city: cityFilter || undefined }),
+          fetchLeads(accountId, { funnel_id: active.id, limit: 500, ...geoParams(cityFilter) }),
           fetchPipelineMetrics(accountId, active.id, cityFilter).catch(() => ({ metrics: [], totalLeads: 0 })),
         ])
         setLeads(data.leads)
