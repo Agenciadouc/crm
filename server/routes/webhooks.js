@@ -163,23 +163,180 @@ function autoDetectStage(lead, messageText) {
   }
 }
 
-// uzapi webhook — traduz shape uzapi pro shape interno (Baileys) e delega
-// pro mesmo handler da rota /evolution abaixo.
+// uzapi webhook — traduz shape uzapi (Meta Cloud API) pro shape Baileys
+// interno e delega pro mesmo handler da rota /evolution abaixo.
 //
-// IMPORTANTE: `translateUzapiToBaileys` ainda esta como esqueleto. Preencher
-// depois que Fase 1 (capturar 1 payload real de webhook uzapi) estiver feita.
-// Enquanto nao preenchido, essa rota apenas LOGA o body cru pro console
-// (com prefixo "[UZAPI-WEBHOOK-RAW]") e retorna 200 pra evitar retentativas.
+// Shape uzapi (todos vem envelopados assim):
+//   { object: "whatsapp_business_account", entry: [{ id: WABA_ID, changes: [{
+//       field: "connection" | "messages" | "history" | ...,
+//       value: { messaging_product, metadata: {phone_number_id}, ...payload }
+//     }]}]}
+//
+// Traducoes:
+//   field=connection + value.status[{connection}]    -> { event: 'connection.update', data: {state} }
+//   field=messages + value.messages[]                -> { event: 'messages.upsert', data: {key, message, ...} }
+//   field=messages + value.statuses[]                -> { event: 'messages.update', data: [{key, update}] }
+//   field=* + value.qrcode[]                         -> { event: 'connection.update', data: {qrcode} } (uzapi custom)
+//   field=history + value.history[]                  -> ignora (sync inicial, muito ruido)
 function translateUzapiToBaileys(uzapiBody) {
-  // TODO Fase 1: quando tiver 1 exemplo real de webhook inbound uzapi, mapear
-  // pro shape { event: 'messages.upsert', data: { key: {id, remoteJid, fromMe},
-  // message: { conversation | imageMessage | audioMessage | ... },
-  // messageTimestamp, pushName, ... } } que o handler Evolution abaixo entende.
-  //
-  // Tipos de evento a mapear:
-  //   inbound msg      -> { event: 'messages.upsert', data: {...Baileys shape} }
-  //   status update    -> { event: 'messages.update', data: [{key, status}] }
-  //   connection state -> { event: 'connection.update', data: {state} }
+  if (!uzapiBody || uzapiBody.object !== 'whatsapp_business_account') return null
+  const entry = Array.isArray(uzapiBody.entry) ? uzapiBody.entry[0] : null
+  if (!entry) return null
+  const change = Array.isArray(entry.changes) ? entry.changes[0] : null
+  if (!change) return null
+  const field = change.field
+  const value = change.value || {}
+  const metadata = value.metadata || {}
+  const phoneNumberId = metadata.phone_number_id
+
+  // 1) Connection status (uzapi: value.status[].connection = "connected"|"desconnected")
+  if (field === 'connection' && Array.isArray(value.status)) {
+    const conn = value.status[0]?.connection
+    let state = 'close'
+    if (conn === 'connected') state = 'open'
+    else if (conn === 'connecting') state = 'connecting'
+    return {
+      event: 'connection.update',
+      instance: phoneNumberId,
+      data: { state, isNewLogin: false },
+    }
+  }
+
+  // 2) QR code (uzapi custom: value.qrcode[].code = base64)
+  if (Array.isArray(value.qrcode) && value.qrcode[0]?.code) {
+    return {
+      event: 'connection.update',
+      instance: phoneNumberId,
+      data: { qrcode: { base64: value.qrcode[0].code }, state: 'connecting' },
+    }
+  }
+
+  // 3) Status update (ack delivered/read/played)
+  if (field === 'messages' && Array.isArray(value.statuses)) {
+    const updates = value.statuses.map(s => {
+      // Meta: status = "sent" | "delivered" | "read" | "played"
+      let mappedStatus = s.status
+      if (s.status === 'sent') mappedStatus = 1        // SERVER_ACK
+      else if (s.status === 'delivered') mappedStatus = 2  // DELIVERY_ACK
+      else if (s.status === 'read' || s.status === 'played') mappedStatus = 3  // READ
+      return {
+        key: {
+          id: s.id,
+          remoteJid: s.recipient_id ? `${s.recipient_id}@s.whatsapp.net` : null,
+          fromMe: true,
+        },
+        update: { status: mappedStatus },
+        // fallback fields pro parser existente:
+        status: mappedStatus,
+      }
+    })
+    return { event: 'messages.update', instance: phoneNumberId, data: updates }
+  }
+
+  // 4) Mensagens recebidas (texto/midia/interactive/etc)
+  if (field === 'messages' && Array.isArray(value.messages)) {
+    const msg = value.messages[0]
+    if (!msg) return null
+    const contact = Array.isArray(value.contacts) ? value.contacts[0] : null
+    const pushName = contact?.profile?.name || null
+    const from = msg.from || ''
+    const isGroup = !!msg.isGroup
+    const remoteJid = isGroup && msg.group_id
+      ? msg.group_id.endsWith('@g.us') ? msg.group_id : `${msg.group_id}@g.us`
+      : `${from}@s.whatsapp.net`
+
+    // Constroi message content shape Baileys
+    let messageContent = null
+    if (msg.type === 'text' && msg.text?.body) {
+      messageContent = { conversation: msg.text.body }
+    } else if (msg.type === 'image' && msg.image) {
+      messageContent = {
+        imageMessage: {
+          mediaId: msg.image.id,
+          mimetype: msg.image.mime_type || 'image/jpeg',
+          caption: msg.image.caption || '',
+          fileSha256: msg.image.sha256 || null,
+        },
+      }
+    } else if (msg.type === 'video' && msg.video) {
+      messageContent = {
+        videoMessage: {
+          mediaId: msg.video.id,
+          mimetype: msg.video.mime_type || 'video/mp4',
+          caption: msg.video.caption || '',
+          fileSha256: msg.video.sha256 || null,
+        },
+      }
+    } else if (msg.type === 'audio' && msg.audio) {
+      messageContent = {
+        audioMessage: {
+          mediaId: msg.audio.id,
+          mimetype: msg.audio.mime_type || 'audio/ogg',
+          ptt: (msg.audio.mime_type || '').includes('ogg'),
+          fileSha256: msg.audio.sha256 || null,
+        },
+      }
+    } else if (msg.type === 'document' && msg.document) {
+      messageContent = {
+        documentMessage: {
+          mediaId: msg.document.id,
+          mimetype: msg.document.mime_type || 'application/octet-stream',
+          fileName: msg.document.filename || 'document',
+          caption: msg.document.caption || '',
+          fileSha256: msg.document.sha256 || null,
+        },
+      }
+    } else if (msg.type === 'sticker' && msg.sticker) {
+      messageContent = {
+        stickerMessage: {
+          mediaId: msg.sticker.id,
+          mimetype: msg.sticker.mime_type || 'image/webp',
+          fileSha256: msg.sticker.sha256 || null,
+        },
+      }
+    } else if (msg.type === 'reaction' && msg.reaction) {
+      messageContent = {
+        reactionMessage: {
+          key: { id: msg.reaction.message_id, remoteJid, fromMe: false },
+          text: msg.reaction.emoji || '',
+        },
+      }
+    } else if (msg.type === 'location' && msg.location) {
+      messageContent = {
+        locationMessage: {
+          degreesLatitude: msg.location.latitude,
+          degreesLongitude: msg.location.longitude,
+          address: msg.location.address || '',
+          name: msg.location.name || '',
+        },
+      }
+    } else if (msg.type === 'contacts' && Array.isArray(msg.contacts)) {
+      messageContent = { contactsArrayMessage: { contacts: msg.contacts } }
+    } else if (msg.interactive) {
+      // button_reply ou list_reply — trata como texto pro parser
+      const reply = msg.interactive.button_reply || msg.interactive.list_reply || msg.interactive.reply
+      const title = reply?.title || reply?.id || ''
+      messageContent = { conversation: title }
+    } else {
+      // fallback texto vazio pra nao perder o lead
+      messageContent = { conversation: '' }
+    }
+
+    return {
+      event: 'messages.upsert',
+      instance: phoneNumberId,
+      data: {
+        key: { id: msg.id, remoteJid, fromMe: false, participant: isGroup ? `${from}@s.whatsapp.net` : undefined },
+        message: messageContent,
+        messageTimestamp: Number(msg.timestamp) || Math.floor(Date.now() / 1000),
+        pushName: pushName,
+      },
+    }
+  }
+
+  // 5) History sync - ignora (muito ruido, ja veio via WhatsApp Web)
+  if (field === 'history') return null
+
   return null
 }
 
@@ -187,16 +344,17 @@ router.post('/uzapi/:accountSlug', (req, res) => {
   try {
     const translated = translateUzapiToBaileys(req.body)
     if (!translated) {
-      // Ainda nao implementado — loga cru pra podermos ver o shape real
-      console.log(`[UZAPI-WEBHOOK-RAW] slug=${req.params.accountSlug}`, JSON.stringify(req.body).slice(0, 2000))
-      return res.json({ ok: true, note: 'tradutor uzapi->baileys nao implementado ainda; body logado' })
+      // Nao traduziu — loga cru pra debug e retorna 200 pra evitar retentativa
+      console.log(`[UZAPI-WEBHOOK-UNKNOWN] slug=${req.params.accountSlug}`, JSON.stringify(req.body).slice(0, 800))
+      return res.json({ ok: true, note: 'shape uzapi nao reconhecido, ignorado' })
     }
-    // Substitui body pelo traduzido e delega pro handler Evolution abaixo (rota interna)
+    // Substitui body pelo traduzido e delega pro handler /evolution que ja
+    // sabe processar shape Baileys (que este tradutor produz)
     req.body = translated
     req.url = `/evolution/${req.params.accountSlug}`
     return router.handle(req, res)
   } catch (err) {
-    console.error('[UZAPI Webhook]', err.message)
+    console.error('[UZAPI Webhook]', err.message, err.stack)
     res.status(500).json({ error: err.message })
   }
 })
