@@ -155,6 +155,8 @@ export default function Chat() {
   const [notesCollapsed, setNotesCollapsed] = useState(() => localStorage.getItem('chat_notes_collapsed') === '1')
   const [tagsCollapsed, setTagsCollapsed] = useState(() => localStorage.getItem('chat_tags_collapsed') === '1')
   const [cadenceCollapsed, setCadenceCollapsed] = useState(() => localStorage.getItem('chat_cadence_collapsed') === '1')
+  // Aba do cartao Cadencias e Follow-ups (mesmas abas da tela Automacao)
+  const [automationTab, setAutomationTab] = useState<'manuais' | 'automaticas'>(() => { try { return localStorage.getItem('chat_automation_tab') === 'automaticas' ? 'automaticas' : 'manuais' } catch { return 'manuais' } })
   const [leadTasks, setLeadTasks] = useState<any[]>([])
   const [editingTask, setEditingTask] = useState<any>(null)
   const [sendInstanceOverride, setSendInstanceOverride] = useState<number | null>(null)
@@ -1674,6 +1676,51 @@ export default function Chat() {
                     ))}
                   </div>
 
+                  {/* Vendas — total + lista + botao adicionar */}
+                  <div className="card" style={{ padding: 12, marginBottom: 12 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                      <div style={{ fontSize: 10, color: '#9B96B0', textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: 3 }}>
+                        <DollarSign size={10} style={{ color: '#34C759' }} /> Vendas {sales.length > 0 && <span style={{ color: '#6B6580' }}>({sales.length})</span>}
+                      </div>
+                      <button className="btn btn-secondary btn-sm" onClick={openSaleModalStandalone} style={{ padding: '2px 6px' }} title="Registrar nova venda"><Plus size={10} /></button>
+                    </div>
+                    {salesTotal > 0 && (
+                      <div style={{ fontSize: 15, fontWeight: 700, color: '#34C759', marginBottom: 8 }}>
+                        R$ {salesTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        <span style={{ fontSize: 9, color: '#6B6580', fontWeight: 400, marginLeft: 6 }}>total</span>
+                      </div>
+                    )}
+                    {sales.length === 0 ? (
+                      <div style={{ fontSize: 10, color: '#6B6580' }}>Sem vendas registradas</div>
+                    ) : (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                        {sales.map(s => {
+                          const dt = new Date(s.sale_date.replace(' ', 'T') + 'Z')
+                          const dateStr = dt.toLocaleDateString('pt-BR') + ' ' + dt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+                          const canDelete = user?.role === 'super_admin' || user?.role === 'gerente'
+                          return (
+                            <div key={s.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '5px 8px', background: 'rgba(52,199,89,0.06)', border: '1px solid rgba(52,199,89,0.15)', borderRadius: 6 }}>
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: 1, flex: 1, minWidth: 0 }}>
+                                <div style={{ fontSize: 12, fontWeight: 600, color: '#34C759' }}>
+                                  R$ {Number(s.value).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                </div>
+                                <div style={{ fontSize: 9, color: '#9B96B0', display: 'flex', alignItems: 'center', gap: 4 }}>
+                                  <Clock size={8} /> {dateStr}
+                                  {s.created_by_name && <span>· {s.created_by_name}</span>}
+                                </div>
+                              </div>
+                              {canDelete && (
+                                <button onClick={() => handleDeleteSale(s.id)} title="Excluir venda" style={{ background: 'none', border: 'none', color: '#6B6580', cursor: 'pointer', padding: 2, display: 'flex', alignItems: 'center' }}>
+                                  <Trash2 size={10} />
+                                </button>
+                              )}
+                            </div>
+                          )
+                        })}
+                      </div>
+                    )}
+                  </div>
+
                   {/* Observacoes */}
                   <div className="card" style={{ padding: 12, marginBottom: 12 }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: notesCollapsed ? 0 : 6 }}>
@@ -1748,191 +1795,214 @@ export default function Chat() {
                     )}
                   </div>
 
-                  {/* Cadence */}
-                  <div className="card" style={{ padding: 12 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: cadenceCollapsed ? 0 : 6 }}>
-                      <div onClick={() => setCadenceCollapsed(p => { const v = !p; localStorage.setItem('chat_cadence_collapsed', v ? '1' : '0'); return v })} style={{ fontSize: 10, color: '#9B96B0', textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: 3, cursor: 'pointer', flex: 1 }}>
-                        {cadenceCollapsed ? <ChevronDown size={12} style={{ color: '#9B96B0' }} /> : <ChevronUp size={12} style={{ color: '#9B96B0' }} />}
-                        <ListOrdered size={10} /> Cadencia
-                      </div>
-                      <div style={{ position: 'relative' }}>
-                        <button className="btn btn-secondary btn-sm" onClick={() => { setCadenceCollapsed(false); setShowCadenceMenu(!showCadenceMenu) }} style={{ padding: '2px 8px', fontSize: 10 }}>{leadCadence ? 'Trocar' : 'Atribuir'}</button>
-                        {showCadenceMenu && (
-                          <div style={{ position: 'absolute', right: 0, top: '100%', marginTop: 4, background: 'var(--bg-card)', border: '1px solid var(--border-medium)', borderRadius: 8, padding: 4, zIndex: 50, minWidth: 220, maxHeight: 320, overflowY: 'auto' }}>
-                            {cadences.length === 0 && globalCadences.length === 0 && <div style={{ padding: 8, fontSize: 11, color: 'var(--text-muted)' }}>Nenhuma cadência. Crie em Cadências e Follow-ups (aba Manuais)</div>}
-                            {cadences.length > 0 && (
-                              <>
-                                <div style={{ padding: '4px 10px', fontSize: 9, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 0.5 }}>Desta conta</div>
-                                {cadences.map(c => (
-                                  <button key={c.id} onClick={() => handleAssignCadence(c.id)} style={{ display: 'block', padding: '6px 10px', border: 'none', background: 'none', color: 'var(--text-primary)', fontSize: 11, cursor: 'pointer', borderRadius: 4, width: '100%', textAlign: 'left' }}>
-                                    {c.name} <span style={{ color: 'var(--text-muted)' }}>({c.attempts.length} etapas)</span>
-                                  </button>
-                                ))}
-                              </>
-                            )}
-                            {globalCadences.length > 0 && (
-                              <>
-                                <div style={{ padding: '6px 10px 4px', fontSize: 9, color: '#7ee787', textTransform: 'uppercase', letterSpacing: 0.5, borderTop: cadences.length > 0 ? '1px dashed var(--border-subtle)' : 'none', marginTop: cadences.length > 0 ? 4 : 0 }}>Templates globais</div>
-                                {globalCadences.map(g => (
-                                  <button key={`g-${g.id}`} onClick={() => handleAssignGlobalCadence(g.id)} disabled={applyingGlobalId === g.id} style={{ display: 'block', padding: '6px 10px', border: 'none', background: 'none', color: 'var(--text-primary)', fontSize: 11, cursor: 'pointer', borderRadius: 4, width: '100%', textAlign: 'left', opacity: applyingGlobalId === g.id ? 0.5 : 1 }}>
-                                    <span style={{ color: '#7ee787', fontSize: 9, marginRight: 4 }}>★</span>
-                                    {g.name} <span style={{ color: 'var(--text-muted)' }}>({g.attempts.length} etapas)</span>
-                                    {g.applied_here && <span style={{ color: '#7ee787', fontSize: 9, marginLeft: 4 }}>✓</span>}
-                                    {applyingGlobalId === g.id && <span style={{ color: 'var(--text-muted)', fontSize: 9, marginLeft: 4 }}>aplicando...</span>}
-                                  </button>
-                                ))}
-                              </>
-                            )}
-                          </div>
-                        )}
-                      </div>
+                  {/* Cadencias e Follow-ups: um cartao so, com as mesmas abas da tela Automacao */}
+                  <div className="card" style={{ padding: 12, marginBottom: 12 }}>
+                    <div onClick={() => setCadenceCollapsed(p => { const v = !p; localStorage.setItem('chat_cadence_collapsed', v ? '1' : '0'); return v })} style={{ fontSize: 10, color: '#9B96B0', textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: 3, cursor: 'pointer', marginBottom: cadenceCollapsed ? 0 : 8 }}>
+                      {cadenceCollapsed ? <ChevronDown size={12} style={{ color: '#9B96B0' }} /> : <ChevronUp size={12} style={{ color: '#9B96B0' }} />}
+                      <ListOrdered size={10} /> Cadências e Follow-ups
                     </div>
-                    {!cadenceCollapsed && (leadCadence ? (
+                    {!cadenceCollapsed && (
                       <>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                          <div style={{ fontSize: 12, fontWeight: 600 }}>{leadCadence.cadence_name}</div>
-                          <div style={{ display: 'flex', gap: 3 }}>
-                            <button className="btn btn-secondary btn-sm" style={{ padding: '2px 6px', fontSize: 9 }} onClick={() => { const base = import.meta.env.BASE_URL.replace(/\/$/, ''); window.open(`${base}${automationUrl('manuais')}`, '_blank') }}>Editar</button>
-                            <button className="btn btn-danger btn-sm" style={{ padding: '2px 6px', fontSize: 9 }} onClick={async () => {
-                              if (!accountId || !confirm('Remover cadencia deste lead?')) return
-                              await removeLeadCadence(leadCadence.id, accountId)
-                              loadLead()
-                            }}>Remover</button>
-                          </div>
+                        <div style={{ display: 'flex', gap: 4, marginBottom: 10 }}>
+                          {([['manuais', 'Manuais', !!leadCadence && leadCadence.status !== 'completed'], ['automaticas', 'Automáticas', !!leadFollowUp && leadFollowUp.status !== 'completed' && leadFollowUp.status !== 'cancelled']] as const).map(([key, label, active]) => (
+                            <button
+                              key={key}
+                              className={`btn btn-sm ${automationTab === key ? 'btn-primary' : 'btn-secondary'}`}
+                              style={{ flex: 1, fontSize: 10, padding: '3px 6px' }}
+                              onClick={() => { setAutomationTab(key); try { localStorage.setItem('chat_automation_tab', key) } catch {} }}
+                              title={key === 'manuais' ? 'Manuais (o vendedor faz)' : 'Automáticas (WhatsApp envia)'}
+                            >
+                              {label}{active && <span style={{ display: 'inline-block', width: 6, height: 6, borderRadius: '50%', background: '#34C759', marginLeft: 5, verticalAlign: 1 }} />}
+                            </button>
+                          ))}
                         </div>
-                        {leadCadence.status === 'completed' ? (
-                          <div style={{ fontSize: 11, color: '#34C759', display: 'flex', alignItems: 'center', gap: 3, marginTop: 4 }}><Check size={10} /> Concluida</div>
-                        ) : (
+                        {automationTab === 'manuais' ? (
                           <>
-                            <div style={{ fontSize: 11, color: '#FFB300', marginTop: 2 }}>Etapa {(leadCadence.attempt_position ?? 0) + 1}/{leadCadence.total_attempts}: {leadCadence.action_type?.toUpperCase()}</div>
-                            {leadCadence.attempt_description && <div style={{ fontSize: 11, color: '#fff', marginTop: 2, fontWeight: 500 }}>{leadCadence.attempt_description}</div>}
-                            {leadCadence.attempt_instructions && <div style={{ fontSize: 10, color: '#9B96B0', marginTop: 2, fontStyle: 'italic' }}>{leadCadence.attempt_instructions}</div>}
-                            {leadCadence.attempt_message ? (
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                              <div style={{ fontSize: 10, color: '#9B96B0', display: 'flex', alignItems: 'center', gap: 3, flex: 1 }}>
+                                <ListOrdered size={10} /> Cadência (passos que o vendedor faz)
+                              </div>
+                              <div style={{ position: 'relative' }}>
+                                <button className="btn btn-secondary btn-sm" onClick={() => { setCadenceCollapsed(false); setShowCadenceMenu(!showCadenceMenu) }} style={{ padding: '2px 8px', fontSize: 10 }}>{leadCadence ? 'Trocar' : 'Atribuir'}</button>
+                                {showCadenceMenu && (
+                                  <div style={{ position: 'absolute', right: 0, top: '100%', marginTop: 4, background: 'var(--bg-card)', border: '1px solid var(--border-medium)', borderRadius: 8, padding: 4, zIndex: 50, minWidth: 220, maxHeight: 320, overflowY: 'auto' }}>
+                                    {cadences.length === 0 && globalCadences.length === 0 && <div style={{ padding: 8, fontSize: 11, color: 'var(--text-muted)' }}>Nenhuma cadência. Crie em Cadências e Follow-ups (aba Manuais)</div>}
+                                    {cadences.length > 0 && (
+                                      <>
+                                        <div style={{ padding: '4px 10px', fontSize: 9, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 0.5 }}>Desta conta</div>
+                                        {cadences.map(c => (
+                                          <button key={c.id} onClick={() => handleAssignCadence(c.id)} style={{ display: 'block', padding: '6px 10px', border: 'none', background: 'none', color: 'var(--text-primary)', fontSize: 11, cursor: 'pointer', borderRadius: 4, width: '100%', textAlign: 'left' }}>
+                                            {c.name} <span style={{ color: 'var(--text-muted)' }}>({c.attempts.length} etapas)</span>
+                                          </button>
+                                        ))}
+                                      </>
+                                    )}
+                                    {globalCadences.length > 0 && (
+                                      <>
+                                        <div style={{ padding: '6px 10px 4px', fontSize: 9, color: '#7ee787', textTransform: 'uppercase', letterSpacing: 0.5, borderTop: cadences.length > 0 ? '1px dashed var(--border-subtle)' : 'none', marginTop: cadences.length > 0 ? 4 : 0 }}>Templates globais</div>
+                                        {globalCadences.map(g => (
+                                          <button key={`g-${g.id}`} onClick={() => handleAssignGlobalCadence(g.id)} disabled={applyingGlobalId === g.id} style={{ display: 'block', padding: '6px 10px', border: 'none', background: 'none', color: 'var(--text-primary)', fontSize: 11, cursor: 'pointer', borderRadius: 4, width: '100%', textAlign: 'left', opacity: applyingGlobalId === g.id ? 0.5 : 1 }}>
+                                            <span style={{ color: '#7ee787', fontSize: 9, marginRight: 4 }}>★</span>
+                                            {g.name} <span style={{ color: 'var(--text-muted)' }}>({g.attempts.length} etapas)</span>
+                                            {g.applied_here && <span style={{ color: '#7ee787', fontSize: 9, marginLeft: 4 }}>✓</span>}
+                                            {applyingGlobalId === g.id && <span style={{ color: 'var(--text-muted)', fontSize: 9, marginLeft: 4 }}>aplicando...</span>}
+                                          </button>
+                                        ))}
+                                      </>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                            {(leadCadence ? (
                               <>
-                                <textarea className="input" value={cadenceMsgText} onChange={e => setCadenceMsgText(e.target.value)} rows={3} style={{ marginTop: 8, fontSize: 11, resize: 'vertical', background: 'rgba(255,179,0,0.05)', border: '1px solid rgba(255,179,0,0.2)' }} />
-                                <button className="btn btn-primary btn-sm" style={{ marginTop: 8, width: '100%', fontSize: 11 }} onClick={() => setSendCadenceModal(true)} disabled={sending || !cadenceMsgText.trim()}><Send size={10} /> Revisar e enviar</button>
-                                <button className="btn btn-secondary btn-sm" style={{ marginTop: 6, width: '100%', fontSize: 10 }} onClick={handleAdvanceCadence}><ChevronRight size={10} /> So avancar (sem enviar)</button>
-                              </>
-                            ) : leadCadence.attempt_script ? (
-                              <>
-                                <button className="btn btn-primary btn-sm" style={{ marginTop: 8, width: '100%', fontSize: 11 }} onClick={handleViewScript}><FileText size={10} /> Ver script</button>
-                                <button className="btn btn-secondary btn-sm" style={{ marginTop: 6, width: '100%', fontSize: 10 }} onClick={handleAdvanceCadence}><ChevronRight size={10} /> Avancar</button>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                  <div style={{ fontSize: 12, fontWeight: 600 }}>{leadCadence.cadence_name}</div>
+                                  <div style={{ display: 'flex', gap: 3 }}>
+                                    <button className="btn btn-secondary btn-sm" style={{ padding: '2px 6px', fontSize: 9 }} onClick={() => { const base = import.meta.env.BASE_URL.replace(/\/$/, ''); window.open(`${base}${automationUrl('manuais')}`, '_blank') }}>Editar</button>
+                                    <button className="btn btn-danger btn-sm" style={{ padding: '2px 6px', fontSize: 9 }} onClick={async () => {
+                                      if (!accountId || !confirm('Remover cadencia deste lead?')) return
+                                      await removeLeadCadence(leadCadence.id, accountId)
+                                      loadLead()
+                                    }}>Remover</button>
+                                  </div>
+                                </div>
+                                {leadCadence.status === 'completed' ? (
+                                  <div style={{ fontSize: 11, color: '#34C759', display: 'flex', alignItems: 'center', gap: 3, marginTop: 4 }}><Check size={10} /> Concluida</div>
+                                ) : (
+                                  <>
+                                    <div style={{ fontSize: 11, color: '#FFB300', marginTop: 2 }}>Etapa {(leadCadence.attempt_position ?? 0) + 1}/{leadCadence.total_attempts}: {leadCadence.action_type?.toUpperCase()}</div>
+                                    {leadCadence.attempt_description && <div style={{ fontSize: 11, color: '#fff', marginTop: 2, fontWeight: 500 }}>{leadCadence.attempt_description}</div>}
+                                    {leadCadence.attempt_instructions && <div style={{ fontSize: 10, color: '#9B96B0', marginTop: 2, fontStyle: 'italic' }}>{leadCadence.attempt_instructions}</div>}
+                                    {leadCadence.attempt_message ? (
+                                      <>
+                                        <textarea className="input" value={cadenceMsgText} onChange={e => setCadenceMsgText(e.target.value)} rows={3} style={{ marginTop: 8, fontSize: 11, resize: 'vertical', background: 'rgba(255,179,0,0.05)', border: '1px solid rgba(255,179,0,0.2)' }} />
+                                        <button className="btn btn-primary btn-sm" style={{ marginTop: 8, width: '100%', fontSize: 11 }} onClick={() => setSendCadenceModal(true)} disabled={sending || !cadenceMsgText.trim()}><Send size={10} /> Revisar e enviar</button>
+                                        <button className="btn btn-secondary btn-sm" style={{ marginTop: 6, width: '100%', fontSize: 10 }} onClick={handleAdvanceCadence}><ChevronRight size={10} /> So avancar (sem enviar)</button>
+                                      </>
+                                    ) : leadCadence.attempt_script ? (
+                                      <>
+                                        <button className="btn btn-primary btn-sm" style={{ marginTop: 8, width: '100%', fontSize: 11 }} onClick={handleViewScript}><FileText size={10} /> Ver script</button>
+                                        <button className="btn btn-secondary btn-sm" style={{ marginTop: 6, width: '100%', fontSize: 10 }} onClick={handleAdvanceCadence}><ChevronRight size={10} /> Avancar</button>
+                                      </>
+                                    ) : (
+                                      <button className="btn btn-primary btn-sm" style={{ marginTop: 8, width: '100%', fontSize: 11 }} onClick={handleAdvanceCadence}><ChevronRight size={10} /> Avancar</button>
+                                    )}
+                                  </>
+                                )}
                               </>
                             ) : (
-                              <button className="btn btn-primary btn-sm" style={{ marginTop: 8, width: '100%', fontSize: 11 }} onClick={handleAdvanceCadence}><ChevronRight size={10} /> Avancar</button>
-                            )}
-                          </>
-                        )}
-                      </>
-                    ) : (
-                      <div style={{ fontSize: 11, color: '#6B6580' }}>Nenhuma cadencia atribuida</div>
-                    ))}
-                  </div>
-
-                  {/* Follow-up (cadencia automatica) */}
-                  <div className="card" style={{ padding: 12, marginTop: 12 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                      <div style={{ fontSize: 10, color: '#9B96B0', textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: 3 }}>
-                        <Zap size={10} /> Follow-up (auto)
-                      </div>
-                      <div style={{ position: 'relative' }}>
-                        <button className="btn btn-secondary btn-sm" onClick={() => setShowFollowUpMenu(!showFollowUpMenu)} style={{ padding: '2px 8px', fontSize: 10 }}>
-                          {leadFollowUp ? 'Trocar' : 'Atribuir'}
-                        </button>
-                        {showFollowUpMenu && (() => {
-                          const localSeq = followUps.filter(f => f.is_active && (f.type || 'sequence') === 'sequence')
-                          const globalSeq = globalFollowUps.filter(g => (g.type || 'sequence') === 'sequence')
-                          return (
-                            <div style={{ position: 'absolute', right: 0, top: '100%', marginTop: 4, background: 'var(--bg-card)', border: '1px solid var(--border-medium)', borderRadius: 8, padding: 4, zIndex: 50, minWidth: 240, maxHeight: 320, overflowY: 'auto' }}>
-                              {localSeq.length === 0 && globalSeq.length === 0 && <div style={{ padding: 8, fontSize: 11, color: 'var(--text-muted)' }}>Nenhum follow-up. Crie em Cadências e Follow-ups (aba Automáticas)</div>}
-                              {localSeq.length > 0 && (
-                                <>
-                                  <div style={{ padding: '4px 10px', fontSize: 9, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 0.5 }}>Desta conta</div>
-                                  {localSeq.map(f => (
-                                    <button key={f.id} onClick={() => handleAssignFollowUp(f.id)} style={{ display: 'block', padding: '6px 10px', border: 'none', background: 'none', color: 'var(--text-primary)', fontSize: 11, cursor: 'pointer', borderRadius: 4, width: '100%', textAlign: 'left' }}>
-                                      {f.name} <span style={{ color: 'var(--text-muted)' }}>({f.steps_count} etapas · {f.instance_name})</span>
-                                    </button>
-                                  ))}
-                                </>
-                              )}
-                              {globalSeq.length > 0 && (
-                                <>
-                                  <div style={{ padding: '6px 10px 4px', fontSize: 9, color: '#7ee787', textTransform: 'uppercase', letterSpacing: 0.5, borderTop: localSeq.length > 0 ? '1px dashed var(--border-subtle)' : 'none', marginTop: localSeq.length > 0 ? 4 : 0 }}>Templates globais</div>
-                                  {globalSeq.map(g => (
-                                    <button key={`g-${g.id}`} onClick={() => handleAssignGlobalFollowUp(g.id)} disabled={applyingGlobalFuId === g.id} style={{ display: 'block', padding: '6px 10px', border: 'none', background: 'none', color: 'var(--text-primary)', fontSize: 11, cursor: 'pointer', borderRadius: 4, width: '100%', textAlign: 'left', opacity: applyingGlobalFuId === g.id ? 0.5 : 1 }}>
-                                      <span style={{ color: '#7ee787', fontSize: 9, marginRight: 4 }}>★</span>
-                                      {g.name} <span style={{ color: 'var(--text-muted)' }}>({g.steps.length} steps)</span>
-                                      {g.applied_here && <span style={{ color: '#7ee787', fontSize: 9, marginLeft: 4 }}>✓</span>}
-                                      {applyingGlobalFuId === g.id && <span style={{ color: 'var(--text-muted)', fontSize: 9, marginLeft: 4 }}>aplicando...</span>}
-                                    </button>
-                                  ))}
-                                </>
-                              )}
-                            </div>
-                          )
-                        })()}
-                      </div>
-                    </div>
-                    {leadFollowUp ? (
-                      <>
-                        <div style={{ fontSize: 12, fontWeight: 600 }}>{leadFollowUp.follow_up_name}</div>
-                        <div style={{ fontSize: 11, color: '#9B96B0', marginTop: 2 }}>
-                          <Smartphone size={10} style={{ verticalAlign: -1 }} /> {leadFollowUp.instance_name || '—'}
-                        </div>
-                        {leadFollowUp.status === 'completed' ? (
-                          <div style={{ fontSize: 11, color: '#34C759', marginTop: 4, display: 'flex', alignItems: 'center', gap: 3 }}>
-                            <Check size={10} /> Concluído (todas etapas enviadas)
-                          </div>
-                        ) : leadFollowUp.status === 'cancelled' ? (
-                          <div style={{ fontSize: 11, color: '#9B96B0', marginTop: 4 }}>Cancelado</div>
-                        ) : leadFollowUp.status === 'paused' ? (
-                          <>
-                            <div style={{ fontSize: 11, color: '#FBBC04', marginTop: 4 }}>
-                              ⏸ Pausado — {leadFollowUp.paused_reason === 'lead_replied' ? 'lead respondeu' :
-                                leadFollowUp.paused_reason === 'instance_offline' ? 'instância offline' :
-                                leadFollowUp.paused_reason === 'instance_removed' ? 'instância removida' :
-                                leadFollowUp.paused_reason === 'manual' ? 'pausado manualmente' :
-                                leadFollowUp.paused_reason === 'lead_blocked' ? 'lead bloqueado — desbloqueie pra retomar' :
-                                leadFollowUp.paused_reason === 'lead_archived' ? 'lead arquivado — desarquive pra retomar' :
-                                leadFollowUp.paused_reason === 'lead_inactive' ? 'lead inativo' :
-                                leadFollowUp.paused_reason === 'lead_no_phone' ? 'lead sem telefone' :
-                                leadFollowUp.paused_reason === 'send_failed' ? 'envio recusado pela Evolution' :
-                                leadFollowUp.paused_reason === 'send_error' ? 'erro de rede no envio' :
-                                leadFollowUp.paused_reason === 'follow_up_inactive' ? 'follow-up desativado' :
-                                leadFollowUp.paused_reason || ''}
-                            </div>
-                            <div style={{ display: 'flex', gap: 4, marginTop: 6 }}>
-                              <button className="btn btn-primary btn-sm" style={{ fontSize: 10, padding: '3px 8px', flex: 1 }} onClick={handleResumeFollowUp}>
-                                <Play size={10} /> Retomar
-                              </button>
-                              <button className="btn btn-danger btn-sm" style={{ fontSize: 10, padding: '3px 8px' }} onClick={handleCancelFollowUp}>
-                                <Trash2 size={10} />
-                              </button>
-                            </div>
+                              <div style={{ fontSize: 11, color: '#6B6580' }}>Nenhuma cadencia atribuida</div>
+                            ))}
                           </>
                         ) : (
                           <>
-                            <div style={{ fontSize: 11, color: '#FFB300', marginTop: 4 }}>
-                              Etapa {leadFollowUp.current_position}/{leadFollowUp.total_steps}
-                            </div>
-                            {leadFollowUp.next_run_at && (
-                              <div style={{ fontSize: 10, color: '#9B96B0', marginTop: 2 }}>
-                                Próximo envio: {parseSqlDate(leadFollowUp.next_run_at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                              <div style={{ fontSize: 10, color: '#9B96B0', display: 'flex', alignItems: 'center', gap: 3 }}>
+                                <Zap size={10} /> Follow-up (mensagens que o WhatsApp envia)
                               </div>
-                            )}
-                            <div style={{ display: 'flex', gap: 4, marginTop: 6 }}>
-                              <button className="btn btn-secondary btn-sm" style={{ fontSize: 10, padding: '3px 8px', flex: 1 }} onClick={handlePauseFollowUp}>
-                                <Pause size={10} /> Pausar
-                              </button>
-                              <button className="btn btn-danger btn-sm" style={{ fontSize: 10, padding: '3px 8px' }} onClick={handleCancelFollowUp}>
-                                <Trash2 size={10} />
-                              </button>
+                              <div style={{ position: 'relative' }}>
+                                <button className="btn btn-secondary btn-sm" onClick={() => setShowFollowUpMenu(!showFollowUpMenu)} style={{ padding: '2px 8px', fontSize: 10 }}>
+                                  {leadFollowUp ? 'Trocar' : 'Atribuir'}
+                                </button>
+                                {showFollowUpMenu && (() => {
+                                  const localSeq = followUps.filter(f => f.is_active && (f.type || 'sequence') === 'sequence')
+                                  const globalSeq = globalFollowUps.filter(g => (g.type || 'sequence') === 'sequence')
+                                  return (
+                                    <div style={{ position: 'absolute', right: 0, top: '100%', marginTop: 4, background: 'var(--bg-card)', border: '1px solid var(--border-medium)', borderRadius: 8, padding: 4, zIndex: 50, minWidth: 240, maxHeight: 320, overflowY: 'auto' }}>
+                                      {localSeq.length === 0 && globalSeq.length === 0 && <div style={{ padding: 8, fontSize: 11, color: 'var(--text-muted)' }}>Nenhum follow-up. Crie em Cadências e Follow-ups (aba Automáticas)</div>}
+                                      {localSeq.length > 0 && (
+                                        <>
+                                          <div style={{ padding: '4px 10px', fontSize: 9, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 0.5 }}>Desta conta</div>
+                                          {localSeq.map(f => (
+                                            <button key={f.id} onClick={() => handleAssignFollowUp(f.id)} style={{ display: 'block', padding: '6px 10px', border: 'none', background: 'none', color: 'var(--text-primary)', fontSize: 11, cursor: 'pointer', borderRadius: 4, width: '100%', textAlign: 'left' }}>
+                                              {f.name} <span style={{ color: 'var(--text-muted)' }}>({f.steps_count} etapas · {f.instance_name})</span>
+                                            </button>
+                                          ))}
+                                        </>
+                                      )}
+                                      {globalSeq.length > 0 && (
+                                        <>
+                                          <div style={{ padding: '6px 10px 4px', fontSize: 9, color: '#7ee787', textTransform: 'uppercase', letterSpacing: 0.5, borderTop: localSeq.length > 0 ? '1px dashed var(--border-subtle)' : 'none', marginTop: localSeq.length > 0 ? 4 : 0 }}>Templates globais</div>
+                                          {globalSeq.map(g => (
+                                            <button key={`g-${g.id}`} onClick={() => handleAssignGlobalFollowUp(g.id)} disabled={applyingGlobalFuId === g.id} style={{ display: 'block', padding: '6px 10px', border: 'none', background: 'none', color: 'var(--text-primary)', fontSize: 11, cursor: 'pointer', borderRadius: 4, width: '100%', textAlign: 'left', opacity: applyingGlobalFuId === g.id ? 0.5 : 1 }}>
+                                              <span style={{ color: '#7ee787', fontSize: 9, marginRight: 4 }}>★</span>
+                                              {g.name} <span style={{ color: 'var(--text-muted)' }}>({g.steps.length} steps)</span>
+                                              {g.applied_here && <span style={{ color: '#7ee787', fontSize: 9, marginLeft: 4 }}>✓</span>}
+                                              {applyingGlobalFuId === g.id && <span style={{ color: 'var(--text-muted)', fontSize: 9, marginLeft: 4 }}>aplicando...</span>}
+                                            </button>
+                                          ))}
+                                        </>
+                                      )}
+                                    </div>
+                                  )
+                                })()}
+                              </div>
                             </div>
+                            {leadFollowUp ? (
+                              <>
+                                <div style={{ fontSize: 12, fontWeight: 600 }}>{leadFollowUp.follow_up_name}</div>
+                                <div style={{ fontSize: 11, color: '#9B96B0', marginTop: 2 }}>
+                                  <Smartphone size={10} style={{ verticalAlign: -1 }} /> {leadFollowUp.instance_name || '—'}
+                                </div>
+                                {leadFollowUp.status === 'completed' ? (
+                                  <div style={{ fontSize: 11, color: '#34C759', marginTop: 4, display: 'flex', alignItems: 'center', gap: 3 }}>
+                                    <Check size={10} /> Concluído (todas etapas enviadas)
+                                  </div>
+                                ) : leadFollowUp.status === 'cancelled' ? (
+                                  <div style={{ fontSize: 11, color: '#9B96B0', marginTop: 4 }}>Cancelado</div>
+                                ) : leadFollowUp.status === 'paused' ? (
+                                  <>
+                                    <div style={{ fontSize: 11, color: '#FBBC04', marginTop: 4 }}>
+                                      ⏸ Pausado — {leadFollowUp.paused_reason === 'lead_replied' ? 'lead respondeu' :
+                                        leadFollowUp.paused_reason === 'instance_offline' ? 'instância offline' :
+                                        leadFollowUp.paused_reason === 'instance_removed' ? 'instância removida' :
+                                        leadFollowUp.paused_reason === 'manual' ? 'pausado manualmente' :
+                                        leadFollowUp.paused_reason === 'lead_blocked' ? 'lead bloqueado — desbloqueie pra retomar' :
+                                        leadFollowUp.paused_reason === 'lead_archived' ? 'lead arquivado — desarquive pra retomar' :
+                                        leadFollowUp.paused_reason === 'lead_inactive' ? 'lead inativo' :
+                                        leadFollowUp.paused_reason === 'lead_no_phone' ? 'lead sem telefone' :
+                                        leadFollowUp.paused_reason === 'send_failed' ? 'envio recusado pela Evolution' :
+                                        leadFollowUp.paused_reason === 'send_error' ? 'erro de rede no envio' :
+                                        leadFollowUp.paused_reason === 'follow_up_inactive' ? 'follow-up desativado' :
+                                        leadFollowUp.paused_reason || ''}
+                                    </div>
+                                    <div style={{ display: 'flex', gap: 4, marginTop: 6 }}>
+                                      <button className="btn btn-primary btn-sm" style={{ fontSize: 10, padding: '3px 8px', flex: 1 }} onClick={handleResumeFollowUp}>
+                                        <Play size={10} /> Retomar
+                                      </button>
+                                      <button className="btn btn-danger btn-sm" style={{ fontSize: 10, padding: '3px 8px' }} onClick={handleCancelFollowUp}>
+                                        <Trash2 size={10} />
+                                      </button>
+                                    </div>
+                                  </>
+                                ) : (
+                                  <>
+                                    <div style={{ fontSize: 11, color: '#FFB300', marginTop: 4 }}>
+                                      Etapa {leadFollowUp.current_position}/{leadFollowUp.total_steps}
+                                    </div>
+                                    {leadFollowUp.next_run_at && (
+                                      <div style={{ fontSize: 10, color: '#9B96B0', marginTop: 2 }}>
+                                        Próximo envio: {parseSqlDate(leadFollowUp.next_run_at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                                      </div>
+                                    )}
+                                    <div style={{ display: 'flex', gap: 4, marginTop: 6 }}>
+                                      <button className="btn btn-secondary btn-sm" style={{ fontSize: 10, padding: '3px 8px', flex: 1 }} onClick={handlePauseFollowUp}>
+                                        <Pause size={10} /> Pausar
+                                      </button>
+                                      <button className="btn btn-danger btn-sm" style={{ fontSize: 10, padding: '3px 8px' }} onClick={handleCancelFollowUp}>
+                                        <Trash2 size={10} />
+                                      </button>
+                                    </div>
+                                  </>
+                                )}
+                              </>
+                            ) : (
+                              <div style={{ fontSize: 11, color: '#6B6580' }}>Nenhum follow-up ativo</div>
+                            )}
                           </>
                         )}
                       </>
-                    ) : (
-                      <div style={{ fontSize: 11, color: '#6B6580' }}>Nenhum follow-up ativo</div>
                     )}
                   </div>
 
@@ -2043,51 +2113,6 @@ export default function Chat() {
                     }}>
                       <ListTodo size={10} /> {creatingTask ? 'Criando...' : 'Criar Tarefa'}
                     </button>
-                  </div>
-
-                  {/* Vendas — total + lista + botao adicionar */}
-                  <div className="card" style={{ padding: 12, marginTop: 12 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                      <div style={{ fontSize: 10, color: '#9B96B0', textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: 3 }}>
-                        <DollarSign size={10} style={{ color: '#34C759' }} /> Vendas {sales.length > 0 && <span style={{ color: '#6B6580' }}>({sales.length})</span>}
-                      </div>
-                      <button className="btn btn-secondary btn-sm" onClick={openSaleModalStandalone} style={{ padding: '2px 6px' }} title="Registrar nova venda"><Plus size={10} /></button>
-                    </div>
-                    {salesTotal > 0 && (
-                      <div style={{ fontSize: 15, fontWeight: 700, color: '#34C759', marginBottom: 8 }}>
-                        R$ {salesTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                        <span style={{ fontSize: 9, color: '#6B6580', fontWeight: 400, marginLeft: 6 }}>total</span>
-                      </div>
-                    )}
-                    {sales.length === 0 ? (
-                      <div style={{ fontSize: 10, color: '#6B6580' }}>Sem vendas registradas</div>
-                    ) : (
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                        {sales.map(s => {
-                          const dt = new Date(s.sale_date.replace(' ', 'T') + 'Z')
-                          const dateStr = dt.toLocaleDateString('pt-BR') + ' ' + dt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
-                          const canDelete = user?.role === 'super_admin' || user?.role === 'gerente'
-                          return (
-                            <div key={s.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '5px 8px', background: 'rgba(52,199,89,0.06)', border: '1px solid rgba(52,199,89,0.15)', borderRadius: 6 }}>
-                              <div style={{ display: 'flex', flexDirection: 'column', gap: 1, flex: 1, minWidth: 0 }}>
-                                <div style={{ fontSize: 12, fontWeight: 600, color: '#34C759' }}>
-                                  R$ {Number(s.value).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                </div>
-                                <div style={{ fontSize: 9, color: '#9B96B0', display: 'flex', alignItems: 'center', gap: 4 }}>
-                                  <Clock size={8} /> {dateStr}
-                                  {s.created_by_name && <span>· {s.created_by_name}</span>}
-                                </div>
-                              </div>
-                              {canDelete && (
-                                <button onClick={() => handleDeleteSale(s.id)} title="Excluir venda" style={{ background: 'none', border: 'none', color: '#6B6580', cursor: 'pointer', padding: 2, display: 'flex', alignItems: 'center' }}>
-                                  <Trash2 size={10} />
-                                </button>
-                              )}
-                            </div>
-                          )
-                        })}
-                      </div>
-                    )}
                   </div>
 
                   {/* Archive + Block */}
