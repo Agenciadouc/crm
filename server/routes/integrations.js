@@ -219,9 +219,17 @@ router.post('/whatsapp/:id/connect', allowInstanceOwner, async (req, res) => {
     // Pra uzapi, o QR chega via webhook — nao sobrescreve qr_code com null se
     // connectInstance nao devolveu. Preserva o que ja esta no BD (pode ter vindo
     // antes por webhook) e apenas marca status=connecting pra UI mostrar spinner.
+    // Alem disso, forca um restart pra a uzapi re-emitir o QR agora (o GET /instance
+    // nao dispara nada; o QR so vem apos restart/create/logout).
     const isUzapi = (instance.provider || 'evolution') === 'uzapi'
     if (isUzapi && !qrcode) {
       db.prepare("UPDATE whatsapp_instances SET status = 'connecting', updated_at = datetime('now') WHERE id = ?").run(instance.id)
+      try {
+        const restartResult = await provider.restartInstance(instance)
+        console.log(`[Provider Connect uzapi] restart disparado inst=${instance.id} ok=${restartResult.ok !== false}`)
+      } catch (e) {
+        console.error(`[Provider Connect uzapi] restart falhou inst=${instance.id}:`, e.message)
+      }
     } else {
       db.prepare("UPDATE whatsapp_instances SET qr_code = ?, status = 'connecting', updated_at = datetime('now') WHERE id = ?").run(qrcode, instance.id)
     }
@@ -597,6 +605,19 @@ router.post('/whatsapp/:id/switch-provider', requireRole('super_admin', 'gerente
     // Re-le a inst atualizada (com uzapi_session + api_key novos, se for uzapi)
     const refreshed = db.prepare('SELECT * FROM whatsapp_instances WHERE id = ?').get(instance.id)
     await registerProviderWebhook(refreshed, account.slug)
+
+    // Uzapi: forca um restart pra a inst sair do estado inicial e comecar a
+    // emitir QR via webhook. Sem isso, a inst fica em "created" indefinidamente.
+    if (target === 'uzapi') {
+      try {
+        const restartResult = await newProvider.restartInstance(refreshed)
+        console.log(`[SwitchProvider uzapi] restart pos-create ok=${restartResult.ok !== false}`)
+        // Marca status='connecting' pra UI mostrar o painel de espera
+        db.prepare("UPDATE whatsapp_instances SET status = 'connecting', updated_at = datetime('now') WHERE id = ?").run(instance.id)
+      } catch (e) {
+        console.error(`[SwitchProvider uzapi] restart pos-create falhou:`, e.message)
+      }
+    }
   } catch (err) {
     // Rollback: volta pro provider anterior
     console.error(`[SwitchProvider] Falha criando session em ${target}, revertendo:`, err.message)

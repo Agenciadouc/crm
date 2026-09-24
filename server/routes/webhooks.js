@@ -342,12 +342,16 @@ function translateUzapiToBaileys(uzapiBody) {
 
 router.post('/uzapi/:accountSlug', (req, res) => {
   try {
+    // Log verboso de TODO webhook uzapi que entra — ajuda debug quando QR nao chega.
+    // Tira depois quando tudo estabilizar.
+    console.log(`[UZAPI-WEBHOOK IN] slug=${req.params.accountSlug} keys=${Object.keys(req.body || {}).join(',')} body=${JSON.stringify(req.body).slice(0, 1500)}`)
     const translated = translateUzapiToBaileys(req.body)
     if (!translated) {
       // Nao traduziu — loga cru pra debug e retorna 200 pra evitar retentativa
       console.log(`[UZAPI-WEBHOOK-UNKNOWN] slug=${req.params.accountSlug}`, JSON.stringify(req.body).slice(0, 800))
       return res.json({ ok: true, note: 'shape uzapi nao reconhecido, ignorado' })
     }
+    console.log(`[UZAPI-WEBHOOK TRANSLATED] event=${translated.event} instance=${translated.instance} hasQr=${!!(translated.data?.qrcode)}`)
     // Substitui body pelo traduzido e delega pro handler /evolution que ja
     // sabe processar shape Baileys (que este tradutor produz)
     req.body = translated
