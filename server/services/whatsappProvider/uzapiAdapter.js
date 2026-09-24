@@ -191,7 +191,10 @@ export async function findMessages(instance, { where = {}, page = 1, offset = 20
 // ─── Instancia (ciclo de vida) ───────────────────────────────────────
 
 // Cria uma instancia nova. Uzapi endpoint: POST /{v}/instance/add
-// Retorna { qrcode, raw }
+// Retorna { qrcode, phoneNumberId, token, raw }
+// - phoneNumberId: id gerado pela uzapi (guardar em whatsapp_instances.uzapi_session)
+// - token: JWT novo da instancia criada (guardar em whatsapp_instances.api_key)
+// - qrcode: sempre null aqui — QR vem depois via webhook 'authentication'
 export async function createInstance({ baseUrl: url, apiKey, instanceName, integration = 'WHATSAPP-BAILEYS', webhook, phoneNumber }) {
   const token = apiKey || process.env.UZAPI_ADMIN_TOKEN || ''
   const body = {
@@ -217,11 +220,20 @@ export async function createInstance({ baseUrl: url, apiKey, instanceName, integ
       body: JSON.stringify(body),
     })
     const data = await res.json().catch(() => ({}))
-    // A uzapi retorna dados da inst criada; QR vem via webhook depois.
-    // Nao ha QR na resposta imediata - dev tem que aguardar webhook 'authentication' com qrcode
-    return { qrcode: null, raw: data }
+    // Response esperada da uzapi (baseado no GET /instance que testamos):
+    //   { id, name, phoneNumberId, businessAccountId, token, ... }
+    const phoneNumberId = data?.phoneNumberId || data?.phone_number_id || null
+    const newToken = data?.token || null
+    return {
+      qrcode: null,
+      phoneNumberId,
+      token: newToken,
+      raw: data,
+      status: res.status,
+      ok: res.ok,
+    }
   } catch (e) {
-    return { qrcode: null, raw: {}, error: e.message }
+    return { qrcode: null, phoneNumberId: null, token: null, raw: {}, error: e.message }
   }
 }
 

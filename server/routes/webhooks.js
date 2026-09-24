@@ -365,11 +365,19 @@ router.post('/evolution/:accountSlug', (req, res) => {
     const account = db.prepare('SELECT * FROM accounts WHERE slug = ? AND is_active = 1').get(req.params.accountSlug)
     if (!account) return res.status(404).json({ error: 'Account not found' })
 
-    // Identify which instance sent this webhook (by instance name in body or match account)
+    // Identify which instance sent this webhook. Prioridade:
+    // 1) req.body.instance = phone_number_id (uzapi, ja setado pelo tradutor)
+    // 2) req.body.instanceName (Evolution, usa instance_name)
+    // 3) Fallback: primeira inst da conta
     const webhookInstance = req.body.instance || req.body.instanceName || null
     let waInstance = null
     if (webhookInstance) {
-      waInstance = db.prepare('SELECT * FROM whatsapp_instances WHERE account_id = ? AND instance_name = ?').get(account.id, webhookInstance)
+      // Tenta primeiro por uzapi_session (phone_number_id) — usado quando vem via tradutor uzapi
+      waInstance = db.prepare('SELECT * FROM whatsapp_instances WHERE account_id = ? AND uzapi_session = ?').get(account.id, String(webhookInstance))
+      // Se nao achou, tenta por instance_name (Evolution)
+      if (!waInstance) {
+        waInstance = db.prepare('SELECT * FROM whatsapp_instances WHERE account_id = ? AND instance_name = ?').get(account.id, webhookInstance)
+      }
     }
     if (!waInstance) {
       // Fallback: get first instance for this account
@@ -382,6 +390,49 @@ router.post('/evolution/:accountSlug', (req, res) => {
     }
 
     const { event, data } = req.body
+
+    // ─── connection.update — QR code novo ou mudanca de estado (open/close/connecting) ─
+    // Vem tanto do Evolution (nativo) quanto do uzapi (traduzido pelo /uzapi/:slug handler).
+    // Atualiza qr_code + status da inst no BD pra UI exibir.
+    if ((event === 'connection.update' || event === 'CONNECTION_UPDATE') && waInstance) {
+      try {
+        const updates = []
+        const params = []
+        // QR code novo (base64)
+        const qrcode = data?.qrcode?.base64 || data?.qrcode || null
+        if (qrcode && typeof qrcode === 'string') {
+          updates.push('qr_code = ?')
+          params.push(qrcode)
+        }
+        // Estado
+        const state = data?.state
+        if (state === 'open' || state === 'connected') {
+          updates.push("status = 'connected'", 'qr_code = NULL')
+        } else if (state === 'connecting') {
+          updates.push("status = 'connecting'")
+        } else if (state === 'close' || state === 'closed') {
+          updates.push("status = 'disconnected'")
+        }
+        if (updates.length > 0) {
+          updates.push("updated_at = datetime('now')")
+          params.push(waInstance.id)
+          db.prepare(`UPDATE whatsapp_instances SET ${updates.join(', ')} WHERE id = ?`).run(...params)
+          console.log(`[Webhook connection.update] inst=${waInstance.id} state=${state || '?'} hasQr=${!!qrcode}`)
+          // Broadcast SSE pra UI atualizar em tempo real
+          try {
+            broadcastSSE(account.id, 'instance:updated', {
+              id: waInstance.id,
+              status: state === 'open' || state === 'connected' ? 'connected' : (state === 'connecting' ? 'connecting' : 'disconnected'),
+              qr_code: state === 'open' || state === 'connected' ? null : qrcode,
+            })
+          } catch {}
+        }
+        return res.json({ ok: true })
+      } catch (e) {
+        console.error('[Webhook connection.update] erro:', e.message)
+        return res.status(500).json({ error: e.message })
+      }
+    }
 
     // ─── messages.update / MESSAGES_UPDATE — callback de status (delivered/read) ───
     // WhatsApp status numerico/string: 1=SERVER_ACK(sent), 2=DELIVERY_ACK(delivered), 3=READ, 4=PLAYED.

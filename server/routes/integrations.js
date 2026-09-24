@@ -545,16 +545,31 @@ router.post('/whatsapp/:id/switch-provider', requireRole('super_admin', 'gerente
   const newProvider = getProvider(updated)
   try {
     if (target === 'uzapi') {
-      // Delega criacao pro adapter uzapi (ele usa UZAPI_ADMIN_TOKEN do .env).
-      // Se adapter ainda esta como esqueleto, essa chamada throw — reverte campo provider.
-      await newProvider.createInstance({
+      // Cria instancia na uzapi. Retorna phoneNumberId + token novos gerados pela uzapi.
+      const webhookUrl = `https://drosagencia.com.br/crm/api/webhooks/uzapi/${account.slug}`
+      const createResult = await newProvider.createInstance({
         instanceName: uzapiSession,
+        webhook: webhookUrl,
+        // apiKey vem de UZAPI_ADMIN_TOKEN via env (fallback dentro do adapter)
       })
+      if (!createResult.ok || !createResult.phoneNumberId || !createResult.token) {
+        throw new Error(`uzapi createInstance falhou: ${JSON.stringify(createResult.raw || {}).slice(0, 300)}`)
+      }
+      // Guarda phoneNumberId (uzapi_session) + token (api_key) no BD.
+      // A partir daqui todas chamadas ao adapter uzapi usam esses valores da inst.
+      db.prepare(`
+        UPDATE whatsapp_instances
+           SET uzapi_session = ?, api_key = ?, api_url = ?, updated_at = datetime('now')
+         WHERE id = ?
+      `).run(createResult.phoneNumberId, createResult.token, 'https://api.uzapi.com.br', instance.id)
+      console.log(`[SwitchProvider] uzapi inst criada: phoneNumberId=${createResult.phoneNumberId}`)
     } else {
       // Volta pra Evolution — assume que a instance ja tinha api_url/api_key configurados
       // (nao mexemos nesses campos durante o switch pra uzapi). Basta re-registrar webhook.
     }
-    await registerProviderWebhook(updated, account.slug)
+    // Re-le a inst atualizada (com uzapi_session + api_key novos, se for uzapi)
+    const refreshed = db.prepare('SELECT * FROM whatsapp_instances WHERE id = ?').get(instance.id)
+    await registerProviderWebhook(refreshed, account.slug)
   } catch (err) {
     // Rollback: volta pro provider anterior
     console.error(`[SwitchProvider] Falha criando session em ${target}, revertendo:`, err.message)
