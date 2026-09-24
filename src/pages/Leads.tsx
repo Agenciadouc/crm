@@ -4,6 +4,7 @@ import { useAuth } from '../context/AuthContext'
 import { useAccount } from '../context/AccountContext'
 import { useSSE } from '../context/SSEContext'
 import AccountSelector from '../components/AccountSelector'
+import CityFilter, { useCityFilter } from '../components/CityFilter'
 import {
   apiFetch,
   fetchLeads, fetchFunnels, fetchUsers, fetchTags, createLead, bulkAssignLeads, bulkMoveLeads,
@@ -40,6 +41,7 @@ export default function Leads() {
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
   const [tagFilter, setTagFilter] = useState('')
+  const [cityFilter, setCityFilter] = useCityFilter(accountId)
   const [sourceOptions, setSourceOptions] = useState<{ value: string; count: number }[]>([])
   const [showNew, setShowNew] = useState(false)
   const [newLead, setNewLead] = useState<Record<string, any>>({ name: '', phone: '', email: '', city: '', source: 'manual', empresa: '', cpf_cnpj: '', instagram: '' })
@@ -71,6 +73,7 @@ export default function Leads() {
       source: sourceFilter || undefined, attendant_id: attendantFilter ? +attendantFilter : undefined,
       date_from: dateFrom || undefined, date_to: dateTo || undefined,
       tag: tagFilter ? +tagFilter : undefined,
+      city: cityFilter || undefined,
       show_archived: showArchived ? '1' : undefined,
       page, limit: 30,
     })
@@ -79,7 +82,7 @@ export default function Leads() {
       .finally(() => setLoading(false))
   }
 
-  useEffect(loadLeads, [accountId, search, stageFilter, sourceFilter, attendantFilter, dateFrom, dateTo, tagFilter, showArchived, page])
+  useEffect(loadLeads, [accountId, search, stageFilter, sourceFilter, attendantFilter, dateFrom, dateTo, tagFilter, cityFilter, showArchived, page])
 
   const loadArchivedCount = useCallback(() => {
     if (!accountId) return
@@ -147,7 +150,7 @@ export default function Leads() {
           </button>
           <button className="btn btn-secondary btn-sm" onClick={async () => {
             const token = localStorage.getItem('dros_crm_token')
-            const res = await fetch(`${import.meta.env.BASE_URL.replace(/\/$/, '')}/api/leads/export?account_id=${accountId}`, { headers: { Authorization: `Bearer ${token}` } })
+            const res = await fetch(`${import.meta.env.BASE_URL.replace(/\/$/, '')}/api/leads/export?account_id=${accountId}${cityFilter ? `&city=${encodeURIComponent(cityFilter)}` : ''}`, { headers: { Authorization: `Bearer ${token}` } })
             const blob = await res.blob()
             const url = URL.createObjectURL(blob)
             const a = document.createElement('a'); a.href = url; a.download = `leads-${new Date().toISOString().slice(0,10)}.csv`; a.click()
@@ -188,13 +191,14 @@ export default function Leads() {
             {tags.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
           </select>
         )}
+        <CityFilter accountId={accountId} value={cityFilter} onChange={c => { setCityFilter(c); setPage(1) }} />
       </div>
       <div className="filter-bar" style={{ marginTop: -8 }}>
         <input className="input" type="date" value={dateFrom} onChange={e => { setDateFrom(e.target.value); setPage(1) }} style={{ width: 160 }} />
         <span style={{ color: '#6B6580', fontSize: 12 }}>ate</span>
         <input className="input" type="date" value={dateTo} onChange={e => { setDateTo(e.target.value); setPage(1) }} style={{ width: 160 }} />
-        {(dateFrom || dateTo || search || stageFilter || sourceFilter || attendantFilter || tagFilter) && (
-          <button className="btn btn-secondary btn-sm" onClick={() => { setSearch(''); setStageFilter(''); setSourceFilter(''); setAttendantFilter(''); setDateFrom(''); setDateTo(''); setTagFilter(''); setPage(1) }}>Limpar filtros</button>
+        {(dateFrom || dateTo || search || stageFilter || sourceFilter || attendantFilter || tagFilter || cityFilter) && (
+          <button className="btn btn-secondary btn-sm" onClick={() => { setSearch(''); setStageFilter(''); setSourceFilter(''); setAttendantFilter(''); setDateFrom(''); setDateTo(''); setTagFilter(''); setCityFilter(''); setPage(1) }}>Limpar filtros</button>
         )}
       </div>
 

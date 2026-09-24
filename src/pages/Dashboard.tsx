@@ -6,6 +6,7 @@ import { fetchDashboardStats, fetchAgentStats, formatNumber, pctChange, type Das
 import { ResponsiveContainer, AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip } from 'recharts'
 import { Users, Target, TrendingUp, TrendingDown, Calendar, UserX, Zap } from 'lucide-react'
 import FunilMensalPanel from '../components/FunilMensal'
+import CityFilter, { useCityFilter } from '../components/CityFilter'
 
 const DAYS_OPTIONS = [{ label: '7d', value: 7 }, { label: '14d', value: 14 }, { label: '30d', value: 30 }, { label: '90d', value: 90 }]
 const COLORS = ['#FFB300', '#34C759', '#5DADE2', '#FF6B8A', '#9B59B6', '#FFAA83', '#EA4335', '#2ECC71']
@@ -27,15 +28,16 @@ export default function Dashboard() {
   const [agents, setAgents] = useState<AgentStat[]>([])
   const [loading, setLoading] = useState(true)
   const { accountId } = useAccount()
+  const [city, setCity] = useCityFilter(accountId)
 
   useEffect(() => {
     if (!accountId) return
     setLoading(true)
     Promise.all([
-      fetchDashboardStats(accountId, days).catch(() => null),
-      fetchAgentStats(accountId, days).catch(() => []),
+      fetchDashboardStats(accountId, days, city).catch(() => null),
+      fetchAgentStats(accountId, days, city).catch(() => []),
     ]).then(([s, a]) => { setStats(s); setAgents(a as AgentStat[]) }).finally(() => setLoading(false))
-  }, [accountId, days])
+  }, [accountId, days, city])
 
   if (!accountId) return <div className="empty-state"><h3>Selecione uma conta</h3></div>
   if (loading) return <div className="loading-container"><div className="spinner" /></div>
@@ -52,8 +54,11 @@ export default function Dashboard() {
           <h1>Dashboard</h1>
           <AccountSelector />
         </div>
-        <div className="date-selector">
-          {DAYS_OPTIONS.map(o => <button key={o.value} className={`date-btn ${days === o.value ? 'active' : ''}`} onClick={() => setDays(o.value)}>{o.label}</button>)}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+          <CityFilter accountId={accountId} value={city} onChange={setCity} />
+          <div className="date-selector">
+            {DAYS_OPTIONS.map(o => <button key={o.value} className={`date-btn ${days === o.value ? 'active' : ''}`} onClick={() => setDays(o.value)}>{o.label}</button>)}
+          </div>
         </div>
       </div>
 
@@ -74,7 +79,7 @@ export default function Dashboard() {
       </section>
 
       {/* Funil Mensal + ROAS (novo modulo) */}
-      <FunilMensalPanel accountId={accountId} />
+      <FunilMensalPanel accountId={accountId} city={city} />
 
       {/* Funnel by stage */}
       {stats.byStage.length > 0 && (

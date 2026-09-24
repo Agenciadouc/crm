@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react'
 import { useAccount } from '../context/AccountContext'
 import { useAuth } from '../context/AuthContext'
 import AccountSelector from '../components/AccountSelector'
+import CityFilter, { useCityFilter, CityNotice } from '../components/CityFilter'
 import {
   fetchProjecao, updateMonthlyMetrics,
   type ProjecaoResponse, type ProjecaoRow,
@@ -42,16 +43,17 @@ export default function Projecao() {
   const [future, setFuture] = useState(3)
   const [data, setData] = useState<ProjecaoResponse | null>(null)
   const [loading, setLoading] = useState(true)
+  const [city, setCity] = useCityFilter(accountId)
 
   const load = () => {
     if (!accountId) return
     setLoading(true)
-    fetchProjecao(accountId, past, future)
+    fetchProjecao(accountId, past, future, city)
       .then(setData)
       .catch(() => setData(null))
       .finally(() => setLoading(false))
   }
-  useEffect(() => { load() }, [accountId, past, future])
+  useEffect(() => { load() }, [accountId, past, future, city])
 
   if (!accountId) return <div className="empty-state"><h3>Selecione uma conta</h3></div>
 
@@ -62,7 +64,8 @@ export default function Projecao() {
           <h1><TrendingUp size={20} style={{ marginRight: 8, verticalAlign: -3 }} /> Projeção</h1>
           <AccountSelector />
         </div>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          <CityFilter accountId={accountId} value={city} onChange={setCity} />
           <label style={{ fontSize: 12, color: '#9B96B0' }}>Passado:
             <select value={past} onChange={e => setPast(parseInt(e.target.value))} className="select" style={{ marginLeft: 6, display: 'inline-block', width: 'auto' }}>
               {[3, 6, 12].map(n => <option key={n} value={n}>{n}m</option>)}
@@ -95,6 +98,10 @@ export default function Projecao() {
               {canEdit && ' Pra editar investimento de mes futuro, va no Dashboard, navegue pro mes, clique "Configurar mes".'}
             </div>
           </div>
+
+          <CityNotice city={city}>
+            Leads, etapas, vendas e faturamento são da cidade. Investimento, meta e ticket são da conta inteira: CPL, CAC, ROAS e a projeção dos meses futuros não aparecem por cidade.
+          </CityNotice>
 
           <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
             <div style={{ overflowX: 'auto' }}>

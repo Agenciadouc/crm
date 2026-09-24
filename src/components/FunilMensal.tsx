@@ -8,6 +8,7 @@ import {
   fetchFunilMensal, updateMonthlyMetrics, type FunilMensal,
 } from '../lib/api'
 import { Settings, ChevronLeft, ChevronRight, DollarSign, Target, TrendingUp, AlertTriangle, X } from 'lucide-react'
+import { CityNotice } from './CityFilter'
 
 const MESES = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez']
 
@@ -39,9 +40,10 @@ function fmtInt(v: number | null | undefined) {
   return v.toLocaleString('pt-BR')
 }
 
-interface Props { accountId: number }
+// city: cidade escolhida no Dashboard ('' = todas)
+interface Props { accountId: number; city?: string }
 
-export default function FunilMensalPanel({ accountId }: Props) {
+export default function FunilMensalPanel({ accountId, city = '' }: Props) {
   const { user } = useAuth()
   const canEdit = user?.role === 'super_admin' || user?.role === 'gerente'
   const [month, setMonth] = useState(currentYearMonth())
@@ -51,12 +53,12 @@ export default function FunilMensalPanel({ accountId }: Props) {
 
   const load = () => {
     setLoading(true)
-    fetchFunilMensal(accountId, month)
+    fetchFunilMensal(accountId, month, city)
       .then(setData)
       .catch(() => setData(null))
       .finally(() => setLoading(false))
   }
-  useEffect(() => { load() }, [accountId, month])
+  useEffect(() => { load() }, [accountId, month, city])
 
   if (loading) return <section className="dash-section"><div className="card" style={{ padding: 24, textAlign: 'center', color: '#6B6580' }}>Carregando funil...</div></section>
   if (!data) return null
@@ -100,6 +102,10 @@ export default function FunilMensalPanel({ accountId }: Props) {
         </div>
       )}
 
+      <CityNotice city={city}>
+        Leads, etapas, vendas e faturamento são da cidade. Investimento e meta são da conta inteira, então CPL, CAC, ROAS e o progresso da meta não aparecem por cidade.
+      </CityNotice>
+
       {/* Cascata visual */}
       <div className="card" style={{ padding: 16, marginBottom: 12 }}>
         {steps.map((s, i) => {
@@ -126,7 +132,9 @@ export default function FunilMensalPanel({ accountId }: Props) {
         <div className="metric-card">
           <div className="metric-header"><span className="metric-label">Investimento</span><div className="metric-icon" style={{ background: '#5DADE220', color: '#5DADE2' }}><DollarSign size={16} /></div></div>
           <div className="metric-value" style={{ fontSize: 20 }}>{fmtBRL(cfg.ad_investment)}</div>
-          {cfg.ad_investment === 0 && canEdit && <div className="metric-sub" style={{ color: '#FFB300', fontSize: 11 }}>Configure pra ver CAC e ROAS</div>}
+          {city
+            ? <div className="metric-sub" style={{ fontSize: 11, color: '#6B6580' }}>Da conta inteira</div>
+            : cfg.ad_investment === 0 && canEdit && <div className="metric-sub" style={{ color: '#FFB300', fontSize: 11 }}>Configure pra ver CAC e ROAS</div>}
         </div>
         <div className="metric-card">
           <div className="metric-header"><span className="metric-label">CPL (custo/lead)</span><div className="metric-icon" style={{ background: '#FFB30020', color: '#FFB300' }}><Target size={16} /></div></div>
@@ -153,7 +161,8 @@ export default function FunilMensalPanel({ accountId }: Props) {
         </div>
         <div className="metric-card">
           <div className="metric-header"><span className="metric-label">Meta de Vendas</span><div className="metric-icon" style={{ background: '#FF6B8A20', color: '#FF6B8A' }}><Target size={16} /></div></div>
-          <div className="metric-value" style={{ fontSize: 20 }}>{c.won} / {cfg.sales_target || '-'}</div>
+          <div className="metric-value" style={{ fontSize: 20 }}>{city ? c.won : `${c.won} / ${cfg.sales_target || '-'}`}</div>
+          {city && <div className="metric-sub" style={{ fontSize: 11, color: '#6B6580' }}>Vendas na cidade (meta é da conta)</div>}
           {calc.target_progress != null && (
             <div className="metric-sub" style={{ fontSize: 11, color: calc.target_progress >= 100 ? '#34C759' : calc.target_progress >= 70 ? '#FFB300' : '#FF6B6B' }}>
               {calc.target_progress.toFixed(0)}% da meta {calc.target_remaining > 0 ? `(faltam ${calc.target_remaining})` : '(batida!)'}

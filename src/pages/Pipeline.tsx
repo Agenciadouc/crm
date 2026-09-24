@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useAccount } from '../context/AccountContext'
 import AccountSelector from '../components/AccountSelector'
 import FilterDropdown, { type FilterValue } from '../components/FilterDropdown'
+import CityFilter, { useCityFilter } from '../components/CityFilter'
 import { useSSE } from '../context/SSEContext'
 import { fetchFunnels, fetchLeads, fetchTags, fetchUsers, moveLeadStage, fetchPipelineMetrics, archiveLead, updateLeadValue, type Funnel, type Lead, type PipelineMetric, type Tag, type User as ApiUser } from '../lib/api'
 import { Phone, MessageCircle, User, Clock, ChevronDown, ChevronRight, ArrowRight, Smartphone, Archive, DollarSign, X } from 'lucide-react'
@@ -50,6 +51,7 @@ export default function Pipeline() {
   const [attendantFilter, setAttendantFilter] = useState<FilterValue[]>([])
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
+  const [cityFilter, setCityFilter] = useCityFilter(accountId)
   const [expandedColumns, setExpandedColumns] = useState<Set<number>>(new Set())
   const CARDS_LIMIT = 5
 
@@ -63,8 +65,8 @@ export default function Pipeline() {
       setFunnel(active || null)
       if (active) {
         const [data, m] = await Promise.all([
-          fetchLeads(accountId, { funnel_id: active.id, limit: 500 }),
-          fetchPipelineMetrics(accountId, active.id).catch(() => ({ metrics: [], totalLeads: 0 })),
+          fetchLeads(accountId, { funnel_id: active.id, limit: 500, city: cityFilter || undefined }),
+          fetchPipelineMetrics(accountId, active.id, cityFilter).catch(() => ({ metrics: [], totalLeads: 0 })),
         ])
         setLeads(data.leads)
         setMetrics(m.metrics)
@@ -76,7 +78,7 @@ export default function Pipeline() {
       }
     } catch {}
     setLoading(false)
-  }, [accountId, isMobile])
+  }, [accountId, isMobile, cityFilter])
 
   useEffect(() => { loadData() }, [loadData])
   useEffect(() => { if (accountId) fetchTags(accountId).then(setTags).catch(() => {}) }, [accountId])
@@ -328,8 +330,9 @@ export default function Pipeline() {
           />
           <input type="date" className="input" style={{ width: 140 }} value={dateFrom} onChange={e => setDateFrom(e.target.value)} title="Data inicial (criacao)" />
           <input type="date" className="input" style={{ width: 140 }} value={dateTo} onChange={e => setDateTo(e.target.value)} title="Data final (criacao)" />
-          {(tagFilter.length > 0 || attendantFilter.length > 0 || dateFrom || dateTo) && (
-            <button className="btn btn-secondary btn-sm" onClick={() => { setTagFilter([]); setAttendantFilter([]); setDateFrom(''); setDateTo('') }}>
+          <CityFilter accountId={accountId} value={cityFilter} onChange={setCityFilter} />
+          {(tagFilter.length > 0 || attendantFilter.length > 0 || dateFrom || dateTo || cityFilter) && (
+            <button className="btn btn-secondary btn-sm" onClick={() => { setTagFilter([]); setAttendantFilter([]); setDateFrom(''); setDateTo(''); setCityFilter('') }}>
               Limpar filtros
             </button>
           )}

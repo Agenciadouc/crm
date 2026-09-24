@@ -787,6 +787,7 @@ router.get('/export', requireRole('super_admin', 'gerente'), (req, res) => {
   if (date_from) { where.push('l.created_at >= ?'); params.push(date_from) }
   if (date_to) { where.push('l.created_at <= ?'); params.push(date_to + ' 23:59:59') }
   if (funnel_id) { where.push('l.funnel_id = ?'); params.push(funnel_id) }
+  if (req.query.city) { where.push('city_key(l.city) = ?'); params.push(cityKey(req.query.city)) }
 
   const leads = db.prepare(`
     SELECT l.name, l.phone, l.email, l.city, l.source, fs.name as etapa, u.name as atendente, l.notes, l.created_at, l.updated_at

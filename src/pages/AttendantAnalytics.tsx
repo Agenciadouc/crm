@@ -15,6 +15,7 @@ import {
   Users, Eye, Bell, BookOpen, Globe, X, CheckCircle, MessageSquare,
 } from 'lucide-react'
 import ConversationDetailModal from '../components/ConversationDetailModal'
+import CityFilter, { useCityFilter, CityNotice } from '../components/CityFilter'
 
 type TabKey = 'overview' | 'ranking' | 'critical' | 'coaching' | 'market' | 'alerts'
 
@@ -204,6 +205,7 @@ export default function AttendantAnalytics() {
   const { user } = useAuth()
   const [tab, setTab] = useState<TabKey>('overview')
   const [days, setDays] = useState(30)
+  const [city, setCity] = useCityFilter(accountId)
   const [analyzing, setAnalyzing] = useState(false)
   const [showConfirmModal, setShowConfirmModal] = useState(false)
   const [estimate, setEstimate] = useState<AnalyzeEstimate | null>(null)
@@ -241,8 +243,8 @@ export default function AttendantAnalytics() {
     if (!accountId) return
     setLoading(true)
     Promise.all([
-      fetchOverviewV2(accountId, days).catch(() => null),
-      fetchAttendants(accountId, days).catch(() => ({ days, attendants: [] as AttendantMetrics[] })),
+      fetchOverviewV2(accountId, days, city).catch(() => null),
+      fetchAttendants(accountId, days, city).catch(() => ({ days, attendants: [] as AttendantMetrics[] })),
     ]).then(([o, v1]) => {
       setOverview(o)
       setAttendantsV1(v1.attendants)
@@ -253,8 +255,8 @@ export default function AttendantAnalytics() {
     if (!accountId) return
     setLoading(true)
     Promise.all([
-      fetchRankingV2(accountId, days).catch(() => ({ days, attendants: [] as RankingRowV2[] })),
-      fetchAttendants(accountId, days).catch(() => ({ days, attendants: [] as AttendantMetrics[] })),
+      fetchRankingV2(accountId, days, city).catch(() => ({ days, attendants: [] as RankingRowV2[] })),
+      fetchAttendants(accountId, days, city).catch(() => ({ days, attendants: [] as AttendantMetrics[] })),
     ]).then(([v2, v1]) => {
       setRankingV2(v2.attendants)
       setAttendantsV1(v1.attendants)
@@ -264,19 +266,19 @@ export default function AttendantAnalytics() {
   const loadCritical = () => {
     if (!accountId) return
     setLoading(true)
-    fetchCriticalConversations(accountId, days, 50).then(setCritical).catch(() => setCritical([])).finally(() => setLoading(false))
+    fetchCriticalConversations(accountId, days, 50, city).then(setCritical).catch(() => setCritical([])).finally(() => setLoading(false))
   }
 
   const loadAlerts = () => {
     if (!accountId) return
     setLoading(true)
-    fetchAlerts(accountId, 'open').then(setAlerts).catch(() => setAlerts([])).finally(() => setLoading(false))
+    fetchAlerts(accountId, 'open', city).then(setAlerts).catch(() => setAlerts([])).finally(() => setLoading(false))
   }
 
   const loadMarket = () => {
     if (!accountId) return
     setLoading(true)
-    fetchMarketIntel(accountId, days).then(setMarketIntel).catch(() => setMarketIntel(null)).finally(() => setLoading(false))
+    fetchMarketIntel(accountId, days, city).then(setMarketIntel).catch(() => setMarketIntel(null)).finally(() => setLoading(false))
   }
 
   const loadCoaching = (userId: number) => {
@@ -295,7 +297,7 @@ export default function AttendantAnalytics() {
     else if (tab === 'market') loadMarket()
     else if (tab === 'coaching' && coachingUserId) loadCoaching(coachingUserId)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [accountId, tab, days])
+  }, [accountId, tab, days, city])
 
   // Quando troca o user do coaching
   useEffect(() => {
@@ -457,7 +459,8 @@ export default function AttendantAnalytics() {
     <div>
       <div className="page-header">
         <h1><BarChart3 size={20} style={{ marginRight: 8, verticalAlign: 'middle' }} />Análise de Atendimentos</h1>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          <CityFilter accountId={accountId} value={city} onChange={setCity} />
           <div className="date-selector">
             {[7, 30, 90].map(d => (
               <button key={d} className={`date-btn ${days === d ? 'active' : ''}`} onClick={() => setDays(d)}>{d}d</button>
@@ -468,6 +471,10 @@ export default function AttendantAnalytics() {
           </button>
         </div>
       </div>
+
+      <CityNotice city={city}>
+        Conversas analisadas, notas, conversas críticas, alertas e objeções são da cidade. Tempo de resposta (SLA), contagens por atendente e o coaching semanal são guardados da conta inteira e não aparecem por cidade.
+      </CityNotice>
 
       {/* Tabs */}
       <div style={{ display: 'flex', gap: 4, borderBottom: '1px solid var(--border-subtle)', marginBottom: 16, overflowX: 'auto' }}>
@@ -565,13 +572,13 @@ export default function AttendantAnalytics() {
                         <td className="name">{a.user_name}</td>
                         <td><span style={{ fontSize: 10, padding: '2px 6px', borderRadius: 4, background: a.role === 'gerente' ? 'rgba(255,179,0,0.15)' : 'var(--bg-hover)', color: a.role === 'gerente' ? 'var(--accent)' : 'var(--text-muted)' }}>{a.role}</span></td>
                         <td className="right" style={{ fontWeight: 700, color: score100Color(a.score_v2) }}>{a.score_v2 ?? '—'}</td>
-                        <td className="right">{a.leads_assigned}</td>
+                        <td className="right">{a.leads_assigned ?? '—'}</td>
                         <td className="right">{a.conversion_pct != null ? `${a.conversion_pct}%` : '—'}</td>
                         <td className="right">{formatSeconds(a.ttfr_human)}</td>
                         <td className="right">{formatSeconds(a.tmr_human)}</td>
                         <td className="right">{a.sla_5min_pct != null ? `${a.sla_5min_pct}%` : '—'}</td>
                         <td className="right">{a.quentes}</td>
-                        <td className="right" style={{ color: a.idle24 > 0 ? 'var(--warning)' : undefined }}>{a.idle24}</td>
+                        <td className="right" style={{ color: a.idle24 > 0 ? 'var(--warning)' : undefined }}>{a.idle24 ?? '—'}</td>
                         <td className="right" style={{ color: a.lost_sales > 0 ? 'var(--negative)' : undefined }}>{a.lost_sales}</td>
                         <td style={{ fontSize: 11, color: 'var(--text-muted)' }}>{a.principal_erro || '—'}</td>
                         <td>{expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}</td>

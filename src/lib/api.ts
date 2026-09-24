@@ -252,8 +252,12 @@ export const approveContract = (id: number, email?: string) => apiFetch<{ contra
 export const syncContractHub = (id: number) => apiFetch<{ ok: boolean; client_id?: number; reason?: string; message?: string }>(`/api/contracts/${id}/sync-hub`, { method: 'POST' })
 
 // Dashboard
-export const fetchDashboardStats = (accountId: number, days = 7) => apiFetch<DashboardStats>(`/api/dashboard/stats?account_id=${accountId}&days=${days}`)
-export const fetchAgentStats = (accountId: number, days = 7) => apiFetch<{ agents: AgentStat[] }>(`/api/dashboard/agents?account_id=${accountId}&days=${days}`).then(d => d.agents)
+// Filtro por cidade dos relatorios: &city= so quando ha cidade escolhida
+const cityQ = (city?: string | null) => city ? `&city=${encodeURIComponent(city)}` : ''
+export interface CityOption { value: string; count: number }
+export const fetchLeadCities = (accountId: number) => apiFetch<{ cities: CityOption[] }>(`/api/leads/cities?account_id=${accountId}`).then(d => d.cities || [])
+export const fetchDashboardStats = (accountId: number, days = 7, city?: string | null) => apiFetch<DashboardStats>(`/api/dashboard/stats?account_id=${accountId}&days=${days}${cityQ(city)}`)
+export const fetchAgentStats = (accountId: number, days = 7, city?: string | null) => apiFetch<{ agents: AgentStat[] }>(`/api/dashboard/agents?account_id=${accountId}&days=${days}${cityQ(city)}`).then(d => d.agents)
 export const fetchGlobalDashboard = () => apiFetch<{ accounts: any[]; totalLeads: number; leadsToday: number }>('/api/dashboard/global')
 
 // ─── Funil Mensal + ROAS + Projecao ────────────────────────────────────────
@@ -282,6 +286,7 @@ export interface FunilMensal {
   month: string
   cascade: FunilMensalCascade
   config: MonthlyConfig
+  by_city?: boolean
   calc: {
     cpl: number | null
     cac: number | null
@@ -312,6 +317,7 @@ export interface ProjecaoRow {
 }
 export interface ProjecaoResponse {
   rows: ProjecaoRow[]
+  by_city?: boolean
   assumptions: {
     avg_qualified_rate: number
     avg_meeting_rate: number
@@ -321,16 +327,16 @@ export interface ProjecaoResponse {
   }
 }
 
-export const fetchFunilMensal = (accountId: number, month: string) =>
-  apiFetch<FunilMensal>(`/api/dashboard/funil-mensal/${month}?account_id=${accountId}`)
+export const fetchFunilMensal = (accountId: number, month: string, city?: string | null) =>
+  apiFetch<FunilMensal>(`/api/dashboard/funil-mensal/${month}?account_id=${accountId}${cityQ(city)}`)
 export const fetchMonthlyMetrics = (accountId: number, month: string) =>
   apiFetch<MonthlyConfig>(`/api/dashboard/monthly-metrics/${month}?account_id=${accountId}`)
 export const updateMonthlyMetrics = (accountId: number, month: string, data: { ad_investment?: number; sales_target?: number; avg_ticket?: number | null; notes?: string }) =>
   apiFetch<MonthlyConfig>(`/api/dashboard/monthly-metrics/${month}?account_id=${accountId}`, { method: 'PUT', body: JSON.stringify(data) })
 export const updateAccountAvgTicket = (accountId: number, avgTicket: number | null) =>
   apiFetch<{ ok: boolean; avg_ticket: number | null }>(`/api/dashboard/account/avg-ticket?account_id=${accountId}`, { method: 'PUT', body: JSON.stringify({ avg_ticket: avgTicket }) })
-export const fetchProjecao = (accountId: number, months = 3, futuros = 3) =>
-  apiFetch<ProjecaoResponse>(`/api/dashboard/projecao?account_id=${accountId}&months=${months}&futuros=${futuros}`)
+export const fetchProjecao = (accountId: number, months = 3, futuros = 3, city?: string | null) =>
+  apiFetch<ProjecaoResponse>(`/api/dashboard/projecao?account_id=${accountId}&months=${months}&futuros=${futuros}${cityQ(city)}`)
 
 export interface AiUsageData {
   period: string
@@ -380,8 +386,8 @@ export interface AttendantDetail {
   recent_insights: ConversationInsight[]
   top_errors: Array<{ error: string; count: number }>
 }
-export const fetchAttendants = (accountId: number, days = 30) =>
-  apiFetch<{ days: number; attendants: AttendantMetrics[] }>(`/api/dashboard/attendants?account_id=${accountId}&days=${days}`)
+export const fetchAttendants = (accountId: number, days = 30, city?: string | null) =>
+  apiFetch<{ days: number; attendants: AttendantMetrics[]; by_city?: boolean }>(`/api/dashboard/attendants?account_id=${accountId}&days=${days}${cityQ(city)}`)
 export const fetchAttendantDetail = (userId: number, accountId: number, days = 30) =>
   apiFetch<AttendantDetail>(`/api/dashboard/attendants/${userId}?account_id=${accountId}&days=${days}`)
 export const fetchConversationInsights = (accountId: number, opts: { days?: number; filter?: string; attendant_id?: number; limit?: number } = {}) => {
@@ -589,7 +595,7 @@ export const bulkAssignLeads = (accountId: number, leadIds: number[], attendantI
 export const bulkMoveLeads = (accountId: number, leadIds: number[], stageId: number) => apiFetch(`/api/leads/bulk/stage?account_id=${accountId}`, { method: 'POST', body: JSON.stringify({ lead_ids: leadIds, stage_id: stageId }) })
 
 // Pipeline metrics
-export const fetchPipelineMetrics = (accountId: number, funnelId: number) => apiFetch<{ metrics: PipelineMetric[]; totalLeads: number }>(`/api/leads/pipeline/metrics?account_id=${accountId}&funnel_id=${funnelId}`)
+export const fetchPipelineMetrics = (accountId: number, funnelId: number, city?: string | null) => apiFetch<{ metrics: PipelineMetric[]; totalLeads: number }>(`/api/leads/pipeline/metrics?account_id=${accountId}&funnel_id=${funnelId}${cityQ(city)}`)
 
 // =============================================
 // Cadences (sequential contact workflows)
@@ -981,6 +987,7 @@ export const deleteLaunch = (id: number, accountId: number) => apiFetch(`/api/la
 // =============================================
 
 export interface OverviewV2 {
+  by_city?: boolean
   cards: {
     conversas_analisadas: number
     score_medio: number | null
@@ -1134,16 +1141,16 @@ export interface AnalyzeEstimate {
   is_super_admin_bypass: boolean
 }
 
-export const fetchOverviewV2 = (accountId: number, days: number = 30) =>
-  apiFetch<OverviewV2>(`/api/dashboard/overview-v2?account_id=${accountId}&days=${days}`)
-export const fetchRankingV2 = (accountId: number, days: number = 30) =>
-  apiFetch<{ days: number; attendants: RankingRowV2[] }>(`/api/dashboard/ranking-v2?account_id=${accountId}&days=${days}`)
-export const fetchCriticalConversations = (accountId: number, days: number = 30, limit: number = 50) =>
-  apiFetch<{ conversations: CriticalConversation[] }>(`/api/dashboard/critical-conversations?account_id=${accountId}&days=${days}&limit=${limit}`).then(d => d.conversations)
+export const fetchOverviewV2 = (accountId: number, days: number = 30, city?: string | null) =>
+  apiFetch<OverviewV2>(`/api/dashboard/overview-v2?account_id=${accountId}&days=${days}${cityQ(city)}`)
+export const fetchRankingV2 = (accountId: number, days: number = 30, city?: string | null) =>
+  apiFetch<{ days: number; attendants: RankingRowV2[]; by_city?: boolean }>(`/api/dashboard/ranking-v2?account_id=${accountId}&days=${days}${cityQ(city)}`)
+export const fetchCriticalConversations = (accountId: number, days: number = 30, limit: number = 50, city?: string | null) =>
+  apiFetch<{ conversations: CriticalConversation[] }>(`/api/dashboard/critical-conversations?account_id=${accountId}&days=${days}&limit=${limit}${cityQ(city)}`).then(d => d.conversations)
 export const fetchConversationDetailV2 = (leadId: number, accountId: number) =>
   apiFetch<ConversationDetailV2>(`/api/dashboard/conversation-detail/${leadId}?account_id=${accountId}`)
-export const fetchAlerts = (accountId: number, status: 'open' | 'resolved' | 'dismissed' = 'open') =>
-  apiFetch<{ alerts: AnalystAlert[] }>(`/api/dashboard/alerts?account_id=${accountId}&status=${status}`).then(d => d.alerts)
+export const fetchAlerts = (accountId: number, status: 'open' | 'resolved' | 'dismissed' = 'open', city?: string | null) =>
+  apiFetch<{ alerts: AnalystAlert[] }>(`/api/dashboard/alerts?account_id=${accountId}&status=${status}${cityQ(city)}`).then(d => d.alerts)
 export const resolveAlert = (id: number, accountId: number, status: 'resolved' | 'dismissed' = 'resolved') =>
   apiFetch(`/api/dashboard/alerts/${id}/resolve?account_id=${accountId}`, { method: 'POST', body: JSON.stringify({ status }) })
 export const assignAlert = (id: number, accountId: number, userId: number | null) =>
@@ -1152,8 +1159,8 @@ export const fetchCoaching = (userId: number, accountId: number, weeks: number =
   apiFetch<{ weekly: CoachingWeekly[] }>(`/api/dashboard/coaching/${userId}?account_id=${accountId}&weeks=${weeks}`).then(d => d.weekly)
 export const generateCoachingNow = (userId: number, accountId: number) =>
   apiFetch<{ ok: boolean; week_start: string; message: string }>(`/api/dashboard/coaching/${userId}/generate?account_id=${accountId}`, { method: 'POST' })
-export const fetchMarketIntel = (accountId: number, days: number = 30) =>
-  apiFetch<MarketIntel>(`/api/dashboard/market-intelligence?account_id=${accountId}&days=${days}`)
+export const fetchMarketIntel = (accountId: number, days: number = 30, city?: string | null) =>
+  apiFetch<MarketIntel>(`/api/dashboard/market-intelligence?account_id=${accountId}&days=${days}${cityQ(city)}`)
 export const fetchAnalyzeEstimate = (accountId: number, days: number = 7, maxLeads: number = 50) =>
   apiFetch<AnalyzeEstimate>(`/api/dashboard/analyze-estimate?account_id=${accountId}&days=${days}&max=${maxLeads}`)
 export const markProposalSent = (leadId: number, accountId: number) =>
