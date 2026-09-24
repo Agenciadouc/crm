@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import Database from 'better-sqlite3'
-import { normalizeCity, cityKey, registerCityFunctions, normalizeExistingCities, cityWhere, resolveCity } from '../server/services/city.js'
+import { normalizeCity, cityKey, registerCityFunctions, normalizeExistingCities, cityWhere, resolveCity, leadCityExists } from '../server/services/city.js'
 
 test('normalizeCity: tira espacos e ajusta maiusculas; preposicoes em minusculo', () => {
   assert.equal(normalizeCity('  são   paulo '), 'São Paulo')
@@ -68,4 +68,15 @@ test('resolveCity: reaproveita a forma ja usada na conta; senao padroniza', () =
   assert.equal(resolveCity(db, 1, 'itajaí'), 'Itajaí')
   assert.equal(resolveCity(db, 1, '  '), null)
   assert.equal(resolveCity(db, null, 'itajaí'), 'Itajaí')
+})
+
+test('leadCityExists: filtra tabela ligada ao lead pela cidade', () => {
+  const db = new Database(':memory:')
+  registerCityFunctions(db)
+  db.exec('CREATE TABLE leads (id INTEGER PRIMARY KEY, city TEXT); CREATE TABLE ins (id INTEGER PRIMARY KEY, lead_id INTEGER)')
+  db.prepare("INSERT INTO leads (id, city) VALUES (1, 'Itajaí'), (2, 'Joinville')").run()
+  db.prepare('INSERT INTO ins (lead_id) VALUES (1), (2), (NULL)').run()
+  const w = leadCityExists('ins.lead_id', 'itajai')
+  assert.deepEqual(db.prepare(`SELECT id FROM ins WHERE 1=1${w.sql}`).all(...w.params).map(r => r.id), [1])
+  assert.deepEqual(leadCityExists('x', null), { sql: '', params: [] })
 })

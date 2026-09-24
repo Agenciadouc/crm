@@ -4,8 +4,23 @@ import { requireRole } from '../middleware/auth.js'
 import { analyzeConversationsBatch, getAnalyzeEstimate } from '../services/conversationAnalyzer.js'
 import { aggregateAllAccounts } from '../services/attendantMetrics.js'
 import { generateCoachingForUser, isoMonday } from '../services/coachingAnalyzer.js'
+import { cityWhere, leadCityExists } from '../services/city.js'
 
 const router = Router()
+
+// Campos que vem do agregado diario por atendente (attendant_metrics_daily, sem cidade): com filtro de
+// cidade ficam nulos e a tela avisa, em vez de mostrar o total da conta como se fosse da cidade.
+const AMD_NULL_V1 = {
+  leads_assigned: null, leads_responded: null, leads_converted: null,
+  ttfr_avg_seconds: null, tmr_avg_seconds: null,
+  leads_under_5min: null, leads_under_30min: null, leads_under_1h: null,
+  open_conversations: null, abandoned_leads: null,
+}
+const AMD_NULL_V2 = {
+  leads_assigned: null, leads_responded: null, leads_converted: null,
+  ttfr_human: null, tmr_human: null, under5: null, idle24: null,
+  sla_5min_pct: null, conversion_pct: null,
+}
 
 // Main dashboard stats
 router.get('/stats', (req, res) => {
@@ -20,48 +35,52 @@ router.get('/stats', (req, res) => {
   prevSince.setDate(prevSince.getDate() - d)
   const prevSinceStr = prevSince.toISOString().slice(0, 19).replace('T', ' ')
 
+  // Filtro opcional por cidade do lead (?city=), comparado sem acento
+  const cw = cityWhere('leads', req.query.city)
+  const cwl = cityWhere('l', req.query.city)
+
   // Total leads in period
-  const totalLeads = db.prepare('SELECT COUNT(*) as c FROM leads WHERE account_id = ? AND is_archived = 0 AND is_blocked = 0 AND created_at >= ?').get(req.accountId, sinceStr).c
-  const prevTotalLeads = db.prepare('SELECT COUNT(*) as c FROM leads WHERE account_id = ? AND is_archived = 0 AND is_blocked = 0 AND created_at >= ? AND created_at < ?').get(req.accountId, prevSinceStr, sinceStr).c
+  const totalLeads = db.prepare(`SELECT COUNT(*) as c FROM leads WHERE account_id = ? AND is_archived = 0 AND is_blocked = 0 AND created_at >= ?${cw.sql}`).get(req.accountId, sinceStr, ...cw.params).c
+  const prevTotalLeads = db.prepare(`SELECT COUNT(*) as c FROM leads WHERE account_id = ? AND is_archived = 0 AND is_blocked = 0 AND created_at >= ? AND created_at < ?${cw.sql}`).get(req.accountId, prevSinceStr, sinceStr, ...cw.params).c
 
   // Leads today
-  const leadsToday = db.prepare("SELECT COUNT(*) as c FROM leads WHERE account_id = ? AND is_archived = 0 AND is_blocked = 0 AND date(created_at) = date('now')").get(req.accountId).c
+  const leadsToday = db.prepare(`SELECT COUNT(*) as c FROM leads WHERE account_id = ? AND is_archived = 0 AND is_blocked = 0 AND date(created_at) = date('now')${cw.sql}`).get(req.accountId, ...cw.params).c
 
   // Conversion rate (all active leads, not just period — a lead created months ago can convert today)
   const convData = db.prepare(`
     SELECT COUNT(*) as total,
       SUM(CASE WHEN fs.is_conversion = 1 THEN 1 ELSE 0 END) as converted
     FROM leads l JOIN funnel_stages fs ON l.stage_id = fs.id
-    WHERE l.account_id = ? AND l.is_active = 1 AND l.is_archived = 0 AND l.is_blocked = 0
-  `).get(req.accountId)
+    WHERE l.account_id = ? AND l.is_active = 1 AND l.is_archived = 0 AND l.is_blocked = 0${cwl.sql}
+  `).get(req.accountId, ...cwl.params)
   const conversionRate = convData.total > 0 ? (convData.converted / convData.total) * 100 : 0
 
   // Unassigned leads
-  const unassigned = db.prepare('SELECT COUNT(*) as c FROM leads WHERE account_id = ? AND attendant_id IS NULL AND is_active = 1 AND is_archived = 0 AND is_blocked = 0').get(req.accountId).c
+  const unassigned = db.prepare(`SELECT COUNT(*) as c FROM leads WHERE account_id = ? AND attendant_id IS NULL AND is_active = 1 AND is_archived = 0 AND is_blocked = 0${cw.sql}`).get(req.accountId, ...cw.params).c
 
   // Leads per stage (for funnel chart)
   const byStage = db.prepare(`
     SELECT fs.id, fs.name, fs.color, fs.position, fs.is_conversion, COUNT(l.id) as count
     FROM funnel_stages fs
     JOIN funnels f ON fs.funnel_id = f.id
-    LEFT JOIN leads l ON l.stage_id = fs.id AND l.is_active = 1 AND l.is_archived = 0 AND l.is_blocked = 0
+    LEFT JOIN leads l ON l.stage_id = fs.id AND l.is_active = 1 AND l.is_archived = 0 AND l.is_blocked = 0${cwl.sql}
     WHERE f.account_id = ? AND f.is_default = 1
     GROUP BY fs.id ORDER BY fs.position
-  `).all(req.accountId)
+  `).all(...cwl.params, req.accountId)
 
   // Leads per source
   const bySource = db.prepare(`
     SELECT COALESCE(source, 'manual') as source, COUNT(*) as count
-    FROM leads WHERE account_id = ? AND is_archived = 0 AND is_blocked = 0 AND created_at >= ?
+    FROM leads WHERE account_id = ? AND is_archived = 0 AND is_blocked = 0 AND created_at >= ?${cw.sql}
     GROUP BY source ORDER BY count DESC
-  `).all(req.accountId, sinceStr)
+  `).all(req.accountId, sinceStr, ...cw.params)
 
   // Daily leads
   const daily = db.prepare(`
     SELECT date(created_at) as date, COUNT(*) as count
-    FROM leads WHERE account_id = ? AND is_archived = 0 AND is_blocked = 0 AND created_at >= ?
+    FROM leads WHERE account_id = ? AND is_archived = 0 AND is_blocked = 0 AND created_at >= ?${cw.sql}
     GROUP BY date(created_at) ORDER BY date
-  `).all(req.accountId, sinceStr)
+  `).all(req.accountId, sinceStr, ...cw.params)
 
   res.json({
     totalLeads, prevTotalLeads, leadsToday, conversionRate, unassigned,
@@ -78,14 +97,16 @@ router.get('/agents', requireRole('super_admin', 'gerente'), (req, res) => {
   since.setDate(since.getDate() - d)
   const sinceStr = since.toISOString().slice(0, 19).replace('T', ' ')
 
+  const cw = cityWhere('leads', req.query.city)
+  const cwl = cityWhere('l', req.query.city)
   const agents = db.prepare(`
     SELECT u.id, u.name, u.is_active,
-      (SELECT COUNT(*) FROM leads WHERE attendant_id = u.id AND is_archived = 0 AND is_blocked = 0 AND created_at >= ?) as leads_period,
-      (SELECT COUNT(*) FROM leads WHERE attendant_id = u.id AND is_active = 1 AND is_archived = 0 AND is_blocked = 0) as leads_total,
-      (SELECT COUNT(*) FROM leads l JOIN funnel_stages fs ON l.stage_id = fs.id WHERE l.attendant_id = u.id AND fs.is_conversion = 1 AND l.is_active = 1 AND l.is_archived = 0 AND l.is_blocked = 0) as conversions
+      (SELECT COUNT(*) FROM leads WHERE attendant_id = u.id AND is_archived = 0 AND is_blocked = 0 AND created_at >= ?${cw.sql}) as leads_period,
+      (SELECT COUNT(*) FROM leads WHERE attendant_id = u.id AND is_active = 1 AND is_archived = 0 AND is_blocked = 0${cw.sql}) as leads_total,
+      (SELECT COUNT(*) FROM leads l JOIN funnel_stages fs ON l.stage_id = fs.id WHERE l.attendant_id = u.id AND fs.is_conversion = 1 AND l.is_active = 1 AND l.is_archived = 0 AND l.is_blocked = 0${cwl.sql}) as conversions
     FROM users u WHERE u.account_id = ? AND u.role IN ('atendente', 'gerente')
     ORDER BY leads_total DESC
-  `).all(sinceStr, req.accountId)
+  `).all(sinceStr, ...cw.params, ...cw.params, ...cwl.params, req.accountId)
 
   res.json({ agents })
 })
@@ -202,6 +223,8 @@ router.get('/attendants', requireRole('super_admin', 'gerente'), requireAnalytic
   if (!req.accountId) return res.status(400).json({ error: 'account_id required' })
   const days = Math.max(1, Math.min(365, parseInt(req.query.days) || 30))
   const sinceDate = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10)
+  const byCity = !!cityWhere('l', req.query.city).sql
+  const lce = leadCityExists('ci.lead_id', req.query.city)
 
   // Agrega métricas dos últimos N dias por user
   const rows = db.prepare(`
@@ -221,18 +244,18 @@ router.get('/attendants', requireRole('super_admin', 'gerente'), requireAnalytic
         SELECT AVG(ci.attendant_score)
         FROM conversation_insights ci
         WHERE ci.attendant_user_id = u.id AND ci.account_id = u.account_id
-          AND ci.analyzed_at >= ?
+          AND ci.analyzed_at >= ?${lce.sql}
       ) as ai_score_avg,
       (
         SELECT COUNT(*) FROM conversation_insights ci
         WHERE ci.attendant_user_id = u.id AND ci.account_id = u.account_id
-          AND ci.analyzed_at >= ? AND ci.lost_sale_signals IS NOT NULL
+          AND ci.analyzed_at >= ? AND ci.lost_sale_signals IS NOT NULL${lce.sql}
       ) as lost_sales_detected,
       (
         SELECT SUM(json_array_length(COALESCE(ci.attendant_errors, '[]')))
         FROM conversation_insights ci
         WHERE ci.attendant_user_id = u.id AND ci.account_id = u.account_id
-          AND ci.analyzed_at >= ?
+          AND ci.analyzed_at >= ?${lce.sql}
       ) as ai_errors_total
     FROM users u
     LEFT JOIN attendant_metrics_daily amd ON amd.user_id = u.id AND amd.date >= ?
@@ -240,9 +263,11 @@ router.get('/attendants', requireRole('super_admin', 'gerente'), requireAnalytic
       AND COALESCE(u.is_bot, 0) = 0
     GROUP BY u.id
     ORDER BY ai_score_avg DESC NULLS LAST, leads_responded DESC
-  `).all(sinceDate, sinceDate, sinceDate, sinceDate, req.accountId)
+  `).all(sinceDate, ...lce.params, sinceDate, ...lce.params, sinceDate, ...lce.params, sinceDate, req.accountId)
 
-  res.json({ days, attendants: rows })
+  // Com cidade: contagens/tempos vem do agregado diario por atendente (sem cidade) -> nulos; a tela avisa.
+  const out = byCity ? rows.map(r => ({ ...r, ...AMD_NULL_V1 })) : rows
+  res.json({ days, attendants: out, by_city: byCity })
 })
 
 // Detalhe de um atendente específico
@@ -441,15 +466,20 @@ router.get('/overview-v2', requireRole('super_admin', 'gerente'), requireAnalyti
   const days = Math.min(365, Math.max(1, parseInt(req.query.days || '30')))
   const since = new Date(Date.now() - days * 86400 * 1000).toISOString().slice(0, 19).replace('T', ' ')
 
+  // ?city= opcional: so conversas/erros/alertas de leads dessa cidade. SLA vem do agregado sem cidade -> nulo.
+  const byCity = !!cityWhere('l', req.query.city).sql
+  const lci = leadCityExists('conversation_insights.lead_id', req.query.city)
+  const cwl = cityWhere('l', req.query.city)
+
   const conversasAnalisadas = db.prepare(`
     SELECT COUNT(*) as n FROM conversation_insights
-    WHERE account_id = ? AND analyzed_at >= ? AND insights_version >= 2
-  `).get(req.accountId, since)?.n || 0
+    WHERE account_id = ? AND analyzed_at >= ? AND insights_version >= 2${lci.sql}
+  `).get(req.accountId, since, ...lci.params)?.n || 0
 
   const scoreMedioRow = db.prepare(`
     SELECT AVG(conversation_score) as avg FROM conversation_insights
-    WHERE account_id = ? AND analyzed_at >= ? AND insights_version >= 2 AND conversation_score IS NOT NULL
-  `).get(req.accountId, since)
+    WHERE account_id = ? AND analyzed_at >= ? AND insights_version >= 2 AND conversation_score IS NOT NULL${lci.sql}
+  `).get(req.accountId, since, ...lci.params)
   const scoreMedio = scoreMedioRow?.avg ? Math.round(scoreMedioRow.avg) : null
 
   // SLA <5min (humano) — usa attendant_metrics_daily agregado
@@ -458,24 +488,24 @@ router.get('/overview-v2', requireRole('super_admin', 'gerente'), requireAnalyti
     FROM attendant_metrics_daily
     WHERE account_id = ? AND date >= date(?)
   `).get(req.accountId, since.slice(0, 10))
-  const slaPct = slaRow?.total ? Math.round(100 * (slaRow.under5 || 0) / slaRow.total) : null
+  const slaPct = !byCity && slaRow?.total ? Math.round(100 * (slaRow.under5 || 0) / slaRow.total) : null
 
   const leadsQuentesEmRisco = db.prepare(`
     SELECT COUNT(*) as n FROM conversation_insights ci
     JOIN leads l ON l.id = ci.lead_id
     WHERE ci.account_id = ? AND ci.analyzed_at >= ?
       AND ci.temperatura_lead = 'quente'
-      AND l.is_active = 1 AND COALESCE(l.is_archived, 0) = 0
+      AND l.is_active = 1 AND COALESCE(l.is_archived, 0) = 0${cwl.sql}
       AND NOT EXISTS (
         SELECT 1 FROM messages WHERE lead_id = l.id AND direction = 'outbound' AND ai_agent_id IS NULL
           AND created_at >= datetime('now', '-1 day')
       )
-  `).get(req.accountId, since)?.n || 0
+  `).get(req.accountId, since, ...cwl.params)?.n || 0
 
   const vendasPerdidas = db.prepare(`
     SELECT COUNT(*) as n FROM conversation_insights
-    WHERE account_id = ? AND analyzed_at >= ? AND lost_sale_signals IS NOT NULL AND lost_sale_signals != ''
-  `).get(req.accountId, since)?.n || 0
+    WHERE account_id = ? AND analyzed_at >= ? AND lost_sale_signals IS NOT NULL AND lost_sale_signals != ''${lci.sql}
+  `).get(req.accountId, since, ...lci.params)?.n || 0
 
   // Receita estimada em risco
   const receitaRiscoRow = db.prepare(`
@@ -483,28 +513,28 @@ router.get('/overview-v2', requireRole('super_admin', 'gerente'), requireAnalyti
     JOIN leads l ON l.id = ci.lead_id
     WHERE ci.account_id = ? AND ci.analyzed_at >= ?
       AND ci.temperatura_lead = 'quente'
-      AND l.value_estimated IS NOT NULL
+      AND l.value_estimated IS NOT NULL${cwl.sql}
       AND NOT EXISTS (
         SELECT 1 FROM messages WHERE lead_id = l.id AND direction = 'outbound' AND ai_agent_id IS NULL
           AND created_at >= datetime('now', '-1 day')
       )
-  `).get(req.accountId, since)
+  `).get(req.accountId, since, ...cwl.params)
   const receitaRisco = receitaRiscoRow?.total || 0
 
   const errosCriticos = db.prepare(`
     SELECT COUNT(*) as n FROM conversation_errors
-    WHERE account_id = ? AND created_at >= ? AND gravity = 'critica'
-  `).get(req.accountId, since)?.n || 0
+    WHERE account_id = ? AND created_at >= ? AND gravity = 'critica'${leadCityExists('conversation_errors.lead_id', req.query.city).sql}
+  `).get(req.accountId, since, ...leadCityExists('conversation_errors.lead_id', req.query.city).params)?.n || 0
 
   const alertasOpen = db.prepare(`
-    SELECT COUNT(*) as n FROM analyst_alerts WHERE account_id = ? AND status = 'open'
-  `).get(req.accountId)?.n || 0
+    SELECT COUNT(*) as n FROM analyst_alerts WHERE account_id = ? AND status = 'open'${leadCityExists('analyst_alerts.lead_id', req.query.city).sql}
+  `).get(req.accountId, ...leadCityExists('analyst_alerts.lead_id', req.query.city).params)?.n || 0
 
   // Bot taxa de resolução: % de bot_analysis.respondeu_corretamente
   const botRow = db.prepare(`
     SELECT bot_analysis_json FROM conversation_insights
-    WHERE account_id = ? AND analyzed_at >= ? AND bot_analysis_json IS NOT NULL
-  `).all(req.accountId, since)
+    WHERE account_id = ? AND analyzed_at >= ? AND bot_analysis_json IS NOT NULL${lci.sql}
+  `).all(req.accountId, since, ...lci.params)
   let botTotal = 0, botOk = 0
   for (const r of botRow) {
     try {
@@ -519,8 +549,8 @@ router.get('/overview-v2', requireRole('super_admin', 'gerente'), requireAnalyti
     SELECT COUNT(*) as n FROM lead_follow_ups lfu
     JOIN follow_ups fu ON fu.id = lfu.follow_up_id
     JOIN leads l ON l.id = lfu.lead_id
-    WHERE l.account_id = ? AND lfu.status = 'active' AND lfu.next_run_at < datetime('now')
-  `).get(req.accountId)?.n || 0
+    WHERE l.account_id = ? AND lfu.status = 'active' AND lfu.next_run_at < datetime('now')${cwl.sql}
+  `).get(req.accountId, ...cwl.params)?.n || 0
 
   res.json({
     cards: {
@@ -536,6 +566,7 @@ router.get('/overview-v2', requireRole('super_admin', 'gerente'), requireAnalyti
       follow_ups_atrasados: followUpsAtrasados,
     },
     days,
+    by_city: byCity,
   })
 })
 
@@ -545,6 +576,8 @@ router.get('/ranking-v2', requireRole('super_admin', 'gerente'), requireAnalytic
   const days = Math.min(365, Math.max(1, parseInt(req.query.days || '30')))
   const since = new Date(Date.now() - days * 86400 * 1000).toISOString().slice(0, 19).replace('T', ' ')
   const sinceDate = since.slice(0, 10)
+  const byCity = !!cityWhere('l', req.query.city).sql
+  const lce = leadCityExists('ci.lead_id', req.query.city)
 
   const rows = db.prepare(`
     SELECT
@@ -561,23 +594,24 @@ router.get('/ranking-v2', requireRole('super_admin', 'gerente'), requireAnalytic
       COUNT(DISTINCT CASE WHEN ci.temperatura_lead = 'quente' THEN ci.lead_id END) as quentes
     FROM users u
     LEFT JOIN attendant_metrics_daily amd ON amd.user_id = u.id AND amd.account_id = u.account_id AND amd.date >= ?
-    LEFT JOIN conversation_insights ci ON ci.attendant_user_id = u.id AND ci.account_id = u.account_id AND ci.analyzed_at >= ? AND ci.insights_version >= 2
+    LEFT JOIN conversation_insights ci ON ci.attendant_user_id = u.id AND ci.account_id = u.account_id AND ci.analyzed_at >= ? AND ci.insights_version >= 2${lce.sql}
     WHERE u.account_id = ? AND u.role IN ('atendente', 'gerente') AND u.is_active = 1 AND COALESCE(u.is_bot, 0) = 0
     GROUP BY u.id, u.name, u.role
     ORDER BY score_v2 DESC NULLS LAST, leads_responded DESC
-  `).all(sinceDate, since, req.accountId)
+  `).all(sinceDate, since, ...lce.params, req.accountId)
 
   // Pra cada user: principal_erro e principal_forte
   const principalErrorStmt = db.prepare(`
     SELECT code, COUNT(*) as n FROM conversation_errors
-    WHERE account_id = ? AND attendant_user_id = ? AND created_at >= ?
+    WHERE account_id = ? AND attendant_user_id = ? AND created_at >= ?${leadCityExists('conversation_errors.lead_id', req.query.city).sql}
     GROUP BY code ORDER BY n DESC LIMIT 1
   `)
   const principalStrengthStmt = db.prepare(`
     SELECT code, COUNT(*) as n FROM conversation_strengths
-    WHERE account_id = ? AND attendant_user_id = ? AND created_at >= ?
+    WHERE account_id = ? AND attendant_user_id = ? AND created_at >= ?${leadCityExists('conversation_strengths.lead_id', req.query.city).sql}
     GROUP BY code ORDER BY n DESC LIMIT 1
   `)
+  const cityParams = leadCityExists('x', req.query.city).params
   const enriched = rows.map(r => ({
     ...r,
     score_v2: r.score_v2 ? Math.round(r.score_v2) : null,
@@ -585,11 +619,13 @@ router.get('/ranking-v2', requireRole('super_admin', 'gerente'), requireAnalytic
     tmr_human: r.tmr_human ? Math.round(r.tmr_human) : null,
     sla_5min_pct: r.leads_assigned ? Math.round(100 * r.under5 / r.leads_assigned) : null,
     conversion_pct: r.leads_assigned ? Math.round(100 * r.leads_converted / r.leads_assigned) : null,
-    principal_erro: principalErrorStmt.get(req.accountId, r.user_id, since)?.code || null,
-    principal_forte: principalStrengthStmt.get(req.accountId, r.user_id, since)?.code || null,
+    principal_erro: principalErrorStmt.get(req.accountId, r.user_id, since, ...cityParams)?.code || null,
+    principal_forte: principalStrengthStmt.get(req.accountId, r.user_id, since, ...cityParams)?.code || null,
+    // Com cidade: contagens/tempos do agregado diario por atendente (sem cidade) -> nulos; a tela avisa.
+    ...(byCity ? AMD_NULL_V2 : {}),
   }))
 
-  res.json({ days, attendants: enriched })
+  res.json({ days, attendants: enriched, by_city: byCity })
 })
 
 // Conversas críticas
@@ -598,6 +634,7 @@ router.get('/critical-conversations', requireRole('super_admin', 'gerente'), req
   const days = Math.min(365, Math.max(1, parseInt(req.query.days || '30')))
   const limit = Math.min(100, Math.max(1, parseInt(req.query.limit || '50')))
   const since = new Date(Date.now() - days * 86400 * 1000).toISOString().slice(0, 19).replace('T', ' ')
+  const cwl = cityWhere('l', req.query.city)
 
   const rows = db.prepare(`
     SELECT ci.lead_id, l.name as lead_name, l.phone as lead_phone,
@@ -609,7 +646,7 @@ router.get('/critical-conversations', requireRole('super_admin', 'gerente'), req
     FROM conversation_insights ci
     JOIN leads l ON l.id = ci.lead_id
     LEFT JOIN users u ON u.id = ci.attendant_user_id
-    WHERE ci.account_id = ? AND ci.analyzed_at >= ? AND ci.insights_version >= 2
+    WHERE ci.account_id = ? AND ci.analyzed_at >= ? AND ci.insights_version >= 2${cwl.sql}
       AND (
         ci.prioridade_revisao IN ('alta', 'critica')
         OR ci.lost_sale_signals IS NOT NULL
@@ -619,7 +656,7 @@ router.get('/critical-conversations', requireRole('super_admin', 'gerente'), req
       CASE ci.prioridade_revisao WHEN 'critica' THEN 0 WHEN 'alta' THEN 1 WHEN 'media' THEN 2 ELSE 3 END,
       ci.chance_conversao DESC
     LIMIT ?
-  `).all(req.accountId, since, limit)
+  `).all(req.accountId, since, ...cwl.params, limit)
 
   res.json({ conversations: rows })
 })
@@ -676,17 +713,19 @@ router.get('/conversation-detail/:leadId', requireRole('super_admin', 'gerente')
 router.get('/alerts', requireRole('super_admin', 'gerente'), requireAnalyticsEnabled, (req, res) => {
   if (!req.accountId) return res.status(400).json({ error: 'account_id required' })
   const status = req.query.status || 'open'
+  // Com cidade: so alertas de leads dessa cidade (alerta sem lead fica de fora)
+  const cwl = cityWhere('l', req.query.city)
   const rows = db.prepare(`
     SELECT a.*, l.name as lead_name, l.phone as lead_phone, u.name as assigned_to_name
     FROM analyst_alerts a
     LEFT JOIN leads l ON l.id = a.lead_id
     LEFT JOIN users u ON u.id = a.assigned_to_user_id
-    WHERE a.account_id = ? AND a.status = ?
+    WHERE a.account_id = ? AND a.status = ?${cwl.sql}
     ORDER BY
       CASE a.severity WHEN 'critica' THEN 0 WHEN 'alta' THEN 1 WHEN 'media' THEN 2 ELSE 3 END,
       a.created_at DESC
     LIMIT 100
-  `).all(req.accountId, status)
+  `).all(req.accountId, status, ...cwl.params)
   res.json({ alerts: rows })
 })
 
@@ -767,8 +806,8 @@ router.get('/market-intelligence', requireRole('super_admin', 'gerente'), requir
   const rows = db.prepare(`
     SELECT objecoes_detectadas, motivos_perda, riscos_detectados
     FROM conversation_insights
-    WHERE account_id = ? AND analyzed_at >= ? AND insights_version >= 2
-  `).all(req.accountId, since)
+    WHERE account_id = ? AND analyzed_at >= ? AND insights_version >= 2${leadCityExists('conversation_insights.lead_id', req.query.city).sql}
+  `).all(req.accountId, since, ...leadCityExists('conversation_insights.lead_id', req.query.city).params)
 
   function countArr(field) {
     const counts = new Map()
@@ -863,16 +902,19 @@ function loadMonthConfig(accountId, yearMonth) {
 // Um lead conta como "qualificado" se JA passou por algum stage com is_qualified=1 OU is_meeting=1
 // OU is_conversion=1 (progressao acumulativa). "reuniao" idem em is_meeting/is_conversion. "won" so
 // em is_conversion. Isso reflete o fluxo (mesmo se o lead voltou pra um stage anterior, o marco fica).
-function computeFunnelCascade(accountId, yearMonth) {
+// city (opcional): so leads dessa cidade (comparacao sem acento).
+function computeFunnelCascade(accountId, yearMonth, city = null) {
   const b = monthBounds(yearMonth)
   if (!b) return null
+  const cw = cityWhere('leads', city)
+  const cwl = cityWhere('l', city)
 
   // Leads criados no mes (base)
   const totalRow = db.prepare(`
     SELECT COUNT(*) as c FROM leads
     WHERE account_id = ? AND is_active = 1 AND is_blocked = 0
-      AND created_at >= ? AND created_at < ?
-  `).get(accountId, b.start, b.end)
+      AND created_at >= ? AND created_at < ?${cw.sql}
+  `).get(accountId, b.start, b.end, ...cw.params)
   const total = totalRow.c
 
   // IDs de stages classificados na conta (default funnel)
@@ -897,12 +939,12 @@ function computeFunnelCascade(accountId, yearMonth) {
       SELECT COUNT(DISTINCT l.id) as c
       FROM leads l
       WHERE l.account_id = ? AND l.is_active = 1 AND l.is_blocked = 0
-        AND l.created_at >= ? AND l.created_at < ?
+        AND l.created_at >= ? AND l.created_at < ?${cwl.sql}
         AND EXISTS (
           SELECT 1 FROM stage_history sh
           WHERE sh.lead_id = l.id AND sh.to_stage_id IN (${placeholders})
         )
-    `).get(accountId, b.start, b.end, ...stageIds)
+    `).get(accountId, b.start, b.end, ...cwl.params, ...stageIds)
     return row.c
   }
 
@@ -925,8 +967,8 @@ function computeFunnelCascade(accountId, yearMonth) {
       FROM lead_sales ls
       JOIN leads l ON l.id = ls.lead_id
       WHERE l.account_id = ? AND l.is_active = 1 AND l.is_blocked = 0
-        AND ls.sale_date >= ? AND ls.sale_date < ?
-    `).get(accountId, b.start, b.end)
+        AND ls.sale_date >= ? AND ls.sale_date < ?${cwl.sql}
+    `).get(accountId, b.start, b.end, ...cwl.params)
     realRevenue += salesRow.v || 0
 
     // 2) Fallback legado — leads WON no mes que NAO tem entry em lead_sales
@@ -939,8 +981,8 @@ function computeFunnelCascade(accountId, yearMonth) {
           AND l.created_at >= ? AND l.created_at < ?
           AND l.value_estimated > 0
           AND EXISTS (SELECT 1 FROM stage_history sh WHERE sh.lead_id = l.id AND sh.to_stage_id IN (${placeholders}))
-          AND NOT EXISTS (SELECT 1 FROM lead_sales ls2 WHERE ls2.lead_id = l.id)
-      `).get(accountId, b.start, b.end, ...wonIds)
+          AND NOT EXISTS (SELECT 1 FROM lead_sales ls2 WHERE ls2.lead_id = l.id)${cwl.sql}
+      `).get(accountId, b.start, b.end, ...wonIds, ...cwl.params)
       realRevenue += legacyRow.v || 0
     }
   }
@@ -961,7 +1003,8 @@ function computeFunnelCascade(accountId, yearMonth) {
 router.get('/funil-mensal/:month', requireRole('super_admin', 'gerente', 'atendente'), (req, res) => {
   if (!req.accountId) return res.status(400).json({ error: 'account_id required' })
   const month = req.params.month === 'current' ? currentYearMonth() : req.params.month
-  const cascade = computeFunnelCascade(req.accountId, month)
+  const city = req.query.city || null
+  const cascade = computeFunnelCascade(req.accountId, month, city)
   if (!cascade) return res.status(400).json({ error: 'formato de mes invalido (use YYYY-MM ou current)' })
 
   const cfg = loadMonthConfig(req.accountId, month)
@@ -972,18 +1015,21 @@ router.get('/funil-mensal/:month', requireRole('super_admin', 'gerente', 'atende
   // Faturamento estimado: prioriza soma real de value_estimated; se zero, usa won * ticket.
   const estimatedRevenue = cascade.real_revenue > 0 ? cascade.real_revenue : (cascade.won * ticket)
 
-  const cpl  = cascade.total > 0 ? investment / cascade.total : null
-  const cac  = cascade.won > 0 ? investment / cascade.won : null
-  const roas = investment > 0 ? estimatedRevenue / investment : null
-  const targetProgress = target > 0 ? (cascade.won / target) * 100 : null
+  // Investimento e meta sao da conta inteira (nao tem cidade): com cidade escolhida, CPL/CAC/ROAS e
+  // progresso da meta ficam nulos e a tela avisa (decisao do dono, 24/09/2026).
+  const byCity = !!(city && String(city).trim())
+  const cpl  = !byCity && cascade.total > 0 ? investment / cascade.total : null
+  const cac  = !byCity && cascade.won > 0 ? investment / cascade.won : null
+  const roas = !byCity && investment > 0 ? estimatedRevenue / investment : null
+  const targetProgress = !byCity && target > 0 ? (cascade.won / target) * 100 : null
 
   res.json({
-    month, cascade, config: cfg,
+    month, cascade, config: cfg, by_city: byCity,
     calc: {
       cpl, cac, roas,
       estimated_revenue: estimatedRevenue,
       target_progress: targetProgress,
-      target_remaining: Math.max(0, target - cascade.won),
+      target_remaining: byCity ? null : Math.max(0, target - cascade.won),
     },
   })
 })
@@ -1039,6 +1085,10 @@ router.get('/projecao', requireRole('super_admin', 'gerente'), (req, res) => {
   if (!req.accountId) return res.status(400).json({ error: 'account_id required' })
   const past = Math.min(24, Math.max(0, parseInt(req.query.months) || 3))
   const future = Math.min(24, Math.max(0, parseInt(req.query.futuros) || 3))
+  // Com cidade: so meses reais da cidade; CPL/CAC/ROAS e projecao futura (dependem do investimento
+  // da conta inteira) ficam nulos e a tela avisa (decisao do dono, 24/09/2026).
+  const city = req.query.city || null
+  const byCity = !!(city && String(city).trim())
 
   // Gera lista de YYYY-MM: [past atras ... atual ... future adiante]
   const list = []
@@ -1055,7 +1105,7 @@ router.get('/projecao', requireRole('super_admin', 'gerente'), (req, res) => {
     const isFuture = offset > 0
     const cascade = isFuture
       ? { total: 0, qualified: 0, meeting: 0, won: 0, real_revenue: 0, qualified_rate: null, meeting_rate: null, won_rate: null, overall_conversion: null }
-      : computeFunnelCascade(req.accountId, year_month)
+      : computeFunnelCascade(req.accountId, year_month, city)
     return { year_month, is_future: isFuture, config: cfg, cascade }
   })
 
@@ -1077,7 +1127,7 @@ router.get('/projecao', requireRole('super_admin', 'gerente'), (req, res) => {
     const cfg = r.config
     let cascade = r.cascade
     let projected = false
-    if (r.is_future) {
+    if (r.is_future && !byCity) {
       projected = true
       const projTotal = cfg.ad_investment > 0 && avg_cpl > 0 ? Math.round(cfg.ad_investment / avg_cpl) : 0
       const projQual  = Math.round(projTotal * (avg.qualified_rate / 100))
@@ -1099,7 +1149,7 @@ router.get('/projecao', requireRole('super_admin', 'gerente'), (req, res) => {
       projected,
       investment,
       total_leads: cascade.total,
-      cpl: cascade.total > 0 ? investment / cascade.total : null,
+      cpl: !byCity && cascade.total > 0 ? investment / cascade.total : null,
       qualified: cascade.qualified,
       qualified_rate: cascade.qualified_rate,
       meeting: cascade.meeting,
@@ -1109,13 +1159,14 @@ router.get('/projecao', requireRole('super_admin', 'gerente'), (req, res) => {
       target: cfg.sales_target,
       ticket,
       revenue,
-      cac: cascade.won > 0 ? investment / cascade.won : null,
-      roas: investment > 0 ? revenue / investment : null,
+      cac: !byCity && cascade.won > 0 ? investment / cascade.won : null,
+      roas: !byCity && investment > 0 ? revenue / investment : null,
     }
   })
 
   res.json({
     rows: enriched,
+    by_city: byCity,
     assumptions: {
       avg_qualified_rate: avg.qualified_rate,
       avg_meeting_rate: avg.meeting_rate,

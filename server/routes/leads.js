@@ -8,7 +8,7 @@ import { getProvider } from '../services/whatsapp/index.js'
 import { sendBotWelcomeForSheetsLead, processInboundMessage, diagnoseForceAi } from '../services/aiAgent.js'
 import { canAtendenteAccessLead } from '../services/leadAccess.js'
 import { SEND_PROVIDERS } from '../services/whatsapp/numberRole.js'
-import { resolveCity, cityKey } from '../services/city.js'
+import { resolveCity, cityKey, cityWhere } from '../services/city.js'
 
 const router = Router()
 
@@ -264,6 +264,31 @@ router.get('/sources', (req, res) => {
     ORDER BY n DESC, source
   `).all(req.accountId)
   res.json({ sources: rows.map(r => ({ value: r.source, count: r.n })) })
+})
+
+// GET /cities — cidades dos leads da conta com contagem, para o filtro por cidade dos relatorios.
+// Agrupa sem acento/maiuscula; mostra a forma mais usada (a padronizacao ja unifica quase tudo).
+router.get('/cities', (req, res) => {
+  if (!req.accountId) return res.json({ cities: [] })
+  const rows = db.prepare(`
+    SELECT city, city_key(city) AS k, COUNT(*) AS n
+    FROM leads
+    WHERE account_id = ? AND city IS NOT NULL AND city != '' AND is_blocked = 0
+    GROUP BY city
+  `).all(req.accountId)
+  const byKey = new Map()
+  for (const r of rows) {
+    const cur = byKey.get(r.k)
+    if (!cur) byKey.set(r.k, { value: r.city, count: r.n, top: r.n })
+    else {
+      cur.count += r.n
+      if (r.n > cur.top) { cur.value = r.city; cur.top = r.n }
+    }
+  }
+  const cities = [...byKey.values()]
+    .map(c => ({ value: c.value, count: c.count }))
+    .sort((a, b) => (b.count - a.count) || a.value.localeCompare(b.value, 'pt-BR'))
+  res.json({ cities })
 })
 
 // ─── Pedidos de transferencia de lead entre atendentes ─────────────
@@ -1071,17 +1096,19 @@ router.get('/pipeline/metrics', (req, res) => {
   if (!req.accountId) return res.json({ metrics: [] })
   const { funnel_id } = req.query
   if (!funnel_id) return res.json({ metrics: [] })
+  // ?city= opcional (sem acento). O funil precisa ser da conta (antes nao conferia).
+  const cw = cityWhere('l', req.query.city)
 
   const metrics = db.prepare(`
     SELECT fs.id as stage_id, fs.name, fs.color, fs.position, fs.is_conversion,
       COUNT(l.id) as lead_count,
       AVG(CASE WHEN l.updated_at != l.created_at THEN (julianday(l.updated_at) - julianday(l.created_at)) * 24 ELSE NULL END) as avg_hours_in_stage
     FROM funnel_stages fs
-    LEFT JOIN leads l ON l.stage_id = fs.id AND l.is_active = 1 AND l.is_archived = 0 AND l.is_blocked = 0
-    WHERE fs.funnel_id = ?
+    LEFT JOIN leads l ON l.stage_id = fs.id AND l.is_active = 1 AND l.is_archived = 0 AND l.is_blocked = 0${cw.sql}
+    WHERE fs.funnel_id = ? AND fs.funnel_id IN (SELECT id FROM funnels WHERE account_id = ?)
     GROUP BY fs.id
     ORDER BY fs.position
-  `).all(funnel_id)
+  `).all(...cw.params, funnel_id, req.accountId)
 
   // Calculate conversion rates between stages
   let totalLeads = metrics.reduce((s, m) => s + m.lead_count, 0)

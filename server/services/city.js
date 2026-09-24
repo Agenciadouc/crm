@@ -85,3 +85,11 @@ export function resolveCity(db, accountId, value) {
   `).get(accountId, cityKey(city))
   return row ? row.city : city
 }
+
+// Para tabelas ligadas ao lead por lead_id (insights da IA, erros, alertas): "o lead e dessa cidade".
+// `leadIdExpr` = coluna com o id do lead, ex.: 'ci.lead_id'. Sem cidade: nada.
+export function leadCityExists(leadIdExpr, city) {
+  const key = cityKey(city)
+  if (!key) return { sql: '', params: [] }
+  return { sql: ` AND EXISTS (SELECT 1 FROM leads lc WHERE lc.id = ${leadIdExpr} AND city_key(lc.city) = ?)`, params: [key] }
+}
