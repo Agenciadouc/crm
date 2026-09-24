@@ -63,6 +63,9 @@ function renderTemplate(c) {
   conditional('FRENTE_ESTRUTURACAO', !!c.frente_estruturacao)
   conditional('FRENTE_AQUISICAO', !!c.frente_aquisicao)
   conditional('FRENTE_EDITORIAL', !!c.frente_editorial)
+  conditional('FRENTE_SITE', !!c.frente_site)
+  // Exclusao "Criacao de website institucional" so aparece quando frente_site NAO esta ativa
+  conditional('EXCLUSAO_SITE', !c.frente_site)
   const temAnexo = c.fat_mes1_valor != null || c.fat_mes2_valor != null || c.fat_mes3_valor != null
   conditional('ANEXO_FAT', temAnexo)
 
@@ -93,6 +96,8 @@ function renderTemplate(c) {
     EXCLUSOES_EXTRAS: c.exclusoes_extras || '',
     VIDEOS_POR_MES: String(c.videos_por_mes || 0),
     IMAGENS_POR_MES: String(c.imagens_por_mes || 0),
+    SITE_DOMINIO_VALOR: formatBRL(c.site_dominio_valor != null ? c.site_dominio_valor : 40),
+    SITE_HOSPEDAGEM_VALOR: formatBRL(c.site_hospedagem_valor != null ? c.site_hospedagem_valor : 450),
     FAT_MES1_REF: c.fat_mes1_ref || '',
     FAT_MES1_VALOR: c.fat_mes1_valor != null ? formatBRL(c.fat_mes1_valor) : '',
     FAT_MES2_REF: c.fat_mes2_ref || '',
@@ -175,18 +180,21 @@ router.post('/', (req, res) => {
           endereco_logradouro, endereco_bairro, endereco_cep, endereco_cidade, endereco_estado,
           fee_mensal, comissao_percent, vigencia_meses, data_inicio, data_fim,
           renovacao_meses, aviso_previo_dias, reajuste_indice,
-          frente_diagnostico, frente_estruturacao, frente_aquisicao, frente_editorial, exclusoes_extras,
+          frente_diagnostico, frente_estruturacao, frente_aquisicao, frente_editorial, frente_site,
+          site_dominio_valor, site_hospedagem_valor, exclusoes_extras,
           videos_por_mes, imagens_por_mes,
           fat_mes1_ref, fat_mes1_valor, fat_mes2_ref, fat_mes2_valor, fat_mes3_ref, fat_mes3_valor, fat_base,
           local_assinatura, data_assinatura, created_by
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         numero, b.razao_social, b.cnpj, b.inscricao_estadual || null,
         b.endereco_logradouro, b.endereco_bairro, b.endereco_cep, b.endereco_cidade, b.endereco_estado,
         parseFloat(b.fee_mensal) || 3500, parseFloat(b.comissao_percent) || 1.0,
         vigencia, b.data_inicio, dataFim,
         parseInt(b.renovacao_meses) || 12, parseInt(b.aviso_previo_dias) || 30, b.reajuste_indice || 'IGPM/FGV',
-        b.frente_diagnostico ? 1 : 0, b.frente_estruturacao ? 1 : 0, b.frente_aquisicao ? 1 : 0, b.frente_editorial ? 1 : 0,
+        b.frente_diagnostico ? 1 : 0, b.frente_estruturacao ? 1 : 0, b.frente_aquisicao ? 1 : 0, b.frente_editorial ? 1 : 0, b.frente_site ? 1 : 0,
+        b.site_dominio_valor != null ? parseFloat(b.site_dominio_valor) : 40,
+        b.site_hospedagem_valor != null ? parseFloat(b.site_hospedagem_valor) : 450,
         b.exclusoes_extras || null,
         parseInt(b.videos_por_mes) || 0, parseInt(b.imagens_por_mes) || 0,
         b.fat_mes1_ref || null, b.fat_mes1_valor != null ? parseFloat(b.fat_mes1_valor) : null,
@@ -214,7 +222,8 @@ router.put('/:id', (req, res) => {
     'endereco_logradouro', 'endereco_bairro', 'endereco_cep', 'endereco_cidade', 'endereco_estado',
     'fee_mensal', 'comissao_percent', 'vigencia_meses', 'data_inicio', 'data_fim',
     'renovacao_meses', 'aviso_previo_dias', 'reajuste_indice',
-    'frente_diagnostico', 'frente_estruturacao', 'frente_aquisicao', 'frente_editorial', 'exclusoes_extras',
+    'frente_diagnostico', 'frente_estruturacao', 'frente_aquisicao', 'frente_editorial', 'frente_site',
+    'site_dominio_valor', 'site_hospedagem_valor', 'exclusoes_extras',
     'videos_por_mes', 'imagens_por_mes',
     'fat_mes1_ref', 'fat_mes1_valor', 'fat_mes2_ref', 'fat_mes2_valor', 'fat_mes3_ref', 'fat_mes3_valor',
     'local_assinatura', 'data_assinatura',
@@ -224,8 +233,8 @@ router.put('/:id', (req, res) => {
   for (const f of fields) {
     if (b[f] !== undefined) {
       let val = b[f]
-      if (['frente_diagnostico', 'frente_estruturacao', 'frente_aquisicao', 'frente_editorial'].includes(f)) val = val ? 1 : 0
-      else if (['fee_mensal', 'comissao_percent', 'fat_mes1_valor', 'fat_mes2_valor', 'fat_mes3_valor'].includes(f)) val = val != null && val !== '' ? parseFloat(val) : null
+      if (['frente_diagnostico', 'frente_estruturacao', 'frente_aquisicao', 'frente_editorial', 'frente_site'].includes(f)) val = val ? 1 : 0
+      else if (['fee_mensal', 'comissao_percent', 'fat_mes1_valor', 'fat_mes2_valor', 'fat_mes3_valor', 'site_dominio_valor', 'site_hospedagem_valor'].includes(f)) val = val != null && val !== '' ? parseFloat(val) : null
       else if (['vigencia_meses', 'renovacao_meses', 'aviso_previo_dias', 'videos_por_mes', 'imagens_por_mes'].includes(f)) val = parseInt(val) || 0
       sets.push(`${f} = ?`); params.push(val)
     }

@@ -6,6 +6,8 @@ import { canStartBroadcast } from './services/broadcastRouting.js'
 import { sendFollowUpMessage, resumeFollowUpsIfPaused, resumeFollowUpsIfAttendantNowAssigned } from './services/followUpSender.js'
 import { processInactivityFollowUps } from './services/inactivityScanner.js'
 import { getProvider } from './services/whatsapp/index.js'
+// Sessao da Evolution (estado, reconectar, restart) — funcoes vindas do GitHub (João, 23/09). Mensagens: tomada ./whatsapp/.
+import { evolution as evolutionSession } from './services/whatsappProvider/index.js'
 import { handleInboundMessage } from './services/inboundRuntime.js'
 import { createWebhookRegistrar } from './services/whatsapp/webhookRegistration.js'
 import { apiUrlKey, checkApiUrlsAlive } from './services/whatsapp/evolutionHealth.js'
@@ -34,11 +36,12 @@ async function checkWhatsAppInstances() {
   for (const inst of instances) {
     if (!aliveByUrl.get(apiUrlKey(inst.api_url))) continue
     try {
-      const r = await fetch(`${inst.api_url}/instance/connectionState/${encodeURIComponent(inst.instance_name)}`, {
-        headers: { apikey: inst.api_key },
-      })
-      const data = await r.json()
-      const state = data?.instance?.state || ''
+      const provider = evolutionSession
+      const stateRes = await provider.connectionState(inst)
+      // Erro de rede/HTTP: o adapter devolve state 'close' + error. Trata como checagem que falhou (catch abaixo),
+      // como antes da junção — nao como sessao fechada de verdade (evitaria reconexao em rajada).
+      if (stateRes.error) throw new Error(stateRes.error)
+      const { state } = stateRes
       let newStatus = 'disconnected'
       if (state === 'open' || state === 'connected') newStatus = 'connected'
       else if (state === 'connecting') newStatus = 'connecting'
@@ -54,22 +57,22 @@ async function checkWhatsAppInstances() {
         }
       }
 
-      // AUTO-RECONNECT: if was connected but now disconnected/closed, try to reconnect
-      if (inst.status === 'connected' && (newStatus === 'disconnected' || state === 'close' || state === 'closed')) {
-        console.log(`[Health] ${inst.instance_name} — connection lost, attempting auto-reconnect...`)
+      // AUTO-RECONNECT: if was connected/connecting but now disconnected/closed, try to reconnect
+      if ((inst.status === 'connected' || inst.status === 'connecting') && (newStatus === 'disconnected' || state === 'close' || state === 'closed')) {
+        console.log(`[Health] ${inst.instance_name} — connection lost/pending, attempting auto-reconnect...`)
         try {
-          const reconnectRes = await fetch(`${inst.api_url}/instance/connect/${encodeURIComponent(inst.instance_name)}`, {
-            headers: { apikey: inst.api_key },
-          })
-          const reconnectData = await reconnectRes.json()
-          if (reconnectData?.instance?.state === 'open' || reconnectData?.instance?.state === 'connecting') {
-            db.prepare("UPDATE whatsapp_instances SET status = 'connecting', updated_at = datetime('now') WHERE id = ?").run(inst.id)
-            console.log(`[Health] ${inst.instance_name} — reconnect initiated successfully`)
+          const conn = await provider.connectInstance(inst)
+          const reconnectData = conn?.raw || {}
+          const hasQr = !!conn?.qrcode
+          if (reconnectData?.instance?.state === 'open' || reconnectData?.instance?.state === 'connecting' || hasQr) {
+            db.prepare("UPDATE whatsapp_instances SET status = 'connecting', qr_code = COALESCE(?, qr_code), updated_at = datetime('now') WHERE id = ?").run(conn?.qrcode || null, inst.id)
+            console.log(`[Health] ${inst.instance_name} — reconnect initiated (${hasQr ? 'needs QR' : 'no QR needed'})`)
           } else {
-            console.log(`[Health] ${inst.instance_name} — reconnect response:`, JSON.stringify(reconnectData).substring(0, 150))
+            const summary = JSON.stringify(reconnectData || {}).substring(0, 150)
+            console.log(`[Health] ${inst.instance_name} — reconnect response:`, summary || '(vazio)')
           }
         } catch (reconnectErr) {
-          console.error(`[Health] ${inst.instance_name} — reconnect failed:`, reconnectErr.message)
+          console.error(`[Health] ${inst.instance_name} — reconnect failed:`, reconnectErr?.message || reconnectErr)
         }
       }
     } catch (err) {
@@ -341,14 +344,9 @@ async function detectGhostInstancesAndRestart() {
         console.warn(`[GhostDetect] instancia=${inst.instance_name} suspeita: ${staleNoDelivery} msgs stale sem entrega. Forcando restart...`)
         _ghostRestartCooldown.set(inst.id, Date.now())
         try {
-          // /instance/restart eh mais agressivo que /connect — refaz a sessao Baileys
-          const encoded = encodeURIComponent(inst.instance_name)
-          const r = await fetch(`${inst.api_url}/instance/restart/${encoded}`, {
-            method: 'POST',
-            headers: { apikey: inst.api_key },
-          })
-          const data = await r.json().catch(() => ({}))
-          console.warn(`[GhostDetect] restart ${inst.instance_name} response:`, JSON.stringify(data).substring(0, 200))
+          // restart eh mais agressivo que connect — refaz a sessao do zero
+          const { raw: data } = await evolutionSession.restartInstance(inst)
+          console.warn(`[GhostDetect] restart ${inst.instance_name} response:`, JSON.stringify(data || {}).substring(0, 200))
           // Marca como connecting + pausa broadcasts ativos dessa instancia
           db.prepare("UPDATE whatsapp_instances SET status = 'connecting', updated_at = datetime('now') WHERE id = ?").run(inst.id)
           db.prepare("UPDATE broadcasts SET paused_at = datetime('now'), paused_reason = 'instancia_fantasma_detectada' WHERE status = 'sending' AND instance_id = ? AND paused_at IS NULL").run(inst.id)
@@ -565,13 +563,8 @@ async function dailyInstanceHealthCheck() {
 
   for (const inst of instances) {
     try {
-      const encoded = encodeURIComponent(inst.instance_name)
-      const stateRes = await fetch(`${inst.api_url}/instance/connectionState/${encoded}`, {
-        headers: { apikey: inst.api_key },
-        timeout: 15000,
-      })
-      const stateData = await stateRes.json().catch(() => ({}))
-      const realState = stateData?.instance?.state || stateData?.state || ''
+      const provider = evolutionSession
+      const { state: realState } = await provider.connectionState(inst)
 
       if (realState === 'open' || realState === 'connected') {
         if (inst.status !== 'connected') {
@@ -580,17 +573,13 @@ async function dailyInstanceHealthCheck() {
         connected++
       } else if (realState === 'close' || realState === 'closed' || realState === 'disconnected') {
         // Tenta reconectar
-        const connRes = await fetch(`${inst.api_url}/instance/connect/${encoded}`, {
-          headers: { apikey: inst.api_key },
-          timeout: 20000,
-        })
-        const connData = await connRes.json().catch(() => ({}))
+        const { qrcode, raw: connData } = await provider.connectInstance(inst)
         const newState = connData?.instance?.state || connData?.state || ''
-        const hasQr = !!(connData?.qrcode?.base64 || connData?.base64 || (typeof connData?.qrcode === 'string' && connData.qrcode.startsWith('data:image')))
+        const hasQr = !!qrcode
 
         if (hasQr) {
           db.prepare("UPDATE whatsapp_instances SET status='connecting', qr_code=?, updated_at=datetime('now') WHERE id=?")
-            .run(connData?.qrcode?.base64 || connData?.base64 || connData?.qrcode || null, inst.id)
+            .run(qrcode, inst.id)
           qrNeeded++
           console.log(`[DailyHealthCheck] ${inst.account_name} → ${inst.instance_name}: precisa QR`)
         } else if (newState === 'open' || newState === 'connected') {

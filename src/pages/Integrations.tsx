@@ -119,6 +119,7 @@ export default function Integrations() {
       {current === 'ia' && account && (
         <AiCard accountId={accountId} account={account} isSuperAdmin={user?.role === 'super_admin'} onAccountUpdated={updateAccountLocal} />
       )}
+
     </div>
   )
 }

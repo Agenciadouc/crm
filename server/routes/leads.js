@@ -251,6 +251,19 @@ router.get('/archived-count', (req, res) => {
   res.json({ count, withActivity })
 })
 
+// Lista fontes (source) distintas dos leads da conta atual — pra popular filtro
+router.get('/sources', (req, res) => {
+  if (!req.accountId) return res.json({ sources: [] })
+  const rows = db.prepare(`
+    SELECT source, COUNT(*) as n
+    FROM leads
+    WHERE account_id = ? AND source IS NOT NULL AND source != ''
+    GROUP BY source
+    ORDER BY n DESC, source
+  `).all(req.accountId)
+  res.json({ sources: rows.map(r => ({ value: r.source, count: r.n })) })
+})
+
 // ─── Pedidos de transferencia de lead entre atendentes ─────────────
 // IMPORTANTE: precisam vir ANTES da rota '/:id' pra nao serem capturadas como id
 
@@ -550,6 +563,58 @@ router.put('/:id/stage', (req, res) => {
   const updated = db.prepare('SELECT l.*, fs.name as stage_name, fs.color as stage_color, wi.instance_name as instance_name FROM leads l LEFT JOIN funnel_stages fs ON l.stage_id = fs.id LEFT JOIN whatsapp_instances wi ON l.instance_id = wi.id WHERE l.id = ?').get(lead.id)
   try { broadcastSSE(lead.account_id, 'lead:updated', updated) } catch {}
   res.json({ lead: updated })
+})
+
+// ─── Vendas do lead (multiple sales por lead) ─────────────────────
+// GET /:id/sales — lista vendas ordenadas por data desc
+router.get('/:id/sales', (req, res) => {
+  const lead = db.prepare('SELECT id, account_id FROM leads WHERE id = ?').get(req.params.id)
+  if (!lead) return res.status(404).json({ error: 'Lead nao encontrado' })
+  if (req.user.role !== 'super_admin' && lead.account_id !== req.accountId) return res.status(403).json({ error: 'Sem permissao' })
+  const sales = db.prepare(`
+    SELECT s.*, u.name as created_by_name
+    FROM lead_sales s LEFT JOIN users u ON u.id = s.created_by
+    WHERE s.lead_id = ? ORDER BY s.sale_date DESC, s.id DESC
+  `).all(req.params.id)
+  const total = sales.reduce((sum, s) => sum + Number(s.value || 0), 0)
+  res.json({ sales, total })
+})
+
+// POST /:id/sales — registra nova venda. Body: { value, sale_date?, notes? }
+// Tambem atualiza leads.value_estimated = SUM(sales) pra manter compat com dashboard
+router.post('/:id/sales', (req, res) => {
+  const lead = db.prepare('SELECT id, account_id FROM leads WHERE id = ?').get(req.params.id)
+  if (!lead) return res.status(404).json({ error: 'Lead nao encontrado' })
+  if (req.user.role !== 'super_admin' && lead.account_id !== req.accountId) return res.status(403).json({ error: 'Sem permissao' })
+  const value = parseFloat(req.body?.value)
+  if (!Number.isFinite(value) || value <= 0) return res.status(400).json({ error: 'valor invalido (deve ser > 0)' })
+  const saleDate = req.body?.sale_date ? String(req.body.sale_date).slice(0, 19).replace('T', ' ') : null
+  const notes = req.body?.notes ? String(req.body.notes).slice(0, 500) : null
+  const insertRes = db.prepare(`
+    INSERT INTO lead_sales (account_id, lead_id, value, sale_date, notes, created_by)
+    VALUES (?, ?, ?, COALESCE(?, datetime('now')), ?, ?)
+  `).run(lead.account_id, lead.id, value, saleDate, notes, req.user.id)
+  // Sincroniza leads.value_estimated com a SOMA das vendas (fallback pro Pipeline atual)
+  const totalRow = db.prepare('SELECT COALESCE(SUM(value), 0) as t FROM lead_sales WHERE lead_id = ?').get(lead.id)
+  db.prepare("UPDATE leads SET value_estimated = ?, updated_at = datetime('now') WHERE id = ?").run(totalRow.t, lead.id)
+  const sale = db.prepare(`
+    SELECT s.*, u.name as created_by_name FROM lead_sales s LEFT JOIN users u ON u.id = s.created_by WHERE s.id = ?
+  `).get(insertRes.lastInsertRowid)
+  const total = totalRow.t
+  try { broadcastSSE(lead.account_id, 'lead:updated', { id: lead.id, value_estimated: total }) } catch {}
+  res.json({ sale, total })
+})
+
+// DELETE /:id/sales/:saleId — remove venda (super_admin ou gerente)
+router.delete('/:id/sales/:saleId', requireRole('super_admin', 'gerente'), (req, res) => {
+  const lead = db.prepare('SELECT id, account_id FROM leads WHERE id = ?').get(req.params.id)
+  if (!lead) return res.status(404).json({ error: 'Lead nao encontrado' })
+  if (req.user.role !== 'super_admin' && lead.account_id !== req.accountId) return res.status(403).json({ error: 'Sem permissao' })
+  db.prepare('DELETE FROM lead_sales WHERE id = ? AND lead_id = ?').run(req.params.saleId, lead.id)
+  const totalRow = db.prepare('SELECT COALESCE(SUM(value), 0) as t FROM lead_sales WHERE lead_id = ?').get(lead.id)
+  db.prepare("UPDATE leads SET value_estimated = ?, updated_at = datetime('now') WHERE id = ?").run(totalRow.t, lead.id)
+  try { broadcastSSE(lead.account_id, 'lead:updated', { id: lead.id, value_estimated: totalRow.t }) } catch {}
+  res.json({ ok: true, total: totalRow.t })
 })
 
 // Archive lead — hides from pipeline/chat; messages still stored but don't broadcast

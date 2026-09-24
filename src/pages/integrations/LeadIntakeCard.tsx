@@ -128,15 +128,16 @@ export default function LeadIntakeCard({ accountId, account, instances, users }:
     setDeleteRuleTagId(null)
   }
 
-  const connectedInsts = instances.filter(i => i.status === 'connected')
+  // Regra de roteamento e logica de banco: o numero so precisa existir na conta, conectado ou nao (GitHub, João 23/09).
+  const instLabel = (i: WhatsAppInstance) => `${i.instance_name}${i.phone_number ? ` (${i.phone_number})` : ''}${i.status !== 'connected' ? ' — desconectado' : ''}`
 
   return (
     <>
-      {connectedInsts.length === 0 ? (
+      {instances.length === 0 ? (
         <section className="dash-section">
           <div className="section-title"><GitBranch size={14} /> Roteamento de leads (formulários)</div>
           <div className="card" style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-            Conecte um número no card WhatsApp para escolher para qual número vão os leads de formulário.
+            Crie um número no card WhatsApp para escolher para qual número vão os leads de formulário.
           </div>
         </section>
       ) : (
@@ -165,8 +166,8 @@ export default function LeadIntakeCard({ accountId, account, instances, users }:
                 style={{ minWidth: 280, fontSize: 12 }}
               >
                 <option value="">— nenhuma (lead fica sem instância) —</option>
-                {connectedInsts.map(i => (
-                  <option key={i.id} value={i.id}>{i.instance_name}{i.phone_number ? ` (${i.phone_number})` : ''}</option>
+                {instances.map(i => (
+                  <option key={i.id} value={i.id}>{instLabel(i)}</option>
                 ))}
               </select>
             </div>
@@ -274,17 +275,20 @@ export default function LeadIntakeCard({ accountId, account, instances, users }:
               {!routingEdit.isNew && <p style={{ fontSize: 10, color: '#6B6580', marginTop: 4 }}>Tag não editável — pra trocar de tag, remove e cria nova.</p>}
             </div>
             <div className="form-group">
-              <label>Instância WhatsApp *</label>
+              <label>Número WhatsApp *</label>
               <select
                 className="select"
                 value={routingEdit.instance_id}
                 onChange={e => setRoutingEdit(p => p ? { ...p, instance_id: e.target.value } : null)}
               >
                 <option value="">— escolha —</option>
-                {instances.filter(i => i.status === 'connected').map(i => (
-                  <option key={i.id} value={i.id}>{i.instance_name}{i.phone_number ? ` (${i.phone_number})` : ''}</option>
+                {instances.map(i => (
+                  <option key={i.id} value={i.id}>{instLabel(i)}</option>
                 ))}
               </select>
+              <p style={{ fontSize: 10, color: '#6B6580', marginTop: 4 }}>
+                Status de conexão não importa aqui — a regra é lógica de banco. O número precisa só existir na conta.
+              </p>
             </div>
             <div className="form-group">
               <label>Atendente padrão (opcional)</label>

@@ -393,7 +393,8 @@ router.post('/analyze-now', requireRole('super_admin', 'gerente'), requireAnalyt
   }
 
   setImmediate(() => {
-    analyzeConversationsBatch(req.accountId, { maxLeads, sinceHours: 168 })
+    const daysParam = Math.max(1, Math.min(90, parseInt(req.query.days) || 7))
+    analyzeConversationsBatch(req.accountId, { maxLeads, sinceHours: daysParam * 24 })
       .catch(e => console.error('[Analyze-now]', e.message))
     const today = new Date().toISOString().slice(0, 10)
     try { aggregateAllAccounts(today) } catch (e) { console.error('[Aggregate-now]', e.message) }
@@ -421,7 +422,7 @@ router.put('/analysis-limit', requireRole('super_admin', 'gerente'), requireAnal
 // Estimativa de custo pra modal de confirmação no "Analisar agora"
 router.get('/analyze-estimate', requireRole('super_admin', 'gerente'), (req, res) => {
   if (!req.accountId) return res.status(400).json({ error: 'account_id required' })
-  const sinceHours = Math.max(1, Math.min(720, parseInt(req.query.days || '7') * 24))
+  const sinceHours = Math.max(1, Math.min(2160, parseInt(req.query.days || '7') * 24))
   const maxLeads = Math.max(1, Math.min(500, parseInt(req.query.max) || 50))
   const est = getAnalyzeEstimate(req.accountId, sinceHours, maxLeads)
   const isSuperAdmin = req.user?.role === 'super_admin'
@@ -909,22 +910,39 @@ function computeFunnelCascade(accountId, yearMonth) {
   const meeting   = countPassed(meetIds)
   const won       = countPassed(wonIds)
 
-  // Soma de value_estimated dos leads WON do mes (faturamento real, quando informado).
-  // Se lead won nao tem value_estimated, fica 0 (o painel usa avg_ticket * won como fallback).
+  // Faturamento real do mes = SOMA das vendas com sale_date DENTRO do mes.
+  // Usa a tabela lead_sales (nova) — respeita retroativas, recompras/upsells
+  // aparecem no mes em que aconteceram, nao no mes de criacao do lead.
+  //
+  // Fallback: leads antigos que ainda nao migraram pro modelo lead_sales
+  // (nao tem entry na tabela lead_sales mas tem value_estimated > 0) contam
+  // via created_at do lead + stage_history WON — comportamento legado.
   let realRevenue = 0
-  if (wonIds.length > 0) {
-    const placeholders = wonIds.map(() => '?').join(',')
-    const row = db.prepare(`
-      SELECT COALESCE(SUM(l.value_estimated), 0) as v
-      FROM leads l
+  {
+    // 1) Vendas novas (por sale_date)
+    const salesRow = db.prepare(`
+      SELECT COALESCE(SUM(ls.value), 0) as v
+      FROM lead_sales ls
+      JOIN leads l ON l.id = ls.lead_id
       WHERE l.account_id = ? AND l.is_active = 1 AND l.is_blocked = 0
-        AND l.created_at >= ? AND l.created_at < ?
-        AND EXISTS (
-          SELECT 1 FROM stage_history sh
-          WHERE sh.lead_id = l.id AND sh.to_stage_id IN (${placeholders})
-        )
-    `).get(accountId, b.start, b.end, ...wonIds)
-    realRevenue = row.v || 0
+        AND ls.sale_date >= ? AND ls.sale_date < ?
+    `).get(accountId, b.start, b.end)
+    realRevenue += salesRow.v || 0
+
+    // 2) Fallback legado — leads WON no mes que NAO tem entry em lead_sales
+    if (wonIds.length > 0) {
+      const placeholders = wonIds.map(() => '?').join(',')
+      const legacyRow = db.prepare(`
+        SELECT COALESCE(SUM(l.value_estimated), 0) as v
+        FROM leads l
+        WHERE l.account_id = ? AND l.is_active = 1 AND l.is_blocked = 0
+          AND l.created_at >= ? AND l.created_at < ?
+          AND l.value_estimated > 0
+          AND EXISTS (SELECT 1 FROM stage_history sh WHERE sh.lead_id = l.id AND sh.to_stage_id IN (${placeholders}))
+          AND NOT EXISTS (SELECT 1 FROM lead_sales ls2 WHERE ls2.lead_id = l.id)
+      `).get(accountId, b.start, b.end, ...wonIds)
+      realRevenue += legacyRow.v || 0
+    }
   }
 
   return {

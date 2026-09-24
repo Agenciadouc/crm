@@ -47,7 +47,8 @@ const app = express()
 // Atras de Apache reverse proxy — confia no X-Forwarded-For pra req.ip funcionar
 app.set('trust proxy', 1)
 app.use(cors())
-app.use(express.json({ limit: '5mb' }))
+// Limite alto: upload de documento ate 100mb (GitHub 18/09)
+app.use(express.json({ limit: '150mb' }))
 // JSON invalido no webhook de WhatsApp: 200 + log (a UzAPI reenviaria em laco). Demais rotas seguem com o erro padrao.
 app.use(webhookJsonErrorHandler)
 

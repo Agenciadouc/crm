@@ -5,6 +5,9 @@ import { requireRole } from '../middleware/auth.js'
 import { runPollNow } from '../scheduler.js'
 import { getPublicBaseUrl } from '../services/publicUrl.js'
 import { getProvider } from '../services/whatsapp/index.js'
+// Sessao da Evolution (criar, QR, estado, reconectar, recriar sessao zumbi) — vinda do GitHub (João, 23/09).
+// Mensagens, webhook e UzAPI continuam na tomada ../services/whatsapp/.
+import { evolution as evolutionSession } from '../services/whatsappProvider/index.js'
 import { generateWebhookToken } from '../services/whatsapp/schema.js'
 import { createWebhookRegistrar } from '../services/whatsapp/webhookRegistration.js'
 import { findInstanceByName } from '../services/whatsapp/instanceQueries.js'
@@ -187,19 +190,14 @@ router.post('/whatsapp', requireRole('super_admin', 'gerente', 'atendente'), asy
     return res.json({ instance: safe(db.prepare('SELECT * FROM whatsapp_instances WHERE id = ?').get(existing.id), req) })
   }
 
-  // Create instance on Evolution API
-  let qrCode = null
-  try {
-    const createRes = await fetch(`${baseUrl}/instance/create`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', apikey: api_key },
-      body: JSON.stringify({ instanceName: instance_name, qrcode: true, integration: 'WHATSAPP-BAILEYS' }),
-    })
-    const createData = await createRes.json()
-    qrCode = createData?.qrcode?.base64 || createData?.base64 || null
-  } catch (err) {
-    console.error('[Evolution Create Instance]', err.message)
-  }
+  // Cria instancia via provider (endpoint de criacao — sempre Evolution nessa rota,
+  // pois UzAPI e criada no ramo acima, pelo manager). Troca de provedor de numero existente: ver /switch-provider.
+  const createResult = await evolutionSession.createInstance({
+    baseUrl,
+    apiKey: api_key,
+    instanceName: instance_name,
+  })
+  const qrCode = createResult.qrcode
 
   // Save to DB. Anti-ban: nova instancia entra em warm-up de 3 dias (volume gradual).
   const result = db.prepare(
@@ -255,15 +253,51 @@ router.post('/whatsapp/:id/connect', allowInstanceOwner, async (req, res) => {
   }
 
   try {
-    const r = await fetch(`${instance.api_url}/instance/connect/${instance.instance_name}`, {
-      headers: { apikey: instance.api_key },
-    })
-    const data = await r.json()
-    // Evolution v2.3 pode retornar QR aninhado (data.qrcode.base64) ou direto (data.base64)
-    const qrCode = data?.qrcode?.base64 || data?.base64 || null
-    if (!qrCode) console.error('[Evolution Connect] sem QR — payload:', JSON.stringify(data).slice(0, 300))
+    const provider = evolutionSession
+    let { qrcode, raw: data } = await provider.connectInstance(instance)
 
-    db.prepare("UPDATE whatsapp_instances SET qr_code = ?, status = 'connecting', updated_at = datetime('now') WHERE id = ?").run(qrCode, instance.id)
+    // Fallback pra sessao zumbi. So dispara em 3 condicoes CUMULATIVAS:
+    // 1) Nao veio qrcode
+    // 2) Response veio SEM erro (senao pode ser timeout/rede — nao mexer)
+    // 3) O connectionState retornou 'close' (confirma sessao ta zumbi mesmo, nao so lenta)
+    // Isso protege sessoes boas contra deletion acidental por timeout/rede.
+    const noErrorInFetch = !data?.error && !data?.errno
+    const isMaybeZombie = !qrcode && noErrorInFetch && (!data || Object.keys(data || {}).length === 0)
+    if (isMaybeZombie && (instance.provider || 'evolution') === 'evolution') {
+      // Confirma via connectionState pra ter certeza que a sessao ta zumbi mesmo
+      const stateCheck = await provider.connectionState(instance)
+      const isReallyZombie = stateCheck.state === 'close' || stateCheck.state === 'closed' || !stateCheck.state
+      if (isReallyZombie && !stateCheck.error) {
+        console.warn(`[Provider Connect] sessao zumbi confirmada em ${instance.instance_name} (state=${stateCheck.state}) — recriando`)
+        try { await provider.deleteInstance(instance, { timeoutMs: 5000 }) } catch {}
+        // Evolution v2.3 precisa de ~3s pra completar delete no Baileys+Postgres
+        await new Promise(r => setTimeout(r, 3000))
+        const createResult = await evolutionSession.createInstance({
+          baseUrl: instance.api_url,
+          apiKey: instance.api_key,
+          instanceName: instance.instance_name,
+        })
+        qrcode = createResult.qrcode
+        data = createResult.raw
+
+        // Se CREATE ainda nao trouxe QR (Baileys inicializando), espera + retry via CONNECT
+        // Ate 3 tentativas com 2s de intervalo (total ~6s adicional)
+        for (let i = 0; !qrcode && i < 3; i++) {
+          await new Promise(r => setTimeout(r, 2000))
+          const retryResult = await provider.connectInstance(instance)
+          qrcode = retryResult.qrcode
+          data = retryResult.raw
+          console.log(`[Provider Connect] retry ${i + 1}/3 — QR ${qrcode ? 'gerado' : 'ainda nao'}`)
+        }
+        console.log(`[Provider Connect] recriada — QR ${qrcode ? 'GERADO ✓' : 'FALHOU apos retries'}`)
+      } else {
+        console.log(`[Provider Connect] ${instance.instance_name}: nao vou recriar (state=${stateCheck.state}, error=${stateCheck.error || 'none'})`)
+      }
+    }
+
+    if (!qrcode) console.error('[Provider Connect] sem QR — payload:', JSON.stringify(data || {}).slice(0, 300))
+
+    db.prepare("UPDATE whatsapp_instances SET qr_code = ?, status = 'connecting', updated_at = datetime('now') WHERE id = ?").run(qrcode, instance.id)
 
     // Re-register webhook on every connect to recover from any past Evolution-side resets
     await registerInstanceWebhook(instance)
@@ -271,7 +305,7 @@ router.post('/whatsapp/:id/connect', allowInstanceOwner, async (req, res) => {
     const updated = db.prepare('SELECT * FROM whatsapp_instances WHERE id = ?').get(instance.id)
     res.json({ instance: safe(updated, req), qr_code: updated.qr_code, status: updated.status })
   } catch (err) {
-    console.error('[Evolution Connect]', err.message)
+    console.error('[Provider Connect]', err.message)
     res.status(500).json({ error: 'Falha ao conectar: ' + err.message })
   }
 })
@@ -287,18 +321,12 @@ router.post('/whatsapp/sync-phones', requireRole('super_admin'), async (req, res
   res.json({ ok: true, synced: results.length, results })
 })
 
-// Helper: busca + salva phone_number da Evolution se estiver vazio no banco
+// Helper: busca + salva phone_number do provider se estiver vazio no banco
 async function syncInstancePhoneIfMissing(instance) {
   if (instance.phone_number) return instance.phone_number
   try {
-    const r = await fetch(`${instance.api_url}/instance/fetchInstances?instanceName=${encodeURIComponent(instance.instance_name)}`, {
-      headers: { apikey: instance.api_key },
-    })
-    const data = await r.json()
-    const arr = Array.isArray(data) ? data : (data?.instance ? [data.instance] : [])
-    const inst = arr[0] || {}
-    // Evolution retorna ownerJid (ex: 554891574922@s.whatsapp.net) — extrai só digitos
-    const jid = inst.ownerJid || inst.owner || inst.number || ''
+    const info = await evolutionSession.fetchInstanceInfo(instance)
+    const jid = info?.ownerJid || info?.owner || info?.number || ''
     const phone = String(jid).replace(/@.*$/, '').replace(/[^\d]/g, '')
     if (phone && phone.length >= 10) {
       db.prepare("UPDATE whatsapp_instances SET phone_number = ?, updated_at = datetime('now') WHERE id = ?").run(phone, instance.id)
@@ -326,11 +354,7 @@ router.get('/whatsapp/:id/status', async (req, res) => {
   }
 
   try {
-    const r = await fetch(`${instance.api_url}/instance/connectionState/${instance.instance_name}`, {
-      headers: { apikey: instance.api_key },
-    })
-    const data = await r.json()
-    const state = data?.instance?.state || data?.state || ''
+    const { state, raw: data } = await evolutionSession.connectionState(instance)
 
     let status = 'disconnected'
     if (state === 'open' || state === 'connected') status = 'connected'
@@ -423,7 +447,7 @@ router.get('/whatsapp/:id/health', requireRole('super_admin', 'gerente'), (req, 
   })
 })
 
-// ─── Refresh QR code ─────────────────────────────────────────────
+// ─── Refresh QR code (mesma logica anti-zumbi do /connect) ───────
 router.post('/whatsapp/:id/qrcode', allowInstanceOwner, async (req, res) => {
   const instance = getOwnedInstance(req, res)
   if (!instance) return
@@ -438,14 +462,37 @@ router.post('/whatsapp/:id/qrcode', allowInstanceOwner, async (req, res) => {
   }
 
   try {
-    const r = await fetch(`${instance.api_url}/instance/connect/${instance.instance_name}`, {
-      headers: { apikey: instance.api_key },
-    })
-    const data = await r.json()
-    const qrCode = data?.qrcode?.base64 || data?.base64 || null
-    if (!qrCode) console.error('[Evolution Refresh QR] sem QR — payload:', JSON.stringify(data).slice(0, 300))
+    const provider = evolutionSession
+    let { qrcode, raw: data } = await provider.connectInstance(instance)
 
-    db.prepare("UPDATE whatsapp_instances SET qr_code = ?, status = 'connecting', updated_at = datetime('now') WHERE id = ?").run(qrCode, instance.id)
+    // Mesma protecao anti-delete-acidental do endpoint /connect
+    const noErrorInFetch = !data?.error && !data?.errno
+    const isMaybeZombie = !qrcode && noErrorInFetch && (!data || Object.keys(data || {}).length === 0)
+    if (isMaybeZombie && (instance.provider || 'evolution') === 'evolution') {
+      const stateCheck = await provider.connectionState(instance)
+      const isReallyZombie = stateCheck.state === 'close' || stateCheck.state === 'closed' || !stateCheck.state
+      if (isReallyZombie && !stateCheck.error) {
+        console.warn(`[Provider Refresh QR] sessao zumbi confirmada em ${instance.instance_name} — recriando`)
+        try { await provider.deleteInstance(instance, { timeoutMs: 5000 }) } catch {}
+        await new Promise(r => setTimeout(r, 3000))
+        const createResult = await evolutionSession.createInstance({
+          baseUrl: instance.api_url,
+          apiKey: instance.api_key,
+          instanceName: instance.instance_name,
+        })
+        qrcode = createResult.qrcode
+        data = createResult.raw
+        for (let i = 0; !qrcode && i < 3; i++) {
+          await new Promise(r => setTimeout(r, 2000))
+          const retryResult = await provider.connectInstance(instance)
+          qrcode = retryResult.qrcode
+          data = retryResult.raw
+        }
+      }
+    }
+    if (!qrcode) console.error('[Provider Refresh QR] sem QR — payload:', JSON.stringify(data || {}).slice(0, 300))
+
+    db.prepare("UPDATE whatsapp_instances SET qr_code = ?, status = 'connecting', updated_at = datetime('now') WHERE id = ?").run(qrcode, instance.id)
     const updated = db.prepare('SELECT * FROM whatsapp_instances WHERE id = ?').get(instance.id)
     res.json({ instance: safe(updated, req), qr_code: updated.qr_code, status: updated.status })
   } catch (err) {
@@ -468,12 +515,9 @@ router.post('/whatsapp/:id/disconnect', requireRole('super_admin', 'gerente', 'a
   }
 
   try {
-    await fetch(`${instance.api_url}/instance/logout/${instance.instance_name}`, {
-      method: 'DELETE',
-      headers: { apikey: instance.api_key },
-    })
+    await evolutionSession.logout(instance)
   } catch (err) {
-    console.error('[Evolution Logout]', err.message)
+    console.error('[Provider Logout]', err.message)
   }
 
   db.prepare("UPDATE whatsapp_instances SET status = 'disconnected', qr_code = NULL, updated_at = datetime('now') WHERE id = ?").run(instance.id)
@@ -497,24 +541,19 @@ router.delete('/whatsapp/:id', requireRole('super_admin', 'gerente', 'atendente'
   // Se Evolution responder 404 ou timeoutar, segue o jogo e apaga do banco assim mesmo
   // — instancia fantasma (so no CRM) eh um caso valido e nao deve travar o user.
   try {
-    const r = await fetch(`${instance.api_url}/instance/delete/${encodeURIComponent(instance.instance_name)}`, {
-      method: 'DELETE',
-      headers: { apikey: instance.api_key },
-      signal: AbortSignal.timeout(8000),
-    })
-    if (!r.ok && r.status !== 404) {
-      const body = await r.text().catch(() => '')
-      console.error(`[Evolution Delete Instance] ${instance.instance_name} HTTP ${r.status}: ${body.slice(0, 200)}`)
+    const result = await evolutionSession.deleteInstance(instance, { timeoutMs: 8000 })
+    if (!result.ok) {
+      console.error(`[Provider Delete Instance] ${instance.instance_name}: ${result.error || `HTTP ${result.status}`}`)
     }
   } catch (err) {
-    console.error(`[Evolution Delete Instance] ${instance.instance_name}: ${err.name === 'TimeoutError' ? 'timeout 8s' : err.message}`)
+    console.error(`[Provider Delete Instance] ${instance.instance_name}: ${err.message}`)
   }
   db.prepare('DELETE FROM whatsapp_instances WHERE id = ?').run(instance.id)
   resumeWithDefaultSendInstance(db, instance.account_id, { resumeBroadcastIfPaused, resumeFollowUpsIfPaused })
   res.json({ ok: true })
 })
 
-// ─── Re-set webhook URL on Evolution API ─────────────────────────
+// ─── Re-set webhook URL no provider ──────────────────────────────
 router.post('/whatsapp/:id/setup-webhook', requireRole('super_admin', 'gerente', 'atendente'), async (req, res) => {
   const instance = getOwnedInstance(req, res)
   if (!instance) return
@@ -550,7 +589,7 @@ router.put('/whatsapp/:id/attendant', requireRole('super_admin', 'gerente', 'ate
   res.json({ instance: safe(updated, req) })
 })
 
-// ─── Restart Baileys session on Evolution (fixes "open but no msgs" zombie state) ───
+// ─── Restart session (fixes "open but no msgs" zombie state) ───
 router.post('/whatsapp/:id/restart', requireRole('super_admin', 'gerente', 'atendente'), async (req, res) => {
   const instance = getOwnedInstance(req, res)
   if (!instance) return
@@ -566,12 +605,8 @@ router.post('/whatsapp/:id/restart', requireRole('super_admin', 'gerente', 'aten
   }
 
   try {
-    const r = await fetch(`${instance.api_url}/instance/restart/${encodeURIComponent(instance.instance_name)}`, {
-      method: 'POST',
-      headers: { apikey: instance.api_key },
-    })
-    const data = await r.json()
-    res.json({ ok: true, response: data })
+    const result = await evolutionSession.restartInstance(instance)
+    res.json({ ok: result.ok !== false, response: result.raw || null })
   } catch (err) {
     res.status(500).json({ error: err.message })
   }
@@ -586,6 +621,33 @@ router.post('/whatsapp/sync-now', requireRole('super_admin', 'gerente', 'atenden
   } catch (err) {
     res.status(500).json({ error: err.message })
   }
+})
+
+// ─── Switch provider (Evolution <-> uzapi) ───────────────────────
+// Body: { target: 'evolution' | 'uzapi' }
+// Faz logout no provider atual, muda o campo `provider` na inst, cria a session
+// no novo provider, registra webhook e retorna needsQr:true pra UI abrir o painel.
+router.post('/whatsapp/:id/switch-provider', requireRole('super_admin', 'gerente'), async (req, res) => {
+  const instance = getOwnedInstance(req, res)
+  if (!instance) return
+  const target = String(req.body?.target || '').toLowerCase()
+  if (!['evolution', 'uzapi'].includes(target)) {
+    return res.status(400).json({ error: 'target invalido (use "evolution" ou "uzapi")' })
+  }
+  if ((instance.provider || 'evolution') === target) {
+    return res.status(400).json({ error: `Ja esta no provider ${target}` })
+  }
+
+  // Junção com o GitHub (24/09): a troca de provedor de um numero existente dependia do esboco de UzAPI
+  // (whatsappProvider/uzapiAdapter.js, ainda nao implementado) e deslogava a Evolution ANTES de tentar —
+  // o numero ficava desconectado e a troca falhava. Aqui a UzAPI ja esta pronta na tomada ../services/whatsapp/,
+  // com papel proprio (numero de disparo), e o provedor e escolhido ao CRIAR o numero. Recusa antes de mexer em nada.
+  return res.status(409).json({
+    error: target === 'uzapi'
+      ? 'Para usar a UzAPI, crie um número novo escolhendo UzAPI no card WhatsApp. Este número continua na Evolution.'
+      : 'Para voltar à Evolution, crie um número novo escolhendo Evolution no card WhatsApp.',
+    code: 'switch_provider_use_new_number',
+  })
 })
 
 // ─── Test connection (legacy, kept for compatibility) ────────────
@@ -604,11 +666,8 @@ router.post('/whatsapp/:id/test', requireRole('super_admin', 'gerente', 'atenden
   }
 
   try {
-    const r = await fetch(`${instance.api_url}/instance/connectionState/${instance.instance_name}`, {
-      headers: { apikey: instance.api_key },
-    })
-    const data = await r.json()
-    const status = data.instance?.state === 'open' ? 'connected' : 'disconnected'
+    const { state, raw: data } = await evolutionSession.connectionState(instance)
+    const status = (state === 'open' || state === 'connected') ? 'connected' : 'disconnected'
     db.prepare("UPDATE whatsapp_instances SET status = ?, updated_at = datetime('now') WHERE id = ?").run(status, instance.id)
     res.json({ success: status === 'connected', status, data })
   } catch (err) {

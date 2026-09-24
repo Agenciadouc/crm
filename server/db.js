@@ -362,6 +362,10 @@ try {
 addColumnIfNotExists('whatsapp_instances', 'paused_at', 'TEXT')                              // datetime pausa (auto ou manual); null = ativa
 addColumnIfNotExists('whatsapp_instances', 'paused_reason', 'TEXT')                          // 'delivered_rate_low' | 'manual' | 'ghost_detected'
 addColumnIfNotExists('whatsapp_instances', 'health_check_window_min', 'INTEGER DEFAULT 120') // janela pra delivered_rate (default 2h)
+// Provider WhatsApp: 'evolution' (self-hosted, default) | 'uzapi' (SaaS, opt-in por cliente)
+addColumnIfNotExists('whatsapp_instances', 'provider', "TEXT NOT NULL DEFAULT 'evolution'")
+// Nome da session no painel uzapi (auto-derivado do slug da instance quando switch pra uzapi)
+addColumnIfNotExists('whatsapp_instances', 'uzapi_session', 'TEXT')
 // Backfill warm-up retroativo APENAS pra instancias recentes (created_at < 3 dias atras).
 // Instancias antigas nao sao afetadas — ja "esquentaram" naturalmente em prod.
 try {
@@ -1282,6 +1286,24 @@ db.exec(`
     FOREIGN KEY (instance_id) REFERENCES whatsapp_instances(id) ON DELETE CASCADE,
     FOREIGN KEY (attendant_id) REFERENCES users(id) ON DELETE SET NULL
   );
+
+  -- Vendas registradas por lead. Cada lead pode ter varias vendas (recompras, upsells, etc).
+  -- Pergunta valor cada vez que move pra stage is_conversion=1. Total agregado alimenta o ROI mensal.
+  CREATE TABLE IF NOT EXISTS lead_sales (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id    INTEGER NOT NULL,
+    lead_id       INTEGER NOT NULL,
+    value         REAL NOT NULL,
+    sale_date     TEXT NOT NULL DEFAULT (datetime('now')),
+    notes         TEXT,
+    created_by    INTEGER,
+    created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE,
+    FOREIGN KEY (lead_id) REFERENCES leads(id) ON DELETE CASCADE,
+    FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_lead_sales_lead ON lead_sales(lead_id, sale_date DESC);
+  CREATE INDEX IF NOT EXISTS idx_lead_sales_account_date ON lead_sales(account_id, sale_date DESC);
 `)
 
 // Instância padrão pra leads de formulário
@@ -1334,6 +1356,9 @@ db.exec(`
     frente_estruturacao   INTEGER NOT NULL DEFAULT 1,
     frente_aquisicao      INTEGER NOT NULL DEFAULT 1,
     frente_editorial      INTEGER NOT NULL DEFAULT 1,
+    frente_site           INTEGER NOT NULL DEFAULT 0,
+    site_dominio_valor    REAL NOT NULL DEFAULT 40,
+    site_hospedagem_valor REAL NOT NULL DEFAULT 450,
     exclusoes_extras      TEXT,
     fat_mes1_ref          TEXT,
     fat_mes1_valor        REAL,
@@ -1351,6 +1376,11 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_contracts_created_at ON contracts(created_at DESC);
 `)
+
+// Migrations idempotentes contracts — bancos antigos sem essas colunas ganham defaults
+addColumnIfNotExists('contracts', 'frente_site', 'INTEGER NOT NULL DEFAULT 0')
+addColumnIfNotExists('contracts', 'site_dominio_valor', 'REAL NOT NULL DEFAULT 40')
+addColumnIfNotExists('contracts', 'site_hospedagem_valor', 'REAL NOT NULL DEFAULT 450')
 
 // ─── Global templates (Plano C) ─────────────────────────────────────────
 // Templates de cadences e follow-ups criados pelo super_admin, sem account_id.

@@ -209,6 +209,8 @@ export interface Contract {
   vigencia_meses: number; data_inicio: string; data_fim: string;
   renovacao_meses: number; aviso_previo_dias: number; reajuste_indice: string;
   frente_diagnostico: number; frente_estruturacao: number; frente_aquisicao: number; frente_editorial: number;
+  frente_site: number;
+  site_dominio_valor: number; site_hospedagem_valor: number;
   exclusoes_extras: string | null;
   videos_por_mes: number; imagens_por_mes: number;
   fat_mes1_ref: string | null; fat_mes1_valor: number | null;
@@ -233,6 +235,8 @@ export interface ContractInput {
   vigencia_meses: number; data_inicio: string; data_fim?: string;
   renovacao_meses: number; aviso_previo_dias: number; reajuste_indice: string;
   frente_diagnostico: boolean; frente_estruturacao: boolean; frente_aquisicao: boolean; frente_editorial: boolean;
+  frente_site?: boolean;
+  site_dominio_valor?: number; site_hospedagem_valor?: number;
   exclusoes_extras?: string;
   videos_por_mes?: number; imagens_por_mes?: number;
   fat_mes1_ref?: string; fat_mes1_valor?: number | null;
@@ -394,12 +398,13 @@ export const fetchLeadInsight = (leadId: number, accountId: number) =>
 export const triggerAnalysisNow = async (
   accountId: number,
   maxLeads: number = 50,
-  opts: { resetAll?: boolean; resetLead?: number } = {}
+  opts: { resetAll?: boolean; resetLead?: number; days?: number } = {}
 ): Promise<{ ok: boolean; message?: string; error?: string; retry_after_min?: number; max_leads?: number }> => {
   const params = new URLSearchParams({ account_id: String(accountId), max: String(maxLeads) })
   if (opts.resetAll) params.set('reset_all', 'true')
   if (opts.resetLead) params.set('reset_lead', String(opts.resetLead))
-  const res = await fetch(`/api/dashboard/analyze-now?${params.toString()}`, {
+  if (opts.days) params.set('days', String(opts.days))
+  const res = await fetch(`${BASE}/api/dashboard/analyze-now?${params.toString()}`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${getToken()}`, 'Content-Type': 'application/json' },
   })
@@ -440,6 +445,17 @@ export const disconnectWhatsApp = (id: number, accountId: number) => apiFetch(`/
 export const deleteWhatsAppInstance = (id: number, accountId: number) => apiFetch(`/api/integrations/whatsapp/${id}?account_id=${accountId}`, { method: 'DELETE' })
 export const setupWhatsAppWebhook = (id: number, accountId: number) => apiFetch<{ ok: boolean; webhookUrl: string }>(`/api/integrations/whatsapp/${id}/setup-webhook?account_id=${accountId}`, { method: 'POST' })
 export const restartWhatsAppInstance = (id: number, accountId: number) => apiFetch<{ ok: boolean }>(`/api/integrations/whatsapp/${id}/restart?account_id=${accountId}`, { method: 'POST' })
+
+// System notice (popup global de aviso pra todos usuarios logados)
+export interface SystemNotice { id: number; title: string | null; message: string; type: 'info' | 'warning' | 'success'; expiresAt: number; createdAt: number }
+export const fetchSystemNotice = () => apiFetch<{ notice: SystemNotice | null }>(`/api/admin/system-notice`)
+export const sendSystemNotice = (data: { message: string; type?: 'info' | 'warning' | 'success'; durationMinutes?: number; title?: string }) =>
+  apiFetch<{ ok: boolean; notice: SystemNotice }>(`/api/admin/system-notice`, { method: 'POST', body: JSON.stringify(data) })
+export const clearSystemNotice = () => apiFetch<{ ok: boolean }>(`/api/admin/system-notice`, { method: 'DELETE' })
+export const publishRelease = (version?: string) =>
+  apiFetch<{ ok: boolean; version: string | null }>(`/api/admin/publish-release`, { method: 'POST', body: JSON.stringify({ version }) })
+export const switchWhatsAppProvider = (id: number, accountId: number, target: 'evolution' | 'uzapi') =>
+  apiFetch<{ instance: WhatsAppInstance; needsQr: boolean; target: string }>(`/api/integrations/whatsapp/${id}/switch-provider?account_id=${accountId}`, { method: 'POST', body: JSON.stringify({ target }) })
 export const setInstanceAttendant = (id: number, accountId: number, attendantId: number | null) => apiFetch<{ instance: WhatsAppInstance }>(`/api/integrations/whatsapp/${id}/attendant?account_id=${accountId}`, { method: 'PUT', body: JSON.stringify({ attendant_id: attendantId }) })
 export const setInstanceMode = (id: number, accountId: number, mode: 'open' | 'restricted') => apiFetch<{ instance: WhatsAppInstance }>(`/api/integrations/whatsapp/${id}/mode?account_id=${accountId}`, { method: 'PUT', body: JSON.stringify({ mode }) })
 export const syncWhatsAppNow = (accountId: number) => apiFetch<{ ok: boolean }>(`/api/integrations/whatsapp/sync-now?account_id=${accountId}`, { method: 'POST' })
@@ -1220,3 +1236,11 @@ export const deleteBriefing = (id: number, accountId: number) =>
 
 export const briefingFromAgent = (agentId: number, accountId: number) =>
   apiFetch<{ briefing_id: number }>(`/api/agent-briefings/from-agent/${agentId}?account_id=${accountId}`, { method: 'POST' })
+// Vendas multiplas por lead
+export interface LeadSale { id: number; lead_id: number; value: number; sale_date: string; notes: string | null; created_by: number | null; created_by_name: string | null; created_at: string }
+export const fetchLeadSales = (leadId: number, accountId: number) =>
+  apiFetch<{ sales: LeadSale[]; total: number }>(`/api/leads/${leadId}/sales?account_id=${accountId}`)
+export const addLeadSale = (leadId: number, accountId: number, data: { value: number; sale_date?: string; notes?: string }) =>
+  apiFetch<{ sale: LeadSale; total: number }>(`/api/leads/${leadId}/sales?account_id=${accountId}`, { method: 'POST', body: JSON.stringify(data) })
+export const deleteLeadSale = (leadId: number, saleId: number, accountId: number) =>
+  apiFetch<{ ok: boolean; total: number }>(`/api/leads/${leadId}/sales/${saleId}?account_id=${accountId}`, { method: 'DELETE' })

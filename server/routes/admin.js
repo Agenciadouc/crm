@@ -4,8 +4,50 @@ import db from '../db.js'
 import { requireRole } from '../middleware/auth.js'
 import { uzapiUsageByAccount } from '../services/whatsapp/connectionLog.js'
 import { listAdminCheckAll } from '../services/whatsapp/instanceQueries.js'
+// Sessao da Evolution (estado, reconectar) — funcoes vindas do GitHub (João, 23/09). Mensagens: tomada ../services/whatsapp/.
+import { evolution as evolutionSession } from '../services/whatsappProvider/index.js'
+import { setSystemNotice, clearSystemNotice, getSystemNotice, broadcastSSEAll } from '../sse.js'
 
 const router = Router()
+
+// ─── System notice (aviso global — popup em todo mundo logado) ────
+// GET /api/admin/system-notice — qualquer user logado le pra saber se tem aviso ativo
+router.get('/system-notice', (req, res) => {
+  res.json({ notice: getSystemNotice() })
+})
+
+// POST /api/admin/system-notice — super_admin dispara aviso global
+// Body: { message, type: 'info'|'warning'|'success', durationMinutes: number, title? }
+router.post('/system-notice', requireRole('super_admin'), (req, res) => {
+  const { message, type = 'info', durationMinutes = 5, title } = req.body || {}
+  if (!message || !String(message).trim()) return res.status(400).json({ error: 'message obrigatorio' })
+  const notice = {
+    id: Date.now(),
+    title: title ? String(title).slice(0, 100) : null,
+    message: String(message).slice(0, 500),
+    type: ['info', 'warning', 'success'].includes(type) ? type : 'info',
+    expiresAt: Date.now() + Math.max(1, Math.min(1440, Number(durationMinutes) || 5)) * 60000,
+    createdAt: Date.now(),
+  }
+  setSystemNotice(notice)
+  res.json({ ok: true, notice })
+})
+
+// DELETE /api/admin/system-notice — cancela aviso antes do tempo
+router.delete('/system-notice', requireRole('super_admin'), (req, res) => {
+  clearSystemNotice()
+  res.json({ ok: true })
+})
+
+// POST /api/admin/publish-release — dispara SSE 'system:release' pra todos os
+// usuarios logados. Cada cliente com JS na mesma versao abre o modal na hora.
+// Cliente com JS mais antigo recebe prompt de reload.
+// Body: { version?: string } — se omitido, cliente usa a versao local.
+router.post('/publish-release', requireRole('super_admin'), (req, res) => {
+  const version = req.body?.version ? String(req.body.version).slice(0, 30) : null
+  broadcastSSEAll('system:release', { version, at: Date.now() })
+  res.json({ ok: true, version, note: 'Broadcast disparado pra todos os clientes conectados.' })
+})
 
 // ─── Check + auto-reconnect TODAS as instancias WhatsApp (admin global)
 // Usado pelo botao "Verificar todas as instancias" no painel admin
@@ -16,14 +58,8 @@ router.post('/instances/check-all', requireRole('super_admin'), async (req, res)
   for (const inst of instances) {
     const r = { id: inst.id, account: inst.account_name, instance: inst.instance_name, action: '', state: '' }
     try {
-      // Checa estado real via connectionState (URL-encoded pra suportar acentos/espacos)
-      const encoded = encodeURIComponent(inst.instance_name)
-      const stateRes = await fetch(`${inst.api_url}/instance/connectionState/${encoded}`, {
-        headers: { apikey: inst.api_key },
-        timeout: 15000,
-      })
-      const stateData = await stateRes.json().catch(() => ({}))
-      const realState = stateData?.instance?.state || stateData?.state || ''
+      const provider = evolutionSession
+      const { state: realState } = await provider.connectionState(inst)
 
       if (realState === 'open' || realState === 'connected') {
         if (inst.status !== 'connected') {
@@ -33,17 +69,13 @@ router.post('/instances/check-all', requireRole('super_admin'), async (req, res)
         r.action = 'already_connected'
       } else if (realState === 'close' || realState === 'closed' || realState === 'disconnected') {
         // Tenta reconectar
-        const connRes = await fetch(`${inst.api_url}/instance/connect/${encoded}`, {
-          headers: { apikey: inst.api_key },
-          timeout: 20000,
-        })
-        const connData = await connRes.json().catch(() => ({}))
+        const { qrcode, raw: connData } = await provider.connectInstance(inst)
         const newState = connData?.instance?.state || connData?.state || ''
-        const hasQr = !!(connData?.qrcode?.base64 || connData?.base64 || (typeof connData?.qrcode === 'string' && connData.qrcode.startsWith('data:image')))
+        const hasQr = !!qrcode
 
         if (hasQr) {
           db.prepare("UPDATE whatsapp_instances SET status='connecting', qr_code=?, updated_at=datetime('now') WHERE id=?")
-            .run(connData?.qrcode?.base64 || connData?.base64 || connData?.qrcode || null, inst.id)
+            .run(qrcode, inst.id)
           r.state = 'needs_qr'
           r.action = 'qr_required'
         } else if (newState === 'open' || newState === 'connected') {
@@ -57,7 +89,7 @@ router.post('/instances/check-all', requireRole('super_admin'), async (req, res)
         }
       } else if (!realState) {
         r.state = 'no_response'
-        r.action = 'evolution_unreachable'
+        r.action = 'whatsapp_unreachable'
       } else {
         r.state = realState
         r.action = 'unknown_state'
