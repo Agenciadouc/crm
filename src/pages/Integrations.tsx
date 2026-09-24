@@ -213,6 +213,21 @@ export default function Integrations() {
     } catch (e: any) { alert('Erro: ' + e.message) }
   }
 
+  const handleForceStatusCheck = async (inst: WhatsAppInstance) => {
+    if (!accountId) return
+    try {
+      const { instance: updated, state } = await checkWhatsAppStatus(inst.id, accountId)
+      setInstances(prev => prev.map(i => i.id === updated.id ? updated : i))
+      if (updated.status === 'connected') {
+        alert(`OK — instancia "${updated.instance_name}" esta conectada (state=${state}).`)
+      } else if (updated.status === 'connecting') {
+        alert(`Ainda aguardando pareamento (state=${state}). Escaneie o QR e tente de novo.`)
+      } else {
+        alert(`Provider reporta desconectada (state=${state}). Clique em Conectar pra gerar QR novo.`)
+      }
+    } catch (e: any) { alert('Erro ao verificar: ' + e.message) }
+  }
+
   const handleDisconnect = async (inst: WhatsAppInstance) => {
     if (!accountId) return
     await disconnectWhatsApp(inst.id, accountId)
@@ -547,12 +562,30 @@ export default function Integrations() {
                       {getStatusIcon(inst.status)} {getStatusLabel(inst.status)}
                     </span>
                     {inst.status === 'disconnected' && (
-                      <button className="btn btn-primary btn-sm" onClick={() => handleConnect(inst)}><Power size={12} /> Conectar</button>
+                      <>
+                        <button className="btn btn-primary btn-sm" onClick={() => handleConnect(inst)}><Power size={12} /> Conectar</button>
+                        <button
+                          className="btn btn-secondary btn-sm"
+                          onClick={() => handleForceStatusCheck(inst)}
+                          title="Consulta o provider e sincroniza status no CRM. Use quando o CRM mostra desconectado mas voce sabe que ja pareou (webhook pode ter falhado)."
+                        >
+                          <RefreshCw size={12} /> Verificar
+                        </button>
+                      </>
                     )}
                     {inst.status === 'connecting' && (
-                      <button className="btn btn-secondary btn-sm" onClick={() => setActiveQR(activeQR === inst.id ? null : inst.id)}>
-                        <QrCode size={12} /> {activeQR === inst.id ? 'Ocultar QR' : 'Ver QR'}
-                      </button>
+                      <>
+                        <button className="btn btn-secondary btn-sm" onClick={() => setActiveQR(activeQR === inst.id ? null : inst.id)}>
+                          <QrCode size={12} /> {activeQR === inst.id ? 'Ocultar QR' : 'Ver QR'}
+                        </button>
+                        <button
+                          className="btn btn-secondary btn-sm"
+                          onClick={() => handleForceStatusCheck(inst)}
+                          title="Consulta o provider e sincroniza status no CRM. Use se ja escaneou o QR mas o CRM nao mudou pra Conectado."
+                        >
+                          <RefreshCw size={12} /> Verificar
+                        </button>
+                      </>
                     )}
                     {inst.status === 'connected' && (
                       <>

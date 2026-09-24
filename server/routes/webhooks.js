@@ -189,25 +189,40 @@ function translateUzapiToBaileys(uzapiBody) {
   const metadata = value.metadata || {}
   const phoneNumberId = metadata.phone_number_id
 
-  // 1) Connection status (uzapi: value.status[].connection = "connected"|"desconnected")
-  if (field === 'connection' && Array.isArray(value.status)) {
-    const conn = value.status[0]?.connection
+  // 1) Connection status — cobre 3 shapes conhecidos:
+  //    a) field='connection' + value.status[{connection}]
+  //    b) field='authentication' + value.authentication[{status: 'connected'|'qr'|'error'}]
+  //    c) field='connection' + value.connection direto (fallback)
+  if (field === 'connection' || field === 'authentication') {
+    // Extrai valor 'connected'/'connecting'/'disconnected' de qualquer sub-shape
+    let conn = ''
+    if (Array.isArray(value.status)) conn = value.status[0]?.connection || ''
+    else if (Array.isArray(value.authentication)) conn = value.authentication[0]?.status || ''
+    else if (typeof value.connection === 'string') conn = value.connection
+    else if (typeof value.status === 'string') conn = value.status
+
+    conn = String(conn).toLowerCase()
     let state = 'close'
-    if (conn === 'connected') state = 'open'
-    else if (conn === 'connecting') state = 'connecting'
+    // Aceita variacoes: 'connected'/'open'/'authenticated'
+    if (/^(connected|open|authenticated|paired|ready)$/.test(conn)) state = 'open'
+    else if (/^(connecting|authenticating|qr|pending|reconnecting)$/.test(conn)) state = 'connecting'
     return {
       event: 'connection.update',
       instance: phoneNumberId,
-      data: { state, isNewLogin: false },
+      data: { state, isNewLogin: state === 'open' },
     }
   }
 
-  // 2) QR code (uzapi custom: value.qrcode[].code = base64)
-  if (Array.isArray(value.qrcode) && value.qrcode[0]?.code) {
+  // 2) QR code — cobre shapes:
+  //    a) value.qrcode[{code}]
+  //    b) value.qr / value.qrCode (string direta base64)
+  const qrString = (Array.isArray(value.qrcode) && value.qrcode[0]?.code)
+    || value.qr || value.qrCode || value.qr_code || null
+  if (qrString) {
     return {
       event: 'connection.update',
       instance: phoneNumberId,
-      data: { qrcode: { base64: value.qrcode[0].code }, state: 'connecting' },
+      data: { qrcode: { base64: qrString }, state: 'connecting' },
     }
   }
 
