@@ -4,8 +4,7 @@ import db from '../db.js'
 import { requireRole } from '../middleware/auth.js'
 import { uzapiUsageByAccount } from '../services/whatsapp/connectionLog.js'
 import { listAdminCheckAll } from '../services/whatsapp/instanceQueries.js'
-// Sessao da Evolution (estado, reconectar) — funcoes vindas do GitHub (João, 23/09). Mensagens: tomada ../services/whatsapp/.
-import { evolution as evolutionSession } from '../services/whatsappProvider/index.js'
+import { evolutionSession } from '../services/whatsapp/evolutionSession.js'
 import { setSystemNotice, clearSystemNotice, getSystemNotice, broadcastSSEAll } from '../sse.js'
 
 const router = Router()

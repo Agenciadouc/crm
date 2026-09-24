@@ -5,9 +5,7 @@ import { requireRole } from '../middleware/auth.js'
 import { runPollNow } from '../scheduler.js'
 import { getPublicBaseUrl } from '../services/publicUrl.js'
 import { getProvider } from '../services/whatsapp/index.js'
-// Sessao da Evolution (criar, QR, estado, reconectar, recriar sessao zumbi) — vinda do GitHub (João, 23/09).
-// Mensagens, webhook e UzAPI continuam na tomada ../services/whatsapp/.
-import { evolution as evolutionSession } from '../services/whatsappProvider/index.js'
+import { evolutionSession } from '../services/whatsapp/evolutionSession.js'
 import { generateWebhookToken } from '../services/whatsapp/schema.js'
 import { createWebhookRegistrar } from '../services/whatsapp/webhookRegistration.js'
 import { findInstanceByName } from '../services/whatsapp/instanceQueries.js'
@@ -191,7 +189,7 @@ router.post('/whatsapp', requireRole('super_admin', 'gerente', 'atendente'), asy
   }
 
   // Cria instancia via provider (endpoint de criacao — sempre Evolution nessa rota,
-  // pois UzAPI e criada no ramo acima, pelo manager). Troca de provedor de numero existente: ver /switch-provider.
+  // pois UzAPI e criada no ramo acima, pelo manager).
   const createResult = await evolutionSession.createInstance({
     baseUrl,
     apiKey: api_key,
@@ -621,33 +619,6 @@ router.post('/whatsapp/sync-now', requireRole('super_admin', 'gerente', 'atenden
   } catch (err) {
     res.status(500).json({ error: err.message })
   }
-})
-
-// ─── Switch provider (Evolution <-> uzapi) ───────────────────────
-// Body: { target: 'evolution' | 'uzapi' }
-// Faz logout no provider atual, muda o campo `provider` na inst, cria a session
-// no novo provider, registra webhook e retorna needsQr:true pra UI abrir o painel.
-router.post('/whatsapp/:id/switch-provider', requireRole('super_admin', 'gerente'), async (req, res) => {
-  const instance = getOwnedInstance(req, res)
-  if (!instance) return
-  const target = String(req.body?.target || '').toLowerCase()
-  if (!['evolution', 'uzapi'].includes(target)) {
-    return res.status(400).json({ error: 'target invalido (use "evolution" ou "uzapi")' })
-  }
-  if ((instance.provider || 'evolution') === target) {
-    return res.status(400).json({ error: `Ja esta no provider ${target}` })
-  }
-
-  // Junção com o GitHub (24/09): a troca de provedor de um numero existente dependia do esboco de UzAPI
-  // (whatsappProvider/uzapiAdapter.js, ainda nao implementado) e deslogava a Evolution ANTES de tentar —
-  // o numero ficava desconectado e a troca falhava. Aqui a UzAPI ja esta pronta na tomada ../services/whatsapp/,
-  // com papel proprio (numero de disparo), e o provedor e escolhido ao CRIAR o numero. Recusa antes de mexer em nada.
-  return res.status(409).json({
-    error: target === 'uzapi'
-      ? 'Para usar a UzAPI, crie um número novo escolhendo UzAPI no card WhatsApp. Este número continua na Evolution.'
-      : 'Para voltar à Evolution, crie um número novo escolhendo Evolution no card WhatsApp.',
-    code: 'switch_provider_use_new_number',
-  })
 })
 
 // ─── Test connection (legacy, kept for compatibility) ────────────
