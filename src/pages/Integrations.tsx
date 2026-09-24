@@ -453,8 +453,9 @@ export default function Integrations() {
       </section>
       )}
 
-      {/* QR Code Panel */}
-      {qrInstance && qrInstance.qr_code && qrInstance.status === 'connecting' && (
+      {/* QR Code Panel — mostra sempre que tem qr_code E nao esta conectada.
+          Nao exige status='connecting' pra evitar sumir durante flapping do WhatsApp Web */}
+      {qrInstance && qrInstance.qr_code && qrInstance.status !== 'connected' && (
         <div className="card" style={{ marginBottom: 20, textAlign: 'center', padding: 24 }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, marginBottom: 16 }}>
             <QrCode size={20} style={{ color: '#FFB300' }} />

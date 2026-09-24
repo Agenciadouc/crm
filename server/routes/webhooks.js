@@ -404,26 +404,38 @@ router.post('/evolution/:accountSlug', (req, res) => {
           updates.push('qr_code = ?')
           params.push(qrcode)
         }
-        // Estado
+        // Estado — mapeamento com PROTECAO contra flapping durante pareamento:
+        //   Se veio 'close' mas ja existe qr_code no BD (ou acabou de vir novo), NAO
+        //   volta pra disconnected — mantem 'connecting' pra UI continuar mostrando o QR.
+        //   WhatsApp Web dispara close intermitente enquanto aguarda scan.
         const state = data?.state
+        const hasQrInDb = !!waInstance.qr_code || !!qrcode
         if (state === 'open' || state === 'connected') {
           updates.push("status = 'connected'", 'qr_code = NULL')
         } else if (state === 'connecting') {
           updates.push("status = 'connecting'")
-        } else if (state === 'close' || state === 'closed') {
+        } else if ((state === 'close' || state === 'closed') && !hasQrInDb) {
           updates.push("status = 'disconnected'")
+        } else if ((state === 'close' || state === 'closed') && hasQrInDb) {
+          // Flapping durante pareamento: mantem 'connecting' pra nao piscar UI
+          updates.push("status = 'connecting'")
+          console.log(`[Webhook connection.update] flapping close ignorado (tem QR ativo) — inst=${waInstance.id}`)
         }
         if (updates.length > 0) {
           updates.push("updated_at = datetime('now')")
           params.push(waInstance.id)
           db.prepare(`UPDATE whatsapp_instances SET ${updates.join(', ')} WHERE id = ?`).run(...params)
           console.log(`[Webhook connection.update] inst=${waInstance.id} state=${state || '?'} hasQr=${!!qrcode}`)
-          // Broadcast SSE pra UI atualizar em tempo real
+          // Broadcast SSE pra UI atualizar em tempo real (envia apenas o essencial;
+          // frontend refetch a lista completa se quiser detalhes)
           try {
+            const finalStatus = state === 'open' || state === 'connected' ? 'connected'
+              : (state === 'close' || state === 'closed') && !hasQrInDb ? 'disconnected'
+              : 'connecting'
             broadcastSSE(account.id, 'instance:updated', {
               id: waInstance.id,
-              status: state === 'open' || state === 'connected' ? 'connected' : (state === 'connecting' ? 'connecting' : 'disconnected'),
-              qr_code: state === 'open' || state === 'connected' ? null : qrcode,
+              status: finalStatus,
+              qr_code: state === 'open' || state === 'connected' ? null : (qrcode || waInstance.qr_code),
             })
           } catch {}
         }
