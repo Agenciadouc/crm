@@ -5,6 +5,7 @@ import { createTestDb, seedBasic, insertLead } from './helpers/db.js'
 import { createEvolutionAdapter } from '../server/services/whatsapp/evolution.js'
 import { createLeadIntake } from '../server/services/leadIntake.js'
 import { createInboundHandler, detectAdSource } from '../server/services/inboundHandler.js'
+import { isOptedOut } from '../server/services/antiban.js'
 
 const adapter = createEvolutionAdapter({ fetch: async () => { throw new Error('sem rede nos testes') } })
 const tick = () => new Promise(r => setImmediate(r))
@@ -390,4 +391,14 @@ test('SAIR depois de voltar a aceitar mensagens (opt-in mais novo): confirma de 
   db.prepare("UPDATE leads SET opted_out_at = datetime('now', '-1 day'), opted_in_at = datetime('now', '-1 hour')").run()
   receive(textPayload('SAIR'))
   assert.equal(calls.optout.length, 2)
+})
+
+test('lead novo cuja primeira mensagem e SAIR fica descadastrado (isOptedOut)', async () => {
+  const { db, seed, receive } = setup()
+  asSendNumber(db, seed)
+  const r = receive(textPayload('SAIR'))
+  assert.deepEqual(r, { ok: true, optedOut: true })
+  const lead = db.prepare('SELECT opted_in_at, opted_out_at FROM leads').get()
+  assert.ok(lead.opted_out_at)
+  assert.equal(isOptedOut(lead), true)
 })

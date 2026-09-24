@@ -43,3 +43,8 @@ test('variacao do passo de follow-up: 2+ variacoes OU variavel do lead', () => {
   assert.match(bad.error, /variação|\{\{nome\}\}/)
   assert.equal(checkStepVariety({ variations: ['Oi', '  '] }).ok, false)
 })
+
+test('isOptedOut: carimbos iguais (SAIR no mesmo segundo do opt-in da criacao) = descadastrado', () => {
+  assert.equal(isOptedOut({ opted_out_at: '2026-09-23 10:00:00', opted_in_at: '2026-09-23 10:00:00' }), true)
+  assert.equal(isOptedOut({ opted_out_at: '2026-09-23 10:00:00', opted_in_at: '2026-09-23 10:00:01' }), false)
+})

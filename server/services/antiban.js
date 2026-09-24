@@ -18,9 +18,11 @@ export function isOptOutMessage(text) {
   return OPTOUT_WORDS.includes(w)
 }
 
+// Empate de carimbo (lead criado pela propria mensagem SAIR: opt-in e opt-out no mesmo segundo) = descadastrado.
+// Os caminhos de opt-in explicito zeram opted_out_at, entao o >= nao prende quem voltou a aceitar.
 export function isOptedOut(lead) {
   if (!lead || !lead.opted_out_at) return false
-  return !lead.opted_in_at || lead.opted_out_at > lead.opted_in_at
+  return !lead.opted_in_at || lead.opted_out_at >= lead.opted_in_at
 }
 
 export function appendOptOutFooter(text, footer) {

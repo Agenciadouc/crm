@@ -6,7 +6,7 @@ import { broadcastSSE } from '../sse.js'
 import { sendViaInstance, checkWhatsAppNumbersBulk } from '../services/leadHandoff.js'
 import { resolveSendInstance, getDefaultSendInstance } from '../services/whatsapp/resolveSendInstance.js'
 import { broadcastFooter, pauseReasonText, canStartBroadcast, skipOptedOutRecipient, pausedBroadcastsToResume, MANUAL_PAUSE_REASON } from '../services/broadcastRouting.js'
-import { appendOptOutFooter } from '../services/antiban.js'
+import { appendOptOutFooter, isOptedOut } from '../services/antiban.js'
 
 const router = Router()
 
@@ -75,7 +75,7 @@ router.post('/', requireRole('super_admin', 'gerente'), (req, res) => {
     for (const leadId of lead_ids) {
       const lead = db.prepare('SELECT phone, opted_in_at, opted_out_at FROM leads WHERE id = ? AND phone IS NOT NULL AND is_archived = 0 AND is_blocked = 0').get(leadId)
       if (!lead) continue
-      if (lead.opted_out_at && (!lead.opted_in_at || lead.opted_out_at > lead.opted_in_at)) { skippedNoOptin++; continue }
+      if (isOptedOut(lead)) { skippedNoOptin++; continue }
       stmt.run(result.lastInsertRowid, leadId, lead.phone)
     }
     db.prepare('UPDATE broadcasts SET total_count = (SELECT COUNT(*) FROM broadcast_recipients WHERE broadcast_id = ?) WHERE id = ?').run(result.lastInsertRowid, result.lastInsertRowid)
