@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useAccount } from '../context/AccountContext'
 import { useAuth } from '../context/AuthContext'
+import { useSSE } from '../context/SSEContext'
 import {
   fetchWhatsAppInstances, createWhatsAppInstance, connectWhatsAppInstance,
   checkWhatsAppStatus, refreshWhatsAppQR, disconnectWhatsApp, deleteWhatsAppInstance,
@@ -136,6 +137,14 @@ export default function Integrations() {
   }, [accountId])
 
   useEffect(() => { load() }, [load])
+
+  // Recarrega instances quando receber SSE 'instance:updated' (QR novo, status connected, etc)
+  // sem mostrar loading global — atualizacao silenciosa em background
+  const reloadInstancesOnly = useCallback(() => {
+    if (!accountId) return
+    fetchWhatsAppInstances(accountId).then(setInstances).catch(() => {})
+  }, [accountId])
+  useSSE('instance:updated', reloadInstancesOnly)
 
   // Auto-poll status for connecting instances
   useEffect(() => {

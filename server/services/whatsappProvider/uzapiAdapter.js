@@ -239,24 +239,30 @@ export async function createInstance({ baseUrl: url, apiKey, instanceName, integ
 
 // Pra uzapi, "connect" = consultar estado atual. Se estiver esperando QR,
 // o QR chega via webhook (nao ha /connect que retorna QR sob demanda).
+// IMPORTANTE: NAO retornamos qrcode aqui em consultas — o QR ja chegou
+// via webhook e ta salvo no BD. Se retornassemos vazio, o handler apagaria.
 export async function connectInstance(instance) {
   const r = await _fetchJson(`${instBase(instance)}/instance`, {
     headers: authHeader(instance),
   })
-  // QR fica em qrcode se pendente
-  const qrcode = r.data?.qrcode?.base64 || r.data?.qrcode || null
-  return { qrcode, raw: r.data || {} }
+  // uzapi entrega QR apenas via webhook — endpoint /instance nao devolve QR
+  return { qrcode: null, raw: r.data || {} }
 }
 
 // Retorna { state: 'open'|'connecting'|'close', raw }
+// Uzapi GET /instance retorna:
+//   - deploymentStatus: 'connected' | 'connecting' | 'error' | ...
+//   - isAuthenticated: bool (true quando pareado com sucesso)
+// Combinamos os 2: deploymentStatus=connected + isAuthenticated=true -> open
 export async function connectionState(instance) {
   const r = await _fetchJson(`${instBase(instance)}/instance`, {
     headers: authHeader(instance),
   })
-  const status = r.data?.status || r.data?.state || 'close'
+  const deploy = r.data?.deploymentStatus || r.data?.status || r.data?.state || ''
+  const isAuth = !!r.data?.isAuthenticated
   let state = 'close'
-  if (status === 'connected' || status === 'open') state = 'open'
-  else if (status === 'connecting' || status === 'authenticating') state = 'connecting'
+  if (isAuth && (deploy === 'connected' || deploy === 'open')) state = 'open'
+  else if (deploy === 'connecting' || deploy === 'authenticating' || (deploy === 'connected' && !isAuth)) state = 'connecting'
   return { state, raw: r.data || {} }
 }
 
