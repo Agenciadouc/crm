@@ -69,34 +69,38 @@ export async function sendText(instance, { number, text }) {
   return { ok: false, reason: String(reason).substring(0, 200), raw: r.data || {} }
 }
 
-// mediatype: 'image' | 'video' | 'document'
-// media pode ser: base64 puro (sem prefixo) OU URL http/https OU media_id retornado pelo /media
+// mediatype: 'image' | 'video' | 'document' | 'audio' | 'sticker'
+// media pode ser: base64 puro (sem prefixo) OU URL http/https
 export async function sendMedia(instance, { number, mediatype, media, mimetype, fileName, caption, delay }) {
   const to = String(number).replace(/[^\d]/g, '')
   const body = { to, delayMessage: delay || 0, type: mediatype }
-  const mediaObj = { caption: caption || '' }
+  const mediaObj = {}
+  if (caption) mediaObj.caption = caption
 
-  // Detecta se e URL/base64/id: base64 detectado por tamanho grande e sem prefixo http
-  if (typeof media === 'string' && (media.startsWith('http://') || media.startsWith('https://'))) {
+  const isUrl = typeof media === 'string' && (media.startsWith('http://') || media.startsWith('https://'))
+  if (isUrl) {
     mediaObj.link = media
-  } else if (typeof media === 'string' && media.length < 100 && /^[a-zA-Z0-9]+$/.test(media)) {
-    mediaObj.id = media  // media_id da uzapi
   } else {
-    // Base64 - remove prefixo data: se veio
-    const base64 = String(media).replace(/^data:[^;]+;base64,/, '')
-    mediaObj.base64 = base64
+    // Base64 — remove prefixo data: se veio
+    const base64Clean = String(media).replace(/^data:[^;]+;base64,/, '')
+    mediaObj.base64 = base64Clean
     if (mimetype) mediaObj.mime_type = mimetype
     if (fileName) mediaObj.filename = fileName
   }
-
   if (mediatype === 'document' && fileName) mediaObj.filename = fileName
   body[mediatype] = mediaObj
+
+  console.log(`[uzapi sendMedia] to=${to} type=${mediatype} mime=${mimetype || '?'} sizeKB=${Math.round((mediaObj.base64?.length || 0) * 0.75 / 1024)}`)
 
   const r = await _fetchJson(`${instBase(instance)}/messages`, {
     method: 'POST', headers: jsonHeaders(instance), body: JSON.stringify(body),
   })
-  if (r.ok && r.data?.messageId) return { ok: true, wamsgId: r.data.messageId, raw: r.data }
-  const reason = r.data?.message || r.error || `http_${r.status}`
+  if (r.ok && r.data?.messageId) {
+    console.log(`[uzapi sendMedia] ok msgId=${r.data.messageId}`)
+    return { ok: true, wamsgId: r.data.messageId, raw: r.data }
+  }
+  const reason = r.data?.message || r.data?.error || r.error || `http_${r.status}`
+  console.error(`[uzapi sendMedia] falhou http=${r.status} reason=${reason} raw=${JSON.stringify(r.data || {}).slice(0, 500)}`)
   return { ok: false, reason: String(reason).substring(0, 200), raw: r.data || {} }
 }
 
