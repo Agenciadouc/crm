@@ -325,3 +325,50 @@ test('remove: apagar o numero retoma os pausados pelo novo padrao conectado da c
   await manager.remove(velho)
   assert.deepEqual(calls, [['b', novo.id], ['f', novo.id]])
 })
+
+test('criar numero UzAPI: sem QR na criacao, pede reiniciar para a UzAPI mandar o QR pelo aviso; falha do reiniciar nao derruba', async () => {
+  const { seed, manager, calls } = setup()
+  const inst = await manager.createUzapiInstance({ accountId: seed.account.id, instanceName: 'Nova' })
+  assert.deepEqual(calls.restart, [inst.id])
+
+  const withQr = setup({ createInstance: () => ({ phoneNumberId: '100000000000009', instanceToken: 'T', uzapiInstanceId: null, qr: '2@QR-DE-TESTE-NAO-E-REAL,abcdefghij' }) })
+  await withQr.manager.createUzapiInstance({ accountId: withQr.seed.account.id, instanceName: 'Nova' })
+  assert.deepEqual(withQr.calls.restart, [])
+
+  const broken = setup({ restart: () => { throw new Error('ECONNREFUSED') } })
+  const created = await broken.manager.createUzapiInstance({ accountId: broken.seed.account.id, instanceName: 'Nova' })
+  assert.equal(created.status, 'connecting')
+})
+
+test('refreshQr: sem QR e nao conectado -> pede reiniciar (no maximo 1 vez a cada 30s por numero)', async () => {
+  let now = 1_000_000
+  const db = createTestDb()
+  const seed = seedBasic(db)
+  const { adapter, calls } = fakeUzapi()
+  const manager = createInstanceManager({ db, getProvider: () => adapter, env: UZAPI_TEST_ENV, log: quietLog, removeTimeoutMs: 50, now: () => now })
+  const inst = insertUzapiInstance(db, seed.account.id, { status: 'connecting' })
+  await manager.refreshQr(inst)
+  await manager.refreshQr(row(db, inst.id))
+  assert.deepEqual(calls.restart, [inst.id])
+  now += 31_000
+  await manager.refreshQr(row(db, inst.id))
+  assert.deepEqual(calls.restart, [inst.id, inst.id])
+  // Com QR guardado nao reinicia (reiniciar trocaria o QR que a pessoa esta escaneando)
+  db.prepare("UPDATE whatsapp_instances SET qr_code = '2@QR-DE-TESTE-NAO-E-REAL,abcdefghij' WHERE id = ?").run(inst.id)
+  now += 31_000
+  await manager.refreshQr(row(db, inst.id))
+  assert.equal(calls.restart.length, 2)
+})
+
+test('applyConnection: "desconectado" durante o pareamento (connecting com QR) e ignorado; o Desconectar do CRM vale', async () => {
+  const { db, seed, manager } = setup()
+  const inst = insertUzapiInstance(db, seed.account.id, { status: 'connecting' })
+  db.prepare("UPDATE whatsapp_instances SET qr_code = 'QR' WHERE id = ?").run(inst.id)
+  const r = manager.applyConnection(row(db, inst.id), { connection: 'disconnected' })
+  assert.deepEqual([r.status, r.qr_code], ['connecting', 'QR'])
+  assert.deepEqual(logs(db).map(l => l.event), [])
+  const st = manager.applyStatus(row(db, inst.id), { status: 'disconnected' })
+  assert.deepEqual([st.status, st.qr_code], ['connecting', 'QR'])
+  const d = await manager.disconnect(row(db, inst.id))
+  assert.deepEqual([d.instance.status, d.instance.qr_code], ['disconnected', null])
+})

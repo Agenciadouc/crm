@@ -51,9 +51,25 @@ function withTimeout(promise, ms, fallback) {
 // scheduler faz na Evolution ao reconectar. Padrao sem efeito para testes e chamadores que nao precisam.
 export function createInstanceManager({
   db, getProvider, env = process.env, log = console, removeTimeoutMs = 8000,
-  resumeBroadcastIfPaused = () => {}, resumeFollowUpsIfPaused = () => {},
+  resumeBroadcastIfPaused = () => {}, resumeFollowUpsIfPaused = () => {}, now = () => Date.now(),
 }) {
   const byId = (id) => db.prepare('SELECT * FROM whatsapp_instances WHERE id = ?').get(id)
+
+  // A UzAPI so manda o QR (pelo aviso) depois de criar ou reiniciar a sessao; GET /instance nao traz QR.
+  // Reiniciar troca o QR, entao no maximo 1 pedido a cada 30s por numero.
+  const QR_KICK_INTERVAL_MS = 30000
+  const lastQrKick = new Map()
+  async function kickQr(instance) {
+    const t = now()
+    if (t - (lastQrKick.get(instance.id) || 0) < QR_KICK_INTERVAL_MS) return
+    lastQrKick.set(instance.id, t)
+    try {
+      const r = await getProvider(instance).restart(instance)
+      if (!r?.ok) log.warn(`[UzAPI QR] reiniciar para gerar QR falhou (${instance.instance_name}): ${r?.reason}`)
+    } catch (e) {
+      log.warn(`[UzAPI QR] reiniciar para gerar QR falhou (${instance.instance_name}): ${e.message}`)
+    }
+  }
   // Trava de criacao em andamento por conta + nome normalizado (cliques simultaneos no mesmo nome).
   const creating = new Set()
   const creationKey = (accountId, name) => `${accountId}:${String(name || '').trim().toLowerCase()}`
@@ -89,6 +105,7 @@ export function createInstanceManager({
       if (e.code === 'provider_auth') throw new ProviderError('provider_auth', UZAPI_ACCOUNT_AUTH_MESSAGE, 502)
       throw new ProviderError(e.code || 'uzapi_create_failed', 'Não foi possível criar o número na UzAPI. Tente de novo em instantes.', 502)
     }
+    let instance
     // Do ponto aqui em diante o numero ja existe na UzAPI: se gravar no banco falhar (indice unico,
     // banco ocupado, cifra), exclui na UzAPI (best-effort) para nao ficar cobrando numero orfao.
     try {
@@ -97,13 +114,14 @@ export function createInstanceManager({
         INSERT INTO whatsapp_instances (account_id, instance_name, api_url, api_key, status, qr_code, lead_intake_mode, warmup_until, provider, provider_config, webhook_token)
         VALUES (?, ?, '', '', 'connecting', ?, ?, datetime('now', '+3 days'), 'uzapi', ?, ?)
       `).run(accountId, instanceName, created.qr || null, leadIntakeMode, providerConfig, webhookToken)
-      const instance = byId(r.lastInsertRowid)
+      instance = byId(r.lastInsertRowid)
       logConnectionEvent(db, instance, 'created')
-      return instance
     } catch (e) {
       await cleanupOrphanUzapiInstance(created, instanceName)
       throw new ProviderError('uzapi_create_failed', 'O número foi criado na UzAPI mas não foi possível salvá-lo no CRM. Tente de novo.', 502)
     }
+    if (!instance.qr_code) await kickQr(instance)
+    return instance
   }
 
   // Numero criado na UzAPI mas que nao entrou no banco: exclui na UzAPI (best-effort, com tempo
@@ -122,9 +140,12 @@ export function createInstanceManager({
   }
 
   // Sincrono (chamado pelo webhook). connected: limpa QR, 1a conexao em connected_at; QR: grava e fica connecting.
-  function applyConnection(instance, { connection = null, qr = null, phoneNumber = null } = {}) {
+  // force: o Desconectar do CRM. Sem ele, "desconectado" com QR na tela e o vaivem do WhatsApp Web
+  // durante o pareamento (teste real de 24/09): ignora para o QR nao sumir.
+  function applyConnection(instance, { connection = null, qr = null, phoneNumber = null, force = false } = {}) {
     const cur = byId(instance.id)
     if (!cur) return null
+    if (connection === 'disconnected' && !force && cur.status === 'connecting' && cur.qr_code) return cur
     if (connection === 'connected') {
       db.prepare(`
         UPDATE whatsapp_instances SET status = 'connected', qr_code = NULL,
@@ -186,6 +207,7 @@ export function createInstanceManager({
     const qr = st.qr || current.qr_code || null
     if (qr) return { instance: applyConnection(current, { qr }), qr_code: qr, status: 'connecting', panel_url: panelUrl, ...authError }
     db.prepare("UPDATE whatsapp_instances SET status = 'connecting', updated_at = datetime('now') WHERE id = ?").run(current.id)
+    if (st.ok) await kickQr(current)
     return { instance: byId(current.id), qr_code: null, status: 'connecting', panel_url: panelUrl, ...authError }
   }
 
@@ -198,7 +220,7 @@ export function createInstanceManager({
   async function disconnect(instance) {
     const r = await getProvider(instance).disconnect(instance)
     if (!r.ok) log.error(`[UzAPI logout] ${instance.instance_name}: ${r.reason}`)
-    return { ok: r.ok, instance: applyConnection(instance, { connection: 'disconnected' }) }
+    return { ok: r.ok, instance: applyConnection(instance, { connection: 'disconnected', force: true }) }
   }
 
   async function restart(instance) {

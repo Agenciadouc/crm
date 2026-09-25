@@ -62,6 +62,9 @@ test('mapDeploymentStatus', () => {
   assert.equal(mapDeploymentStatus({ deploymentStatus: 'stopped' }), 'disconnected')
   assert.equal(mapDeploymentStatus({ deploymentStatus: 'pending', isAuthenticated: false }), 'connecting')
   assert.equal(mapDeploymentStatus({}), 'connecting')
+  // Teste real (24/09): "connected" sem autenticar = sessao de pe esperando o QR
+  assert.equal(mapDeploymentStatus({ deploymentStatus: 'connected', isAuthenticated: false }), 'connecting')
+  assert.equal(mapDeploymentStatus({ deploymentStatus: 'connected' }), 'connected')
 })
 
 test('status: GET /{pnid}/instance com o token do numero; devolve status, telefone e QR (se vier)', async () => {

@@ -196,6 +196,19 @@ export default function WhatsAppCard({ accountId, instances, setInstances, reloa
     } catch (e: any) { showErrorAt(inst.id, 'Erro ao conectar', e) }
   }
 
+  // Pergunta ao provedor o estado real (o aviso de conexao pode ter se perdido).
+  const [verifying, setVerifying] = useState<number | null>(null)
+  const handleVerify = async (inst: WhatsAppInstance) => {
+    setVerifying(inst.id)
+    try {
+      const { instance: updated } = await checkWhatsAppStatus(inst.id, accountId)
+      setInstances(prev => prev.map(i => i.id === updated.id ? { ...i, ...updated } : i))
+      if (updated.status === 'connected') showSuccessAt(inst.id, 'O número está conectado. Status atualizado.')
+      else showErrorAt(inst.id, 'O provedor confirma que o número está desconectado. Clique em Conectar para gerar o QR.')
+    } catch (e: any) { showErrorAt(inst.id, 'Erro ao verificar', e) }
+    finally { setVerifying(null) }
+  }
+
   const handleDisconnect = async (inst: WhatsAppInstance) => {
     try { await disconnectWhatsApp(inst.id, accountId) } catch (e: any) { showErrorAt(inst.id, 'Erro ao desconectar', e) }
     setActiveQR(null)
@@ -420,7 +433,12 @@ export default function WhatsAppCard({ accountId, instances, setInstances, reloa
                     {statusIcon(inst.status)} {statusLabel(inst.status)}
                   </span>
                   {inst.status === 'disconnected' && (
-                    <button className="btn btn-primary btn-sm" onClick={() => handleConnect(inst)}><Power size={12} /> Conectar</button>
+                    <>
+                      <button className="btn btn-primary btn-sm" onClick={() => handleConnect(inst)}><Power size={12} /> Conectar</button>
+                      <button className="btn btn-secondary btn-sm" onClick={() => handleVerify(inst)} disabled={verifying === inst.id} title="Pergunta ao provedor se o número está conectado. Use se você já escaneou o QR e aqui ainda aparece Desconectado.">
+                        {verifying === inst.id ? <Loader size={12} className="spinning" /> : <RefreshCw size={12} />} Verificar
+                      </button>
+                    </>
                   )}
                   {inst.status === 'connecting' && (
                     <button className="btn btn-secondary btn-sm" onClick={() => activeQR === inst.id ? setActiveQR(null) : (isEvolution(inst) && inst.qr_code ? setActiveQR(inst.id) : openQr(inst))}>

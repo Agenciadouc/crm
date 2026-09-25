@@ -14,8 +14,10 @@ const DISCONNECTED_STATES = ['desconnected', 'disconnected', 'logout', 'loggedou
 export function mapDeploymentStatus(d) {
   const s = String(d?.deploymentStatus || '').toLowerCase()
   if (DISCONNECTED_STATES.includes(s)) return 'disconnected'
-  if (d?.isAuthenticated === true || s === 'connected') return 'connected'
-  return 'connecting'
+  if (d?.isAuthenticated === true) return 'connected'
+  // Teste real (24/09): "connected" com isAuthenticated false = sessao de pe esperando o QR
+  if (d?.isAuthenticated === false) return 'connecting'
+  return s === 'connected' ? 'connected' : 'connecting'
 }
 
 // Algumas respostas vem embrulhadas em { data: {...} }
