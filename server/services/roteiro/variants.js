@@ -13,14 +13,25 @@ export function activeVariant(db, accountId, questionKey) {
     .get(accountId, questionKey) || null
 }
 
-// Troca {nome} pelo primeiro nome do lead; sem nome, remove ", {nome}" e "{nome}" soltos.
+function capitalizeFirst(text) {
+  return text.length ? text[0].toUpperCase() + text.slice(1) : text
+}
+
+// Troca {nome} pelo primeiro nome do lead; sem nome, remove "{nome}, " no inicio,
+// ", {nome}" no fim e "{nome}" solto, recapitalizando a frase resultante.
 function resolveLeadName(text, leadName) {
   const name = typeof leadName === 'string' ? leadName.trim() : ''
   if (name) {
     const first = name.split(/\s+/)[0]
     return text.replace(/\{nome\}/g, first)
   }
-  return text.replace(/,\s*\{nome\}/g, '').replace(/\{nome\}/g, '')
+  if (!text.includes('{nome}')) return text
+  const cleaned = text
+    .replace(/\{nome\}\s*,\s*/g, '')
+    .replace(/,\s*\{nome\}/g, '')
+    .replace(/\{nome\}/g, '')
+    .trim()
+  return capitalizeFirst(cleaned)
 }
 
 // Texto final da pergunta para o lead: aplica variante B (se houver teste ativo e o

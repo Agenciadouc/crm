@@ -222,6 +222,7 @@ export function saveAnswer(db, { accountId, leadId, questionKey, optionKey = nul
       origin = excluded.origin,
       evidence = excluded.evidence,
       answered_by = excluded.answered_by,
+      answered_at = datetime('now'),
       updated_at = datetime('now')
   `).run({ accountId, leadId, questionKey, optionKey: finalOptionKey, answerText: finalAnswerText, origin, evidence, userId })
 

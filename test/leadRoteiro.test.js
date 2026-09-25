@@ -184,6 +184,28 @@ test('saveAnswer: manual depois de ia sobrescreve e origem vira manual', () => {
   assert.equal(result.answer.answered_by, atendenteId)
 })
 
+test('saveAnswer: correcao manual atualiza answered_at (nao mantem data antiga da resposta da IA)', () => {
+  const db = createRoteiroTestDb()
+  const { accountId, funnelId, stages, atendenteId } = seedRoteiroBase(db)
+  const published = publishBasicRoteiro(db, accountId, funnelId, stages)
+  const { q1 } = questionKeys(published)
+  const q1Question = published.questions.find(q => q.question_key === q1)
+  const iaOption = q1Question.options[0].option_key
+  const manualOption = q1Question.options[1].option_key
+  const leadId = addLead(db, { account_id: accountId, name: 'Maria Souza', funnel_id: funnelId, stage_id: stages.novo })
+
+  saveAnswer(db, { accountId, leadId, questionKey: q1, optionKey: iaOption, origin: 'ia', evidence: 'trecho' })
+  db.prepare("UPDATE lead_answers SET answered_at = datetime('now', '-3 days') WHERE lead_id = ? AND question_key = ?").run(leadId, q1)
+  const today = db.prepare("SELECT date('now') as today").get().today
+
+  const result = saveAnswer(db, { accountId, leadId, questionKey: q1, optionKey: manualOption, origin: 'manual', userId: atendenteId })
+
+  assert.equal(result.skipped, false)
+  assert.equal(result.answer.answered_at.slice(0, 10), today)
+  assert.equal(result.answer.answered_by_name, 'Ana')
+  assert.equal(result.answer.origin, 'manual')
+})
+
 test('saveAnswer: optionKey invalido -> 400', () => {
   const db = createRoteiroTestDb()
   const { accountId, funnelId, stages } = seedRoteiroBase(db)
@@ -193,6 +215,21 @@ test('saveAnswer: optionKey invalido -> 400', () => {
 
   assert.throws(() => saveAnswer(db, { accountId, leadId, questionKey: q1, optionKey: 'nao-existe', origin: 'manual' }), (err) => {
     assert.equal(err.status, 400)
+    return true
+  })
+})
+
+test('saveAnswer: answerText maior que 1000 caracteres -> 400', () => {
+  const db = createRoteiroTestDb()
+  const { accountId, funnelId, stages } = seedRoteiroBase(db)
+  const published = publishBasicRoteiro(db, accountId, funnelId, stages)
+  const { q2 } = questionKeys(published) // pergunta de texto ("Conte mais sobre seu projeto")
+  const leadId = addLead(db, { account_id: accountId, name: 'Maria Souza', funnel_id: funnelId, stage_id: stages.qualificando })
+
+  const longText = 'a'.repeat(1001)
+  assert.throws(() => saveAnswer(db, { accountId, leadId, questionKey: q2, answerText: longText, origin: 'manual' }), (err) => {
+    assert.equal(err.status, 400)
+    assert.equal(err.message, 'A resposta não pode passar de 1000 caracteres.')
     return true
   })
 })
@@ -267,6 +304,25 @@ test('questionTextForLead: troca {nome} pelo primeiro nome, remove ", {nome}" se
 
   const withoutName = questionTextForLead(db, { accountId, leadId: 1, question, leadName: '' })
   assert.equal(withoutName.text, 'Qual sua faixa de orçamento?')
+})
+
+test('questionTextForLead: "{nome}, " no inicio sem nome vira frase limpa e capitalizada', () => {
+  const db = createRoteiroTestDb()
+  const { accountId, funnelId, stages } = seedRoteiroBase(db)
+  saveDraft(db, accountId, funnelId, {
+    questions: [
+      { stage_id: stages.qualificando, position: 0, text: '{nome}, tudo bem?', kind: 'text', required: false, bant: null, ai_hint: null },
+    ],
+    deviations: [],
+  })
+  const published = publish(db, accountId, funnelId, null)
+  const question = published.questions[0]
+
+  const withoutName = questionTextForLead(db, { accountId, leadId: 1, question, leadName: '' })
+  assert.equal(withoutName.text, 'Tudo bem?')
+
+  const withName = questionTextForLead(db, { accountId, leadId: 1, question, leadName: 'João Silva' })
+  assert.equal(withName.text, 'João, tudo bem?')
 })
 
 test('variantFor: estavel e distribui aproximadamente 50/50 em 200 leads', () => {
