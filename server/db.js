@@ -7,6 +7,7 @@ import { applyCopilotSchema } from './services/copilotSchema.js'
 import { applyAgentBriefingSchema } from './services/agentBriefingSchema.js'
 import { registerCityFunctions, normalizeExistingCities } from './services/city.js'
 import { applyGeoSchema } from './services/geo.js'
+import { applyRoteiroSchema } from './services/roteiro/schema.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const dbPath = resolve(__dirname, 'data', 'crm.db')
@@ -1473,5 +1474,8 @@ applyAgentBriefingSchema(db)
   const n = applyGeoSchema(db)
   if (n > 0) console.log(`[DB] estado (uf) calculado: ${n} leads`)
 }
+
+// Roteiro de Qualificacao e Termometro do Lead (tabelas do roteiro, colunas score*)
+applyRoteiroSchema(db)
 
 export default db
