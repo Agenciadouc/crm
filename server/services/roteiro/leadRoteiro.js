@@ -11,7 +11,7 @@ function getLead(db, accountId, leadId) {
   return lead
 }
 
-function getFunnelStages(db, funnelId) {
+export function getFunnelStages(db, funnelId) {
   return db.prepare('SELECT id, name, position, is_terminal, is_conversion FROM funnel_stages WHERE funnel_id = ? ORDER BY position ASC')
     .all(funnelId)
     .map(s => ({ ...s, is_terminal: !!s.is_terminal, is_conversion: !!s.is_conversion }))
@@ -19,7 +19,7 @@ function getFunnelStages(db, funnelId) {
 
 // getPublishedQuestions lanca not_found se o funil nao existir/pertencer a conta;
 // aqui tratamos essa borda como "sem roteiro" em vez de propagar o erro.
-function safeGetPublishedQuestions(db, accountId, funnelId) {
+export function safeGetPublishedQuestions(db, accountId, funnelId) {
   if (!funnelId) return []
   try {
     return getPublishedQuestions(db, accountId, funnelId)

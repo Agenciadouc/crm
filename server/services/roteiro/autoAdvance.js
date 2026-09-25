@@ -1,23 +1,9 @@
 // Avanco automatico de etapa e desfazer (spec 4.4, 7.2). Fica fora de leadRoteiro.js
 // para nao criar import circular com stageMove.js (que importa checkRoteiroGate daqui).
 // Nao importa server/db.js: recebe db.
-import { RoteiroError, getPublishedQuestions } from './repo.js'
+import { RoteiroError } from './repo.js'
+import { getFunnelStages, safeGetPublishedQuestions } from './leadRoteiro.js'
 import { moveLeadToStage } from '../stageMove.js'
-
-function getFunnelStages(db, funnelId) {
-  return db.prepare('SELECT id, name, position, is_terminal FROM funnel_stages WHERE funnel_id = ? ORDER BY position ASC')
-    .all(funnelId)
-    .map(s => ({ ...s, is_terminal: !!s.is_terminal }))
-}
-
-function safeGetPublishedQuestions(db, accountId, funnelId) {
-  try {
-    return getPublishedQuestions(db, accountId, funnelId)
-  } catch (err) {
-    if (err instanceof RoteiroError && err.code === 'not_found') return []
-    throw err
-  }
-}
 
 // Etapa atual tem >= 1 obrigatoria, todas respondidas, o lead nao esta marcado pra nao
 // avancar a partir dela, e a proxima etapa (menor position maior que a atual) existe e
@@ -65,8 +51,14 @@ export function undoAutoAdvance(db, { accountId, leadId, userId = null }) {
     throw new RoteiroError('nothing_to_undo', 400, 'Não há avanço automático para desfazer.')
   }
 
-  const result = moveLeadToStage(db, { lead, toStageId: lastAuto.from_stage_id, trigger: 'roteiro_undo', userId, gate: false })
-  db.prepare('UPDATE leads SET roteiro_no_auto_from_stage = ? WHERE id = ?').run(lastAuto.from_stage_id, leadId)
+  // Move + marca em uma unica transacao (a transacao interna do moveLeadToStage vira
+  // savepoint aninhado); o hook onMoved roda uma unica vez, depois do move, ainda dentro
+  // desta transacao externa.
+  let result
+  db.transaction(() => {
+    result = moveLeadToStage(db, { lead, toStageId: lastAuto.from_stage_id, trigger: 'roteiro_undo', userId, gate: false })
+    db.prepare('UPDATE leads SET roteiro_no_auto_from_stage = ? WHERE id = ?').run(lastAuto.from_stage_id, leadId)
+  })()
 
   return result
 }
