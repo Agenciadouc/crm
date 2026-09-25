@@ -13,6 +13,9 @@ import { canAtendenteAccessLead } from '../services/leadAccess.js'
 import { SEND_PROVIDERS } from '../services/whatsapp/numberRole.js'
 import { resolveCity, cityKey, cityWhere } from '../services/city.js'
 import { UF_NAMES } from '../services/geo.js'
+import { scoreWhere, scoreOrder } from '../services/leadScore/filters.js'
+import { recalcLeadScore } from '../services/leadScore/recalc.js'
+import { BAND_LABEL } from '../services/leadScore/compute.js'
 
 const router = Router()
 
@@ -102,6 +105,8 @@ router.get('/', (req, res) => {
   // Cidade escolhida no filtro: compara sem acento/maiuscula (city_key registrada em db.js)
   // Cidade/estado escolhidos no filtro (?city= sem acento, ?uf= sigla)
   { const g = cityWhere('l', req.query); if (g.sql) { where.push(g.sql.replace(/^ AND /, '')); params.push(...g.params) } }
+  // Filtros do termometro (faixa, nota minima, perfil A/B, engajamento alto) — spec 5.4
+  { const s = scoreWhere('l', req.query); if (s.sql) { where.push(s.sql.replace(/^ AND /, '')); params.push(...s.params) } }
   if (search) { where.push("(l.name LIKE ? OR l.phone LIKE ? OR l.email LIKE ?)"); params.push(`%${search}%`, `%${search}%`, `%${search}%`) }
   if (date_from) { where.push('l.created_at >= ?'); params.push(date_from) }
   if (date_to) { where.push('l.created_at <= ?'); params.push(date_to + ' 23:59:59') }
@@ -122,6 +127,8 @@ router.get('/', (req, res) => {
   const total = db.prepare(countSql).get(...params).total
 
   const offset = (parseInt(page) - 1) * parseInt(limit)
+  // sort=score ordena pela nota do termometro; senao, ordem padrao por atividade recente
+  const orderBy = scoreOrder('l', req.query) || 'COALESCE(l.last_inbound_at, l.updated_at) DESC'
   const sql = `
     SELECT l.*, fs.name as stage_name, fs.color as stage_color, u.name as attendant_name,
       wi.instance_name as instance_name,
@@ -132,7 +139,7 @@ router.get('/', (req, res) => {
     LEFT JOIN users u ON l.attendant_id = u.id
     LEFT JOIN whatsapp_instances wi ON l.instance_id = wi.id
     WHERE ${where.join(' AND ')}
-    ORDER BY COALESCE(l.last_inbound_at, l.updated_at) DESC
+    ORDER BY ${orderBy}
     LIMIT ? OFFSET ?
   `
   const leads = db.prepare(sql).all(...params, parseInt(limit), offset)
@@ -542,6 +549,31 @@ router.get('/:id/conversations', (req, res) => {
   res.json({ conversations: convs })
 })
 
+// Termometro do lead: nota + porque (spec 5.1, 7.3). Se ainda nao tem score_at, calcula na hora (sem aviso de faixa).
+router.get('/:id/score', (req, res) => {
+  let lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(req.params.id)
+  if (!lead) return res.status(404).json({ error: 'Lead nao encontrado' })
+  if (req.accountId && lead.account_id !== req.accountId) return res.status(404).json({ error: 'Lead nao encontrado' })
+  if (req.user.role === 'atendente' && !canAtendenteAccessLead(req.user.id, lead)) return res.status(403).json({ error: 'Sem permissao' })
+
+  if (lead.score_at == null) {
+    const result = recalcLeadScore(db, lead.id, { now: new Date() })
+    if (result) lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(lead.id)
+  }
+
+  res.json({
+    score: lead.score ?? null,
+    band: lead.score_band ?? null,
+    fit: lead.score_fit ?? null,
+    fit_grade: lead.score_fit_grade ?? null,
+    engagement: lead.score_engagement ?? null,
+    quadrant: lead.score_quadrant ?? null,
+    reasons: lead.score_reasons_json ? JSON.parse(lead.score_reasons_json) : [],
+    score_prev: lead.score_prev ?? null,
+    score_at: lead.score_at ?? null,
+  })
+})
+
 // Update lead
 router.put('/:id', (req, res) => {
   const lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(req.params.id)
@@ -824,15 +856,19 @@ router.get('/export', requireRole('super_admin', 'gerente'), (req, res) => {
   if (date_to) { where.push('l.created_at <= ?'); params.push(date_to + ' 23:59:59') }
   if (funnel_id) { where.push('l.funnel_id = ?'); params.push(funnel_id) }
   { const g = cityWhere('l', req.query); if (g.sql) { where.push(g.sql.replace(/^ AND /, '')); params.push(...g.params) } }
+  // Filtros do termometro (faixa, nota minima, perfil A/B, engajamento alto) — spec 5.4
+  { const s = scoreWhere('l', req.query); if (s.sql) { where.push(s.sql.replace(/^ AND /, '')); params.push(...s.params) } }
 
+  const orderBy = scoreOrder('l', req.query) || 'l.created_at DESC'
   const leads = db.prepare(`
-    SELECT l.name, l.phone, l.email, l.city, l.source, fs.name as etapa, u.name as atendente, l.notes, l.created_at, l.updated_at
+    SELECT l.name, l.phone, l.email, l.city, l.source, fs.name as etapa, u.name as atendente, l.notes, l.created_at, l.updated_at,
+      l.score, l.score_band, l.score_fit_grade, l.score_engagement, l.score_quadrant, l.score_prev
     FROM leads l LEFT JOIN funnel_stages fs ON l.stage_id = fs.id LEFT JOIN users u ON l.attendant_id = u.id
-    WHERE ${where.join(' AND ')} ORDER BY l.created_at DESC
+    WHERE ${where.join(' AND ')} ORDER BY ${orderBy}
   `).all(...params)
 
-  const header = 'Nome,Telefone,Email,Cidade,Fonte,Etapa,Atendente,Notas,Criado em,Atualizado em'
-  const rows = leads.map(l => [l.name, l.phone, l.email, l.city, l.source, l.etapa, l.atendente, `"${(l.notes || '').replace(/"/g, '""')}"`, l.created_at, l.updated_at].join(','))
+  const header = 'Nome,Telefone,Email,Cidade,Fonte,Etapa,Atendente,Notas,Criado em,Atualizado em,Termômetro,Faixa'
+  const rows = leads.map(l => [l.name, l.phone, l.email, l.city, l.source, l.etapa, l.atendente, `"${(l.notes || '').replace(/"/g, '""')}"`, l.created_at, l.updated_at, l.score ?? '', l.score_band ? BAND_LABEL[l.score_band] || l.score_band : ''].join(','))
   const csv = [header, ...rows].join('\n')
 
   res.setHeader('Content-Type', 'text/csv; charset=utf-8')
