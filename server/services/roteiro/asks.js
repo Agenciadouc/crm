@@ -1,19 +1,6 @@
 // Registro de envios (asks) do roteiro: criacao e marcacao de respondido/avancou/comprou (spec 6.1).
 // Nao importa server/db.js: recebe db (testavel com banco em memoria).
-
-function toSqliteDate(date) {
-  return date.toISOString().slice(0, 19).replace('T', ' ')
-}
-
-// 'now' em UTC formatado 'YYYY-MM-DD HH:MM:SS': usa o Date passado (testes) ou o relogio do SQLite.
-function resolveNow(db, now) {
-  if (now) return toSqliteDate(now)
-  return db.prepare("SELECT datetime('now') AS v").get().v
-}
-
-function shiftFromNow(db, nowStr, modifier) {
-  return db.prepare('SELECT datetime(?, ?) AS v').get(nowStr, modifier).v
-}
+import { resolveNow, shiftFromNow } from './time.js'
 
 // Cria o ask (envio de pergunta) e devolve o id.
 export function recordAsk(db, { accountId, leadId, questionKey, variant = 'A', textSent, messageId = null, userId = null, source }) {

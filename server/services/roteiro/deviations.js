@@ -2,27 +2,22 @@
 // Nao importa server/db.js: recebe db (testavel com banco em memoria).
 import { normalizeText } from './recognize.js'
 import { RoteiroError, getPublishedDeviations, getPublishedQuestions } from './repo.js'
+import { resolveNow, shiftFromNow } from './time.js'
 
-function toSqliteDate(date) {
-  return date.toISOString().slice(0, 19).replace('T', ' ')
-}
-
-function resolveNow(db, now) {
-  if (now) return toSqliteDate(now)
-  return db.prepare("SELECT datetime('now') AS v").get().v
-}
-
-// Algum gatilho (normalizado) contido no texto normalizado -> devolve o desvio; senao null.
+// Algum gatilho (normalizado) contido no texto normalizado, em fronteira de palavra
+// (com espacos nas pontas) -> devolve o desvio; senao null. Fronteira de palavra evita que
+// um gatilho curto como "pix" case dentro de outra palavra, tipo "pixel".
 export function matchDeviation(text, deviations) {
   const normText = normalizeText(text)
   if (!normText) return null
+  const paddedText = ` ${normText} `
 
   for (const dev of deviations || []) {
     const triggers = String(dev.triggers || '')
       .split(',')
       .map(t => normalizeText(t))
       .filter(Boolean)
-    if (triggers.some(t => normText.includes(t))) return dev
+    if (triggers.some(t => paddedText.includes(` ${t} `))) return dev
   }
   return null
 }
@@ -42,7 +37,7 @@ export function activeDeviationForLead(db, { accountId, lead, now }) {
   if (!deviations.length) return null
 
   const nowStr = resolveNow(db, now)
-  const cutoff = db.prepare("SELECT datetime(?, '-24 hours') AS v").get(nowStr).v
+  const cutoff = shiftFromNow(db, nowStr, '-24 hours')
 
   const lastInbound = db.prepare(`
     SELECT id, content, created_at FROM messages
@@ -51,11 +46,13 @@ export function activeDeviationForLead(db, { accountId, lead, now }) {
   `).get(lead.id, cutoff)
   if (!lastInbound) return null
 
+  // Compara por id (nao por created_at): mensagens no mesmo segundo tem o mesmo timestamp,
+  // mas o outbound sempre tem id maior por ter sido inserido depois.
   const outboundAfter = db.prepare(`
     SELECT id FROM messages
-    WHERE lead_id = ? AND direction = 'outbound' AND created_at > ?
+    WHERE lead_id = ? AND direction = 'outbound' AND id > ?
     LIMIT 1
-  `).get(lead.id, lastInbound.created_at)
+  `).get(lead.id, lastInbound.id)
   if (outboundAfter) return null
 
   const matched = matchDeviation(lastInbound.content, deviations)

@@ -14,6 +14,13 @@ function insertAsk(db, { accountId, leadId, questionKey, hoursAgo = 0, source = 
   `).run(accountId, leadId, questionKey, source, `-${hoursAgo} hours`).lastInsertRowid)
 }
 
+// Insere uma mensagem com created_at explicito (para testar empate de timestamp por id).
+function insertMessageAt(db, { leadId, accountId, direction, content, createdAt }) {
+  return Number(db.prepare(`
+    INSERT INTO messages (lead_id, account_id, direction, content, created_at) VALUES (?, ?, ?, ?, ?)
+  `).run(leadId, accountId, direction, content, createdAt).lastInsertRowid)
+}
+
 function publishWithDeviation(db, accountId, funnelId, stages, returnQuestionKey = null) {
   saveDraft(db, accountId, funnelId, {
     questions: [
@@ -93,6 +100,29 @@ test('markReplied: só marca asks abertos dentro da janela (ask de 30h atrás co
   assert.ok(recentRow.replied_at)
 })
 
+test('markReplied: aceita "now" explícito para o cálculo da janela', () => {
+  const db = createRoteiroTestDb()
+  const { accountId, funnelId, stages } = seedRoteiroBase(db)
+  const leadId = addLead(db, { account_id: accountId, funnel_id: funnelId, stage_id: stages.qualificando })
+
+  const insertAskAt = (questionKey, askedAt) => Number(db.prepare(`
+    INSERT INTO roteiro_asks (account_id, lead_id, question_key, variant, text_sent, source, asked_at)
+    VALUES (?, ?, ?, 'A', 'texto', 'button', ?)
+  `).run(accountId, leadId, questionKey, askedAt).lastInsertRowid)
+
+  const insideId = insertAskAt('q1', '2026-01-01 11:00:00') // 1h30 antes do "now" fixado, dentro da janela de 24h
+  const outsideId = insertAskAt('q2', '2025-12-30 00:00:00') // bem antes da janela de 24h
+
+  const now = new Date('2026-01-01T12:30:00Z')
+  const changed = markReplied(db, { leadId, windowHours: 24, now })
+  assert.equal(changed, 1)
+
+  const inside = db.prepare('SELECT replied_at FROM roteiro_asks WHERE id = ?').get(insideId)
+  const outside = db.prepare('SELECT replied_at FROM roteiro_asks WHERE id = ?').get(outsideId)
+  assert.equal(inside.replied_at, '2026-01-01 12:30:00')
+  assert.equal(outside.replied_at, null)
+})
+
 test('markReplied: não marca de novo um ask que já tem replied_at', () => {
   const db = createRoteiroTestDb()
   const { accountId, funnelId, stages } = seedRoteiroBase(db)
@@ -166,6 +196,15 @@ test('matchDeviation: nenhum gatilho bate -> null', () => {
   assert.equal(matchDeviation('Bom dia, tudo bem?', deviations), null)
 })
 
+test('matchDeviation: respeita fronteira de palavra (gatilho curto não casa dentro de outra palavra)', () => {
+  const deviations = [{ triggers: 'preço, quanto custa, pix', reply_text: 'A partir de R$500.' }]
+  assert.equal(matchDeviation('Comprei um pixel novo', deviations), null)
+  const viaPix = matchDeviation('Posso pagar no pix?', deviations)
+  assert.ok(viaPix)
+  const viaMultiPalavra = matchDeviation('Quanto custa o pacote?', deviations)
+  assert.ok(viaMultiPalavra)
+})
+
 test('activeDeviationForLead: casa com o último inbound dentro de 24h', () => {
   const db = createRoteiroTestDb()
   const { accountId, funnelId, stages } = seedRoteiroBase(db)
@@ -190,6 +229,20 @@ test('activeDeviationForLead: some depois que sai uma mensagem outbound', () => 
 
   const lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(leadId)
   assert.equal(activeDeviationForLead(db, { accountId, lead }), null)
+})
+
+test('activeDeviationForLead: outbound no mesmo segundo do inbound (id maior) faz o desvio sumir', () => {
+  const db = createRoteiroTestDb()
+  const { accountId, funnelId, stages } = seedRoteiroBase(db)
+  publishWithDeviation(db, accountId, funnelId, stages)
+  const leadId = addLead(db, { account_id: accountId, funnel_id: funnelId, stage_id: stages.qualificando })
+  const sameTimestamp = '2026-01-01 12:00:00'
+  insertMessageAt(db, { leadId, accountId, direction: 'inbound', content: 'Quanto custa o pacote?', createdAt: sameTimestamp })
+  insertMessageAt(db, { leadId, accountId, direction: 'outbound', content: 'Os planos começam em R$500.', createdAt: sameTimestamp })
+
+  const lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(leadId)
+  const now = new Date('2026-01-01T12:30:00Z')
+  assert.equal(activeDeviationForLead(db, { accountId, lead, now }), null)
 })
 
 test('activeDeviationForLead: inbound fora das últimas 24h -> null', () => {
