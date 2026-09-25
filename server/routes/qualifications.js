@@ -1,8 +1,15 @@
 import { Router } from 'express'
 import db from '../db.js'
 import { requireRole } from '../middleware/auth.js'
+import { saveAnswer, safeGetPublishedQuestions } from '../services/roteiro/leadRoteiro.js'
 
 const router = Router()
+
+function getLeadForAccount(accountId, leadId) {
+  const lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(leadId)
+  if (!lead || lead.account_id !== accountId) return null
+  return lead
+}
 
 // List qualification sequences
 router.get('/', (req, res) => {
@@ -55,33 +62,55 @@ router.put('/reorder/bulk', requireRole('super_admin', 'gerente'), (req, res) =>
   res.json({ ok: true })
 })
 
-// Get lead qualifications (questions + answers)
+// Get lead qualifications (questions + answers) — compat: respostas vem de lead_answers
+// (question_key 'legacy-'+sequence_id), a tabela antiga lead_qualifications nao e mais lida aqui.
 router.get('/lead/:leadId', (req, res) => {
   if (!req.accountId) return res.status(400).json({ error: 'account_id required' })
+  const lead = getLeadForAccount(req.accountId, req.params.leadId)
+  if (!lead) return res.status(404).json({ error: 'Lead não encontrado' })
+
   const qualifications = db.prepare(`
-    SELECT qs.id as sequence_id, qs.question, qs.position, lq.id as answer_id, lq.answer, lq.answered_at, lq.answered_by,
+    SELECT qs.id as sequence_id, qs.question, qs.position, la.id as answer_id, la.answer_text as answer, la.answered_at, la.answered_by,
       u.name as answered_by_name
     FROM qualification_sequences qs
-    LEFT JOIN lead_qualifications lq ON lq.sequence_id = qs.id AND lq.lead_id = ?
-    LEFT JOIN users u ON u.id = lq.answered_by
+    LEFT JOIN lead_answers la ON la.question_key = ('legacy-' || qs.id) AND la.lead_id = ?
+    LEFT JOIN users u ON u.id = la.answered_by
     WHERE qs.account_id = ? AND qs.is_active = 1
     ORDER BY qs.position
   `).all(req.params.leadId, req.accountId)
   res.json({ qualifications })
 })
 
-// Answer a qualification question for a lead
+// Answer a qualification question for a lead — compat: grava em lead_answers. Se a pergunta
+// legada ainda estiver no roteiro publicado do funil do lead, usa saveAnswer (mesmo caminho
+// do roteiro novo); senao, upsert direto (roteiro nao migrado ou pergunta fora da versao atual).
 router.post('/lead/:leadId/answer', (req, res) => {
+  if (!req.accountId) return res.status(400).json({ error: 'account_id required' })
   const { sequence_id, answer } = req.body
   if (!sequence_id || !answer) return res.status(400).json({ error: 'sequence_id e answer obrigatorios' })
 
-  const existing = db.prepare('SELECT id FROM lead_qualifications WHERE lead_id = ? AND sequence_id = ?').get(req.params.leadId, sequence_id)
-  if (existing) {
-    db.prepare("UPDATE lead_qualifications SET answer = ?, answered_at = datetime('now'), answered_by = ? WHERE id = ?").run(answer, req.user.id, existing.id)
+  const lead = getLeadForAccount(req.accountId, req.params.leadId)
+  if (!lead) return res.status(404).json({ error: 'Lead não encontrado' })
+
+  const questionKey = `legacy-${sequence_id}`
+  const publishedQuestions = safeGetPublishedQuestions(db, req.accountId, lead.funnel_id)
+  const question = publishedQuestions.find(q => q.question_key === questionKey)
+
+  if (question) {
+    saveAnswer(db, {
+      accountId: req.accountId, leadId: req.params.leadId, questionKey,
+      answerText: answer, origin: 'manual', userId: req.user.id,
+    })
   } else {
-    db.prepare("INSERT INTO lead_qualifications (lead_id, sequence_id, answer, answered_at, answered_by) VALUES (?, ?, ?, datetime('now'), ?)").run(
-      req.params.leadId, sequence_id, answer, req.user.id
-    )
+    db.prepare(`
+      INSERT INTO lead_answers (account_id, lead_id, question_key, option_key, answer_text, origin, evidence, answered_by, answered_at, updated_at)
+      VALUES (?, ?, ?, NULL, ?, 'manual', NULL, ?, datetime('now'), datetime('now'))
+      ON CONFLICT(lead_id, question_key) DO UPDATE SET
+        answer_text = excluded.answer_text,
+        answered_by = excluded.answered_by,
+        answered_at = datetime('now'),
+        updated_at = datetime('now')
+    `).run(req.accountId, req.params.leadId, questionKey, answer, req.user.id)
   }
   res.json({ ok: true })
 })

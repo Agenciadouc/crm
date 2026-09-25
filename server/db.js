@@ -8,6 +8,7 @@ import { applyAgentBriefingSchema } from './services/agentBriefingSchema.js'
 import { registerCityFunctions, normalizeExistingCities } from './services/city.js'
 import { applyGeoSchema } from './services/geo.js'
 import { applyRoteiroSchema } from './services/roteiro/schema.js'
+import { migrateLegacyQualifications } from './services/roteiro/migrateLegacy.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const dbPath = resolve(__dirname, 'data', 'crm.db')
@@ -1477,5 +1478,12 @@ applyAgentBriefingSchema(db)
 
 // Roteiro de Qualificacao e Termometro do Lead (tabelas do roteiro, colunas score*)
 applyRoteiroSchema(db)
+
+// Migra a qualificacao antiga (qualification_sequences/lead_qualifications) pro roteiro (idempotente).
+try {
+  migrateLegacyQualifications(db)
+} catch (err) {
+  console.error('[Roteiro] migracao da qualificacao antiga:', err.message)
+}
 
 export default db
