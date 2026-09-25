@@ -3,6 +3,9 @@ import db from '../db.js'
 import { requireRole } from '../middleware/auth.js'
 import { broadcastSSE } from '../sse.js'
 import { triggerCapiForStageChange } from '../services/metaCapi.js'
+import { moveLeadToStage, resolveManualMove } from '../services/stageMove.js'
+import { markBought } from '../services/roteiro/asks.js'
+import { scheduleScore } from '../services/leadScore/recalc.js'
 import { notifyAndOpenLead } from '../services/leadHandoff.js'
 import { getProvider } from '../services/whatsapp/index.js'
 import { sendBotWelcomeForSheetsLead, processInboundMessage, diagnoseForceAi } from '../services/aiAgent.js'
@@ -589,22 +592,34 @@ router.patch('/:id/read', (req, res) => {
 
 // Move lead stage
 router.put('/:id/stage', (req, res) => {
-  const { stage_id } = req.body
+  const { stage_id, force_reason } = req.body
   if (!stage_id) return res.status(400).json({ error: 'stage_id required' })
 
   const lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(req.params.id)
   if (!lead) return res.status(404).json({ error: 'Lead nao encontrado' })
+  if (req.accountId && lead.account_id !== req.accountId) return res.status(404).json({ error: 'Lead nao encontrado' })
 
-  const oldStageId = lead.stage_id
+  // "Avancar mesmo assim" (trava do roteiro) exige motivo e so gestor/admin pode
+  const decision = resolveManualMove({ role: req.user.role, forceReason: force_reason })
+  if (!decision.ok) return res.status(decision.status).json({ error: decision.error })
+
+  // Porta unica: grava historico e o hook dispara CAPI/asks/nota/SSE (spec 7.2)
+  let result
+  try {
+    result = moveLeadToStage(db, {
+      lead, toStageId: Number(stage_id), trigger: decision.force ? 'forced' : 'manual',
+      userId: req.user.id, notes: decision.notes, force: decision.force, gate: true,
+    })
+  } catch (e) {
+    if (e.message === 'stage_not_in_funnel') return res.status(400).json({ error: 'Etapa nao pertence ao funil do lead' })
+    throw e
+  }
+  if (!result.moved && result.reason === 'roteiro_gate') {
+    return res.status(409).json({ code: 'roteiro_gate', error: 'Faltam perguntas obrigatórias para avançar.', pending: result.pending })
+  }
   // Mudanca de etapa MANUAL (via UI) trava bot pra esse lead — gerente/atendente assumiu controle.
   // Se quiser reativar bot, atribuir bot como atendente OU usar botao "Forcar IA" (super_admin).
-  // Bot interno (aiAgent) muda stage via SQL direto, NAO passa por essa rota — entao nao afeta o fluxo natural do bot.
-  db.prepare("UPDATE leads SET stage_id = ?, ai_handed_off_at = COALESCE(ai_handed_off_at, datetime('now')), updated_at = datetime('now') WHERE id = ?").run(stage_id, lead.id)
-  const histRes = db.prepare('INSERT INTO stage_history (lead_id, from_stage_id, to_stage_id, trigger_type, triggered_by) VALUES (?, ?, ?, ?, ?)').run(
-    lead.id, oldStageId, stage_id, 'manual', req.user.id
-  )
-  // CAPI: dispara evento da nova etapa (service filtra se nao tiver ctwa_clid)
-  triggerCapiForStageChange(lead.id, stage_id, histRes.lastInsertRowid)
+  db.prepare("UPDATE leads SET ai_handed_off_at = COALESCE(ai_handed_off_at, datetime('now')), updated_at = datetime('now') WHERE id = ?").run(lead.id)
 
   const updated = db.prepare('SELECT l.*, fs.name as stage_name, fs.color as stage_color, wi.instance_name as instance_name FROM leads l LEFT JOIN funnel_stages fs ON l.stage_id = fs.id LEFT JOIN whatsapp_instances wi ON l.instance_id = wi.id WHERE l.id = ?').get(lead.id)
   try { broadcastSSE(lead.account_id, 'lead:updated', updated) } catch {}
@@ -647,6 +662,8 @@ router.post('/:id/sales', (req, res) => {
     SELECT s.*, u.name as created_by_name FROM lead_sales s LEFT JOIN users u ON u.id = s.created_by WHERE s.id = ?
   `).get(insertRes.lastInsertRowid)
   const total = totalRow.t
+  // Roteiro/termometro: venda marca os envios de pergunta como "comprou" e recalcula a nota
+  try { markBought(db, { leadId: lead.id }); scheduleScore(lead.id) } catch (e) { console.error('[Roteiro] venda:', e.message) }
   try { broadcastSSE(lead.account_id, 'lead:updated', { id: lead.id, value_estimated: total }) } catch {}
   res.json({ sale, total })
 })
@@ -1090,22 +1107,23 @@ router.post('/bulk/assign', requireRole('super_admin', 'gerente'), (req, res) =>
 router.post('/bulk/stage', requireRole('super_admin', 'gerente'), (req, res) => {
   const { lead_ids, stage_id } = req.body
   if (!lead_ids || !Array.isArray(lead_ids) || !stage_id) return res.status(400).json({ error: 'lead_ids and stage_id required' })
-  const stmtUpdate = db.prepare("UPDATE leads SET stage_id = ?, updated_at = datetime('now') WHERE id = ?")
-  const stmtHistory = db.prepare('INSERT INTO stage_history (lead_id, from_stage_id, to_stage_id, trigger_type, triggered_by) VALUES (?, (SELECT stage_id FROM leads WHERE id = ?), ?, ?, ?)')
-  const histIds = []
-  const transaction = db.transaction(() => {
-    for (const id of lead_ids) {
-      const histRes = stmtHistory.run(id, id, stage_id, 'manual', req.user.id)
-      histIds.push({ leadId: id, histId: histRes.lastInsertRowid })
-      stmtUpdate.run(stage_id, id)
+  // Um a um pela porta unica (trava do roteiro + CAPI/nota pelo hook). Travados nao movem.
+  let moved = 0
+  const blocked = []
+  for (const id of lead_ids) {
+    const lead = req.accountId
+      ? db.prepare('SELECT * FROM leads WHERE id = ? AND account_id = ?').get(id, req.accountId)
+      : db.prepare('SELECT * FROM leads WHERE id = ?').get(id)
+    if (!lead) continue
+    try {
+      const r = moveLeadToStage(db, { lead, toStageId: Number(stage_id), trigger: 'manual', userId: req.user.id, gate: true })
+      if (r.moved) moved++
+      else if (r.reason === 'roteiro_gate') blocked.push({ id: lead.id, name: lead.name, pending_count: r.pending.length })
+    } catch (e) {
+      if (e.message !== 'stage_not_in_funnel') throw e
     }
-  })
-  transaction()
-  // CAPI: fire-and-forget pra cada lead (service filtra os sem ctwa_clid)
-  for (const { leadId, histId } of histIds) {
-    triggerCapiForStageChange(leadId, stage_id, histId)
   }
-  res.json({ ok: true, count: lead_ids.length })
+  res.json({ ok: true, count: lead_ids.length, moved, blocked })
 })
 
 // =============================================

@@ -7,6 +7,7 @@
 import db from '../db.js'
 import { callHaiku } from './anthropicClient.js'
 import { pickAnthropicKey } from './anthropicKeyPicker.js'
+import { scheduleScore } from './leadScore/recalc.js'
 
 // ─── System prompt V2 (cacheável — Anthropic cache_control ephemeral em anthropicClient) ───
 const SYSTEM_PROMPT_V2 = `Voce e um analista de qualidade de atendimento comercial via WhatsApp.
@@ -855,6 +856,8 @@ export async function analyzeConversation(leadId) {
     )
   })
   tx()
+  // Termometro: insight novo da IA entra no ajuste da nota
+  scheduleScore(lead.id)
 
   console.log(`[Analyzer V2] mode=${decision.mode} lead=${leadId} new_msgs=${isIncremental ? (newMsgIdSet?.size || 0) : msgs.length} cost=$${(result.costUsd || 0).toFixed(4)} score=${ins.conversation_score}`)
   return {

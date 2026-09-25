@@ -2,8 +2,10 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createTestDb, seedBasic, insertLead } from './helpers/db.js'
 import { createLeadIntake } from '../server/services/leadIntake.js'
+import { configureStageMoveHooks } from '../server/services/stageMove.js'
 
 const tick = () => new Promise(r => setImmediate(r))
+test.afterEach(() => { configureStageMoveHooks({ onMoved: null }) })
 
 function setup(opts = {}) {
   const db = createTestDb()
@@ -15,6 +17,8 @@ function setup(opts = {}) {
     notifyAndOpenLead: (...a) => { calls.handoff.push(a); return Promise.resolve() },
     triggerCapiForStageChange: (...a) => { calls.capi.push(a) },
   })
+  // CAPI da troca de etapa sai pelo hook da porta unica (stageMove); em producao quem liga e o runtime do roteiro
+  configureStageMoveHooks({ onMoved: ({ lead, toStageId, historyId }) => { calls.capi.push([lead.id, toStageId, historyId]) } })
   return { db, seed, calls, intake }
 }
 

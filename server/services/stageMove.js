@@ -8,6 +8,16 @@ export function configureStageMoveHooks({ onMoved } = {}) {
   onMovedHook = typeof onMoved === 'function' ? onMoved : () => {}
 }
 
+// Troca manual (PUT /leads/:id/stage): "avancar mesmo assim" exige motivo e so vale pra gestor/admin.
+const FORCE_ROLES = ['gerente', 'super_admin']
+
+export function resolveManualMove({ role, forceReason }) {
+  const reason = typeof forceReason === 'string' ? forceReason.trim() : ''
+  if (!reason) return { ok: true, force: false, notes: null }
+  if (!FORCE_ROLES.includes(role)) return { ok: false, status: 403, error: 'Só o gestor pode avançar sem as respostas.' }
+  return { ok: true, force: true, notes: reason.slice(0, 500) }
+}
+
 export function moveLeadToStage(db, { lead, toStageId, trigger, userId = null, notes = null, force = false, gate = true }) {
   const current = db.prepare('SELECT * FROM leads WHERE id = ?').get(lead.id)
 

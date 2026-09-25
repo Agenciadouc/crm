@@ -35,7 +35,9 @@ import adminRoutes from './routes/admin.js'
 import appSettingsRoutes from './routes/app-settings.js'
 import globalTemplatesRoutes from './routes/globalTemplates.js'
 import { authenticate, scopeToAccount } from './middleware/auth.js'
-import { addSSEClient, removeSSEClient } from './sse.js'
+import { addSSEClient, removeSSEClient, broadcastSSE } from './sse.js'
+import { triggerCapiForStageChange } from './services/metaCapi.js'
+import { bootRoteiroRuntime } from './services/roteiro/runtime.js'
 import { startScheduler } from './scheduler.js'
 import { recoverPendingBroadcasts } from './routes/broadcasts.js'
 import { createMediaTemp } from './services/mediaTemp.js'
@@ -44,6 +46,9 @@ import { configureUzapiMediaTemp } from './services/whatsapp/uzapi.js'
 import { webhookJsonErrorHandler } from './services/whatsapp/webhookFlow.js'
 
 const app = express()
+
+// Roteiro + termometro: hook unico da troca de etapa (CAPI, asks, nota, SSE)
+bootRoteiroRuntime({ db, broadcastSSE, triggerCapiForStageChange })
 // Atras de Apache reverse proxy — confia no X-Forwarded-For pra req.ip funcionar
 app.set('trust proxy', 1)
 app.use(cors())

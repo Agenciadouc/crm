@@ -4,11 +4,13 @@ import * as P from './fixtures/evolution-payloads.js'
 import { createTestDb, seedBasic, insertLead } from './helpers/db.js'
 import { createEvolutionAdapter } from '../server/services/whatsapp/evolution.js'
 import { createLeadIntake } from '../server/services/leadIntake.js'
+import { configureStageMoveHooks } from '../server/services/stageMove.js'
 import { createInboundHandler, detectAdSource } from '../server/services/inboundHandler.js'
 import { isOptedOut } from '../server/services/antiban.js'
 
 const adapter = createEvolutionAdapter({ fetch: async () => { throw new Error('sem rede nos testes') } })
 const tick = () => new Promise(r => setImmediate(r))
+test.afterEach(() => { configureStageMoveHooks({ onMoved: null }) })
 
 // Numero de disparo (UzAPI): o agente e as auto-mensagens so rodam nele (spec secao 6).
 function asSendNumber(db, seed) {
@@ -34,6 +36,8 @@ function setup(seedOpts = {}, depOverrides = {}) {
     notifyAndOpenLead: (...a) => { calls.handoff.push(a); return Promise.resolve() },
     triggerCapiForStageChange: (...a) => { calls.capi.push(a) },
   })
+  // CAPI da troca de etapa sai pelo hook da porta unica (stageMove); em producao quem liga e o runtime do roteiro
+  configureStageMoveHooks({ onMoved: ({ lead, toStageId, historyId }) => { calls.capi.push([lead.id, toStageId, historyId]) } })
   const handler = createInboundHandler({
     db,
     broadcastSSE: (...a) => { calls.sse.push(a) },
@@ -115,6 +119,17 @@ test('lead existente responde: sai de Novo Lead para Em Atendimento com CAPI', (
   assert.equal(row.name, 'Maria Silva')
   const h = db.prepare("SELECT * FROM stage_history WHERE lead_id = ? AND trigger_type = 'webhook'").get(lead.id)
   assert.deepEqual(calls.capi.at(-1), [lead.id, seed.stage2, h.id])
+})
+
+test('roteiro: mensagem do cliente marca o envio de pergunta como respondido; fromMe nao marca', () => {
+  const { db, seed, receive } = setup()
+  const lead = insertLead(db, { account_id: seed.account.id, funnel_id: seed.funnelId, stage_id: seed.stage2, phone: '5547991351835', source: 'whatsapp' })
+  const askId = db.prepare("INSERT INTO roteiro_asks (account_id, lead_id, question_key, variant, text_sent, source, asked_at) VALUES (?, ?, 'orcamento', 'A', 'Qual o orcamento?', 'button', datetime('now', '-1 hours'))")
+    .run(seed.account.id, lead.id).lastInsertRowid
+  receive(P.outboundFromMe)
+  assert.equal(db.prepare('SELECT replied_at FROM roteiro_asks WHERE id = ?').get(askId).replied_at, null)
+  receive(P.textConversation)
+  assert.ok(db.prepare('SELECT replied_at FROM roteiro_asks WHERE id = ?').get(askId).replied_at)
 })
 
 test('audio: media_type audio, conteudo [Audio], media_url e IA com mediaType audio', async () => {

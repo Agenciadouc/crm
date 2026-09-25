@@ -1,6 +1,7 @@
 // Entrada de leads (WhatsApp, Meta Lead Form, site, Google Sheets).
 // Movido de routes/webhooks.js sem alterar a logica. Dependencias injetadas para teste.
 import { normalizePhone, phoneCompareKey } from './whatsapp/normalize.js'
+import { moveLeadToStage } from './stageMove.js'
 
 export function createLeadIntake({ db, pickFromRoulette, notifyAndOpenLead, triggerCapiForStageChange }) {
   function getOrCreateLead(accountId, phone, name, source, waJid, instanceId, opts = {}) {
@@ -111,13 +112,9 @@ export function createLeadIntake({ db, pickFromRoulette, notifyAndOpenLead, trig
 
       const matched = keywords.some(kw => text.includes(kw.toLowerCase()))
       if (matched) {
-        const oldStageId = lead.stage_id
-        db.prepare("UPDATE leads SET stage_id = ?, updated_at = datetime('now') WHERE id = ?").run(stage.id, lead.id)
-        const histRes = db.prepare('INSERT INTO stage_history (lead_id, from_stage_id, to_stage_id, trigger_type) VALUES (?, ?, ?, ?)').run(
-          lead.id, oldStageId, stage.id, 'auto_keyword'
-        )
-        // Dispara CAPI se a etapa tem evento Meta mapeado
-        triggerCapiForStageChange(lead.id, stage.id, histRes.lastInsertRowid)
+        // Porta unica com trava do roteiro; CAPI sai pelo hook. Travado: nao move.
+        const mv = moveLeadToStage(db, { lead, toStageId: stage.id, trigger: 'auto_keyword', gate: true })
+        if (mv.reason === 'roteiro_gate') console.log('[Roteiro] trava: lead', lead.id, 'auto_keyword ->', stage.id, 'pendentes:', mv.pending.length)
         break // Only advance to first match
       }
     }

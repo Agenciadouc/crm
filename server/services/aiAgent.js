@@ -20,6 +20,7 @@ import { releaseLeadsFromAgent as releaseHeldLeads } from './agentShutdown.js'
 import { resolveSendInstance } from './whatsapp/resolveSendInstance.js'
 import { agentInstanceBlocker, agentServesInstance, numberRole } from './whatsapp/numberRole.js'
 import { resolveCity } from './city.js'
+import { moveLeadToStage } from './stageMove.js'
 
 // ─── Helpers ──────────────────────────────────────────────────────────
 
@@ -361,9 +362,11 @@ function executeHandoff(agent, lead, reason, instanceId, opts = {}) {
     const freshForGate = getLead(lead.id) || lead
     const gate = gateForLead(agent, freshForGate)
     if (handoffStageMoveAllowed({ salesEngine: usesSalesEngine(agent), rule, gate })) {
-      const prev = freshForGate.stage_id
-      db.prepare("UPDATE leads SET stage_id = ?, updated_at = datetime('now') WHERE id = ?").run(rule.move_to_stage_id, lead.id)
-      db.prepare('INSERT INTO stage_history (lead_id, from_stage_id, to_stage_id, trigger_type) VALUES (?, ?, ?, ?)').run(lead.id, prev, rule.move_to_stage_id, 'ai_handoff')
+      // Porta unica: trava do roteiro soma-se a do agente; CAPI/nota pelo hook
+      try {
+        const mv = moveLeadToStage(db, { lead: freshForGate, toStageId: rule.move_to_stage_id, trigger: 'ai_handoff', gate: true })
+        if (mv.reason === 'roteiro_gate') console.log('[Roteiro] trava: lead', lead.id, 'ai_handoff ->', rule.move_to_stage_id, 'pendentes:', mv.pending.length)
+      } catch (e) { console.error(`[AI Agent] handoff move_to_stage lead=${lead.id}:`, e.message) }
     } else {
       console.log(`[AI Agent] handoff move_to_stage RECUSADO lead=${lead.id} reason=${reason} faltando=${JSON.stringify(gate)}`)
     }
@@ -483,13 +486,23 @@ async function executeTool(toolUse, agent, lead, instanceId, availableTags, avai
             return { handoff: false, message: formatGateRefusal(gate) }
           }
         }
-        const prev = fresh.stage_id
-        db.prepare("UPDATE leads SET stage_id = ?, updated_at = datetime('now') WHERE id = ?").run(stage.id, lead.id)
-        db.prepare('INSERT INTO stage_history (lead_id, from_stage_id, to_stage_id, trigger_type, notes) VALUES (?, ?, ?, ?, ?)').run(
-          lead.id, prev, stage.id,
-          salesEngine ? 'ai_qualified' : 'ai_agent',
-          salesEngine ? 'Movido pela IA - qualificacao completa' : null
-        )
+        // Porta unica: trava do roteiro soma-se a do agente; CAPI/nota pelo hook
+        let mv
+        try {
+          mv = moveLeadToStage(db, {
+            lead: fresh, toStageId: stage.id,
+            trigger: salesEngine ? 'ai_qualified' : 'ai_agent',
+            notes: salesEngine ? 'Movido pela IA - qualificacao completa' : null,
+            gate: true,
+          })
+        } catch (e) {
+          console.error(`[AI Agent] move_stage lead=${lead.id}:`, e.message)
+          return { handoff: false, message: 'Nao foi possivel mudar a etapa.' }
+        }
+        if (mv.reason === 'roteiro_gate') {
+          console.log('[Roteiro] trava: lead', lead.id, 'move_stage ->', stage.id, 'pendentes:', mv.pending.length)
+          return { handoff: false, message: `Etapa nao alterada: ainda faltam respostas do roteiro (${mv.pending.map(p => p.text).join(' | ')}).` }
+        }
         lead.stage_id = stage.id
         console.log(`[AI Agent] move_stage lead=${lead.id} -> "${input.stage_name}"`)
       }

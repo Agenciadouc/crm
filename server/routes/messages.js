@@ -5,8 +5,21 @@ import { getProvider } from '../services/whatsapp/index.js'
 import { resolveMediaInstance } from '../services/whatsapp/resolveInstance.js'
 import { jidToSendNumber } from '../services/whatsapp/normalize.js'
 import { canAtendenteAccessLead, getUserPrimaryInstanceId } from '../services/leadAccess.js'
+import { onOutboundSaved, roteiroOnChatSend } from '../services/roteiro/runtime.js'
 
 const router = Router()
+
+// Roteiro/termometro apos salvar a mensagem enviada pelo Chat (so quando entregou).
+// Falha aqui nunca derruba o envio: so loga. Devolve a pergunta reconhecida ou null.
+function roteiroAfterChatSend({ lead, userId, content, messageId, questionKey }) {
+  try {
+    onOutboundSaved({ db, lead })
+    return roteiroOnChatSend(db, { lead, userId, content, messageId, questionKey: questionKey || null })
+  } catch (e) {
+    console.error('[Roteiro] envio do chat:', e.message)
+    return null
+  }
+}
 
 const MEDIA_LIMITS = {
   image:    5  * 1024 * 1024,
@@ -155,10 +168,13 @@ router.post('/:leadId', async (req, res) => {
     }
 
     const message = db.prepare('SELECT * FROM messages WHERE id = ?').get(result.lastInsertRowid)
+    const recognized_question = delivered
+      ? roteiroAfterChatSend({ lead, userId: req.user.id, content, messageId: message.id, questionKey: req.body.roteiro_question_key })
+      : null
     const errorMsg = delivered ? undefined : (sendRes.reason === 'number_not_on_whatsapp'
       ? 'Numero nao tem WhatsApp. Mensagem nao foi enviada.'
       : 'Falha ao enviar pelo WhatsApp. Verifique a conexao.')
-    res.json({ message, delivered, instance: { id: instance.id, name: instance.instance_name }, error: errorMsg })
+    res.json({ message, delivered, instance: { id: instance.id, name: instance.instance_name }, error: errorMsg, recognized_question })
   } catch (err) {
     if (err.status) return res.status(err.status).json({ error: err.message, code: err.code })
     res.status(500).json({ error: err.message })
@@ -260,7 +276,11 @@ router.post('/:leadId/media', jsonBodyParser({ limit: '150mb' }), async (req, re
     }
 
     const message = db.prepare('SELECT * FROM messages WHERE id = ?').get(result.lastInsertRowid)
-    res.json({ message, delivered, instance: { id: instance.id, name: instance.instance_name }, error: delivered ? undefined : 'Falha ao enviar pelo WhatsApp.' })
+    // Midia: so a legenda conta como texto da pergunta
+    const recognized_question = delivered
+      ? roteiroAfterChatSend({ lead, userId: req.user.id, content: caption || '', messageId: message.id, questionKey: req.body.roteiro_question_key })
+      : null
+    res.json({ message, delivered, instance: { id: instance.id, name: instance.instance_name }, error: delivered ? undefined : 'Falha ao enviar pelo WhatsApp.', recognized_question })
   } catch (err) {
     console.error('[Messages/Media] Exception:', err.message)
     if (err.status) return res.status(err.status).json({ error: err.message, code: err.code })

@@ -3,6 +3,7 @@ import fetch from 'node-fetch'
 import db from '../db.js'
 import { broadcastSSE } from '../sse.js'
 import { triggerCapiForStageChange } from '../services/metaCapi.js'
+import { moveLeadToStage } from '../services/stageMove.js'
 import { sendBotWelcomeForSheetsLead } from '../services/aiAgent.js'
 import { notifyAndOpenLead } from '../services/leadHandoff.js'
 import { getProvider } from '../services/whatsapp/index.js'
@@ -412,10 +413,8 @@ router.post('/sheets/:accountSlug', (req, res) => {
       const stages = db.prepare('SELECT id, name FROM funnel_stages WHERE funnel_id = ?').all(lead.funnel_id)
       const match = stages.find(s => norm(s.name) === target)
       if (match && match.id !== lead.stage_id) {
-        const prevStage = lead.stage_id
-        db.prepare("UPDATE leads SET stage_id = ?, updated_at = datetime('now') WHERE id = ?").run(match.id, lead.id)
-        const histRes = db.prepare('INSERT INTO stage_history (lead_id, from_stage_id, to_stage_id, trigger_type) VALUES (?, ?, ?, ?)').run(lead.id, prevStage, match.id, 'webhook')
-        triggerCapiForStageChange(lead.id, match.id, histRes.lastInsertRowid)
+        // Etapa inicial do formulario: sem trava do roteiro. CAPI sai pelo hook.
+        moveLeadToStage(db, { lead, toStageId: match.id, trigger: 'webhook', gate: false })
       }
     }
 

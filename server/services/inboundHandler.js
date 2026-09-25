@@ -4,6 +4,8 @@
 
 import { numberRole } from './whatsapp/numberRole.js'
 import { isOptOutMessage, isOptedOut, DEFAULT_OPTOUT_CONFIRM } from './antiban.js'
+import { moveLeadToStage } from './stageMove.js'
+import { onInboundSaved } from './roteiro/runtime.js'
 
 const STATUS_RANK = { sent: 1, delivered: 2, read: 3 }
 
@@ -365,11 +367,8 @@ export function createInboundHandler(deps) {
       const firstStage = db.prepare('SELECT id FROM funnel_stages WHERE funnel_id = ? ORDER BY position LIMIT 1').get(lead.funnel_id)
       const secondStage = db.prepare('SELECT id FROM funnel_stages WHERE funnel_id = ? ORDER BY position LIMIT 1 OFFSET 1').get(lead.funnel_id)
       if (firstStage && secondStage && lead.stage_id === firstStage.id) {
-        db.prepare("UPDATE leads SET stage_id = ?, updated_at = datetime('now') WHERE id = ?").run(secondStage.id, lead.id)
-        const histRes = db.prepare('INSERT INTO stage_history (lead_id, from_stage_id, to_stage_id, trigger_type) VALUES (?, ?, ?, ?)').run(
-          lead.id, firstStage.id, secondStage.id, 'webhook'
-        )
-        triggerCapiForStageChange(lead.id, secondStage.id, histRes.lastInsertRowid)
+        // Colocacao inicial: sem trava do roteiro (nunca bloqueia a entrada). CAPI sai pelo hook.
+        moveLeadToStage(db, { lead, toStageId: secondStage.id, trigger: 'webhook', gate: false })
       }
     }
 
@@ -377,10 +376,16 @@ export function createInboundHandler(deps) {
     // Filtra por conta: o mesmo numero fisico em duas contas nao pode fazer a segunda perder a mensagem.
     const existing = msgId ? db.prepare('SELECT id FROM messages WHERE wa_msg_id = ? AND account_id = ?').get(msgId, account.id) : null
     if (!existing) {
-      db.prepare(`
+      const insertedMsg = db.prepare(`
         INSERT INTO messages (lead_id, account_id, direction, content, media_type, media_url, sender_name, wa_msg_id, wa_timestamp, instance_id)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(lead.id, account.id, fromMe ? 'outbound' : 'inbound', content, mediaType, mediaUrl, fromMe ? '' : pushName, msgId || null, timestamp, waInstance?.id || null)
+      // Roteiro/termometro: mensagem do cliente marca perguntas respondidas e recalcula a nota
+      if (!fromMe) {
+        try {
+          onInboundSaved({ db, account, lead, message: { id: Number(insertedMsg.lastInsertRowid), content, media_type: mediaType } })
+        } catch (e) { console.error('[Roteiro] inbound:', e?.message) }
+      }
       // Incrementa unread_count se msg eh inbound e lead nao arquivado (arquivados usam has_new_after_archive).
       // Tambem seta last_inbound_at pra qualquer inbound (arquivado ou nao) — usado no sort do chat pra
       // subir contato pro topo so quando ELE manda msg (msg outbound do atendente nao move).
@@ -449,10 +454,12 @@ export function createInboundHandler(deps) {
           const freshLead = db.prepare('SELECT stage_id FROM leads WHERE id = ?').get(lead.id)
           if (freshLead && freshLead.stage_id !== activeFu.on_reply_move_to_stage_id) {
             const prev = freshLead.stage_id
-            db.prepare("UPDATE leads SET stage_id = ?, updated_at = datetime('now') WHERE id = ?").run(activeFu.on_reply_move_to_stage_id, lead.id)
-            const histRes = db.prepare('INSERT INTO stage_history (lead_id, from_stage_id, to_stage_id, trigger_type) VALUES (?, ?, ?, ?)').run(lead.id, prev, activeFu.on_reply_move_to_stage_id, 'followup_reply')
-            try { triggerCapiForStageChange(lead.id, activeFu.on_reply_move_to_stage_id, histRes.lastInsertRowid) } catch (e) { console.error('[FollowUp CAPI]', e.message) }
-            console.log(`[FollowUp] Stage lead=${lead.id} ${prev} -> ${activeFu.on_reply_move_to_stage_id}`)
+            // Porta unica com trava do roteiro; CAPI sai pelo hook
+            try {
+              const mv = moveLeadToStage(db, { lead, toStageId: activeFu.on_reply_move_to_stage_id, trigger: 'followup_reply', gate: true })
+              if (mv.moved) console.log(`[FollowUp] Stage lead=${lead.id} ${prev} -> ${activeFu.on_reply_move_to_stage_id}`)
+              else if (mv.reason === 'roteiro_gate') console.log('[Roteiro] trava: lead', lead.id, 'followup_reply ->', activeFu.on_reply_move_to_stage_id, 'pendentes:', mv.pending.length)
+            } catch (e) { console.error('[FollowUp] mover etapa:', e.message) }
           }
         }
 

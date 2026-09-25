@@ -1,6 +1,7 @@
 import Database from 'better-sqlite3'
 import { registerCityFunctions } from '../../server/services/city.js'
 import { migrateWhatsappProviderSchema } from '../../server/services/whatsapp/schema.js'
+import { applyRoteiroSchema } from '../../server/services/roteiro/schema.js'
 
 export function createTestDb({ migrate = true } = {}) {
   const db = new Database(':memory:')
@@ -20,7 +21,8 @@ export function createTestDb({ migrate = true } = {}) {
     );
     CREATE TABLE funnel_stages (
       id INTEGER PRIMARY KEY AUTOINCREMENT, funnel_id INTEGER NOT NULL, name TEXT NOT NULL,
-      position INTEGER NOT NULL DEFAULT 0, auto_keywords TEXT
+      position INTEGER NOT NULL DEFAULT 0, auto_keywords TEXT,
+      is_conversion INTEGER NOT NULL DEFAULT 0, is_terminal INTEGER NOT NULL DEFAULT 0
     );
     CREATE TABLE leads (
       id INTEGER PRIMARY KEY AUTOINCREMENT, account_id INTEGER NOT NULL, funnel_id INTEGER NOT NULL,
@@ -43,6 +45,7 @@ export function createTestDb({ migrate = true } = {}) {
     CREATE TABLE stage_history (
       id INTEGER PRIMARY KEY AUTOINCREMENT, lead_id INTEGER NOT NULL, from_stage_id INTEGER,
       to_stage_id INTEGER NOT NULL, trigger_type TEXT NOT NULL DEFAULT 'manual',
+      triggered_by INTEGER, notes TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
     CREATE TABLE whatsapp_instances (
@@ -76,6 +79,8 @@ export function createTestDb({ migrate = true } = {}) {
     CREATE TABLE lead_tags (lead_id INTEGER NOT NULL, tag_id INTEGER NOT NULL, PRIMARY KEY (lead_id, tag_id));
   `)
   if (migrate) migrateWhatsappProviderSchema(db)
+  // Roteiro/termometro (porta unica de troca de etapa e asks)
+  applyRoteiroSchema(db)
   return db
 }
 
