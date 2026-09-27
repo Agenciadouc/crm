@@ -16,11 +16,18 @@ const scoreKey = (accountId: number) => `scoreFilter:${accountId}`
 const emptyFilter = (): ScoreFilter => ({ ...EMPTY_SCORE_FILTER, bands: [] })
 
 // Filtro do termometro guardado no navegador por conta
+const readScoreFilter = (accountId: number | null | undefined): ScoreFilter => {
+  if (!accountId) return emptyFilter()
+  try { return parseScoreFilter(localStorage.getItem(scoreKey(accountId))) } catch { return emptyFilter() }
+}
+
 export function useScoreFilter(accountId: number | null | undefined): [ScoreFilter, (f: ScoreFilter) => void] {
-  const [filter, setFilterState] = useState<ScoreFilter>(emptyFilter)
+  // Ja nasce com o filtro salvo: evita buscar a lista sem filtro e depois de novo com filtro
+  const [filter, setFilterState] = useState<ScoreFilter>(() => readScoreFilter(accountId))
   useEffect(() => {
-    if (!accountId) { setFilterState(emptyFilter()); return }
-    try { setFilterState(parseScoreFilter(localStorage.getItem(scoreKey(accountId)))) } catch { setFilterState(emptyFilter()) }
+    // Troca de conta: le o filtro da outra conta; mesmo valor mantem o objeto (sem nova busca)
+    const next = readScoreFilter(accountId)
+    setFilterState(prev => (encodeScoreFilter(prev) === encodeScoreFilter(next) ? prev : next))
   }, [accountId])
   const setFilter = (f: ScoreFilter) => {
     setFilterState(f)

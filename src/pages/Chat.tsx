@@ -103,12 +103,11 @@ export default function Chat() {
   useEffect(() => {
     const params = new URLSearchParams(location.search)
     const id = parseInt(params.get('lead') || params.get('lead_id') || '')
-    if (id) {
-      setSelectedLeadId(id)
-      if (isMobile) setMobileTab('chat')
-    }
+    // selectLead: igual a um clique (limpa nao lidas, vai pra conversa no celular).
+    // location.key: clicar de novo no mesmo aviso reabre mesmo com a mesma URL.
+    if (id) selectLead(id)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [location.search])
+  }, [location.key])
   // Quando vai pra Info/Historico via bottom nav, sincroniza com a rightTab interna
   const switchMobileTab = (tab: 'conversas' | 'chat' | 'info' | 'history') => {
     setMobileTab(tab)
@@ -1661,7 +1660,7 @@ export default function Chat() {
             <div style={{ flex: 1, overflowY: 'auto', padding: 12 }}>
               {rightTab === 'info' && (
                 <>
-                  {accountId && <ScoreThermometer leadId={lead.id} accountId={accountId} />}
+                  {accountId && <ScoreThermometer key={lead.id} leadId={lead.id} accountId={accountId} />}
                   {/* Stage + Attendant */}
                   <div style={{ marginBottom: 12 }}>
                     <div style={{ fontSize: 10, color: '#9B96B0', textTransform: 'uppercase', marginBottom: 4 }}>Etapa</div>

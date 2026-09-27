@@ -43,18 +43,24 @@ export default function ScoreThermometer({ leadId, accountId }: Props) {
   const [error, setError] = useState(false)
   const tokenRef = useRef(0)
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // Lead aberto agora: resposta de outro lead (troca rapida de conversa) e descartada
+  const leadRef = useRef(leadId)
+  leadRef.current = leadId
 
   const load = useCallback((silent = false) => {
     const my = ++tokenRef.current
+    const reqLead = leadId
+    const current = () => my === tokenRef.current && reqLead === leadRef.current
     if (!silent) { setLoading(true); setData(null) }
-    fetchLeadScore(leadId, accountId)
-      .then(d => { if (my === tokenRef.current) { setData(d); setError(false) } })
-      .catch(() => { if (my === tokenRef.current && !silent) setError(true) })
-      .finally(() => { if (my === tokenRef.current) setLoading(false) })
+    fetchLeadScore(reqLead, accountId)
+      .then(d => { if (current()) { setData(d); setError(false) } })
+      .catch(() => { if (current() && !silent) setError(true) })
+      .finally(() => { if (current()) setLoading(false) })
   }, [leadId, accountId])
 
   useEffect(() => { load() }, [load])
-  useEffect(() => () => { if (timerRef.current) clearTimeout(timerRef.current) }, [])
+  // Troca de lead (ou saida da tela): cancela o recarregamento agendado do lead anterior
+  useEffect(() => () => { if (timerRef.current) { clearTimeout(timerRef.current); timerRef.current = null } }, [leadId])
 
   const reloadIfMine = useCallback((id: unknown) => { if (Number(id) === leadId) load(true) }, [leadId, load])
   useSSE('lead:updated', useCallback((d: any) => reloadIfMine(d?.id ?? d?.lead_id), [reloadIfMine]))
