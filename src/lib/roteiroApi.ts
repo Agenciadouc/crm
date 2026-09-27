@@ -179,7 +179,17 @@ export interface RoteiroVariantRow {
   ended_at: string | null
   suggestion_id: number | null
 }
-export interface RoteiroSuggestions { suggestions: RoteiroSuggestion[]; tests: Omit<RoteiroVariantRow, 'account_id'>[] }
+// Resumo do teste para a tela: funil, texto atual (A), envios/taxa de A e B, dias restantes e se ja foi decidido
+export interface RoteiroTestSummary {
+  funnel_id: number | null
+  current_text: string | null
+  a: { sent: number; rate: number | null }
+  b: { sent: number; rate: number | null }
+  days_left: number
+  decided: boolean
+}
+export type RoteiroTest = Omit<RoteiroVariantRow, 'account_id'> & RoteiroTestSummary
+export interface RoteiroSuggestions { suggestions: RoteiroSuggestion[]; tests: RoteiroTest[] }
 
 const fp = (funnelId: number) => `/api/roteiro/funnels/${funnelId}`
 
@@ -202,8 +212,21 @@ export const bantTemplate = (funnelId: number, accountId: number) =>
 
 // Montar com IA: SUBSTITUI o rascunho inteiro (confirmar antes se ja houver rascunho).
 // 503 sem IA na conta; 502 quando a IA nao respondeu.
-export const aiDraft = (funnelId: number, accountId: number) =>
-  apiFetch<RoteiroVersion>(`${fp(funnelId)}/ai-draft?account_id=${accountId}`, { method: 'POST' })
+// AiUnavailableError: 503 = a conta nao tem IA ligada (a tela desliga o botao e explica onde ligar).
+export class AiUnavailableError extends Error {}
+export async function aiDraft(funnelId: number, accountId: number): Promise<RoteiroVersion> {
+  // mesma base do apiFetch (vite: /crm/)
+  const base = String((import.meta as any).env?.BASE_URL ?? '/').replace(/\/$/, '')
+  const res = await fetch(`${base}${fp(funnelId)}/ai-draft?account_id=${accountId}`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${localStorage.getItem('dros_crm_token')}`, 'Content-Type': 'application/json' },
+  })
+  if (res.status === 401) { localStorage.removeItem('dros_crm_token'); window.location.href = `${base}/login`; throw new Error('Unauthorized') }
+  const data = await res.json().catch(() => ({}))
+  if (res.status === 503) throw new AiUnavailableError(data.error || 'A IA não está ligada nesta conta.')
+  if (!res.ok) throw new Error(data.error || `API error: ${res.status}`)
+  return data as RoteiroVersion
+}
 
 export const fetchPerformance = (funnelId: number, accountId: number) =>
   apiFetch<RoteiroPerformance>(`/api/roteiro/performance?account_id=${accountId}&funnel_id=${funnelId}`)

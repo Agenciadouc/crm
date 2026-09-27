@@ -11,7 +11,7 @@ import { recordAsk, markAnswered } from '../services/roteiro/asks.js'
 import { activeDeviationForLead } from '../services/roteiro/deviations.js'
 import { scheduleScore } from '../services/leadScore/recalc.js'
 import { questionMetrics, conversionByBand } from '../services/roteiro/metrics.js'
-import { startAbTest, confirmVariant, keepCurrent, applySuggestion, rejectSuggestion } from '../services/roteiro/learning.js'
+import { startAbTest, confirmVariant, keepCurrent, applySuggestion, rejectSuggestion, abTestSummary } from '../services/roteiro/learning.js'
 import { pickAnthropicKey } from '../services/anthropicKeyPicker.js'
 import { buildAiDraft } from '../services/roteiro/aiDraft.js'
 import { canAtendenteAccessLead } from '../services/leadAccess.js'
@@ -158,7 +158,10 @@ export function createRoteiroRouter(db, { ai = null, now = () => new Date() } = 
         }))
       const tests = db.prepare("SELECT * FROM roteiro_variants WHERE account_id = ? AND status IN ('testing','won','lost') ORDER BY started_at DESC")
         .all(req.accountId)
-        .map(v => ({ id: v.id, question_key: v.question_key, text: v.text, status: v.status, started_at: v.started_at, ended_at: v.ended_at, suggestion_id: v.suggestion_id }))
+        .map(v => ({
+          id: v.id, question_key: v.question_key, text: v.text, status: v.status, started_at: v.started_at, ended_at: v.ended_at, suggestion_id: v.suggestion_id,
+          ...abTestSummary(db, { accountId: req.accountId, variant: v, now: now() }),
+        }))
       res.json({ suggestions, tests })
     } catch (e) { fail(res, e) }
   })

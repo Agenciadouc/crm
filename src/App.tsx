@@ -29,7 +29,7 @@ import CadencesAndFollowUps from './pages/CadencesAndFollowUps'
 import { AUTOMATION_PATH, legacyAutomationRedirect } from './lib/automationTabs'
 import Agents from './pages/Agents'
 import ReadyMessages from './pages/ReadyMessages'
-import Qualifications from './pages/Qualifications'
+import QualificacaoPage from './pages/qualificacao/QualificacaoPage'
 import Launches from './pages/Launches'
 import Tags from './pages/Tags'
 import AdminClients from './pages/admin/Clients'
@@ -129,7 +129,7 @@ function AppRoutes() {
             <Route path="/agents/interview/:briefingId" element={<AgentInterview />} />
             <Route path="/agents/resumo/:briefingId" element={<AgentBriefingSummary />} />
             <Route path="/ready-messages" element={<ReadyMessages />} />
-            <Route path="/qualifications" element={<Qualifications />} />
+            <Route path="/qualifications" element={<QualificacaoPage />} />
             <Route path="/launches" element={<Launches />} />
           </>}
 

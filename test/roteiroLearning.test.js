@@ -4,7 +4,7 @@ import { createRoteiroTestDb, seedRoteiroBase, addLead } from './helpers/roteiro
 import { saveDraft, publish, getRoteiro } from '../server/services/roteiro/repo.js'
 import { toSqliteDate } from '../server/services/roteiro/time.js'
 import {
-  runLearning, startAbTest, evaluateAbTests, confirmVariant, keepCurrent, applySuggestion, rejectSuggestion,
+  runLearning, startAbTest, evaluateAbTests, confirmVariant, keepCurrent, applySuggestion, rejectSuggestion, abTestSummary,
 } from '../server/services/roteiro/learning.js'
 
 const NOW = new Date('2026-09-20T12:00:00Z')
@@ -308,4 +308,27 @@ test('runLearning: sugestao recusada nao volta; outro texto ainda cria', () => {
   // tudo recusado -> nenhum cartao novo
   assert.equal(runLearning(db, { accountId: s.accountId, now: NOW }).created, 0)
   assert.equal(suggestions(db, s.accountId).length, 2)
+})
+
+test('abTestSummary: envios e taxa de A e B, dias restantes e se ja foi decidido', () => {
+  const { db, s, leadId } = setup()
+  const sug = insertSuggestion(db, { accountId: s.accountId, funnelId: s.funnelId, questionKey: 'q1', type: 'seller_phrasing', payload: { text: 'Texto B' }, status: 'testing' })
+  const vId = insertVariant(db, { accountId: s.accountId, questionKey: 'q1', text: 'Texto B', startedDaysAgo: 10, suggestionId: sug })
+  insertAsks(db, { accountId: s.accountId, leadId, questionKey: 'q1', n: 10, replied: 6, variant: 'A', daysAgo: 2 })
+  insertAsks(db, { accountId: s.accountId, leadId, questionKey: 'q1', n: 4, replied: 3, variant: 'B', daysAgo: 2 })
+  // envio antes do inicio do teste nao conta
+  insertAsks(db, { accountId: s.accountId, leadId, questionKey: 'q1', n: 5, replied: 0, variant: 'A', daysAgo: 20 })
+  const v = db.prepare('SELECT * FROM roteiro_variants WHERE id = ?').get(vId)
+
+  const r = abTestSummary(db, { accountId: s.accountId, variant: v, now: NOW })
+  assert.deepEqual(r, {
+    funnel_id: s.funnelId, current_text: 'Qual seu orçamento?',
+    a: { sent: 10, rate: 60 }, b: { sent: 4, rate: 75 }, days_left: 20, decided: false,
+  })
+
+  db.prepare("UPDATE roteiro_variants SET status = 'won', ended_at = ? WHERE id = ?").run(at(1), vId)
+  keepCurrent(db, { accountId: s.accountId, variantId: vId, userId: s.gerenteId })
+  const ended = abTestSummary(db, { accountId: s.accountId, variant: db.prepare('SELECT * FROM roteiro_variants WHERE id = ?').get(vId), now: NOW })
+  assert.equal(ended.days_left, 0)
+  assert.equal(ended.decided, true)
 })

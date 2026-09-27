@@ -301,3 +301,36 @@ export function rejectSuggestion(db, { accountId, suggestionId, userId = null, n
   decideSuggestion(db, s.id, 'rejected', userId, now)
   return { ok: true }
 }
+
+// Resumo de um teste A/B para a tela (aba Sugestoes e testes): funil, texto atual (A),
+// envios e taxa de A e B desde o inicio (ate o fim, se ja terminou), dias restantes
+// e se o gestor ja decidiu (sugestao aplicada/recusada).
+export function abTestSummary(db, { accountId, variant, now } = {}) {
+  const v = variant
+  const until = v.ended_at || resolveNow(db, now)
+  const stmt = db.prepare(`
+    SELECT COUNT(*) AS sent, SUM(CASE WHEN replied_at IS NOT NULL THEN 1 ELSE 0 END) AS replied
+    FROM roteiro_asks WHERE account_id = ? AND question_key = ? AND variant = ? AND asked_at >= ? AND asked_at <= ?
+  `)
+  const side = letter => {
+    const r = stmt.get(accountId, v.question_key, letter, v.started_at, until)
+    const sent = r.sent || 0
+    return { sent, rate: pct(r.replied || 0, sent) }
+  }
+  let daysLeft = 0
+  if (v.status === 'testing') {
+    const elapsed = db.prepare('SELECT julianday(?) - julianday(?) AS d').get(until, v.started_at).d || 0
+    daysLeft = Math.max(0, Math.ceil(AB_MAX_DAYS - elapsed))
+  }
+  const s = v.suggestion_id
+    ? db.prepare('SELECT status FROM roteiro_suggestions WHERE id = ? AND account_id = ?').get(v.suggestion_id, accountId)
+    : null
+  return {
+    funnel_id: funnelForQuestion(db, accountId, v.question_key),
+    current_text: publishedQuestionText(db, accountId, v.question_key),
+    a: side('A'),
+    b: side('B'),
+    days_left: daysLeft,
+    decided: !!s && (s.status === 'applied' || s.status === 'rejected'),
+  }
+}

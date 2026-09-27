@@ -396,5 +396,14 @@ test('POST /leads/:leadId/asks grava a variante realmente servida ao lead (B com
     assert.equal(r.status, 201)
     const row = db.prepare('SELECT * FROM roteiro_asks WHERE id = ?').get(r.body.ask_id)
     assert.equal(row.variant, 'B', 'tem que gravar a variante realmente servida, nao sempre A')
+
+    // A lista de testes traz os numeros de A e B para a tela do gestor
+    const lista = await peca(base, { path: '/api/roteiro/suggestions', jwtToken: t })
+    const [teste] = lista.body.tests
+    assert.equal(teste.funnel_id, funnelId)
+    assert.equal(teste.b.sent, 1)
+    assert.equal(teste.a.sent, 0)
+    assert.equal(teste.decided, false)
+    assert.ok(teste.days_left > 0)
   })
 })
