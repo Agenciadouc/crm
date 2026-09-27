@@ -172,7 +172,38 @@ export const forceAiRespond = async (id: number, instanceId?: number): Promise<{
   if (!res.ok) return { ok: false, error: body.error || `Erro ${res.status}`, blockers: body.blockers, message: body.message }
   return body
 }
-export const moveLeadStage = (id: number, stageId: number) => apiFetch(`/api/leads/${id}/stage`, { method: 'PUT', body: JSON.stringify({ stage_id: stageId }) })
+// Trava do roteiro (spec 4.3): PUT /leads/:id/stage devolve 409 {code:'roteiro_gate', pending}
+export interface RoteiroOption { option_key: string; label: string; points: number; position: number }
+export interface RoteiroPendingQuestion {
+  question_key: string; text: string; stage_id: number; stage_name: string
+  kind: 'text' | 'options'; options: RoteiroOption[]
+}
+export class RoteiroGateError extends Error {
+  pending: RoteiroPendingQuestion[]
+  constructor(message: string, pending: RoteiroPendingQuestion[]) {
+    super(message)
+    this.name = 'RoteiroGateError'
+    this.pending = pending
+  }
+}
+// forceReason: "avancar mesmo assim" (so gestor/admin; o servidor grava o motivo no historico)
+export async function moveLeadStage(id: number, stageId: number, opts: { forceReason?: string; accountId?: number | null } = {}) {
+  const q = opts.accountId ? `?account_id=${opts.accountId}` : ''
+  const body: Record<string, unknown> = { stage_id: stageId }
+  if (opts.forceReason) body.force_reason = opts.forceReason
+  const res = await fetch(`${BASE}/api/leads/${id}/stage${q}`, {
+    method: 'PUT',
+    headers: { Authorization: `Bearer ${getToken()}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  if (res.status === 401) { localStorage.removeItem('dros_crm_token'); window.location.href = `${BASE}/login`; throw new Error('Unauthorized') }
+  const data = await res.json().catch(() => ({}))
+  if (res.status === 409 && data.code === 'roteiro_gate') {
+    throw new RoteiroGateError(data.error || 'Faltam perguntas obrigatórias para avançar.', Array.isArray(data.pending) ? data.pending : [])
+  }
+  if (!res.ok) throw new Error(data.error || `API error: ${res.status}`)
+  return data as { lead: Lead }
+}
 export const assignLead = (id: number, attendantId: number | null, notify?: boolean) => apiFetch(`/api/leads/${id}/assign`, { method: 'PUT', body: JSON.stringify({ attendant_id: attendantId, notify_attendant: !!notify }) })
 export const refreshProfilePic = (id: number) => apiFetch<{ profile_pic_url: string | null }>(`/api/leads/${id}/refresh-profile-pic`, { method: 'POST' })
 export const archiveLead = (id: number) => apiFetch<{ lead: Lead }>(`/api/leads/${id}/archive`, { method: 'PATCH' }).then(d => d.lead)
@@ -185,8 +216,10 @@ export const fetchLeadConversations = (leadId: number, accountId: number) => api
 
 // Messages
 export const fetchMessages = (leadId: number, accountId: number) => apiFetch<{ messages: Message[] }>(`/api/messages/${leadId}?account_id=${accountId}`).then(d => d.messages)
-export interface SendResult { message: Message; delivered: boolean; error?: string }
-export const sendMessage = (leadId: number, accountId: number, content: string, instance_id?: number) => apiFetch<SendResult>(`/api/messages/${leadId}?account_id=${accountId}`, { method: 'POST', body: JSON.stringify({ content, instance_id }) })
+// recognized_question: o servidor reconheceu na mensagem digitada uma pergunta pendente do roteiro
+export interface SendResult { message: Message; delivered: boolean; error?: string; recognized_question?: { question_key: string; text: string } | null }
+// roteiroQuestionKey: mensagem veio do botao [Perguntar] do roteiro (vira registro de pergunta enviada)
+export const sendMessage = (leadId: number, accountId: number, content: string, instance_id?: number, roteiroQuestionKey?: string | null) => apiFetch<SendResult>(`/api/messages/${leadId}?account_id=${accountId}`, { method: 'POST', body: JSON.stringify({ content, instance_id, ...(roteiroQuestionKey ? { roteiro_question_key: roteiroQuestionKey } : {}) }) })
 export const sendMessageMedia = (leadId: number, accountId: number, payload: { base64: string; mime: string; file_name: string; caption?: string; instance_id?: number }) => apiFetch<SendResult>(`/api/messages/${leadId}/media?account_id=${accountId}`, { method: 'POST', body: JSON.stringify(payload) })
 
 // Proposals
@@ -609,7 +642,9 @@ export const removeLeadTag = (leadId: number, tagId: number) => apiFetch(`/api/l
 
 // Bulk actions
 export const bulkAssignLeads = (accountId: number, leadIds: number[], attendantId: number | null) => apiFetch(`/api/leads/bulk/assign?account_id=${accountId}`, { method: 'POST', body: JSON.stringify({ lead_ids: leadIds, attendant_id: attendantId }) })
-export const bulkMoveLeads = (accountId: number, leadIds: number[], stageId: number) => apiFetch(`/api/leads/bulk/stage?account_id=${accountId}`, { method: 'POST', body: JSON.stringify({ lead_ids: leadIds, stage_id: stageId }) })
+// blocked: leads que nao moveram por perguntas obrigatorias pendentes (trava do roteiro)
+export interface BulkMoveResult { ok: boolean; count: number; moved: number; blocked: { id: number; name: string | null; pending_count: number }[] }
+export const bulkMoveLeads = (accountId: number, leadIds: number[], stageId: number) => apiFetch<BulkMoveResult>(`/api/leads/bulk/stage?account_id=${accountId}`, { method: 'POST', body: JSON.stringify({ lead_ids: leadIds, stage_id: stageId }) })
 
 // Pipeline metrics
 export const fetchPipelineMetrics = (accountId: number, funnelId: number, city?: string | null) => apiFetch<{ metrics: PipelineMetric[]; totalLeads: number }>(`/api/leads/pipeline/metrics?account_id=${accountId}&funnel_id=${funnelId}${cityQ(city)}`)

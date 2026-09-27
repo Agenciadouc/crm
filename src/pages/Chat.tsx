@@ -14,7 +14,7 @@ import {
   archiveLead, blockLead, createStandaloneTask, fetchLeadTasks, completeStandaloneTask, deleteStandaloneTask, completeTask, skipTask, fetchLeadConversations, forceAiRespond, type LeadConversation,
   fetchReadyMessages, type ReadyMessage,
   fetchPendingAiSuggestion, resolveAiSuggestion, pauseLeadAi, resumeLeadAi, type AiSuggestion,
-  createLeadOrFindExisting, markLeadAsRead,
+  createLeadOrFindExisting, markLeadAsRead, RoteiroGateError, type RoteiroPendingQuestion,
   requestLeadTransfer, acceptTransferRequest, rejectTransferRequest, fetchPendingTransferRequests, grabLead, type TransferRequest,
   type WhatsAppInstance, type Lead, type Message, type StageHistoryEntry, type LeadNote,
   type Funnel, type User as UserType, type Tag, type LeadCadence, type Cadence, type LeadFollowUp, type FollowUp,
@@ -25,6 +25,10 @@ import { useCityFilter } from '../components/CityFilter'
 import MoreFilters, { useScoreFilter } from '../components/MoreFilters'
 import ScoreBadge from '../components/score/ScoreBadge'
 import ScoreThermometer from '../components/score/ScoreThermometer'
+import RoteiroCard from '../components/roteiro/RoteiroCard'
+import StageGateModal from '../components/roteiro/StageGateModal'
+import RecognizedQuestionBar from '../components/roteiro/RecognizedQuestionBar'
+import { confirmAsk } from '../lib/roteiroApi'
 import { geoParams, leadMatchesGeo } from '../lib/geoFilter.js'
 import { scoreParams, leadMatchesScore } from '../lib/scoreFilter.js'
 import {
@@ -106,6 +110,9 @@ export default function Chat() {
     // selectLead: igual a um clique (limpa nao lidas, vai pra conversa no celular).
     // location.key: clicar de novo no mesmo aviso reabre mesmo com a mesma URL.
     if (id) selectLead(id)
+    // [Perguntar agora] da ficha/Pipeline: a pergunta chega pronta para a caixa de mensagem
+    const ask = (location.state as { roteiroAsk?: { text: string; questionKey: string | null } } | null)?.roteiroAsk
+    if (id && ask?.text) setPendingRoteiroAsk({ leadId: id, text: ask.text, questionKey: ask.questionKey ?? null })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.key])
   // Quando vai pra Info/Historico via bottom nav, sincroniza com a rightTab interna
@@ -146,6 +153,15 @@ export default function Chat() {
   const [listSort, setListSort] = useState<'recent' | 'score'>('recent')
   const [showArchived, setShowArchived] = useState(false)
   const [msgText, setMsgText] = useState('')
+  // Roteiro: pergunta posta na caixa pelo [Perguntar] (vai no envio como roteiro_question_key)
+  const [roteiroAskKey, setRoteiroAskKey] = useState<string | null>(null)
+  // Pergunta vinda de outra tela: aplicada quando a conversa desse lead abrir
+  const [pendingRoteiroAsk, setPendingRoteiroAsk] = useState<{ leadId: number; text: string; questionKey: string | null } | null>(null)
+  // "Voce perguntou X?" depois de enviar uma mensagem digitada
+  const [recognized, setRecognized] = useState<{ leadId: number; messageId: number; question: { question_key: string; text: string } } | null>(null)
+  const [confirmingAsk, setConfirmingAsk] = useState(false)
+  // Janela "Falta saber" (trava de etapa)
+  const [stageGate, setStageGate] = useState<{ toStage: { id: number; name: string }; pending: RoteiroPendingQuestion[] } | null>(null)
   const [readyMessages, setReadyMessages] = useState<ReadyMessage[]>([])
   const [showReadyMsgs, setShowReadyMsgs] = useState(false)
   const [readyMsgFilter, setReadyMsgFilter] = useState('')
@@ -259,6 +275,7 @@ export default function Chat() {
       if (accountId) resolveAiSuggestion(inBox.id, accountId, 'discarded').catch(() => {})
     }
     setMsgText(filled)
+    setRoteiroAskKey(null)
     setShowReadyMsgs(false)
     setReadyMsgFilter('')
     setTimeout(() => msgInputRef.current?.focus(), 0)
@@ -435,6 +452,50 @@ export default function Chat() {
   }, [msgText, accountId])
 
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages])
+
+  // ─── Roteiro: pergunta na caixa, reconhecimento e trava de etapa ───
+  // Apagou o texto: a mensagem nao e mais a pergunta do roteiro
+  useEffect(() => { if (!msgText.trim()) setRoteiroAskKey(null) }, [msgText])
+  // Troca de conversa: pergunta e "voce perguntou?" sao do lead anterior
+  useEffect(() => { setRoteiroAskKey(null); setRecognized(null); setStageGate(null) }, [selectedLeadId])
+
+  // [Perguntar]/[Usar] do roteiro: poe o texto na caixa (mesmo estado da digitacao)
+  const handleRoteiroAsk = useCallback((text: string, questionKey: string | null) => {
+    // Texto novo substitui a sugestao da IA que estiver na caixa (mesmo gesto da mensagem pronta)
+    const inBox = suggestionInBoxRef.current
+    if (inBox) {
+      suggestionInBoxRef.current = null
+      setSuggestionInBox(null)
+      setAiSuggestion(null)
+      if (accountId) resolveAiSuggestion(inBox.id, accountId, 'discarded').catch(() => {})
+    }
+    setShowReadyMsgs(false)
+    setMsgText(text)
+    setRoteiroAskKey(questionKey)
+    setRecognized(null)
+    if (isMobile) setMobileTab('chat')
+    setTimeout(() => msgInputRef.current?.focus(), 0)
+  }, [accountId, isMobile])
+
+  // Pergunta vinda da ficha/Pipeline: aplica quando a conversa do lead estiver aberta
+  useEffect(() => {
+    if (!pendingRoteiroAsk || !lead || lead.id !== pendingRoteiroAsk.leadId) return
+    handleRoteiroAsk(pendingRoteiroAsk.text, pendingRoteiroAsk.questionKey)
+    setPendingRoteiroAsk(null)
+  }, [pendingRoteiroAsk, lead, handleRoteiroAsk])
+
+  const handleConfirmRecognized = async () => {
+    if (!recognized || !accountId) return
+    setConfirmingAsk(true)
+    try {
+      await confirmAsk(recognized.leadId, accountId, recognized.question.question_key, recognized.messageId)
+      setRecognized(null)
+    } catch (e: any) {
+      setNotice({ kind: 'error', title: 'Não deu para registrar a pergunta', message: e?.message || 'Erro desconhecido' })
+      setRecognized(null)
+    }
+    setConfirmingAsk(false)
+  }
 
   // SSE: new messages / leads
   useSSE('lead:message', useCallback((data: any) => {
@@ -782,10 +843,16 @@ export default function Chat() {
     }
     const sentText = msgText
     const suggestionUsed = suggestionInBoxRef.current
+    const askKey = roteiroAskKey
+    const sentLeadId = lead.id
     setSending(true)
     try {
-      const result = await sendMessage(lead.id, accountId, sentText, override)
+      const result = await sendMessage(lead.id, accountId, sentText, override, askKey)
       setMessages(prev => [...prev, result.message])
+      setRoteiroAskKey(null)
+      if (!askKey && result.recognized_question && result.message?.id) {
+        setRecognized({ leadId: sentLeadId, messageId: result.message.id, question: result.recognized_question })
+      }
       if (suggestionUsed) {
         // Zera a referencia ANTES de limpar a caixa, senao o efeito de "apagou = descartou" dispara
         suggestionInBoxRef.current = null
@@ -973,7 +1040,18 @@ export default function Chat() {
 
   const doMoveStage = async (stageId: number) => {
     if (!lead) return
-    await moveLeadStage(lead.id, stageId); loadLead(); loadLeadsList()
+    try {
+      await moveLeadStage(lead.id, stageId, { accountId })
+    } catch (e: any) {
+      if (e instanceof RoteiroGateError) {
+        const target = allStages.find(s => s.id === stageId)
+        setStageGate({ toStage: { id: stageId, name: target?.name || 'a próxima etapa' }, pending: e.pending })
+        return
+      }
+      setNotice({ kind: 'error', title: 'Não deu para mudar a etapa', message: e?.message || 'Erro desconhecido' })
+      return
+    }
+    loadLead(); loadLeadsList()
   }
 
   const confirmSaleValue = async () => {
@@ -1477,6 +1555,14 @@ export default function Chat() {
                   <span style={{ color: '#6B6580' }}>· Enter envia · apagar descarta</span>
                 </div>
               )}
+              {recognized && recognized.leadId === lead.id && (
+                <RecognizedQuestionBar
+                  question={recognized.question}
+                  busy={confirmingAsk}
+                  onYes={handleConfirmRecognized}
+                  onNo={() => setRecognized(null)}
+                />
+              )}
               <div className="chat-input">
                 <input ref={fileInputRef} type="file" style={{ display: 'none' }} onChange={e => handlePickFile(e.target.files?.[0] || null)} accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip,.txt,.csv" />
                 <button
@@ -1661,6 +1747,16 @@ export default function Chat() {
               {rightTab === 'info' && (
                 <>
                   {accountId && <ScoreThermometer key={lead.id} leadId={lead.id} accountId={accountId} />}
+                  {accountId && (
+                    <RoteiroCard
+                      key={`roteiro-${lead.id}`}
+                      leadId={lead.id}
+                      accountId={accountId}
+                      mode="chat"
+                      onAsk={handleRoteiroAsk}
+                      canForce={user?.role === 'gerente' || user?.role === 'super_admin'}
+                    />
+                  )}
                   {/* Stage + Attendant */}
                   <div style={{ marginBottom: 12 }}>
                     <div style={{ fontSize: 10, color: '#9B96B0', textTransform: 'uppercase', marginBottom: 4 }}>Etapa</div>
@@ -2415,6 +2511,19 @@ export default function Chat() {
             <span>Histórico</span>
           </button>
         </nav>
+      )}
+
+      {/* Janela "Falta saber": a troca de etapa travou por perguntas obrigatorias */}
+      {stageGate && lead && accountId && (
+        <StageGateModal
+          leadId={lead.id}
+          accountId={accountId}
+          toStage={stageGate.toStage}
+          pending={stageGate.pending}
+          canForce={user?.role === 'gerente' || user?.role === 'super_admin'}
+          onAsk={handleRoteiroAsk}
+          onDone={moved => { setStageGate(null); if (moved) { loadLead(); loadLeadsList() } }}
+        />
       )}
 
       {/* Modal de atribuicao de atendente — pergunta se quer enviar 1a msg automatica */}

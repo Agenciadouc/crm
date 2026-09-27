@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback, type MouseEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAccount } from '../context/AccountContext'
+import { useAuth } from '../context/AuthContext'
+import StageGateModal from '../components/roteiro/StageGateModal'
 import AccountSelector from '../components/AccountSelector'
 import FilterDropdown, { type FilterValue } from '../components/FilterDropdown'
 import { useCityFilter } from '../components/CityFilter'
@@ -9,7 +11,7 @@ import ScoreBadge from '../components/score/ScoreBadge'
 import { geoParams } from '../lib/geoFilter.js'
 import { scoreParams, isScoreFilterActive, EMPTY_SCORE_FILTER } from '../lib/scoreFilter.js'
 import { useSSE } from '../context/SSEContext'
-import { fetchFunnels, fetchLeads, fetchTags, fetchUsers, moveLeadStage, fetchPipelineMetrics, archiveLead, updateLeadValue, type Funnel, type Lead, type PipelineMetric, type Tag, type User as ApiUser } from '../lib/api'
+import { fetchFunnels, fetchLeads, fetchTags, fetchUsers, moveLeadStage, RoteiroGateError, type RoteiroPendingQuestion, fetchPipelineMetrics, archiveLead, updateLeadValue, type Funnel, type Lead, type PipelineMetric, type Tag, type User as ApiUser } from '../lib/api'
 import { Phone, MessageCircle, User, Clock, ChevronDown, ChevronRight, ArrowRight, Smartphone, Archive, DollarSign, X } from 'lucide-react'
 import { parseSqlDate } from '../lib/dates'
 
@@ -47,6 +49,10 @@ export default function Pipeline() {
   const [moveLeadId, setMoveLeadId] = useState<number | null>(null)
   // Modal de valor: aparece quando lead move pra stage is_conversion=1
   const [saleModal, setSaleModal] = useState<{ leadId: number; stageId: number; leadName: string; stageName: string } | null>(null)
+  // Janela "Falta saber": o cartao volta para a etapa de origem e o modal mostra o que falta
+  const { user } = useAuth()
+  const canForce = user?.role === 'gerente' || user?.role === 'super_admin'
+  const [stageGate, setStageGate] = useState<{ leadId: number; toStage: { id: number; name: string }; pending: RoteiroPendingQuestion[] } | null>(null)
   const [saleValue, setSaleValue] = useState('')
   const [saleSaving, setSaleSaving] = useState(false)
   const [tags, setTags] = useState<Tag[]>([])
@@ -132,8 +138,24 @@ export default function Pipeline() {
 
   // Move de fato — extraído pra ser reusado depois do modal
   const doMoveLead = async (leadId: number, stageId: number) => {
+    const fromStageId = leads.find(l => l.id === leadId)?.stage_id
     setLeads(prev => prev.map(l => l.id === leadId ? { ...l, stage_id: stageId } : l))
-    try { await moveLeadStage(leadId, stageId) } catch { loadData() }
+    try {
+      await moveLeadStage(leadId, stageId, { accountId })
+    } catch (e) {
+      if (e instanceof RoteiroGateError) {
+        // Reverte o cartao e abre a janela com as perguntas que faltam
+        if (fromStageId != null) setLeads(prev => prev.map(l => l.id === leadId ? { ...l, stage_id: fromStageId } : l))
+        const target = (funnel?.stages || []).find(s => s.id === stageId)
+        setStageGate({ leadId, toStage: { id: stageId, name: target?.name || 'a próxima etapa' }, pending: e.pending })
+        return
+      }
+      loadData()
+    }
+  }
+  // [Perguntar agora]: abre o Chat do lead com a pergunta na caixa
+  const askInChat = (leadId: number) => (text: string, questionKey: string | null) => {
+    navigate(`/chat?lead_id=${leadId}`, { state: { roteiroAsk: { text, questionKey } } })
   }
 
   // Checa se o stage destino eh de conversao. Se for E o lead ainda nao tem value_estimated,
@@ -206,6 +228,18 @@ export default function Pipeline() {
 
   const stages = funnel.stages || []
 
+  const gateModal = stageGate && accountId && (
+    <StageGateModal
+      leadId={stageGate.leadId}
+      accountId={accountId}
+      toStage={stageGate.toStage}
+      pending={stageGate.pending}
+      canForce={canForce}
+      onAsk={askInChat(stageGate.leadId)}
+      onDone={moved => { setStageGate(null); if (moved) loadData() }}
+    />
+  )
+
   // MOBILE: Vertical accordion layout
   if (isMobile) {
     return (
@@ -272,6 +306,8 @@ export default function Pipeline() {
             </div>
           )
         })}
+
+        {gateModal}
 
         {/* Move lead modal */}
         {moveLeadId && (
@@ -468,6 +504,8 @@ export default function Pipeline() {
           </div>
         </div>
       )}
+
+      {gateModal}
     </div>
   )
 }

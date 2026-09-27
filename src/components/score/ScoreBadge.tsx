@@ -26,7 +26,7 @@ export default function ScoreBadge({ score, band, prev, size = 'sm' }: Props) {
   const down = prev != null && score < prev
   return (
     <span
-      title={`Termômetro ${score} — ${meta.label}. Passe o mouse no lead para ver o porquê.`}
+      title={`Termômetro ${score} — ${meta.label}. Abra o lead para ver o porquê.`}
       style={{
         display: 'inline-flex', alignItems: 'center', gap: 3, whiteSpace: 'nowrap', flexShrink: 0,
         fontSize: fs, fontWeight: 700, color: meta.color, background: `${meta.color}1F`,

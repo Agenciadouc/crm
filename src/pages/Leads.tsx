@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { useAccount } from '../context/AccountContext'
 import { useSSE } from '../context/SSEContext'
@@ -11,13 +11,14 @@ import ScoreBadge from '../components/score/ScoreBadge'
 import { geoParams } from '../lib/geoFilter.js'
 import { scoreParams, isScoreFilterActive, EMPTY_SCORE_FILTER } from '../lib/scoreFilter.js'
 import { SCORE_HELP_TEXT } from '../lib/score'
+import { bulkMoveSummary } from '../lib/roteiroView.js'
 import {
   apiFetch,
   fetchLeads, fetchFunnels, fetchUsers, fetchTags, createLead, bulkAssignLeads, bulkMoveLeads,
   archiveLead, unarchiveLead, fetchArchivedCount, fetchWhatsAppInstances,
-  formatNumber, type Lead, type Funnel, type User as UserType, type Tag, type WhatsAppInstance,
+  formatNumber, type BulkMoveResult, type Lead, type Funnel, type User as UserType, type Tag, type WhatsAppInstance,
 } from '../lib/api'
-import { Plus, Download, Phone, MessageCircle, Clock, CheckSquare, Square, Users, ArrowRight, Archive, ArchiveRestore, ArrowDown, ArrowUpDown } from 'lucide-react'
+import { Plus, Download, Phone, MessageCircle, Clock, CheckSquare, Square, Users, ArrowRight, Archive, ArchiveRestore, ArrowDown, ArrowUpDown, Lock, CheckCircle2, X } from 'lucide-react'
 import { parseSqlDate } from '../lib/dates'
 
 function timeAgo(d: string) { const m = Math.max(0, Math.floor((Date.now() - parseSqlDate(d).getTime()) / 60000)); if (m < 60) return `${m}m`; const h = Math.floor(m / 60); if (h < 24) return `${h}h`; return `${Math.floor(h / 24)}d` }
@@ -136,9 +137,17 @@ export default function Leads() {
     setSelected(new Set()); setShowBulkAssign(false); loadLeads()
   }
 
+  // Resultado da troca em massa: travados pelo roteiro nao movem e aparecem com link
+  const [bulkResult, setBulkResult] = useState<{ stageName: string; result: BulkMoveResult } | null>(null)
   const handleBulkStage = async (stageId: number) => {
     if (!accountId) return
-    await bulkMoveLeads(accountId, [...selected], stageId)
+    try {
+      const result = await bulkMoveLeads(accountId, [...selected], stageId)
+      const stageName = allStages.find(s => s.id === stageId)?.name || ''
+      setBulkResult({ stageName, result: { ...result, blocked: Array.isArray(result?.blocked) ? result.blocked : [] } })
+    } catch (e: any) {
+      alert('Erro: ' + (e?.message || 'não deu para mover os leads'))
+    }
     setSelected(new Set()); setShowBulkStage(false); loadLeads()
   }
 
@@ -228,6 +237,34 @@ export default function Leads() {
           <button className="btn btn-secondary btn-sm" onClick={() => setShowBulkAssign(true)}><Users size={12} /> Atribuir</button>
           <button className="btn btn-secondary btn-sm" onClick={() => setShowBulkStage(true)}><ArrowRight size={12} /> Mover etapa</button>
           <button className="btn btn-secondary btn-sm" onClick={() => setSelected(new Set())}>Cancelar</button>
+        </div>
+      )}
+
+      {/* Resultado da troca de etapa em massa */}
+      {bulkResult && (
+        <div style={{ padding: '10px 14px', borderRadius: 8, marginBottom: 12, border: '1px solid var(--border-subtle)', background: bulkResult.result.blocked.length ? 'var(--warning-bg)' : 'var(--positive-bg)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            {bulkResult.result.blocked.length ? <Lock size={14} style={{ color: 'var(--warning)' }} /> : <CheckCircle2 size={14} style={{ color: 'var(--positive)' }} />}
+            <span style={{ fontSize: 13, fontWeight: 600, flex: 1 }}>
+              {bulkMoveSummary(bulkResult.result)}{bulkResult.stageName ? ` para ${bulkResult.stageName}` : ''}
+            </span>
+            <button type="button" onClick={() => setBulkResult(null)} aria-label="Fechar" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}><X size={14} /></button>
+          </div>
+          {bulkResult.result.blocked.length > 0 && (
+            <>
+              <div style={{ fontSize: 12, color: 'var(--text-secondary)', margin: '6px 0 4px' }}>
+                Estes leads ainda têm perguntas obrigatórias sem resposta. Abra cada um e responda na aba Qualificação (ex.: orçamento, prazo) ou peça ao cliente pelo Chat:
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                {bulkResult.result.blocked.map(b => (
+                  <Link key={b.id} to={`/leads/${b.id}`}
+                    style={{ fontSize: 12, color: 'var(--accent)', fontWeight: 600, padding: '2px 8px', borderRadius: 10, background: 'var(--bg-card)', border: '1px solid var(--border-subtle)', textDecoration: 'none' }}>
+                    {b.name || `Lead ${b.id}`} <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>· falta{b.pending_count === 1 ? '' : 'm'} {b.pending_count}</span>
+                  </Link>
+                ))}
+              </div>
+            </>
+          )}
         </div>
       )}
 

@@ -7,14 +7,17 @@ import {
   fetchLead, fetchFunnels, fetchUsers, fetchTags, updateLead, moveLeadStage, assignLead,
   sendMessage, addLeadNote, addLeadTag, removeLeadTag, createTag,
   fetchLeadCadence, fetchCadences, assignLeadCadence, advanceLeadCadence, removeLeadCadence,
-  fetchReadyMessages, fetchLeadQualifications, answerQualification,
+  fetchReadyMessages, RoteiroGateError, type RoteiroPendingQuestion,
   archiveLead, unarchiveLead, optInLead, optOutLead,
   fetchLeadSales, addLeadSale, deleteLeadSale, type LeadSale,
   type Lead, type Message, type StageHistoryEntry, type LeadNote, type Funnel, type User as UserType, type Tag,
-  type LeadCadence, type Cadence, type ReadyMessage, type LeadQualification,
+  type LeadCadence, type Cadence, type ReadyMessage,
 } from '../lib/api'
 import { ArrowLeft, Phone, Mail, MapPin, MessageCircle, Send, Clock, User, GitBranch, Edit3, Save, X, Plus, StickyNote, Tag as TagIcon, ListOrdered, Zap, ClipboardList, ChevronRight, Check, Archive, ArchiveRestore, FileText, DollarSign, Trash2 } from 'lucide-react'
 import MessageMedia from '../components/MessageMedia'
+import ScoreThermometer from '../components/score/ScoreThermometer'
+import RoteiroCard from '../components/roteiro/RoteiroCard'
+import StageGateModal from '../components/roteiro/StageGateModal'
 import { parseSqlDate } from '../lib/dates'
 
 export default function LeadDetail() {
@@ -46,9 +49,8 @@ export default function LeadDetail() {
   const [scriptModal, setScriptModal] = useState<{ text: string } | null>(null)
   const [readyMsgs, setReadyMsgs] = useState<ReadyMessage[]>([])
   const [showReadyMsgs, setShowReadyMsgs] = useState(false)
-  const [qualifications, setQualifications] = useState<LeadQualification[]>([])
-  const [qualAnswers, setQualAnswers] = useState<Record<number, string>>({})
-  const [savingQual, setSavingQual] = useState<number | null>(null)
+  // Janela "Falta saber" (trava de etapa do roteiro)
+  const [stageGate, setStageGate] = useState<{ toStage: { id: number; name: string }; pending: RoteiroPendingQuestion[] } | null>(null)
   const [editingNotes, setEditingNotes] = useState(false)
   const [notesDraft, setNotesDraft] = useState('')
   const [savingNotes, setSavingNotes] = useState(false)
@@ -66,20 +68,14 @@ export default function LeadDetail() {
     setLeadCadence(lc)
   }, [id, accountId])
 
-  const loadQualifications = useCallback(async () => {
-    if (!id || !accountId) return
-    const q = await fetchLeadQualifications(+id, accountId)
-    setQualifications(q)
-  }, [id, accountId])
-
   useEffect(() => {
     if (!id || !accountId) return
     setLoading(true)
     Promise.all([
       loadLead(), fetchFunnels(accountId).then(setFunnels), fetchUsers(accountId).then(setUsers), fetchTags(accountId).then(setTags),
-      loadCadence(), fetchCadences(accountId).then(setCadences), fetchReadyMessages(accountId).then(setReadyMsgs), loadQualifications(),
+      loadCadence(), fetchCadences(accountId).then(setCadences), fetchReadyMessages(accountId).then(setReadyMsgs),
     ]).finally(() => setLoading(false))
-  }, [id, accountId, loadLead, loadCadence, loadQualifications])
+  }, [id, accountId, loadLead, loadCadence])
 
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages])
 
@@ -140,8 +136,25 @@ export default function LeadDetail() {
   }
   const doMoveStage = async (stageId: number) => {
     if (!lead) return
-    await moveLeadStage(lead.id, stageId); loadLead()
+    try {
+      await moveLeadStage(lead.id, stageId, { accountId })
+    } catch (e: any) {
+      if (e instanceof RoteiroGateError) {
+        const target = funnels.flatMap(f => f.stages || []).find(s => s.id === stageId)
+        setStageGate({ toStage: { id: stageId, name: target?.name || 'a próxima etapa' }, pending: e.pending })
+        return
+      }
+      alert('Erro: ' + (e?.message || 'não deu para mudar a etapa'))
+      return
+    }
+    loadLead()
   }
+  // [Perguntar agora]/[Perguntar] na ficha: abre o Chat do lead com a pergunta na caixa
+  const askInChat = (text: string, questionKey: string | null) => {
+    if (!lead) return
+    navigate(`/chat?lead_id=${lead.id}`, { state: { roteiroAsk: { text, questionKey } } })
+  }
+  const canForce = user?.role === 'gerente' || user?.role === 'super_admin'
   const confirmSaleValue = async () => {
     if (!saleModal || !accountId) return
     const numeric = parseFloat(String(saleValue).replace(/\./g, '').replace(',', '.'))
@@ -237,13 +250,6 @@ export default function LeadDetail() {
     const updated = lead.is_archived ? await unarchiveLead(lead.id) : await archiveLead(lead.id)
     setLead(updated)
   }
-  const handleAnswerQual = async (seqId: number) => {
-    if (!lead || !accountId || !qualAnswers[seqId]?.trim()) return
-    setSavingQual(seqId)
-    await answerQualification(lead.id, accountId, seqId, qualAnswers[seqId].trim())
-    setQualAnswers(prev => { const n = { ...prev }; delete n[seqId]; return n })
-    setSavingQual(null); loadQualifications()
-  }
 
   if (loading) return <div className="loading-container"><div className="spinner" /></div>
   if (!lead) return <div className="empty-state"><h3>Lead nao encontrado</h3></div>
@@ -289,6 +295,7 @@ export default function LeadDetail() {
       <div className="lead-detail">
         {/* Left column: Info + Tags + History */}
         <div>
+          {accountId && <ScoreThermometer key={lead.id} leadId={lead.id} accountId={accountId} />}
           {/* Lead Info Card */}
           <div className="card" style={{ marginBottom: 16 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
@@ -525,7 +532,7 @@ export default function LeadDetail() {
           <div style={{ display: 'flex', gap: 4, marginBottom: 8, flexWrap: 'wrap' }}>
             {(['notes', 'qualification', 'history'] as const).map(tab => (
               <button key={tab} className={`btn btn-sm ${activeTab === tab ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setActiveTab(tab)}>
-                {tab === 'notes' ? <><StickyNote size={12} /> Notas ({notes.length})</> : tab === 'qualification' ? <><ClipboardList size={12} /> Qualificacao</> : <><GitBranch size={12} /> Historico</>}
+                {tab === 'notes' ? <><StickyNote size={12} /> Notas ({notes.length})</> : tab === 'qualification' ? <><ClipboardList size={12} /> Qualificação</> : <><GitBranch size={12} /> Historico</>}
               </button>
             ))}
           </div>
@@ -549,36 +556,10 @@ export default function LeadDetail() {
             </div>
           )}
 
-          {/* Qualification tab */}
-          {activeTab === 'qualification' && (
+          {/* Qualification tab: roteiro completo (todas as etapas) */}
+          {activeTab === 'qualification' && accountId && (
             <div className="card" style={{ minHeight: 400 }}>
-              {qualifications.length > 0 ? (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  {qualifications.map((q, i) => (
-                    <div key={q.sequence_id} style={{ padding: '10px 12px', background: q.answer ? 'rgba(52,199,89,0.05)' : 'rgba(255,179,0,0.03)', borderRadius: 8, border: `1px solid ${q.answer ? 'rgba(52,199,89,0.15)' : 'var(--border-subtle)'}` }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
-                        <div style={{ width: 20, height: 20, borderRadius: '50%', background: q.answer ? '#34C75920' : '#FFB30020', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                          {q.answer ? <Check size={10} style={{ color: '#34C759' }} /> : <span style={{ fontSize: 10, fontWeight: 700, color: '#FFB300' }}>{i + 1}</span>}
-                        </div>
-                        <span style={{ fontSize: 13, fontWeight: 500 }}>{q.question}</span>
-                      </div>
-                      {q.answer ? (
-                        <div style={{ marginLeft: 26 }}>
-                          <div style={{ fontSize: 12, color: '#C8C4D4' }}>{q.answer}</div>
-                          <div style={{ fontSize: 10, color: '#6B6580', marginTop: 2 }}>{q.answered_by_name} · {q.answered_at ? new Date(q.answered_at).toLocaleString('pt-BR') : ''}</div>
-                        </div>
-                      ) : (
-                        <div style={{ marginLeft: 26, display: 'flex', gap: 6 }}>
-                          <input className="input" placeholder="Resposta..." value={qualAnswers[q.sequence_id] || ''} onChange={e => setQualAnswers(prev => ({ ...prev, [q.sequence_id]: e.target.value }))} onKeyDown={e => e.key === 'Enter' && handleAnswerQual(q.sequence_id)} style={{ flex: 1, fontSize: 12 }} />
-                          <button className="btn btn-primary btn-sm btn-icon" onClick={() => handleAnswerQual(q.sequence_id)} disabled={savingQual === q.sequence_id || !qualAnswers[q.sequence_id]?.trim()}><Check size={12} /></button>
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div style={{ textAlign: 'center', color: '#6B6580', padding: 30 }}>Nenhuma pergunta de qualificacao configurada</div>
-              )}
+              <RoteiroCard key={`roteiro-${lead.id}`} leadId={lead.id} accountId={accountId} mode="full" onAsk={askInChat} canForce={canForce} />
             </div>
           )}
 
@@ -612,6 +593,19 @@ export default function LeadDetail() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Janela "Falta saber": a troca de etapa travou por perguntas obrigatorias */}
+      {stageGate && accountId && (
+        <StageGateModal
+          leadId={lead.id}
+          accountId={accountId}
+          toStage={stageGate.toStage}
+          pending={stageGate.pending}
+          canForce={canForce}
+          onAsk={askInChat}
+          onDone={moved => { setStageGate(null); if (moved) loadLead() }}
+        />
       )}
 
       {/* Modal de atribuicao de atendente — pergunta se quer enviar 1a msg automatica */}
