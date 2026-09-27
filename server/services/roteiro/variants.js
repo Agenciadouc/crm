@@ -19,10 +19,22 @@ function capitalizeFirst(text) {
 
 // Troca {nome} pelo primeiro nome do lead; sem nome, remove "{nome}, " no inicio,
 // ", {nome}" no fim e "{nome}" solto, recapitalizando a frase resultante.
-function resolveLeadName(text, leadName) {
+export function leadFirstName(leadName) {
   const name = typeof leadName === 'string' ? leadName.trim() : ''
-  if (name) {
-    const first = name.split(/\s+/)[0]
+  return name ? name.split(/\s+/)[0] : ''
+}
+
+// Caminho inverso de resolveLeadName: troca o primeiro nome do lead (palavra inteira) por {nome}.
+export function restoreNamePlaceholder(text, leadName) {
+  const first = leadFirstName(leadName)
+  if (!first || typeof text !== 'string') return text
+  const escaped = first.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  return text.replace(new RegExp(`(?<![\\p{L}\\p{N}])${escaped}(?![\\p{L}\\p{N}])`, 'gu'), '{nome}')
+}
+
+export function resolveLeadName(text, leadName) {
+  const first = leadFirstName(leadName)
+  if (first) {
     return text.replace(/\{nome\}/g, first)
   }
   if (!text.includes('{nome}')) return text

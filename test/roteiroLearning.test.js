@@ -246,3 +246,66 @@ test('rejectSuggestion: status rejected com quem decidiu', () => {
   assert.ok(row.decided_at)
   assert.throws(() => rejectSuggestion(db, { accountId: s.otherAccountId, suggestionId: sug, userId: null }), e => e.status === 404)
 })
+
+// --- fix round 1: {nome} e recusa -----------------------------------------------------
+
+test('runLearning: pergunta com {nome} -> sugestao volta com {nome} e sem nome real de cliente', () => {
+  const db = createRoteiroTestDb()
+  const s = seedRoteiroBase(db)
+  saveDraft(db, s.accountId, s.funnelId, {
+    questions: [{ question_key: 'qn', stage_id: s.stages.qualificando, position: 0, text: 'O que você quer resolver, {nome}?', kind: 'text' }],
+    deviations: [],
+  })
+  publish(db, s.accountId, s.funnelId, null)
+  const nomes = ['João Silva', 'Maria', 'Pedro Alves', 'Ana Paula', 'Lucas', 'Bia']
+  const stmt = db.prepare(`INSERT INTO roteiro_asks (account_id, lead_id, question_key, variant, text_sent, user_id, source, asked_at, replied_at) VALUES (?, ?, 'qn', 'A', ?, ?, 'button', ?, ?)`)
+  // Ana (vendedora) pergunta do jeito dela para 12 leads diferentes, 11 respondem
+  for (let i = 0; i < 12; i++) {
+    const nome = nomes[i % nomes.length]
+    const leadId = addLead(db, { account_id: s.accountId, name: nome })
+    const first = nome.split(' ')[0]
+    const text = i < 2 ? `O que você quer resolver, ${first}?` : `${first}, me conta: o que te fez procurar a gente?`
+    stmt.run(s.accountId, leadId, text, s.atendenteId, at(1), i < 11 ? at(1) : null)
+  }
+  // Gestora usa o texto do roteiro e ninguem responde
+  for (let i = 0; i < 13; i++) {
+    const leadId = addLead(db, { account_id: s.accountId, name: `Cliente${i}` })
+    stmt.run(s.accountId, leadId, `O que você quer resolver, Cliente${i}?`, s.gerenteId, at(1), null)
+  }
+
+  assert.equal(runLearning(db, { accountId: s.accountId, now: NOW }).created, 1)
+  const [sug] = suggestions(db, s.accountId)
+  assert.equal(sug.payload.text, '{nome}, me conta: o que te fez procurar a gente?')
+  for (const nome of nomes) assert.ok(!sug.payload.text.includes(nome.split(' ')[0]))
+})
+
+test('runLearning: exemplo mais usado igual ao texto atual -> usa o proximo', () => {
+  const { db, s, leadId } = setup()
+  insertAsks(db, { accountId: s.accountId, leadId, questionKey: 'q1', n: 7, replied: 7, userId: s.atendenteId, text: 'Qual seu orçamento?' })
+  insertAsks(db, { accountId: s.accountId, leadId, questionKey: 'q1', n: 5, replied: 4, userId: s.atendenteId, text: 'Quanto pensa investir?' })
+  insertAsks(db, { accountId: s.accountId, leadId, questionKey: 'q1', n: 13, replied: 0, userId: s.gerenteId, text: 'Orçamento?' })
+  assert.equal(runLearning(db, { accountId: s.accountId, now: NOW }).created, 1)
+  assert.equal(suggestions(db, s.accountId)[0].payload.text, 'Quanto pensa investir?')
+})
+
+test('runLearning: sugestao recusada nao volta; outro texto ainda cria', () => {
+  const { db, s, leadId } = setup()
+  insertAsks(db, { accountId: s.accountId, leadId, questionKey: 'q1', n: 8, replied: 8, userId: s.atendenteId, text: 'Jeito A' })
+  insertAsks(db, { accountId: s.accountId, leadId, questionKey: 'q1', n: 4, replied: 3, userId: s.atendenteId, text: 'Jeito B' })
+  insertAsks(db, { accountId: s.accountId, leadId, questionKey: 'q1', n: 13, replied: 0, userId: s.gerenteId, text: 'Gestora' })
+
+  runLearning(db, { accountId: s.accountId, now: NOW })
+  const [first] = suggestions(db, s.accountId)
+  assert.equal(first.payload.text, 'Jeito A')
+  rejectSuggestion(db, { accountId: s.accountId, suggestionId: first.id, userId: s.gerenteId })
+
+  // mesma noite de novo: 'Jeito A' foi recusado -> usa o outro jeito da vendedora
+  assert.equal(runLearning(db, { accountId: s.accountId, now: NOW }).created, 1)
+  const second = suggestions(db, s.accountId)[1]
+  assert.equal(second.payload.text, 'Jeito B')
+  rejectSuggestion(db, { accountId: s.accountId, suggestionId: second.id, userId: s.gerenteId })
+
+  // tudo recusado -> nenhum cartao novo
+  assert.equal(runLearning(db, { accountId: s.accountId, now: NOW }).created, 0)
+  assert.equal(suggestions(db, s.accountId).length, 2)
+})

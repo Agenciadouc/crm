@@ -3,6 +3,7 @@
 import { getPublishedQuestions } from './repo.js'
 import { resolveNow, shiftFromNow } from './time.js'
 import { BANDS } from '../leadScore/compute.js'
+import { restoreNamePlaceholder } from './variants.js'
 
 export const MIN_SAMPLE = 20
 export const DEFAULT_MIN_REPLY_RATE = 70
@@ -32,18 +33,32 @@ function bySeller(db, accountId, questionKey, since, until) {
     GROUP BY a.user_id
   `).all(accountId, questionKey, since, until)
   const examplesStmt = db.prepare(`
-    SELECT text_sent, COUNT(*) AS n FROM roteiro_asks
-    WHERE account_id = ? AND question_key = ? AND user_id = ? AND asked_at >= ? AND asked_at <= ?
-      AND text_sent IS NOT NULL AND TRIM(text_sent) <> ''
-    GROUP BY text_sent ORDER BY n DESC, MAX(asked_at) DESC LIMIT 3
+    SELECT a.text_sent, a.asked_at, l.name AS lead_name FROM roteiro_asks a LEFT JOIN leads l ON l.id = a.lead_id
+    WHERE a.account_id = ? AND a.question_key = ? AND a.user_id = ? AND a.asked_at >= ? AND a.asked_at <= ?
+      AND a.text_sent IS NOT NULL AND TRIM(a.text_sent) <> ''
   `)
+  // Exemplos com o nome do cliente trocado de volta por {nome} (nao vaza nome real e agrupa o mesmo jeito).
+  const examplesFor = userId => {
+    const groups = new Map()
+    for (const e of examplesStmt.all(accountId, questionKey, userId, since, until)) {
+      const text = restoreNamePlaceholder(e.text_sent.trim(), e.lead_name)
+      const g = groups.get(text) || { text, n: 0, last: '' }
+      g.n++
+      if (e.asked_at > g.last) g.last = e.asked_at
+      groups.set(text, g)
+    }
+    return [...groups.values()]
+      .sort((a, b) => b.n - a.n || (a.last < b.last ? 1 : a.last > b.last ? -1 : 0))
+      .slice(0, 3)
+      .map(g => g.text)
+  }
   return rows
     .map(r => ({
       user_id: r.user_id,
       name: r.name ?? null,
       sent: r.sent,
       reply_rate: pct(r.replied, r.sent),
-      examples: examplesStmt.all(accountId, questionKey, r.user_id, since, until).map(e => e.text_sent),
+      examples: examplesFor(r.user_id),
     }))
     .sort((a, b) => (b.reply_rate ?? -1) - (a.reply_rate ?? -1) || b.sent - a.sent)
 }

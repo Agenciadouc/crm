@@ -1,7 +1,7 @@
 // Aprendizado do roteiro (spec 3.3, 6.3, 6.5): sugestoes sem IA, teste A/B e decisoes do gestor.
 // Nao importa server/db.js: recebe db (testavel com banco em memoria).
 import { getRoteiro, saveDraft, publish, RoteiroError } from './repo.js'
-import { activeVariant } from './variants.js'
+import { activeVariant, resolveLeadName } from './variants.js'
 import { questionMetrics, accountMinReplyRate, pct } from './metrics.js'
 import { resolveNow, shiftFromNow } from './time.js'
 
@@ -11,6 +11,7 @@ export const AB_MAX_DAYS = 30
 export const AB_MIN_GAIN = 5
 const AB_TYPES = ['rewrite', 'seller_phrasing']
 
+const normText = t => String(t ?? '').trim().toLowerCase()
 const fmtPct = n => (n == null ? '—' : `${String(n).replace('.', ',')}%`)
 
 function getSuggestion(db, accountId, suggestionId) {
@@ -93,6 +94,9 @@ export function runLearning(db, { accountId, now, ai = null } = {}) {
   const exists = db.prepare(`
     SELECT 1 FROM roteiro_suggestions WHERE account_id = ? AND type = 'seller_phrasing' AND question_key = ? AND status IN ('new','testing') LIMIT 1
   `)
+  const decided = db.prepare(`
+    SELECT payload_json FROM roteiro_suggestions WHERE account_id = ? AND type = 'seller_phrasing' AND question_key = ? AND status IN ('rejected','applied')
+  `)
   const insert = db.prepare(`
     INSERT INTO roteiro_suggestions (account_id, funnel_id, question_key, type, payload_json, evidence_json, created_at)
     VALUES (?, ?, ?, 'seller_phrasing', ?, ?, ?)
@@ -114,9 +118,14 @@ export function runLearning(db, { accountId, now, ai = null } = {}) {
       if (q.status !== 'fraca') continue
       const best = q.by_seller.find(v => v.sent >= SELLER_MIN_SENT && v.reply_rate != null && v.reply_rate >= min && v.examples.length)
       if (!best) continue
-      const text = best.examples[0]
-      if (text.trim().toLowerCase() === String(q.text).trim().toLowerCase()) continue
       if (exists.get(accountId, q.question_key)) continue
+      // Pula exemplo igual ao texto atual e jeito ja recusado/aplicado antes (nao volta toda noite).
+      const skip = new Set([normText(q.text), normText(resolveLeadName(String(q.text), null))])
+      for (const row of decided.all(accountId, q.question_key)) {
+        try { const t = JSON.parse(row.payload_json)?.text; if (t) skip.add(normText(t)) } catch {}
+      }
+      const text = best.examples.find(e => !skip.has(normText(e)))
+      if (!text) continue
       insert.run(accountId, funnelId, q.question_key,
         JSON.stringify({ text, seller_name: best.name, seller_rate: best.reply_rate, current_rate: q.reply_rate }),
         JSON.stringify({ sent: q.sent, seller_sent: best.sent, seller_id: best.user_id }),

@@ -184,3 +184,15 @@ test('conversionByBand: sem aviso com menos de 10 leads na faixa', () => {
   const r = conversionByBand(db, { accountId: s.accountId, now: NOW })
   assert.equal(r.warning, false)
 })
+
+test('questionMetrics: exemplos trocam o primeiro nome do lead por {nome} e agrupam', () => {
+  const db = createRoteiroTestDb()
+  const s = seedRoteiroBase(db)
+  publishThree(db, s)
+  for (const nome of ['João Silva', 'Maria', 'Pedro']) {
+    const leadId = addLead(db, { account_id: s.accountId, name: nome })
+    insertAsks(db, { accountId: s.accountId, leadId, questionKey: 'q_ok', n: 1, userId: s.atendenteId, text: `Oi ${nome.split(' ')[0]}, para quando você precisa?` })
+  }
+  const q = questionMetrics(db, { accountId: s.accountId, funnelId: s.funnelId, now: NOW }).find(r => r.question_key === 'q_ok')
+  assert.deepEqual(q.by_seller[0].examples, ['Oi {nome}, para quando você precisa?'])
+})
