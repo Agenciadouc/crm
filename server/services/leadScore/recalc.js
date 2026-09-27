@@ -83,9 +83,16 @@ export function createScoreScheduler({ db, onBandUp, delayMs = SCORE_SCHEDULE_DE
 
 // Singleton de producao: configura 1x na inicializacao, o resto do app so chama scheduleScore(leadId).
 let runtimeScheduler = null
+let runtimeOnBandUp = null
 
 export function configureScoreRuntime({ db, onBandUp }) {
+  runtimeOnBandUp = onBandUp || null
   runtimeScheduler = createScoreScheduler({ db, onBandUp })
+}
+
+// Aviso de faixa subindo configurado na inicializacao (usado pelo recalculo noturno).
+export function getRuntimeOnBandUp() {
+  return runtimeOnBandUp
 }
 
 export function scheduleScore(leadId) {

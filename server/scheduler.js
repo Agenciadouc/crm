@@ -18,6 +18,8 @@ import { analyzeAllAccounts } from './services/conversationAnalyzer.js'
 import { generateAllCoachings, isoMonday } from './services/coachingAnalyzer.js'
 import { runAutoRescue } from './services/botAutoRescue.js'
 import { checkReplyRates } from './services/replyRate.js'
+import { runScoreNightly } from './services/leadScore/nightly.js'
+import { runHotLeadAlerts } from './services/leadScore/hotLeadAlerts.js'
 
 // Roda a cada 1min — precisao do agendamento <= 60s. Custo desprezivel (1 SELECT/min).
 const INTERVAL_MS = 60 * 1000
@@ -246,6 +248,12 @@ export async function runNightlyAnalysis() {
     // 2. Analisa conversas via Haiku (mais lento)
     const analysisResult = await analyzeAllAccounts()
     console.log(`[Nightly] Analysis: ${JSON.stringify(analysisResult)}`)
+
+    // 3. Termometro: recalcula as notas, grava o retrato do dia e roda o aprendizado do roteiro
+    try {
+      const scoreResult = await runScoreNightly(db, { now: new Date() })
+      console.log(`[Nightly] Termometro: ${JSON.stringify(scoreResult)}`)
+    } catch (e) { console.error('[Nightly] termometro erro:', e.message) }
 
     // Marca timestamp pra evitar dupla execucao
     db.prepare("UPDATE accounts SET last_nightly_at = datetime('now') WHERE is_active = 1").run()
@@ -501,7 +509,17 @@ function markStaleMessagesAsFailed() {
 }
 
 // ─── Main tick (every 5 min) ─────────────────────────────────────
+// Aviso de lead quente sem resposta: a cada 5 ticks (tick = 1 min)
+const HOT_LEAD_EVERY_TICKS = 5
+let hotLeadTickCount = 0
+
 async function tick() {
+  hotLeadTickCount = (hotLeadTickCount + 1) % HOT_LEAD_EVERY_TICKS
+  if (hotLeadTickCount === 0) {
+    try {
+      runHotLeadAlerts(db, { now: new Date() })
+    } catch (e) { console.error('[Termometro] aviso de lead quente:', e.message) }
+  }
   try {
     await Promise.all([
       checkWhatsAppInstances(),
