@@ -31,6 +31,7 @@ import followUpRoutes from './routes/follow-ups.js'
 import agentRoutes from './routes/agents.js'
 import agentBriefingRoutes from './routes/agentBriefings.js'
 import copilotRoutes from './routes/copilot.js'
+import roteiroRoutes from './routes/roteiro.js'
 import adminRoutes from './routes/admin.js'
 import appSettingsRoutes from './routes/app-settings.js'
 import globalTemplatesRoutes from './routes/globalTemplates.js'
@@ -103,6 +104,7 @@ app.use('/api/follow-ups', authenticate, scopeToAccount, followUpRoutes)
 app.use('/api/agents', authenticate, scopeToAccount, agentRoutes)
 app.use('/api/agent-briefings', authenticate, scopeToAccount, agentBriefingRoutes)
 app.use('/api/copilot', authenticate, scopeToAccount, copilotRoutes)
+app.use('/api/roteiro', authenticate, scopeToAccount, roteiroRoutes)
 app.use('/api/admin', authenticate, adminRoutes)
 app.use('/api/app-settings', authenticate, appSettingsRoutes)
 // Templates globais (super_admin only) — sem scopeToAccount pq nao sao presos a conta
