@@ -82,7 +82,7 @@ export default function RoteiroCard({ leadId, accountId, mode, onAsk, canForce }
   // Troca de lead: limpa avisos e edicao do lead anterior
   useEffect(() => { setEditingKey(null); setAdvanced(null); setOffscript(null); setSaveError(null) }, [leadId])
 
-  useSSE('lead:updated', useCallback((d: any) => { if (Number(d?.id ?? d?.lead_id) === leadId) load(true) }, [leadId, load]))
+  useSSE('lead:updated', useCallback((d: any) => { if (d?.bulk || Number(d?.id ?? d?.lead_id) === leadId) load(true) }, [leadId, load]))
   useSSE('lead:roteiro', useCallback((d: any) => {
     if (Number(d?.lead_id) !== leadId) return
     if (d?.offscript && d.offscript.question) setOffscript(d.offscript)

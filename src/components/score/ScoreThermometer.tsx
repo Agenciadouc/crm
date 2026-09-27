@@ -63,7 +63,7 @@ export default function ScoreThermometer({ leadId, accountId }: Props) {
   useEffect(() => () => { if (timerRef.current) { clearTimeout(timerRef.current); timerRef.current = null } }, [leadId])
 
   const reloadIfMine = useCallback((id: unknown) => { if (Number(id) === leadId) load(true) }, [leadId, load])
-  useSSE('lead:updated', useCallback((d: any) => reloadIfMine(d?.id ?? d?.lead_id), [reloadIfMine]))
+  useSSE('lead:updated', useCallback((d: any) => { if (d?.bulk) load(true); else reloadIfMine(d?.id ?? d?.lead_id) }, [reloadIfMine, load]))
   useSSE('lead:score_up', useCallback((d: any) => reloadIfMine(d?.lead_id), [reloadIfMine]))
   useSSE('lead:roteiro', useCallback((d: any) => reloadIfMine(d?.lead_id), [reloadIfMine]))
   useSSE('lead:message', useCallback((d: any) => {

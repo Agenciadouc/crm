@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { createRoteiroTestDb, seedRoteiroBase, addLead, addMessage } from './helpers/roteiroDb.js'
 import { saveDraft, publish } from '../server/services/roteiro/repo.js'
 import { saveAnswer } from '../server/services/roteiro/leadRoteiro.js'
-import { configureStageMoveHooks, moveLeadToStage, resolveManualMove } from '../server/services/stageMove.js'
+import { configureStageMoveHooks, moveLeadToStage, resolveManualMove, bulkMoveLeads } from '../server/services/stageMove.js'
 import {
   bootRoteiroRuntime, buildOnBandUp, onInboundSaved, onOutboundSaved, roteiroOnChatSend,
   setAiExtractHandler, enqueueAiExtract,
@@ -61,6 +61,56 @@ test('onMoved: chama CAPI 1x, marca advanced, agenda nota e manda SSE lead:updat
   assert.equal(ask.bought_at, null)
   assert.deepEqual(calls.score, [leadId])
   assert.deepEqual(calls.sse, [[accountId, 'lead:updated', { id: leadId }]])
+})
+
+test('onMoved silent: faz CAPI/asks/nota mas nao manda lead:updated por lead', () => {
+  const { db, accountId, funnelId, stages, calls } = setup()
+  const leadId = addLead(db, { account_id: accountId, funnel_id: funnelId, stage_id: stages.novo })
+  const lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(leadId)
+  const r = moveLeadToStage(db, { lead, toStageId: stages.qualificando, trigger: 'manual', silent: true })
+  assert.equal(r.moved, true)
+  assert.equal(calls.capi.length, 1)
+  assert.deepEqual(calls.score, [leadId])
+  assert.deepEqual(calls.sse, [])
+})
+
+test('onMoved: erro ao agendar a nota nao impede o SSE', () => {
+  const db = createRoteiroTestDb()
+  const { accountId, funnelId, stages } = seedRoteiroBase(db)
+  const sse = []
+  bootRoteiroRuntime({ db, broadcastSSE: (...a) => sse.push(a), triggerCapiForStageChange: () => {}, schedule: () => { throw new Error('agenda fora') } })
+  const leadId = addLead(db, { account_id: accountId, funnel_id: funnelId, stage_id: stages.novo })
+  const lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(leadId)
+  moveLeadToStage(db, { lead, toStageId: stages.qualificando, trigger: 'manual' })
+  assert.deepEqual(sse, [[accountId, 'lead:updated', { id: leadId }]])
+})
+
+test('bulkMoveLeads: move em silencio e manda UM lead:updated {bulk} no fim; lead de outra conta e ignorado', () => {
+  const { db, accountId, otherAccountId, funnelId, stages, calls, gerenteId } = setup()
+  const a = addLead(db, { account_id: accountId, funnel_id: funnelId, stage_id: stages.novo, name: 'A' })
+  const b = addLead(db, { account_id: accountId, funnel_id: funnelId, stage_id: stages.novo, name: 'B' })
+  const c = addLead(db, { account_id: accountId, funnel_id: funnelId, stage_id: stages.novo, name: 'C' })
+  const outra = addLead(db, { account_id: otherAccountId, funnel_id: funnelId, stage_id: stages.novo, name: 'X' })
+  const sent = []
+  const r = bulkMoveLeads(db, { accountId, leadIds: [a, b, c, outra], toStageId: stages.qualificando, userId: gerenteId, broadcast: (...x) => sent.push(x) })
+  assert.equal(r.moved, 3)
+  assert.deepEqual(r.blocked, [])
+  assert.equal(calls.capi.length, 3)
+  assert.deepEqual(calls.sse, [], 'nenhum lead:updated por lead')
+  assert.deepEqual(sent, [[accountId, 'lead:updated', { bulk: true }]])
+  assert.equal(db.prepare('SELECT stage_id FROM leads WHERE id = ?').get(outra).stage_id, stages.novo)
+})
+
+test('bulkMoveLeads: nada movido -> nenhum SSE; travados vem em blocked', () => {
+  const { db, accountId, funnelId, stages, gerenteId } = setup()
+  publishRoteiro(db, accountId, funnelId, stages)
+  const a = addLead(db, { account_id: accountId, funnel_id: funnelId, stage_id: stages.qualificando, name: 'Travado' })
+  const sent = []
+  const r = bulkMoveLeads(db, { accountId, leadIds: [a], toStageId: stages.proposta, userId: gerenteId, broadcast: (...x) => sent.push(x) })
+  assert.equal(r.moved, 0)
+  assert.equal(r.blocked.length, 1)
+  assert.equal(r.blocked[0].name, 'Travado')
+  assert.deepEqual(sent, [])
 })
 
 test('onMoved: etapa de conversao marca bought', () => {

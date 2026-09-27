@@ -3,7 +3,7 @@ import db from '../db.js'
 import { requireRole } from '../middleware/auth.js'
 import { broadcastSSE } from '../sse.js'
 import { triggerCapiForStageChange } from '../services/metaCapi.js'
-import { moveLeadToStage, resolveManualMove } from '../services/stageMove.js'
+import { moveLeadToStage, resolveManualMove, bulkMoveLeads } from '../services/stageMove.js'
 import { markBought } from '../services/roteiro/asks.js'
 import { scheduleScore } from '../services/leadScore/recalc.js'
 import { notifyAndOpenLead } from '../services/leadHandoff.js'
@@ -641,6 +641,7 @@ router.put('/:id/stage', (req, res) => {
     result = moveLeadToStage(db, {
       lead, toStageId: Number(stage_id), trigger: decision.force ? 'forced' : 'manual',
       userId: req.user.id, notes: decision.notes, force: decision.force, gate: true,
+      silent: true, // o SSE com o lead completo sai abaixo (evita 2 lead:updated)
     })
   } catch (e) {
     if (e.message === 'stage_not_in_funnel') return res.status(400).json({ error: 'Etapa nao pertence ao funil do lead' })
@@ -1143,22 +1144,8 @@ router.post('/bulk/assign', requireRole('super_admin', 'gerente'), (req, res) =>
 router.post('/bulk/stage', requireRole('super_admin', 'gerente'), (req, res) => {
   const { lead_ids, stage_id } = req.body
   if (!lead_ids || !Array.isArray(lead_ids) || !stage_id) return res.status(400).json({ error: 'lead_ids and stage_id required' })
-  // Um a um pela porta unica (trava do roteiro + CAPI/nota pelo hook). Travados nao movem.
-  let moved = 0
-  const blocked = []
-  for (const id of lead_ids) {
-    const lead = req.accountId
-      ? db.prepare('SELECT * FROM leads WHERE id = ? AND account_id = ?').get(id, req.accountId)
-      : db.prepare('SELECT * FROM leads WHERE id = ?').get(id)
-    if (!lead) continue
-    try {
-      const r = moveLeadToStage(db, { lead, toStageId: Number(stage_id), trigger: 'manual', userId: req.user.id, gate: true })
-      if (r.moved) moved++
-      else if (r.reason === 'roteiro_gate') blocked.push({ id: lead.id, name: lead.name, pending_count: r.pending.length })
-    } catch (e) {
-      if (e.message !== 'stage_not_in_funnel') throw e
-    }
-  }
+  // Um a um pela porta unica, sem SSE por lead; 1 lead:updated {bulk} no fim. Travados nao movem.
+  const { moved, blocked } = bulkMoveLeads(db, { accountId: req.accountId || null, leadIds: lead_ids, toStageId: Number(stage_id), userId: req.user.id, broadcast: broadcastSSE })
   res.json({ ok: true, count: lead_ids.length, moved, blocked })
 })
 

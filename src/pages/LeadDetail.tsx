@@ -80,7 +80,7 @@ export default function LeadDetail() {
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages])
 
   useSSE('lead:message', useCallback((data: any) => { if (data.leadId === parseInt(id || '0')) loadLead() }, [id, loadLead]))
-  useSSE('lead:updated', useCallback((data: any) => { if (data.id === parseInt(id || '0')) loadLead() }, [id, loadLead]))
+  useSSE('lead:updated', useCallback((data: any) => { if (data?.bulk || data?.id === parseInt(id || '0')) loadLead() }, [id, loadLead]))
 
   const handleSendMsg = async () => {
     if (!msgText.trim() || !lead || !accountId) return

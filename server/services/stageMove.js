@@ -18,7 +18,8 @@ export function resolveManualMove({ role, forceReason }) {
   return { ok: true, force: true, notes: reason.slice(0, 500) }
 }
 
-export function moveLeadToStage(db, { lead, toStageId, trigger, userId = null, notes = null, force = false, gate = true }) {
+// silent: nao manda o lead:updated deste lead (quem chama avisa depois, ex.: mover em massa).
+export function moveLeadToStage(db, { lead, toStageId, trigger, userId = null, notes = null, force = false, gate = true, silent = false }) {
   const current = db.prepare('SELECT * FROM leads WHERE id = ?').get(lead.id)
 
   const targetStage = db.prepare('SELECT id FROM funnel_stages WHERE id = ? AND funnel_id = ?').get(toStageId, current.funnel_id)
@@ -43,10 +44,36 @@ export function moveLeadToStage(db, { lead, toStageId, trigger, userId = null, n
   })()
 
   try {
-    onMovedHook({ db, lead: current, fromStageId, toStageId, historyId, trigger })
+    onMovedHook({ db, lead: current, fromStageId, toStageId, historyId, trigger, silent })
   } catch (e) {
     console.error('[stageMove] hook:', e.message)
   }
 
   return { moved: true, fromStageId, toStageId, historyId }
+}
+
+// Mover em massa (POST /leads/bulk/stage): um a um pela porta unica (trava do roteiro +
+// CAPI/nota pelo hook), sem SSE por lead; no fim UM lead:updated {bulk:true} por conta.
+// accountId null (super_admin sem conta) = qualquer conta. Travados nao movem.
+export function bulkMoveLeads(db, { accountId = null, leadIds, toStageId, userId = null, broadcast = () => {} }) {
+  let moved = 0
+  const blocked = []
+  const touched = new Set()
+  for (const id of leadIds) {
+    const lead = accountId
+      ? db.prepare('SELECT * FROM leads WHERE id = ? AND account_id = ?').get(id, accountId)
+      : db.prepare('SELECT * FROM leads WHERE id = ?').get(id)
+    if (!lead) continue
+    try {
+      const r = moveLeadToStage(db, { lead, toStageId: Number(toStageId), trigger: 'manual', userId, gate: true, silent: true })
+      if (r.moved) { moved++; touched.add(lead.account_id) }
+      else if (r.reason === 'roteiro_gate') blocked.push({ id: lead.id, name: lead.name, pending_count: r.pending.length })
+    } catch (e) {
+      if (e.message !== 'stage_not_in_funnel') throw e
+    }
+  }
+  for (const acc of touched) {
+    try { broadcast(acc, 'lead:updated', { bulk: true }) } catch {}
+  }
+  return { moved, blocked }
 }

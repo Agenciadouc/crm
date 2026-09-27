@@ -34,17 +34,18 @@ export function buildOnBandUp(broadcastSSE) {
   }
 }
 
-// Hook unico da troca de etapa: CAPI (so aqui, pra nao duplicar), asks, nota e SSE.
+// Hook unico da troca de etapa: CAPI (so aqui, pra nao duplicar), asks, nota e SSE (menos se silent).
 function buildOnMoved({ broadcastSSE, triggerCapiForStageChange }) {
-  return ({ db, lead, toStageId, historyId }) => {
+  return ({ db, lead, toStageId, historyId, silent = false }) => {
     try { triggerCapiForStageChange(lead.id, toStageId, historyId) } catch (e) { console.error('[Roteiro] CAPI:', e.message) }
     try {
       markAdvanced(db, { leadId: lead.id })
       const stage = db.prepare('SELECT is_conversion FROM funnel_stages WHERE id = ?').get(toStageId)
       if (stage && stage.is_conversion) markBought(db, { leadId: lead.id })
     } catch (e) { console.error('[Roteiro] asks na troca de etapa:', e.message) }
-    scheduleFn(lead.id)
-    try { broadcastSSE(lead.account_id, 'lead:updated', { id: lead.id }) } catch {}
+    try { scheduleFn(lead.id) } catch (e) { console.error('[Roteiro] agendar nota:', e.message) }
+    // silent: quem moveu avisa depois (massa manda 1 SSE; PUT /stage manda o lead completo)
+    if (!silent) { try { broadcastSSE(lead.account_id, 'lead:updated', { id: lead.id }) } catch {} }
   }
 }
 

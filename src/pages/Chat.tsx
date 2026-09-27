@@ -506,7 +506,8 @@ export default function Chat() {
   }, [selectedLeadId, loadLead, loadLeadsList]))
   useSSE('lead:created', useCallback(() => loadLeadsList(), [loadLeadsList]))
   useSSE('lead:updated', useCallback((data: any) => {
-    if (data.id === selectedLeadId) loadLead({ silent: true })
+    // bulk: mover em massa manda 1 aviso sem id — recarrega o lead aberto tambem
+    if (data?.bulk || data?.id === selectedLeadId) loadLead({ silent: true })
     loadLeadsList()
   }, [selectedLeadId, loadLead, loadLeadsList]))
   useSSE('lead:archived', useCallback((data: { id: number }) => {
