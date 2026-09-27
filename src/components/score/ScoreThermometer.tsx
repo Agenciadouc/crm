@@ -65,6 +65,8 @@ export default function ScoreThermometer({ leadId, accountId }: Props) {
   const reloadIfMine = useCallback((id: unknown) => { if (Number(id) === leadId) load(true) }, [leadId, load])
   useSSE('lead:updated', useCallback((d: any) => { if (d?.bulk) load(true); else reloadIfMine(d?.id ?? d?.lead_id) }, [reloadIfMine, load]))
   useSSE('lead:score_up', useCallback((d: any) => reloadIfMine(d?.lead_id), [reloadIfMine]))
+  // Recalculo gravou nota nova (5 s depois da acao do vendedor): le a nota atualizada
+  useSSE('lead:score', useCallback((d: any) => reloadIfMine(d?.lead_id), [reloadIfMine]))
   useSSE('lead:roteiro', useCallback((d: any) => reloadIfMine(d?.lead_id), [reloadIfMine]))
   useSSE('lead:message', useCallback((d: any) => {
     if (Number(d?.leadId ?? d?.lead_id) !== leadId) return

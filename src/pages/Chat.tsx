@@ -25,6 +25,7 @@ import { useCityFilter } from '../components/CityFilter'
 import MoreFilters, { useScoreFilter } from '../components/MoreFilters'
 import ScoreBadge from '../components/score/ScoreBadge'
 import ScoreThermometer from '../components/score/ScoreThermometer'
+import { isScoreBand } from '../lib/score'
 import RoteiroCard from '../components/roteiro/RoteiroCard'
 import StageGateModal from '../components/roteiro/StageGateModal'
 import RecognizedQuestionBar from '../components/roteiro/RecognizedQuestionBar'
@@ -510,6 +511,12 @@ export default function Chat() {
     if (data?.bulk || data?.id === selectedLeadId) loadLead({ silent: true })
     loadLeadsList()
   }, [selectedLeadId, loadLead, loadLeadsList]))
+  // Nota nova do termometro: troca so o selo do lead na lista (sem recarregar tudo)
+  useSSE('lead:score', useCallback((data: { lead_id: number; score: number; band: string }) => {
+    if (!data || !isScoreBand(data.band)) return
+    const band = data.band
+    setLeads(prev => prev.map(l => l.id === data.lead_id ? { ...l, score_prev: l.score ?? null, score: data.score, score_band: band } : l))
+  }, []))
   useSSE('lead:archived', useCallback((data: { id: number }) => {
     setLeads(prev => prev.filter(l => l.id !== data.id))
     if (selectedLeadId === data.id) setSelectedLeadId(null)

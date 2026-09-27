@@ -34,6 +34,13 @@ export function buildOnBandUp(broadcastSSE) {
   }
 }
 
+// Nota ou faixa mudou (recalculo em tempo real): SSE leve pro termometro e o selo da lista.
+export function buildOnScoreChanged(broadcastSSE) {
+  return ({ lead, score, band }) => {
+    try { broadcastSSE(lead.account_id, 'lead:score', { lead_id: lead.id, score, band }) } catch (e) { console.error('[Termometro] SSE lead:score:', e.message) }
+  }
+}
+
 // Hook unico da troca de etapa: CAPI (so aqui, pra nao duplicar), asks, nota e SSE (menos se silent).
 function buildOnMoved({ broadcastSSE, triggerCapiForStageChange }) {
   return ({ db, lead, toStageId, historyId, silent = false }) => {
@@ -51,7 +58,7 @@ function buildOnMoved({ broadcastSSE, triggerCapiForStageChange }) {
 
 // Chamado 1x no boot do servidor. `schedule` so e trocado em teste.
 export function bootRoteiroRuntime({ db, broadcastSSE, triggerCapiForStageChange, schedule }) {
-  configureScoreRuntime({ db, onBandUp: buildOnBandUp(broadcastSSE) })
+  configureScoreRuntime({ db, onBandUp: buildOnBandUp(broadcastSSE), onChanged: buildOnScoreChanged(broadcastSSE) })
   scheduleFn = typeof schedule === 'function' ? schedule : scheduleScore
   broadcastFn = typeof broadcastSSE === 'function' ? broadcastSSE : () => {}
   configureStageMoveHooks({ onMoved: buildOnMoved({ broadcastSSE, triggerCapiForStageChange }) })

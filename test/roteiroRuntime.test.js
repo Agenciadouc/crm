@@ -5,7 +5,7 @@ import { saveDraft, publish } from '../server/services/roteiro/repo.js'
 import { saveAnswer } from '../server/services/roteiro/leadRoteiro.js'
 import { configureStageMoveHooks, moveLeadToStage, resolveManualMove, bulkMoveLeads } from '../server/services/stageMove.js'
 import {
-  bootRoteiroRuntime, buildOnBandUp, onInboundSaved, onOutboundSaved, roteiroOnChatSend,
+  bootRoteiroRuntime, buildOnBandUp, buildOnScoreChanged, onInboundSaved, onOutboundSaved, roteiroOnChatSend,
   setAiExtractHandler, enqueueAiExtract,
 } from '../server/services/roteiro/runtime.js'
 
@@ -143,6 +143,13 @@ test('buildOnBandUp: manda SSE lead:score_up com dados do lead', () => {
   const onBandUp = buildOnBandUp((...a) => sse.push(a))
   onBandUp({ lead: { id: 5, account_id: 2, name: 'Maria', attendant_id: 9 }, result: { score: 72, band: 'quente' } })
   assert.deepEqual(sse, [[2, 'lead:score_up', { lead_id: 5, name: 'Maria', score: 72, band: 'quente', attendant_id: 9 }]])
+})
+
+test('buildOnScoreChanged: manda SSE leve lead:score {lead_id, score, band}', () => {
+  const sent = []
+  buildOnScoreChanged((...a) => sent.push(a))({ lead: { id: 7, account_id: 3 }, score: 72, band: 'quente' })
+  assert.deepEqual(sent, [[3, 'lead:score', { lead_id: 7, score: 72, band: 'quente' }]])
+  assert.doesNotThrow(() => buildOnScoreChanged(() => { throw new Error('x') })({ lead: { id: 1, account_id: 1 }, score: 1, band: 'frio' }))
 })
 
 test('onInboundSaved: marca replied dentro da janela da conta, agenda nota e chama extracao', () => {

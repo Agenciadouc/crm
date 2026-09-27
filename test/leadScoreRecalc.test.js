@@ -204,6 +204,29 @@ test('createScoreScheduler: 10 schedules seguidos = 1 unico recalculo quando o t
   assert.equal(timers.length, 2)
 })
 
+test('createScoreScheduler: nota mudou -> onChanged (SSE lead:score); igual -> nada', () => {
+  const db = createRoteiroTestDb()
+  const s = seedRoteiroBase(db)
+  const leadId = addLead(db, { account_id: s.accountId, funnel_id: s.funnelId, stage_id: s.stages.qualificando, name: 'Lead G' })
+  const changed = []
+  const timers = []
+  const scheduler = createScoreScheduler({ db, setTimer: fn => { timers.push(fn); return timers.length }, onChanged: x => changed.push(x) })
+
+  scheduler.schedule(leadId); scheduler.flushAll()
+  assert.equal(changed.length, 1, '1a nota: mudou de nada para algo')
+  const row = db.prepare('SELECT score, score_band, account_id FROM leads WHERE id = ?').get(leadId)
+  assert.deepEqual(changed[0], { lead: { id: leadId, account_id: s.accountId }, score: row.score, band: row.score_band })
+
+  scheduler.schedule(leadId); scheduler.flushAll()
+  assert.equal(changed.length, 1, 'mesma nota e faixa: sem aviso')
+
+  // onChanged que falha nao derruba o recalculo
+  const bad = createScoreScheduler({ db, setTimer: () => 1, onChanged: () => { throw new Error('sse fora') } })
+  db.prepare('UPDATE leads SET score = NULL, score_band = NULL WHERE id = ?').run(leadId)
+  bad.schedule(leadId); bad.flushAll()
+  assert.ok(db.prepare('SELECT score FROM leads WHERE id = ?').get(leadId).score != null)
+})
+
 test('createScoreScheduler: flushAll roda os pendentes na hora', () => {
   const db = createRoteiroTestDb()
   const s = seedRoteiroBase(db)

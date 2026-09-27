@@ -18,7 +18,8 @@ function roseIntoHot(prevBand, nextBand) {
 }
 
 // Recalcula a nota de 1 lead e grava as colunas. null se o lead nao existe ou esta em etapa final (is_terminal).
-export function recalcLeadScore(db, leadId, { now = new Date(), onBandUp } = {}) {
+// onChanged({ lead, score, band }): nota ou faixa mudou (tempo real; o noturno nao passa).
+export function recalcLeadScore(db, leadId, { now = new Date(), onBandUp, onChanged } = {}) {
   const lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(leadId)
   if (!lead) return null
 
@@ -37,6 +38,12 @@ export function recalcLeadScore(db, leadId, { now = new Date(), onBandUp } = {})
     WHERE id = ?
   `).run(result.score, result.band, result.fit, result.fitGrade, result.engagement, result.quadrant, JSON.stringify(result.reasons), prevScore, nowIso, leadId)
 
+  if (typeof onChanged === 'function' && (prevScore !== result.score || (lead.score_band ?? null) !== result.band)) {
+    try {
+      onChanged({ lead: { id: lead.id, account_id: lead.account_id }, score: result.score, band: result.band })
+    } catch (e) { console.error('[Termometro] aviso de nota:', e && e.message) }
+  }
+
   if (roseIntoHot(lead.score_band ?? null, result.band)) {
     const today = nowIso.slice(0, 10)
     const alertedToday = lead.score_alerted_at && String(lead.score_alerted_at).slice(0, 10) === today
@@ -51,13 +58,13 @@ export function recalcLeadScore(db, leadId, { now = new Date(), onBandUp } = {})
 
 // Agendador com coalescencia: no maximo 1 recalculo por lead por janela (delayMs).
 // schedule(id) so cria timer se nao houver um pendente pra esse lead; flushAll roda os pendentes na hora.
-export function createScoreScheduler({ db, onBandUp, delayMs = SCORE_SCHEDULE_DELAY_MS, setTimer = setTimeout, clearTimer = clearTimeout } = {}) {
+export function createScoreScheduler({ db, onBandUp, onChanged, delayMs = SCORE_SCHEDULE_DELAY_MS, setTimer = setTimeout, clearTimer = clearTimeout } = {}) {
   const pending = new Map() // leadId -> handle
 
   function runOne(leadId) {
     pending.delete(leadId)
     try {
-      recalcLeadScore(db, leadId, { onBandUp })
+      recalcLeadScore(db, leadId, { onBandUp, onChanged })
     } catch (e) {
       console.error('[Termometro]', e && e.message)
     }
@@ -85,9 +92,9 @@ export function createScoreScheduler({ db, onBandUp, delayMs = SCORE_SCHEDULE_DE
 let runtimeScheduler = null
 let runtimeOnBandUp = null
 
-export function configureScoreRuntime({ db, onBandUp }) {
+export function configureScoreRuntime({ db, onBandUp, onChanged }) {
   runtimeOnBandUp = onBandUp || null
-  runtimeScheduler = createScoreScheduler({ db, onBandUp })
+  runtimeScheduler = createScoreScheduler({ db, onBandUp, onChanged })
 }
 
 // Aviso de faixa subindo configurado na inicializacao (usado pelo recalculo noturno).
