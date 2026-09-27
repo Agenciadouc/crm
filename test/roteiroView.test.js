@@ -38,6 +38,15 @@ test('bulkMoveSummary no plural, singular e sem travados', () => {
   assert.equal(bulkMoveSummary(null), '0 movidos')
 })
 
+test('bulkMoveSummary explica os que nao mudaram (mesma etapa ou outro funil)', () => {
+  assert.equal(
+    bulkMoveSummary({ count: 17, moved: 12, blocked: [{}, {}, {}] }),
+    '12 movidos · 3 travados por perguntas pendentes · 2 não mudaram porque já estavam nessa etapa ou estão em outro funil',
+  )
+  assert.equal(bulkMoveSummary({ count: 5, moved: 4, blocked: [] }), '4 movidos · 1 não mudou porque já estava nessa etapa ou está em outro funil')
+  assert.equal(bulkMoveSummary({ count: 4, moved: 4, blocked: [] }), '4 movidos')
+})
+
 test('displayQuestionText tira {nome} sem deixar virgula solta', () => {
   assert.equal(displayQuestionText('{nome}, qual o prazo do evento?'), 'Qual o prazo do evento?')
   assert.equal(displayQuestionText('Qual o prazo, {nome}?'), 'Qual o prazo?')

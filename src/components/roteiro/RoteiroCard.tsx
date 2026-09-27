@@ -398,19 +398,29 @@ export default function RoteiroCard({ leadId, accountId, mode, onAsk, canForce }
           )}
           {split.pending.length > 0 && (
             <div style={{ marginBottom: 6 }}>
-              <div style={{ fontSize: 10, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 2 }}>Pendentes ({split.pending.length})</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 10, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 2 }}>
+                Pendentes ({split.pending.length})
+                <HelpTip title="Pendentes" size={11}>
+                  Perguntas desta etapa que ainda não têm resposta. Clique em [Perguntar] para mandar ao cliente, ou clique no texto para anotar o que ele já disse. Ex.: se o cliente contou que o evento é em março, clique em "Para quando é o evento?" e escreva "março".
+                </HelpTip>
+              </div>
               {split.pending.map(q => questionRow(q, true))}
             </div>
           )}
           {split.answered.length > 0 && (
             <div>
-              <button
-                type="button"
-                onClick={() => setShowAnswered(v => !v)}
-                style={{ display: 'flex', alignItems: 'center', gap: 4, background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontSize: 10, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 2 }}
-              >
-                {showAnswered ? <ChevronUp size={11} /> : <ChevronDown size={11} />} Respondidas ({split.answered.length})
-              </button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 2 }}>
+                <button
+                  type="button"
+                  onClick={() => setShowAnswered(v => !v)}
+                  style={{ display: 'flex', alignItems: 'center', gap: 4, background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontSize: 10, color: 'var(--text-muted)', textTransform: 'uppercase' }}
+                >
+                  {showAnswered ? <ChevronUp size={11} /> : <ChevronDown size={11} />} Respondidas ({split.answered.length})
+                </button>
+                <HelpTip title="Respondidas" size={11}>
+                  O que o cliente já respondeu. O robô indica resposta anotada pela IA (com o trecho da conversa); a pessoa indica quem anotou. Use o lápis para corrigir. Ex.: a IA anotou "Até 30 dias" mas o cliente mudou para "abril" — clique no lápis e troque.
+                </HelpTip>
+              </div>
               {showAnswered && split.answered.map(q => questionRow(q, false))}
             </div>
           )}

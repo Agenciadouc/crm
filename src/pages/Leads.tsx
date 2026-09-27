@@ -146,7 +146,10 @@ export default function Leads() {
       const stageName = allStages.find(s => s.id === stageId)?.name || ''
       setBulkResult({ stageName, result: { ...result, blocked: Array.isArray(result?.blocked) ? result.blocked : [] } })
     } catch (e: any) {
+      // Erro: mantem a selecao para tentar de novo
       alert('Erro: ' + (e?.message || 'não deu para mover os leads'))
+      setShowBulkStage(false)
+      return
     }
     setSelected(new Set()); setShowBulkStage(false); loadLeads()
   }

@@ -395,6 +395,8 @@ export default function Chat() {
     suggestionInBoxRef.current = s
     setSuggestionInBox(s)
     setMsgText(s.content)
+    // Texto da IA substitui a caixa: nao e mais a pergunta do roteiro
+    setRoteiroAskKey(null)
   }, [])
 
   const clearSuggestionFromBox = useCallback(() => {
@@ -849,7 +851,9 @@ export default function Chat() {
     try {
       const result = await sendMessage(lead.id, accountId, sentText, override, askKey)
       setMessages(prev => [...prev, result.message])
-      setRoteiroAskKey(null)
+      // Trocou de conversa durante o envio: a caixa (texto e pergunta do roteiro) ja e de outro lead
+      const sameLead = selectedLeadIdRef.current === sentLeadId
+      if (sameLead) setRoteiroAskKey(null)
       if (!askKey && result.recognized_question && result.message?.id) {
         setRecognized({ leadId: sentLeadId, messageId: result.message.id, question: result.recognized_question })
       }
@@ -860,7 +864,8 @@ export default function Chat() {
         setAiSuggestion(null)
         resolveAiSuggestion(suggestionUsed.id, accountId, 'sent', sentText).catch(() => {})
       }
-      setMsgText('')
+      // Sem o guarda, limpar a caixa apagaria tambem a pergunta posta no outro lead (efeito do texto vazio)
+      if (sameLead) setMsgText('')
       if (!result.delivered) setNotice({ kind: 'error', title: 'Mensagem nao entregue', message: 'A mensagem foi salva mas NAO foi enviada no WhatsApp. Verifique a conexao da instancia.' })
       setSendInstanceOverride(null)
       loadLeadsList()

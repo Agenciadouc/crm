@@ -19,13 +19,21 @@ export function progressText(progress) {
   return `${answered} de ${total}`
 }
 
-// "12 movidos · 3 travados por perguntas pendentes"
+// "12 movidos · 3 travados por perguntas pendentes · 2 nao mudaram porque ..."
+// count - moved - blocked: o servidor pula quem ja estava na etapa ou e de outro funil.
 export function bulkMoveSummary(result) {
   const moved = Number(result?.moved) || 0
   const blocked = Array.isArray(result?.blocked) ? result.blocked.length : 0
-  const movedText = `${moved} ${moved === 1 ? 'movido' : 'movidos'}`
-  if (!blocked) return movedText
-  return `${movedText} · ${blocked} ${blocked === 1 ? 'travado' : 'travados'} por perguntas pendentes`
+  const count = Number(result?.count) || 0
+  const skipped = Math.max(0, count - moved - blocked)
+  const parts = [`${moved} ${moved === 1 ? 'movido' : 'movidos'}`]
+  if (blocked) parts.push(`${blocked} ${blocked === 1 ? 'travado' : 'travados'} por perguntas pendentes`)
+  if (skipped) {
+    parts.push(skipped === 1
+      ? '1 não mudou porque já estava nessa etapa ou está em outro funil'
+      : `${skipped} não mudaram porque já estavam nessa etapa ou estão em outro funil`)
+  }
+  return parts.join(' · ')
 }
 
 // Texto cru da pergunta (com {nome}) para mostrar ao vendedor quando nao ha o texto do lead:
