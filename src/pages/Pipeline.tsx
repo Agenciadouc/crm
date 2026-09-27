@@ -3,8 +3,11 @@ import { useNavigate } from 'react-router-dom'
 import { useAccount } from '../context/AccountContext'
 import AccountSelector from '../components/AccountSelector'
 import FilterDropdown, { type FilterValue } from '../components/FilterDropdown'
-import CityFilter, { useCityFilter } from '../components/CityFilter'
+import { useCityFilter } from '../components/CityFilter'
+import MoreFilters, { useScoreFilter } from '../components/MoreFilters'
+import ScoreBadge from '../components/score/ScoreBadge'
 import { geoParams } from '../lib/geoFilter.js'
+import { scoreParams, isScoreFilterActive, EMPTY_SCORE_FILTER } from '../lib/scoreFilter.js'
 import { useSSE } from '../context/SSEContext'
 import { fetchFunnels, fetchLeads, fetchTags, fetchUsers, moveLeadStage, fetchPipelineMetrics, archiveLead, updateLeadValue, type Funnel, type Lead, type PipelineMetric, type Tag, type User as ApiUser } from '../lib/api'
 import { Phone, MessageCircle, User, Clock, ChevronDown, ChevronRight, ArrowRight, Smartphone, Archive, DollarSign, X } from 'lucide-react'
@@ -53,6 +56,7 @@ export default function Pipeline() {
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
   const [cityFilter, setCityFilter] = useCityFilter(accountId)
+  const [scoreFilter, setScoreFilter] = useScoreFilter(accountId)
   const [expandedColumns, setExpandedColumns] = useState<Set<number>>(new Set())
   const CARDS_LIMIT = 5
 
@@ -66,7 +70,7 @@ export default function Pipeline() {
       setFunnel(active || null)
       if (active) {
         const [data, m] = await Promise.all([
-          fetchLeads(accountId, { funnel_id: active.id, limit: 500, ...geoParams(cityFilter) }),
+          fetchLeads(accountId, { funnel_id: active.id, limit: 500, ...geoParams(cityFilter), ...scoreParams(scoreFilter) }),
           fetchPipelineMetrics(accountId, active.id, cityFilter).catch(() => ({ metrics: [], totalLeads: 0 })),
         ])
         setLeads(data.leads)
@@ -79,7 +83,7 @@ export default function Pipeline() {
       }
     } catch {}
     setLoading(false)
-  }, [accountId, isMobile, cityFilter])
+  }, [accountId, isMobile, cityFilter, scoreFilter])
 
   useEffect(() => { loadData() }, [loadData])
   useEffect(() => { if (accountId) fetchTags(accountId).then(setTags).catch(() => {}) }, [accountId])
@@ -235,7 +239,7 @@ export default function Pipeline() {
                     <div key={lead.id} className="kanban-mobile-card">
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                         <div onClick={() => navigate(`/leads/${lead.id}`)} style={{ cursor: 'pointer', flex: 1 }}>
-                          <div style={{ fontSize: 14, fontWeight: 600 }}>{lead.name || 'Sem nome'}</div>
+                          <div style={{ fontSize: 14, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>{lead.name || 'Sem nome'} <ScoreBadge score={lead.score} band={lead.score_band} prev={lead.score_prev} /></div>
                           {lead.phone && <div style={{ fontSize: 12, color: '#9B96B0', display: 'flex', alignItems: 'center', gap: 4, marginTop: 2 }}><Phone size={10} /> {lead.phone}</div>}
                         </div>
                         <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
@@ -331,9 +335,9 @@ export default function Pipeline() {
           />
           <input type="date" className="input" style={{ width: 140 }} value={dateFrom} onChange={e => setDateFrom(e.target.value)} title="Data inicial (criacao)" />
           <input type="date" className="input" style={{ width: 140 }} value={dateTo} onChange={e => setDateTo(e.target.value)} title="Data final (criacao)" />
-          <CityFilter accountId={accountId} value={cityFilter} onChange={setCityFilter} />
-          {(tagFilter.length > 0 || attendantFilter.length > 0 || dateFrom || dateTo || cityFilter) && (
-            <button className="btn btn-secondary btn-sm" onClick={() => { setTagFilter([]); setAttendantFilter([]); setDateFrom(''); setDateTo(''); setCityFilter('') }}>
+          <MoreFilters accountId={accountId} city={cityFilter} onCityChange={setCityFilter} score={scoreFilter} onScoreChange={setScoreFilter} />
+          {(tagFilter.length > 0 || attendantFilter.length > 0 || dateFrom || dateTo || cityFilter || isScoreFilterActive(scoreFilter)) && (
+            <button className="btn btn-secondary btn-sm" onClick={() => { setTagFilter([]); setAttendantFilter([]); setDateFrom(''); setDateTo(''); setCityFilter(''); setScoreFilter({ ...EMPTY_SCORE_FILTER, bands: [] }) }}>
               Limpar filtros
             </button>
           )}
@@ -376,7 +380,10 @@ export default function Pipeline() {
                       onMouseLeave={e => { e.currentTarget.style.opacity = '0.5'; e.currentTarget.style.background = 'transparent' }}>
                       <Archive size={12} />
                     </button>
-                    <div className="kanban-card-name" style={{ paddingRight: 20 }}>{lead.name || 'Sem nome'}</div>
+                    <div className="kanban-card-name" style={{ paddingRight: 20, display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>{lead.name || 'Sem nome'}</span>
+                      <ScoreBadge score={lead.score} band={lead.score_band} prev={lead.score_prev} />
+                    </div>
                     {lead.phone && <div className="kanban-card-phone"><Phone size={10} /> {lead.phone}</div>}
                     {lead.tags && lead.tags.length > 0 && (
                       <div className="kanban-card-tags">

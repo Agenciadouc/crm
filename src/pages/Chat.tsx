@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
+import { useLocation } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { useAccount } from '../context/AccountContext'
 import { useSSE } from '../context/SSEContext'
@@ -20,8 +21,12 @@ import {
 } from '../lib/api'
 import EditTaskModal from '../components/EditTaskModal'
 import FilterDropdown, { type FilterValue } from '../components/FilterDropdown'
-import CityFilter, { useCityFilter } from '../components/CityFilter'
+import { useCityFilter } from '../components/CityFilter'
+import MoreFilters, { useScoreFilter } from '../components/MoreFilters'
+import ScoreBadge from '../components/score/ScoreBadge'
+import ScoreThermometer from '../components/score/ScoreThermometer'
 import { geoParams, leadMatchesGeo } from '../lib/geoFilter.js'
+import { scoreParams, leadMatchesScore } from '../lib/scoreFilter.js'
 import {
   MessageCircle, Search, Send, Phone, User, Edit3, Save, X, Plus,
   StickyNote, Tag as TagIcon, GitBranch, Smartphone, ListOrdered, ChevronRight, Check, Clock, Archive, Ban, ListTodo, ChevronDown, ChevronUp, Trash2, Paperclip, FileText, MessageSquarePlus, Copy, Zap, Pause, Play, Bot,
@@ -93,6 +98,17 @@ export default function Chat() {
       }
     }
   }
+  // Link /chat?lead_id=X com o Chat ja aberto (ex.: aviso "lead esquentou"): troca a conversa
+  const location = useLocation()
+  useEffect(() => {
+    const params = new URLSearchParams(location.search)
+    const id = parseInt(params.get('lead') || params.get('lead_id') || '')
+    if (id) {
+      setSelectedLeadId(id)
+      if (isMobile) setMobileTab('chat')
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.search])
   // Quando vai pra Info/Historico via bottom nav, sincroniza com a rightTab interna
   const switchMobileTab = (tab: 'conversas' | 'chat' | 'info' | 'history') => {
     setMobileTab(tab)
@@ -126,6 +142,9 @@ export default function Chat() {
   const [attendantFilter, setAttendantFilter] = useState<FilterValue[]>([])
   const [stageFilter, setStageFilter] = useState<FilterValue[]>([])
   const [geoFilter, setGeoFilter] = useCityFilter(accountId)
+  const [scoreFilter, setScoreFilter] = useScoreFilter(accountId)
+  // Ordenar: Mais recentes (padrao, nao lidas primeiro) | Termometro (nota mais alta primeiro)
+  const [listSort, setListSort] = useState<'recent' | 'score'>('recent')
   const [showArchived, setShowArchived] = useState(false)
   const [msgText, setMsgText] = useState('')
   const [readyMessages, setReadyMessages] = useState<ReadyMessage[]>([])
@@ -281,10 +300,11 @@ export default function Chat() {
     if (attCsv) filters.attendant_id = attCsv
     const instCsv = toCsv(instanceFilter)
     if (instCsv) filters.instance_id = instCsv
-    Object.assign(filters, geoParams(geoFilter))
+    Object.assign(filters, geoParams(geoFilter), scoreParams(scoreFilter))
+    if (listSort === 'score') filters.sort = 'score'
 
     fetchLeads(accountId, filters).then(data => setLeads(data.leads))
-  }, [accountId, instanceFilter, tagFilter, stageFilter, attendantFilter, showArchived, debouncedSearch, geoFilter])
+  }, [accountId, instanceFilter, tagFilter, stageFilter, attendantFilter, showArchived, debouncedSearch, geoFilter, scoreFilter, listSort])
   useEffect(() => { loadLeadsList() }, [loadLeadsList])
 
   // Race token: cada chamada de loadLead recebe um id incremental.
@@ -714,6 +734,7 @@ export default function Chat() {
     }
     // Estado/cidade: a lista ja vem filtrada do servidor; aqui cobre lead que chega em tempo real
     if (geoFilter) result = result.filter(l => leadMatchesGeo(l, geoFilter))
+    result = result.filter(l => leadMatchesScore(l, scoreFilter))
     if (search.trim()) {
       const s = search.toLowerCase()
       result = result.filter(l => (l.name || '').toLowerCase().includes(s) || (l.phone || '').includes(s))
@@ -722,6 +743,18 @@ export default function Chat() {
     // last_inbound_at (msg recebida do cliente) desc — msg outbound do atendente NAO reordena.
     // Fallback pra updated_at pra leads sem inbound ainda. Leads recem-marcados como lidos NESTA
     // sessao continuam contando como "com prioridade" pra nao afundar (fix de sessão anterior).
+    // Modo Termometro: nota mais alta primeiro (sem nota vai pro fim), depois o criterio de recencia;
+    // aqui nao sobe as nao lidas para o topo.
+    if (listSort === 'score') {
+      return [...result].sort((a, b) => {
+        const aScore = a.score ?? -1
+        const bScore = b.score ?? -1
+        if (aScore !== bScore) return bScore - aScore
+        const aTs = a.last_inbound_at || a.updated_at || ''
+        const bTs = b.last_inbound_at || b.updated_at || ''
+        return bTs.localeCompare(aTs)
+      })
+    }
     return [...result].sort((a, b) => {
       const aHighlighted = (a.unread_count || 0) > 0 || recentlyReadIds.has(a.id) ? 1 : 0
       const bHighlighted = (b.unread_count || 0) > 0 || recentlyReadIds.has(b.id) ? 1 : 0
@@ -730,7 +763,7 @@ export default function Chat() {
       const bTs = b.last_inbound_at || b.updated_at || ''
       return bTs.localeCompare(aTs)
     })
-  }, [leads, search, tagFilter, attendantFilter, stageFilter, recentlyReadIds, geoFilter])
+  }, [leads, search, tagFilter, attendantFilter, stageFilter, recentlyReadIds, geoFilter, scoreFilter, listSort])
 
   // Title da aba: soma total de unread → mostra "(N) Dros CRM"
   useEffect(() => {
@@ -1182,7 +1215,7 @@ export default function Chat() {
               onChange={setAttendantFilter}
             />
           )}
-          <CityFilter accountId={accountId} value={geoFilter} onChange={setGeoFilter} />
+          <MoreFilters accountId={accountId} city={geoFilter} onCityChange={setGeoFilter} score={scoreFilter} onScoreChange={setScoreFilter} />
           <button onClick={() => setShowArchived(s => !s)} className={`btn btn-sm ${showArchived ? 'btn-primary' : 'btn-secondary'}`} style={{ fontSize: 11 }} title="Mostrar leads arquivados">
             <Archive size={12} /> {showArchived ? 'Ocultar arquivados' : 'Mostrar arquivados'}
           </button>
@@ -1210,6 +1243,20 @@ export default function Chat() {
             <Search size={14} style={{ color: '#6B6580' }} />
             <input className="input" placeholder="Buscar contato..." value={search} onChange={e => setSearch(e.target.value)} style={{ border: 'none', background: 'transparent', flex: 1 }} />
           </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px', borderBottom: '1px solid rgba(255,255,255,0.06)', fontSize: 11, color: 'var(--text-muted)' }}>
+            Ordenar:
+            {([['recent', 'Mais recentes'], ['score', 'Termômetro']] as const).map(([v, label]) => (
+              <button
+                key={v}
+                type="button"
+                className={`btn btn-sm ${listSort === v ? 'btn-primary' : 'btn-secondary'}`}
+                style={{ fontSize: 11, padding: '2px 8px' }}
+                aria-pressed={listSort === v}
+                title={v === 'score' ? 'Nota mais alta primeiro: quem está mais perto de comprar' : 'Não lidas primeiro, depois a última mensagem do cliente'}
+                onClick={() => setListSort(v)}
+              >{label}</button>
+            ))}
+          </div>
           <div className="chat-contacts-list">
             {filteredLeads.map(l => {
               const active = l.id === selectedLeadId
@@ -1225,7 +1272,10 @@ export default function Chat() {
                   </div>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', gap: 6 }}>
-                      <span className="chat-contact-name" style={{ fontWeight: (l.unread_count || 0) > 0 ? 700 : 600, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: (l.unread_count || 0) > 0 ? 'var(--text-primary)' : undefined }}>{l.name || l.phone || 'Sem nome'}</span>
+                      <span style={{ display: 'flex', alignItems: 'center', gap: 5, minWidth: 0 }}>
+                        <span className="chat-contact-name" style={{ fontWeight: (l.unread_count || 0) > 0 ? 700 : 600, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: (l.unread_count || 0) > 0 ? 'var(--text-primary)' : undefined }}>{l.name || l.phone || 'Sem nome'}</span>
+                        {l.score != null && <ScoreBadge score={l.score} band={l.score_band} prev={l.score_prev} />}
+                      </span>
                       <span style={{ fontSize: 10, color: (l.unread_count || 0) > 0 ? 'var(--positive)' : 'var(--text-muted)', fontWeight: (l.unread_count || 0) > 0 ? 700 : 400 }}>{timeAgo(l.updated_at)}</span>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', gap: 6, marginTop: 2, alignItems: 'center' }}>
@@ -1611,6 +1661,7 @@ export default function Chat() {
             <div style={{ flex: 1, overflowY: 'auto', padding: 12 }}>
               {rightTab === 'info' && (
                 <>
+                  {accountId && <ScoreThermometer leadId={lead.id} accountId={accountId} />}
                   {/* Stage + Attendant */}
                   <div style={{ marginBottom: 12 }}>
                     <div style={{ fontSize: 10, color: '#9B96B0', textTransform: 'uppercase', marginBottom: 4 }}>Etapa</div>

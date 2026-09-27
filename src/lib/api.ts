@@ -1,5 +1,6 @@
 import { normalizeProviders, type WhatsAppProviderId } from './whatsappProviders.js'
 import { geoQuery } from './geoFilter.js'
+import type { ScoreBand, ScoreQuadrant } from './score'
 export type { WhatsAppProviderId }
 
 const getToken = () => localStorage.getItem('dros_crm_token')
@@ -48,7 +49,19 @@ export interface Lead {
   ai_paused_at?: string | null; ai_paused_by?: number | null; ai_handed_off_at?: string | null
   stage_name?: string; stage_color?: string; attendant_name?: string; instance_name?: string
   last_message?: string; message_count?: number; tags?: Tag[]
+  // Termometro (spec 5.1): nota 0-100, faixa, nota anterior, letra do perfil, engajamento 0-50 e acao da matriz
+  score?: number | null; score_band?: ScoreBand | null; score_prev?: number | null
+  score_fit_grade?: 'A' | 'B' | 'C' | 'D' | null; score_engagement?: number | null; score_quadrant?: ScoreQuadrant | null
 }
+// Termometro completo do lead (GET /api/leads/:id/score)
+export interface ScoreReason { grupo: 'perfil' | 'engajamento' | 'ia'; texto: string; pontos: number }
+export interface LeadScore {
+  score: number | null; band: ScoreBand | null
+  fit: number | null; fit_grade: 'A' | 'B' | 'C' | 'D' | null
+  engagement: number | null; quadrant: ScoreQuadrant | null
+  reasons: ScoreReason[]; score_prev: number | null; score_at: string | null
+}
+export const fetchLeadScore = (leadId: number, accountId: number) => apiFetch<LeadScore>(`/api/leads/${leadId}/score?account_id=${accountId}`)
 export type MessageDeliveryStatus = 'sent' | 'delivered' | 'read'
 export interface Message { id: number; lead_id: number; direction: 'inbound' | 'outbound'; content: string | null; media_type: string; media_url: string | null; transcription?: string | null; sender_name: string | null; wa_msg_id: string | null; instance_id?: number | null; created_at: string; delivery_status?: MessageDeliveryStatus; delivered_at?: string | null; read_at?: string | null }
 export const fetchMessageMedia = (leadId: number, msgId: number) => apiFetch<{ dataUrl: string; mime: string; type: string }>(`/api/messages/${leadId}/media/${msgId}`)
@@ -111,7 +124,7 @@ export const updateFunnelFirstMessage = (funnelId: number, accountId: number, te
   apiFetch(`/api/funnels/${funnelId}?account_id=${accountId}`, { method: 'PUT', body: JSON.stringify({ first_msg_template: template }) })
 
 // Leads
-export interface LeadFilters { stage_id?: number | string; attendant_id?: number | string; instance_id?: number | string; funnel_id?: number; source?: string; city?: string; uf?: string; tag?: number | string; search?: string; date_from?: string; date_to?: string; show_archived?: '1' | 'all'; page?: number; limit?: number }
+export interface LeadFilters { stage_id?: number | string; attendant_id?: number | string; instance_id?: number | string; funnel_id?: number; source?: string; city?: string; uf?: string; tag?: number | string; search?: string; date_from?: string; date_to?: string; show_archived?: '1' | 'all'; page?: number; limit?: number; score_bands?: string; score_min?: number; fit?: 'AB'; engagement?: 'high'; sort?: 'score' }
 export const fetchLeads = (accountId: number, filters: LeadFilters = {}) => {
   const params = new URLSearchParams({ account_id: String(accountId) })
   Object.entries(filters).forEach(([k, v]) => { if (v !== undefined && v !== '') params.set(k, String(v)) })

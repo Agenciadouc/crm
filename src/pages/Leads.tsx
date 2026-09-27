@@ -4,15 +4,20 @@ import { useAuth } from '../context/AuthContext'
 import { useAccount } from '../context/AccountContext'
 import { useSSE } from '../context/SSEContext'
 import AccountSelector from '../components/AccountSelector'
-import CityFilter, { useCityFilter } from '../components/CityFilter'
-import { geoParams, geoQuery } from '../lib/geoFilter.js'
+import { useCityFilter } from '../components/CityFilter'
+import MoreFilters, { useScoreFilter } from '../components/MoreFilters'
+import HelpTip from '../components/HelpTip'
+import ScoreBadge from '../components/score/ScoreBadge'
+import { geoParams } from '../lib/geoFilter.js'
+import { scoreParams, isScoreFilterActive, EMPTY_SCORE_FILTER } from '../lib/scoreFilter.js'
+import { SCORE_HELP_TEXT } from '../lib/score'
 import {
   apiFetch,
   fetchLeads, fetchFunnels, fetchUsers, fetchTags, createLead, bulkAssignLeads, bulkMoveLeads,
   archiveLead, unarchiveLead, fetchArchivedCount, fetchWhatsAppInstances,
   formatNumber, type Lead, type Funnel, type User as UserType, type Tag, type WhatsAppInstance,
 } from '../lib/api'
-import { Plus, Download, Phone, MessageCircle, Clock, CheckSquare, Square, Users, ArrowRight, Archive, ArchiveRestore } from 'lucide-react'
+import { Plus, Download, Phone, MessageCircle, Clock, CheckSquare, Square, Users, ArrowRight, Archive, ArchiveRestore, ArrowDown, ArrowUpDown } from 'lucide-react'
 import { parseSqlDate } from '../lib/dates'
 
 function timeAgo(d: string) { const m = Math.max(0, Math.floor((Date.now() - parseSqlDate(d).getTime()) / 60000)); if (m < 60) return `${m}m`; const h = Math.floor(m / 60); if (h < 24) return `${h}h`; return `${Math.floor(h / 24)}d` }
@@ -43,6 +48,9 @@ export default function Leads() {
   const [dateTo, setDateTo] = useState('')
   const [tagFilter, setTagFilter] = useState('')
   const [cityFilter, setCityFilter] = useCityFilter(accountId)
+  const [scoreFilter, setScoreFilter] = useScoreFilter(accountId)
+  // Clique no cabecalho "Termometro": mais quente primeiro (sort=score)
+  const [sortScore, setSortScore] = useState(false)
   const [sourceOptions, setSourceOptions] = useState<{ value: string; count: number }[]>([])
   const [showNew, setShowNew] = useState(false)
   const [newLead, setNewLead] = useState<Record<string, any>>({ name: '', phone: '', email: '', city: '', source: 'manual', empresa: '', cpf_cnpj: '', instagram: '' })
@@ -75,6 +83,8 @@ export default function Leads() {
       date_from: dateFrom || undefined, date_to: dateTo || undefined,
       tag: tagFilter ? +tagFilter : undefined,
       ...geoParams(cityFilter),
+      ...scoreParams(scoreFilter),
+      sort: sortScore ? 'score' : undefined,
       show_archived: showArchived ? '1' : undefined,
       page, limit: 30,
     })
@@ -83,7 +93,7 @@ export default function Leads() {
       .finally(() => setLoading(false))
   }
 
-  useEffect(loadLeads, [accountId, search, stageFilter, sourceFilter, attendantFilter, dateFrom, dateTo, tagFilter, cityFilter, showArchived, page])
+  useEffect(loadLeads, [accountId, search, stageFilter, sourceFilter, attendantFilter, dateFrom, dateTo, tagFilter, cityFilter, scoreFilter, sortScore, showArchived, page])
 
   const loadArchivedCount = useCallback(() => {
     if (!accountId) return
@@ -151,7 +161,11 @@ export default function Leads() {
           </button>
           <button className="btn btn-secondary btn-sm" onClick={async () => {
             const token = localStorage.getItem('dros_crm_token')
-            const res = await fetch(`${import.meta.env.BASE_URL.replace(/\/$/, '')}/api/leads/export?account_id=${accountId}${geoQuery(cityFilter)}`, { headers: { Authorization: `Bearer ${token}` } })
+            // CSV sai com o mesmo local, termometro e ordem da lista
+            const q = new URLSearchParams({ account_id: String(accountId) })
+            Object.entries({ ...geoParams(cityFilter), ...scoreParams(scoreFilter), ...(sortScore ? { sort: 'score' } : {}) })
+              .forEach(([k, v]) => { if (v !== undefined && v !== '') q.set(k, String(v)) })
+            const res = await fetch(`${import.meta.env.BASE_URL.replace(/\/$/, '')}/api/leads/export?${q}`, { headers: { Authorization: `Bearer ${token}` } })
             const blob = await res.blob()
             const url = URL.createObjectURL(blob)
             const a = document.createElement('a'); a.href = url; a.download = `leads-${new Date().toISOString().slice(0,10)}.csv`; a.click()
@@ -192,14 +206,18 @@ export default function Leads() {
             {tags.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
           </select>
         )}
-        <CityFilter accountId={accountId} value={cityFilter} onChange={c => { setCityFilter(c); setPage(1) }} />
+        <MoreFilters
+          accountId={accountId}
+          city={cityFilter} onCityChange={c => { setCityFilter(c); setPage(1) }}
+          score={scoreFilter} onScoreChange={f => { setScoreFilter(f); setPage(1) }}
+        />
       </div>
       <div className="filter-bar" style={{ marginTop: -8 }}>
         <input className="input" type="date" value={dateFrom} onChange={e => { setDateFrom(e.target.value); setPage(1) }} style={{ width: 160 }} />
         <span style={{ color: '#6B6580', fontSize: 12 }}>ate</span>
         <input className="input" type="date" value={dateTo} onChange={e => { setDateTo(e.target.value); setPage(1) }} style={{ width: 160 }} />
-        {(dateFrom || dateTo || search || stageFilter || sourceFilter || attendantFilter || tagFilter || cityFilter) && (
-          <button className="btn btn-secondary btn-sm" onClick={() => { setSearch(''); setStageFilter(''); setSourceFilter(''); setAttendantFilter(''); setDateFrom(''); setDateTo(''); setTagFilter(''); setCityFilter(''); setPage(1) }}>Limpar filtros</button>
+        {(dateFrom || dateTo || search || stageFilter || sourceFilter || attendantFilter || tagFilter || cityFilter || isScoreFilterActive(scoreFilter)) && (
+          <button className="btn btn-secondary btn-sm" onClick={() => { setSearch(''); setStageFilter(''); setSourceFilter(''); setAttendantFilter(''); setDateFrom(''); setDateTo(''); setTagFilter(''); setCityFilter(''); setScoreFilter({ ...EMPTY_SCORE_FILTER, bands: [] }); setPage(1) }}>Limpar filtros</button>
         )}
       </div>
 
@@ -225,6 +243,7 @@ export default function Leads() {
                   {l.phone && <div style={{ fontSize: 12, color: '#9B96B0', marginTop: 2 }}>{l.phone}</div>}
                 </div>
                 <div style={{ display: 'flex', gap: 4, alignItems: 'center', flexShrink: 0 }}>
+                  <ScoreBadge score={l.score} band={l.score_band} prev={l.score_prev} />
                   <span className="stage-badge" style={{ background: `${l.stage_color}20`, color: l.stage_color, fontSize: 10 }}>{l.stage_name}</span>
                   <button
                     className="btn btn-secondary btn-sm"
@@ -264,7 +283,18 @@ export default function Leads() {
           <table>
             <thead><tr>
               {user?.role !== 'atendente' && <th style={{ width: 32 }}><button style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#9B96B0' }} onClick={toggleSelectAll}>{selected.size === leads.length && leads.length > 0 ? <CheckSquare size={14} /> : <Square size={14} />}</button></th>}
-              <th>Nome</th><th>Telefone</th><th>Etapa</th><th>Atendente</th><th>Fonte</th><th>Cidade</th><th className="right">Criado</th><th style={{ width: 88 }}></th>
+              <th>Nome</th><th>Telefone</th><th>Etapa</th>
+              <th
+                onClick={() => { setSortScore(v => !v); setPage(1) }}
+                title={sortScore ? 'Ordenado pela nota (mais quente primeiro). Clique para voltar aos mais recentes.' : 'Clique para ordenar pela nota: mais quente primeiro'}
+                style={{ cursor: 'pointer', whiteSpace: 'nowrap', color: sortScore ? 'var(--accent)' : undefined }}
+              >
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+                  Termômetro {sortScore ? <ArrowDown size={11} /> : <ArrowUpDown size={11} style={{ opacity: 0.5 }} />}
+                  <HelpTip title="Termômetro">{SCORE_HELP_TEXT}</HelpTip>
+                </span>
+              </th>
+              <th>Atendente</th><th>Fonte</th><th>Cidade</th><th className="right">Criado</th><th style={{ width: 88 }}></th>
             </tr></thead>
             <tbody>
               {leads.map(l => (
@@ -275,6 +305,7 @@ export default function Leads() {
                   </td>
                   <td onClick={() => navigate(`/leads/${l.id}`)}>{l.phone || '-'}</td>
                   <td onClick={() => navigate(`/leads/${l.id}`)}><span className="stage-badge" style={{ background: `${l.stage_color}20`, color: l.stage_color }}>{l.stage_name}</span></td>
+                  <td onClick={() => navigate(`/leads/${l.id}`)}><ScoreBadge score={l.score} band={l.score_band} prev={l.score_prev} /></td>
                   <td onClick={() => navigate(`/leads/${l.id}`)}>{l.attendant_name || <span style={{ color: '#FF6B6B', fontSize: 11 }}>Sem atendente</span>}</td>
                   <td onClick={() => navigate(`/leads/${l.id}`)} style={{ fontSize: 11 }}>{l.source === 'whatsapp' ? <MessageCircle size={10} /> : <Phone size={10} />} {l.source}</td>
                   <td onClick={() => navigate(`/leads/${l.id}`)}>{l.city || '-'}</td>
@@ -298,7 +329,7 @@ export default function Leads() {
                   </td>
                 </tr>
               ))}
-              {leads.length === 0 && <tr><td colSpan={user?.role !== 'atendente' ? 9 : 8} style={{ textAlign: 'center', padding: 40, color: '#6B6580' }}>Nenhum lead encontrado</td></tr>}
+              {leads.length === 0 && <tr><td colSpan={user?.role !== 'atendente' ? 10 : 9} style={{ textAlign: 'center', padding: 40, color: '#6B6580' }}>Nenhum lead encontrado</td></tr>}
             </tbody>
           </table>
           {total > 30 && (
