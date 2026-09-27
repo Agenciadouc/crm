@@ -30,6 +30,33 @@ function hasPublishedVersion(db, accountId, funnelId) {
   return !!db.prepare("SELECT id FROM roteiro_versions WHERE account_id = ? AND funnel_id = ? AND status = 'published'").get(accountId, funnelId)
 }
 
+// Monta as perguntas do roteiro a partir das sequences legadas, ja validadas pro
+// normalizeQuestion do repo.js (que exige texto nao vazio e ate 500 caracteres).
+// A rota antiga de criacao nunca aplicou esse limite, entao uma pergunta invalida
+// aqui nao pode derrubar a conta inteira: pergunta em branco e pulada (nao entra no
+// roteiro, e sua resposta fica orfa e tambem nao migra); pergunta longa demais e
+// truncada em 500 caracteres pra continuar utilizavel.
+function buildQuestions(sequences, stageId) {
+  const questions = []
+  let position = 0
+  for (const seq of sequences) {
+    const raw = typeof seq.question === 'string' ? seq.question.trim() : ''
+    if (!raw) continue
+    const text = raw.length > 500 ? raw.slice(0, 500) : raw
+    questions.push({
+      question_key: `legacy-${seq.id}`,
+      stage_id: stageId,
+      position: position++,
+      text,
+      kind: 'text',
+      required: false,
+      bant: null,
+      ai_hint: null,
+    })
+  }
+  return questions
+}
+
 function migrateAccount(db, accountId) {
   const funnel = pickDefaultFunnel(db, accountId)
   if (!funnel) return null // conta sem funil e pulada
@@ -42,16 +69,8 @@ function migrateAccount(db, accountId) {
   const sequences = db.prepare('SELECT * FROM qualification_sequences WHERE account_id = ? AND is_active = 1 ORDER BY position ASC, id ASC').all(accountId)
   if (!sequences.length) return null
 
-  const questions = sequences.map((seq, idx) => ({
-    question_key: `legacy-${seq.id}`,
-    stage_id: stage.id,
-    position: idx,
-    text: seq.question,
-    kind: 'text',
-    required: false,
-    bant: null,
-    ai_hint: null,
-  }))
+  const questions = buildQuestions(sequences, stage.id)
+  const migratedKeys = new Set(questions.map(q => q.question_key))
 
   saveDraft(db, accountId, funnel.id, { questions, deviations: [] })
   publish(db, accountId, funnel.id, null)
@@ -71,12 +90,14 @@ function migrateAccount(db, accountId) {
 
   let answersCount = 0
   for (const row of answerRows) {
+    const questionKey = `legacy-${row.sequence_id}`
+    if (!migratedKeys.has(questionKey)) continue // pergunta legada ficou de fora (em branco): resposta fica orfa, nao migra
     const text = typeof row.answer === 'string' ? row.answer.trim() : ''
     if (!text) continue
     const info = insertAnswer.run({
       accountId: row.lead_account_id,
       leadId: row.lead_id,
-      questionKey: `legacy-${row.sequence_id}`,
+      questionKey,
       answerText: text,
       answeredBy: row.answered_by ?? null,
       answeredAt: row.answered_at ?? null,
@@ -96,13 +117,23 @@ export function migrateLegacyQualifications(db) {
   let questions = 0
   let answers = 0
   for (const accountId of accountIds) {
-    const result = migrateAccount(db, accountId)
+    // Uma conta com dado legado inesperado (ou qualquer outro erro) nao pode travar
+    // o boot nem impedir a migracao das demais contas: isola por conta e segue.
+    let result
+    try {
+      result = migrateAccount(db, accountId)
+    } catch (err) {
+      console.error(`[Roteiro] migracao legado conta ${accountId}: ${err.message}`)
+      continue
+    }
     if (!result) continue
     accounts += 1
     questions += result.questions
     answers += result.answers
   }
 
+  // Marca migrado mesmo se alguma conta falhou: as falhas ja ficaram logadas, e sem
+  // isso o boot tentaria migrar de novo (e falhar de novo) pra sempre a cada start.
   markMigrated(db)
   return { accounts, questions, answers }
 }
