@@ -104,6 +104,8 @@ router.post('/:leadId', async (req, res) => {
 
     const lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(req.params.leadId)
     if (!lead) return res.status(404).json({ error: 'Lead nao encontrado' })
+    // Lead de outra conta: 404 (nao envia nem grava mensagem em lead alheio)
+    if (req.accountId && lead.account_id !== req.accountId) return res.status(404).json({ error: 'Lead nao encontrado' })
 
     // Anti-duplicate: check if same message was sent to this lead in last 5 minutes
     const duplicate = db.prepare(`

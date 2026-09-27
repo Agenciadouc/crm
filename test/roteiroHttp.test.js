@@ -407,3 +407,42 @@ test('POST /leads/:leadId/asks grava a variante realmente servida ao lead (B com
     assert.ok(teste.days_left > 0)
   })
 })
+
+test('gate, asks e undo-advance de lead de outra conta -> 404', async () => {
+  await comServidor(async ({ db, base }) => {
+    const { accountId, otherAccountId, funnelId, stages } = seedRoteiroBase(db)
+    const published = publishRoteiroDuasEtapas(db, accountId, funnelId, stages)
+    const gerenteBId = Number(db.prepare("INSERT INTO users (account_id, name, email, role) VALUES (?, 'Gestor B', 'b@b.local', 'gerente')").run(otherAccountId).lastInsertRowid)
+    const leadId = addLead(db, { account_id: accountId, name: 'Da Conta A', funnel_id: funnelId, stage_id: stages.novo })
+    const tB = token({ id: gerenteBId, role: 'gerente', accountId: otherAccountId })
+    const qNome = questionKeyForStage(published, stages.novo)
+
+    const gate = await peca(base, { path: `/api/roteiro/leads/${leadId}/gate?to_stage_id=${stages.proposta}`, jwtToken: tB })
+    assert.equal(gate.status, 404)
+    const asks = await peca(base, { method: 'POST', path: `/api/roteiro/leads/${leadId}/asks`, jwtToken: tB, body: { question_key: qNome } })
+    assert.equal(asks.status, 404)
+    const undo = await peca(base, { method: 'POST', path: `/api/roteiro/leads/${leadId}/undo-advance`, jwtToken: tB, body: {} })
+    assert.equal(undo.status, 404)
+    assert.equal(db.prepare('SELECT COUNT(*) AS n FROM roteiro_asks').get().n, 0)
+  })
+})
+
+test('atendente sem vinculo com o lead recebe 403 nas rotas de escrita do vendedor', async () => {
+  await comServidor(async ({ db, base }) => {
+    const { accountId, funnelId, stages } = seedRoteiroBase(db)
+    const published = publishRoteiroDuasEtapas(db, accountId, funnelId, stages)
+    const outroAtendenteId = Number(db.prepare("INSERT INTO users (account_id, name, email, role) VALUES (?, 'Bia', 'bia@a.local', 'atendente')").run(accountId).lastInsertRowid)
+    const leadId = addLead(db, { account_id: accountId, name: 'Sem Vinculo', funnel_id: funnelId, stage_id: stages.novo })
+    const t = token({ id: outroAtendenteId, role: 'atendente', accountId })
+    const qNome = questionKeyForStage(published, stages.novo)
+
+    const resp = await peca(base, { method: 'PUT', path: `/api/roteiro/leads/${leadId}/answers/${qNome}`, jwtToken: t, body: { answer_text: 'Maria' } })
+    assert.equal(resp.status, 403)
+    const asks = await peca(base, { method: 'POST', path: `/api/roteiro/leads/${leadId}/asks`, jwtToken: t, body: { question_key: qNome } })
+    assert.equal(asks.status, 403)
+    const undo = await peca(base, { method: 'POST', path: `/api/roteiro/leads/${leadId}/undo-advance`, jwtToken: t, body: {} })
+    assert.equal(undo.status, 403)
+    assert.equal(db.prepare('SELECT COUNT(*) AS n FROM lead_answers').get().n, 0)
+    assert.equal(db.prepare('SELECT COUNT(*) AS n FROM roteiro_asks').get().n, 0)
+  })
+})
