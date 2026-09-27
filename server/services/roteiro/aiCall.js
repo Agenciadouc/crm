@@ -1,6 +1,6 @@
-// Chamada de IA do roteiro (spec 6.3, 6.4): confere orcamento (canAnalyze) e chave antes,
+// Chamada de IA do roteiro (spec 6.3, 6.4): confere orcamento (canAnalyze = teto do roteiro) e chave antes,
 // chama o modelo e loga os tokens com o `source`. Nao importa server/db.js: recebe tudo
-// injetado; a casca de producao (aiAdapter.js) liga canAnalyze, a chave e o callHaiku.
+// injetado; a casca de producao (aiAdapter.js) liga canRoteiroAi, a chave e o callHaiku.
 export const AI_UNAVAILABLE = 'ai_unavailable'
 
 function unavailable(reason) {

@@ -91,7 +91,7 @@ export async function extractAnswers(db, { accountId, leadId, ai }) {
 
   const messages = lastMessages(db, leadId)
   if (!messages.length) return empty
-  // Orcamento (canAnalyze soma o mes) so depois dos filtros baratos.
+  // Orcamento (teto mensal do roteiro) so depois dos filtros baratos.
   if (typeof ai.isAvailable === 'function' && !ai.isAvailable(accountId)) return empty
 
   const lead = db.prepare('SELECT funnel_id FROM leads WHERE id = ? AND account_id = ?').get(leadId, accountId)

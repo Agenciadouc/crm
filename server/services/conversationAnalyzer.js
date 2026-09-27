@@ -6,7 +6,7 @@
 
 import db from '../db.js'
 import { callHaiku } from './anthropicClient.js'
-import { pickAnthropicKey } from './anthropicKeyPicker.js'
+import { analysisBudget } from './aiBudget.js'
 import { scheduleScore } from './leadScore/recalc.js'
 
 // ─── System prompt V2 (cacheável — Anthropic cache_control ephemeral em anthropicClient) ───
@@ -285,19 +285,9 @@ ${SYSTEM_PROMPT_V2.replace(/^Voce e um analista[\s\S]*?ESCOPO:/, 'ESCOPO:')}`
 // Map temperatura PT (V2) → lead_intent EN (V1 compat)
 const TEMP_TO_INTENT = { quente: 'hot', morno: 'warm', frio: 'cold' }
 
-// Orcamento mensal de IA da conta: analise de conversas, coaching e roteiro somam no mesmo teto.
+// Orcamento mensal de IA da conta: analise de conversas + coaching (o roteiro tem teto proprio, aiBudget.js).
 export function canAnalyze(accountId) {
-  const account = db.prepare('SELECT analysis_token_limit, anthropic_api_key, ai_key_source FROM accounts WHERE id = ?').get(accountId)
-  // Sem chave Anthropic (propria ou da Dros, conforme ai_key_source), a conta nao roda IA
-  if (!pickAnthropicKey(account)) return { ok: false, reason: 'no_api_key', used: 0, limit: 0 }
-  const limit = account?.analysis_token_limit || 200000
-  const monthStart = new Date().toISOString().slice(0, 7) + '-01 00:00:00'
-  const used = db.prepare(`
-    SELECT COALESCE(SUM(input_tokens + output_tokens), 0) as n
-    FROM ai_agent_token_log
-    WHERE account_id = ? AND source IN ('conversation_analysis', 'coaching_analysis', 'roteiro_extraction', 'roteiro_draft', 'roteiro_learning') AND created_at >= ?
-  `).get(accountId, monthStart)?.n || 0
-  return { ok: used < limit, used, limit }
+  return analysisBudget(db, accountId)
 }
 
 // Classifica actor de cada msg pra payload estruturado

@@ -122,6 +122,7 @@ export function applyRoteiroSchema(db) {
   for (const [c, t] of [
     ['roteiro_min_reply_rate', 'INTEGER NOT NULL DEFAULT 70'], ['roteiro_reply_window_h', 'INTEGER NOT NULL DEFAULT 24'],
     ['score_alert_minutes', 'INTEGER NOT NULL DEFAULT 60'], ['score_half_life_days', 'REAL NOT NULL DEFAULT 7'],
+    ['roteiro_ai_token_limit', 'INTEGER NOT NULL DEFAULT 300000'], // teto mensal proprio da IA do roteiro
   ]) addColumnIfNotExists(db, 'accounts', c, t)
   try { db.exec('CREATE INDEX IF NOT EXISTS idx_leads_score ON leads(account_id, score)') } catch (e) { console.warn('[Roteiro] indice idx_leads_score:', e.message) }
 }
