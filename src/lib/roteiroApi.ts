@@ -67,7 +67,8 @@ export interface LeadRoteiro extends LeadRoteiroBase {
 }
 
 export interface RoteiroAdvance { from: number; to: number; to_name: string }
-// SSE lead:roteiro {lead_id, offscript}: pergunta do cliente fora do roteiro vista pela IA
+// SSE lead:roteiro {lead_id, offscript, advanced}: pergunta fora do roteiro vista pela IA;
+// advanced (RoteiroAdvance) quando a IA completou a etapa e o lead avancou
 export interface RoteiroOffscript { question: string; suggested_reply: string }
 
 export type GateResult = { ok: true } | { ok: false; pending: RoteiroPendingQuestion[] }

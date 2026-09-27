@@ -63,6 +63,9 @@ export default function RoteiroCard({ leadId, accountId, mode, onAsk, canForce }
   const [offscript, setOffscript] = useState<RoteiroOffscript | null>(null)
   const [showAnswered, setShowAnswered] = useState(mode === 'full')
   const tokenRef = useRef(0)
+  // Dados atuais para o banner vindo do SSE (nome da etapa de onde saiu)
+  const dataRef = useRef<LeadRoteiro | null>(null)
+  dataRef.current = data
   // Lead aberto agora: resposta atrasada de outro lead e descartada
   const leadRef = useRef(leadId)
   leadRef.current = leadId
@@ -86,6 +89,10 @@ export default function RoteiroCard({ leadId, accountId, mode, onAsk, canForce }
   useSSE('lead:roteiro', useCallback((d: any) => {
     if (Number(d?.lead_id) !== leadId) return
     if (d?.offscript && d.offscript.question) setOffscript(d.offscript)
+    // A IA completou a etapa e o lead avancou: mesmo banner com Desfazer (spec 4.4)
+    if (d?.advanced && d.advanced.to_name) {
+      setAdvanced({ toName: d.advanced.to_name, fromName: stageName(dataRef.current, d.advanced.from) })
+    }
     load(true)
   }, [leadId, load]))
   // Mensagem nova muda "aguardando resposta" e o desvio detectado pela palavra-gatilho

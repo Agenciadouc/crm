@@ -226,8 +226,9 @@ export function saveAnswer(db, { accountId, leadId, questionKey, optionKey = nul
       updated_at = datetime('now')
   `).run({ accountId, leadId, questionKey, optionKey: finalOptionKey, answerText: finalAnswerText, origin, evidence, userId })
 
-  // Resposta nova libera o avanco automatico que uma correcao/undo tenha travado.
-  db.prepare('UPDATE leads SET roteiro_no_auto_from_stage = NULL WHERE id = ?').run(leadId)
+  // Resposta nova DO VENDEDOR libera o avanco automatico que um undo tenha travado.
+  // Resposta da IA nao libera: senao a IA desfaria o "Desfazer" do vendedor.
+  if (origin === 'manual') db.prepare('UPDATE leads SET roteiro_no_auto_from_stage = NULL WHERE id = ?').run(leadId)
 
   const saved = loadAnswerRow(db, leadId, questionKey)
   return { answer: formatAnswer(saved, question), skipped: false }

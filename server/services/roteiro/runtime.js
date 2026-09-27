@@ -58,7 +58,8 @@ export function bootRoteiroRuntime({ db, broadcastSSE, triggerCapiForStageChange
 }
 
 // Liga a extracao por IA (spec 6.4): fila de 2 min por lead -> extractAnswers com o
-// adaptador `ai`. Resposta salva ou pergunta fora do roteiro -> nota + SSE lead:roteiro.
+// adaptador `ai`. Resposta salva ou pergunta fora do roteiro -> nota + SSE lead:roteiro
+// {lead_id, offscript, advanced}.
 // Chamar depois de bootRoteiroRuntime (usa o broadcastSSE guardado la).
 export function bootRoteiroAi({ db, ai, delayMs = EXTRACT_DELAY_MS, setTimer, clearTimer }) {
   const queue = createExtractQueue({
@@ -66,8 +67,9 @@ export function bootRoteiroAi({ db, ai, delayMs = EXTRACT_DELAY_MS, setTimer, cl
     run: async ({ lead }) => {
       const r = await extractAnswers(db, { accountId: lead.account_id, leadId: lead.id, ai })
       if (!r.saved.length && !r.offscript) return
-      if (r.saved.length) scheduleFn(lead.id)
-      try { broadcastFn(lead.account_id, 'lead:roteiro', { lead_id: lead.id, offscript: r.offscript }) } catch (e) { console.error('[Roteiro] SSE lead:roteiro:', e.message) }
+      if (r.saved.length) { try { scheduleFn(lead.id) } catch (e) { console.error('[Roteiro] agendar nota:', e.message) } }
+      // advanced: a IA completou a etapa e o lead avancou -> cartao mostra o banner com Desfazer
+      try { broadcastFn(lead.account_id, 'lead:roteiro', { lead_id: lead.id, offscript: r.offscript, advanced: r.advanced || null }) } catch (e) { console.error('[Roteiro] SSE lead:roteiro:', e.message) }
     },
   })
   setAiExtractHandler(queue.enqueue)

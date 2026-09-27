@@ -6,6 +6,7 @@ import { createRoteiroTestDb, seedRoteiroBase, addLead, addMessage } from './hel
 import { saveDraft, publish, getRoteiro, RoteiroError } from '../server/services/roteiro/repo.js'
 import { saveAnswer } from '../server/services/roteiro/leadRoteiro.js'
 import { recordAsk } from '../server/services/roteiro/asks.js'
+import { maybeAutoAdvance, undoAutoAdvance } from '../server/services/roteiro/autoAdvance.js'
 import { toSqliteDate } from '../server/services/roteiro/time.js'
 import { configureStageMoveHooks } from '../server/services/stageMove.js'
 import { extractAnswers, createExtractQueue, EXTRACT_DELAY_MS } from '../server/services/roteiro/aiExtract.js'
@@ -216,12 +217,58 @@ test('bootRoteiroAi: mensagem recebida -> extracao na fila -> SSE lead:roteiro c
   enqueueAiExtract({ db, account: null, lead, message: { id: 1 } })
   await queue.flushAll()
   const ev = sse.find(e => e[1] === 'lead:roteiro')
-  assert.deepEqual(ev, [s.accountId, 'lead:roteiro', { lead_id: leadId, offscript: { question: 'Tem estacionamento?', suggested_reply: 'Temos sim.' } }])
+  assert.deepEqual(ev, [s.accountId, 'lead:roteiro', { lead_id: leadId, offscript: { question: 'Tem estacionamento?', suggested_reply: 'Temos sim.' }, advanced: null }])
   // Mesma pergunta de novo na proxima janela: sem SSE repetido
   enqueueAiExtract({ db, account: null, lead, message: { id: 2 } })
   await queue.flushAll()
   assert.equal(ai.calls.length, 2)
   assert.equal(sse.filter(e => e[1] === 'lead:roteiro').length, 1)
+})
+
+test('bootRoteiroAi: IA completa a etapa -> SSE lead:roteiro leva o avanco (para o banner com Desfazer)', async () => {
+  const { db, s, leadId } = setupExtract()
+  const sse = []
+  bootRoteiroRuntime({ db, broadcastSSE: (...a) => sse.push(a), triggerCapiForStageChange: () => {}, schedule: () => {} })
+  const ai = fakeAi({ roteiro_extraction: [tool('record_answers', { answers: [
+    { question_key: 'orcamento', option_key: 'acima20', evidence: 'Uns 25 mil' },
+    { question_key: 'prazo', text: 'até dezembro', evidence: 'preciso até dezembro' },
+  ] })] })
+  const queue = bootRoteiroAi({ db, ai, setTimer: () => 1, clearTimer: () => {} })
+  enqueueAiExtract({ db, account: null, lead: db.prepare('SELECT * FROM leads WHERE id = ?').get(leadId), message: { id: 1 } })
+  await queue.flushAll()
+  const ev = sse.find(e => e[1] === 'lead:roteiro')
+  assert.deepEqual(ev[2].advanced, { from: s.stages.qualificando, to: s.stages.proposta, to_name: 'Proposta' })
+})
+
+test('resposta da IA nao desfaz o "Desfazer" do vendedor: lead nao avanca sozinho de novo', async () => {
+  const db = createRoteiroTestDb()
+  const s = seedRoteiroBase(db)
+  saveDraft(db, s.accountId, s.funnelId, {
+    questions: [
+      { question_key: 'orcamento', stage_id: s.stages.qualificando, position: 0, text: 'Qual sua faixa de orçamento?', kind: 'text', required: true },
+      { question_key: 'prazo', stage_id: s.stages.qualificando, position: 1, text: 'Para quando você precisa?', kind: 'text', required: false },
+    ],
+    deviations: [],
+  })
+  publish(db, s.accountId, s.funnelId, s.gerenteId)
+  const leadId = addLead(db, { account_id: s.accountId, funnel_id: s.funnelId, stage_id: s.stages.qualificando, name: 'Maria' })
+  addMessage(db, { leadId, direction: 'inbound', content: 'Preciso até dezembro', minutesAgo: 5 })
+
+  saveAnswer(db, { accountId: s.accountId, leadId, questionKey: 'orcamento', answerText: '25 mil', origin: 'manual', userId: s.atendenteId })
+  assert.ok(maybeAutoAdvance(db, { accountId: s.accountId, leadId }))
+  undoAutoAdvance(db, { accountId: s.accountId, leadId, userId: s.atendenteId })
+
+  const ai = fakeAi({ roteiro_extraction: [tool('record_answers', { answers: [{ question_key: 'prazo', text: 'dezembro', evidence: 'Preciso até dezembro' }] })] })
+  const r = await extractAnswers(db, { accountId: s.accountId, leadId, ai })
+  assert.deepEqual(r.saved, ['prazo'])
+  assert.equal(r.advanced, null)
+  const lead = db.prepare('SELECT stage_id, roteiro_no_auto_from_stage FROM leads WHERE id = ?').get(leadId)
+  assert.equal(lead.stage_id, s.stages.qualificando)
+  assert.equal(lead.roteiro_no_auto_from_stage, s.stages.qualificando, 'resposta da IA mantem a trava')
+
+  // resposta manual nova libera
+  saveAnswer(db, { accountId: s.accountId, leadId, questionKey: 'orcamento', answerText: '30 mil', origin: 'manual', userId: s.atendenteId })
+  assert.equal(db.prepare('SELECT roteiro_no_auto_from_stage AS v FROM leads WHERE id = ?').get(leadId).v, null)
 })
 
 // --- Adaptador (canAnalyze, chave, log de tokens) --------------------------------------
