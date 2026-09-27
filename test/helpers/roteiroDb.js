@@ -21,6 +21,7 @@ export function createRoteiroTestDb() {
     CREATE TABLE IF NOT EXISTS qualification_sequences (id INTEGER PRIMARY KEY AUTOINCREMENT, account_id INTEGER NOT NULL, question TEXT NOT NULL, position INTEGER NOT NULL DEFAULT 0, is_active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT (datetime('now')));
     CREATE TABLE IF NOT EXISTS lead_qualifications (id INTEGER PRIMARY KEY AUTOINCREMENT, lead_id INTEGER NOT NULL, sequence_id INTEGER NOT NULL, answer TEXT, answered_at TEXT, answered_by INTEGER, UNIQUE(lead_id, sequence_id));
     CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT);
+    CREATE TABLE IF NOT EXISTS lead_instance_assignments (id INTEGER PRIMARY KEY AUTOINCREMENT, lead_id INTEGER NOT NULL, instance_id INTEGER NOT NULL, attendant_id INTEGER, created_at TEXT NOT NULL DEFAULT (datetime('now')));
   `)
   applyRoteiroSchema(db)
   return db

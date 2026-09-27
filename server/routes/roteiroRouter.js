@@ -13,25 +13,9 @@ import { scheduleScore } from '../services/leadScore/recalc.js'
 import { questionMetrics, conversionByBand } from '../services/roteiro/metrics.js'
 import { startAbTest, confirmVariant, keepCurrent, applySuggestion, rejectSuggestion } from '../services/roteiro/learning.js'
 import { pickAnthropicKey } from '../services/anthropicKeyPicker.js'
+import { canAtendenteAccessLead } from '../services/leadAccess.js'
 
 const MANAGER_ROLES = ['super_admin', 'gerente']
-
-// leadAccess.js importa server/db.js direto (nao recebe db por parametro), o que
-// quebraria o teste com banco em memoria deste router. Repete aqui a MESMA regra
-// (espelha canAtendenteAccessLead), mas contra o db recebido pela fabrica.
-function atendenteCanAccessLead(db, userId, lead) {
-  if (!lead) return false
-  if (lead.attendant_id === userId) return true
-  const hasTable = db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'lead_instance_assignments'").get()
-  if (hasTable) {
-    const hasAssignment = db.prepare('SELECT 1 FROM lead_instance_assignments WHERE lead_id = ? AND attendant_id = ?').get(lead.id, userId)
-    if (hasAssignment) return true
-  }
-  const userRow = db.prepare('SELECT primary_instance_id FROM users WHERE id = ?').get(userId)
-  const primaryId = userRow?.primary_instance_id
-  if (primaryId && (lead.instance_id === primaryId || lead.last_instance_id === primaryId)) return true
-  return false
-}
 
 export function createRoteiroRouter(db, { ai = null, now = () => new Date() } = {}) {
   const router = Router()
@@ -49,9 +33,8 @@ export function createRoteiroRouter(db, { ai = null, now = () => new Date() } = 
   }
 
   function assertLeadAccess(req, lead) {
-    if (req.user.role === 'atendente' && !atendenteCanAccessLead(db, req.user.id, lead)) {
-      const err = new RoteiroError('forbidden', 403, 'Sem permissão.')
-      throw err
+    if (req.user.role === 'atendente' && !canAtendenteAccessLead(req.user.id, lead, db)) {
+      throw new RoteiroError('forbidden', 403, 'Sem permissão.')
     }
   }
 
@@ -215,7 +198,7 @@ export function createRoteiroRouter(db, { ai = null, now = () => new Date() } = 
     try {
       const lead = getLeadScoped(req.accountId, req.params.leadId)
       assertLeadAccess(req, lead)
-      const roteiro = getLeadRoteiro(db, { accountId: req.accountId, leadId: req.params.leadId })
+      const roteiro = getLeadRoteiro(db, { accountId: req.accountId, leadId: lead.id })
       const deviation = activeDeviationForLead(db, { accountId: req.accountId, lead, now: now() })
       res.json({ ...roteiro, deviation, can_force: MANAGER_ROLES.includes(req.user.role) })
     } catch (e) { fail(res, e) }
@@ -227,17 +210,17 @@ export function createRoteiroRouter(db, { ai = null, now = () => new Date() } = 
       assertLeadAccess(req, lead)
       saveAnswer(db, {
         accountId: req.accountId,
-        leadId: req.params.leadId,
+        leadId: lead.id,
         questionKey: req.params.questionKey,
         optionKey: req.body?.option_key ?? null,
         answerText: req.body?.answer_text ?? null,
         origin: 'manual',
         userId: req.user.id,
       })
-      markAnswered(db, { leadId: req.params.leadId, questionKey: req.params.questionKey, now: now() })
-      const advanced = maybeAutoAdvance(db, { accountId: req.accountId, leadId: req.params.leadId, userId: req.user.id })
-      scheduleScore(req.params.leadId)
-      const roteiro = getLeadRoteiro(db, { accountId: req.accountId, leadId: req.params.leadId })
+      markAnswered(db, { leadId: lead.id, questionKey: req.params.questionKey, now: now() })
+      const advanced = maybeAutoAdvance(db, { accountId: req.accountId, leadId: lead.id, userId: req.user.id })
+      scheduleScore(lead.id)
+      const roteiro = getLeadRoteiro(db, { accountId: req.accountId, leadId: lead.id })
       res.json({ roteiro, advanced })
     } catch (e) { fail(res, e) }
   })
@@ -249,13 +232,18 @@ export function createRoteiroRouter(db, { ai = null, now = () => new Date() } = 
       const questionKey = req.body?.question_key
       const messageId = req.body?.message_id
       if (!questionKey || !messageId) throw new RoteiroError('invalid', 400, 'Informe a pergunta e a mensagem.')
+      // Mesma resolucao de runtime.js (roteiroOnChatSend): acha a pergunta no roteiro do
+      // lead pra pegar a variante (A/B) realmente servida, e recusar chave que nao existe.
+      const roteiro = getLeadRoteiro(db, { accountId: req.accountId, leadId: lead.id })
+      const question = roteiro.stages.flatMap(s => s.questions).find(q => q.question_key === questionKey)
+      if (!question) throw new RoteiroError('invalid', 400, 'Esta pergunta não está no roteiro deste lead.')
       const message = db.prepare('SELECT * FROM messages WHERE id = ? AND lead_id = ?').get(messageId, lead.id)
       if (!message) throw new RoteiroError('not_found', 404, 'Mensagem não encontrada.')
       const askId = recordAsk(db, {
         accountId: req.accountId,
         leadId: lead.id,
         questionKey,
-        variant: 'A',
+        variant: question.variant,
         textSent: message.content,
         messageId: message.id,
         userId: req.user.id,

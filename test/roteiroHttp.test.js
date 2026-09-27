@@ -9,6 +9,7 @@ import express from 'express'
 import jwt from 'jsonwebtoken'
 import { createRoteiroTestDb, seedRoteiroBase, addLead } from './helpers/roteiroDb.js'
 import { saveDraft, publish } from '../server/services/roteiro/repo.js'
+import { variantFor } from '../server/services/roteiro/variants.js'
 import { authenticate, scopeToAccount, JWT_SECRET } from '../server/middleware/auth.js'
 import { createRoteiroRouter } from '../server/routes/roteiroRouter.js'
 
@@ -328,5 +329,51 @@ test('POST /leads/:leadId/asks registra o envio reconhecido', async () => {
     const row = db.prepare('SELECT * FROM roteiro_asks WHERE id = ?').get(r.body.ask_id)
     assert.equal(row.source, 'recognized')
     assert.equal(row.text_sent, 'Qual seu nome?')
+  })
+})
+
+test('POST /leads/:leadId/asks com pergunta que nao esta no roteiro do lead devolve 400', async () => {
+  await comServidor(async ({ db, base }) => {
+    const { accountId, funnelId, stages } = seedRoteiroBase(db)
+    publishRoteiroDuasEtapas(db, accountId, funnelId, stages)
+    const leadId = addLead(db, { account_id: accountId, name: 'Carla', funnel_id: funnelId, stage_id: stages.novo })
+    const msgId = Number(db.prepare("INSERT INTO messages (lead_id, account_id, direction, content) VALUES (?, ?, 'outbound', 'oi')").run(leadId, accountId).lastInsertRowid)
+    const t = token({ id: 999, role: 'gerente', accountId })
+
+    const r = await peca(base, { method: 'POST', path: `/api/roteiro/leads/${leadId}/asks`, jwtToken: t, body: { question_key: 'chave-que-nao-existe', message_id: msgId } })
+    assert.equal(r.status, 400)
+    assert.match(r.body.error, /não está no roteiro/)
+    assert.equal(db.prepare('SELECT COUNT(*) AS c FROM roteiro_asks').get().c, 0, 'nao pode gravar ask de chave invalida')
+  })
+})
+
+test('POST /leads/:leadId/asks grava a variante realmente servida ao lead (B com teste A/B rodando e sorteio em B)', async () => {
+  await comServidor(async ({ db, base }) => {
+    const { accountId, funnelId, stages } = seedRoteiroBase(db)
+    const published = publishRoteiroDuasEtapas(db, accountId, funnelId, stages)
+    const qNome = questionKeyForStage(published, stages.novo)
+    const t = token({ id: 999, role: 'gerente', accountId })
+
+    // Sugestao de novo texto pra pergunta + inicia o teste A/B pela propria rota do gestor.
+    const suggestionId = Number(db.prepare(
+      "INSERT INTO roteiro_suggestions (account_id, funnel_id, question_key, type, payload_json, status) VALUES (?, ?, ?, 'rewrite', ?, 'new')",
+    ).run(accountId, funnelId, qNome, JSON.stringify({ text: 'Como você se chama?' })).lastInsertRowid)
+    const iniciado = await peca(base, { method: 'POST', path: `/api/roteiro/suggestions/${suggestionId}/test`, jwtToken: t, body: {} })
+    assert.equal(iniciado.status, 200)
+    assert.equal(iniciado.body.variant.status, 'testing')
+
+    // Sorteio fixo por lead+pergunta: cria leads ate achar um cujo sorteio cai em 'B'.
+    let leadId = null
+    for (let i = 0; i < 50 && !leadId; i++) {
+      const candidateId = addLead(db, { account_id: accountId, name: `Lead ${i}`, funnel_id: funnelId, stage_id: stages.novo })
+      if (variantFor(candidateId, qNome) === 'B') leadId = candidateId
+    }
+    assert.ok(leadId, 'nao achou lead com sorteio B em 50 tentativas (probabilidade ~2^-50)')
+
+    const msgId = Number(db.prepare("INSERT INTO messages (lead_id, account_id, direction, content) VALUES (?, ?, 'outbound', 'Como você se chama?')").run(leadId, accountId).lastInsertRowid)
+    const r = await peca(base, { method: 'POST', path: `/api/roteiro/leads/${leadId}/asks`, jwtToken: t, body: { question_key: qNome, message_id: msgId } })
+    assert.equal(r.status, 201)
+    const row = db.prepare('SELECT * FROM roteiro_asks WHERE id = ?').get(r.body.ask_id)
+    assert.equal(row.variant, 'B', 'tem que gravar a variante realmente servida, nao sempre A')
   })
 })
