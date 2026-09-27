@@ -322,3 +322,36 @@ test('getPublishedQuestions/getPublishedDeviations: vazio quando nao ha publicad
   assert.deepEqual(getPublishedQuestions(db, accountId, funnelId), [])
   assert.deepEqual(getPublishedDeviations(db, accountId, funnelId), [])
 })
+
+test('publish: pergunta apagada que estava em teste A/B cancela o teste (spec 6.5)', () => {
+  const db = createRoteiroTestDb()
+  const s = seedRoteiroBase(db)
+  const q = (key, text) => ({ question_key: key, stage_id: s.stages.qualificando, position: 0, text, kind: 'text', required: false, bant: null, ai_hint: null })
+  saveDraft(db, s.accountId, s.funnelId, { questions: [q('orcamento', 'Qual seu orçamento?'), q('prazo', 'Qual o prazo?')], deviations: [] })
+  publish(db, s.accountId, s.funnelId, s.gerenteId)
+
+  // segundo funil da conta com a pergunta 'decisor' publicada
+  const funnel2 = Number(db.prepare("INSERT INTO funnels (account_id, name, is_default, is_active) VALUES (?, 'Funil 2', 0, 1)").run(s.accountId).lastInsertRowid)
+  const st2 = Number(db.prepare("INSERT INTO funnel_stages (funnel_id, name, position) VALUES (?, 'Etapa', 0)").run(funnel2).lastInsertRowid)
+  saveDraft(db, s.accountId, funnel2, { questions: [{ ...q('decisor', 'Quem decide?'), stage_id: st2 }], deviations: [] })
+  publish(db, s.accountId, funnel2, s.gerenteId)
+
+  const addVariant = (accountId, key, status = 'testing') => Number(db.prepare('INSERT INTO roteiro_variants (account_id, question_key, text, status) VALUES (?, ?, ?, ?)').run(accountId, key, 'Texto B', status).lastInsertRowid)
+  const vPrazo = addVariant(s.accountId, 'prazo')
+  const vOrc = addVariant(s.accountId, 'orcamento')
+  const vDecisor = addVariant(s.accountId, 'decisor')
+  const vGanhou = addVariant(s.accountId, 'prazo', 'won')
+  const vOutraConta = addVariant(s.otherAccountId, 'prazo')
+
+  // apaga 'prazo' e publica
+  saveDraft(db, s.accountId, s.funnelId, { questions: [q('orcamento', 'Qual seu orçamento?')], deviations: [] })
+  publish(db, s.accountId, s.funnelId, s.gerenteId)
+
+  const v = id => db.prepare('SELECT status, ended_at FROM roteiro_variants WHERE id = ?').get(id)
+  assert.equal(v(vPrazo).status, 'cancelled')
+  assert.ok(v(vPrazo).ended_at)
+  assert.equal(v(vOrc).status, 'testing')
+  assert.equal(v(vDecisor).status, 'testing', 'pergunta publicada em outro funil da conta continua em teste')
+  assert.equal(v(vGanhou).status, 'won')
+  assert.equal(v(vOutraConta).status, 'testing')
+})

@@ -201,6 +201,16 @@ export function publish(db, accountId, funnelId, userId) {
     `).run(accountId, funnelId, nextVersion, userId ?? null)
     newVersionId = Number(info.lastInsertRowid)
     replaceVersionContent(db, newVersionId, accountId, content.questions, content.deviations)
+    // Pergunta apagada com teste A/B rodando: cancela o teste (spec 6.5). Variantes sao da
+    // conta (sem funil): so cancela se a pergunta nao esta em nenhuma versao publicada da conta.
+    db.prepare(`
+      UPDATE roteiro_variants SET status = 'cancelled', ended_at = datetime('now')
+      WHERE account_id = ? AND status = 'testing' AND question_key NOT IN (
+        SELECT q.question_key FROM roteiro_questions q
+        JOIN roteiro_versions v ON v.id = q.version_id
+        WHERE v.account_id = ? AND v.status = 'published'
+      )
+    `).run(accountId, accountId)
   })()
 
   return getVersionObject(db, newVersionId)
