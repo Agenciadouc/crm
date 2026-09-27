@@ -14,7 +14,8 @@ import { listGhostCandidates, listDailyCheckInstances, listWebhookReRegister, cl
 import { createUzapiStatusSync } from './services/whatsapp/uzapiStatusSync.js'
 import { createInstanceManager } from './services/whatsapp/instanceManager.js'
 import { aggregateAllAccounts } from './services/attendantMetrics.js'
-import { analyzeAllAccounts } from './services/conversationAnalyzer.js'
+import { analyzeAllAccounts, canAnalyze } from './services/conversationAnalyzer.js'
+import { createRoteiroAi } from './services/roteiro/aiAdapter.js'
 import { generateAllCoachings, isoMonday } from './services/coachingAnalyzer.js'
 import { runAutoRescue } from './services/botAutoRescue.js'
 import { checkReplyRates } from './services/replyRate.js'
@@ -245,13 +246,18 @@ export async function runNightlyAnalysis() {
     const metricsResult = aggregateAllAccounts(dateStr)
     console.log(`[Nightly] Metrics: ${JSON.stringify(metricsResult)}`)
 
-    // 2. Analisa conversas via Haiku (mais lento)
-    const analysisResult = await analyzeAllAccounts()
-    console.log(`[Nightly] Analysis: ${JSON.stringify(analysisResult)}`)
+    // 2. Analisa conversas via Haiku (mais lento). Falha aqui nao pula o termometro.
+    try {
+      const analysisResult = await analyzeAllAccounts()
+      console.log(`[Nightly] Analysis: ${JSON.stringify(analysisResult)}`)
+    } catch (e) { console.error('[Nightly] analise erro:', e.message) }
 
     // 3. Termometro: recalcula as notas, grava o retrato do dia e roda o aprendizado do roteiro
+    //    (com IA so nas contas com chave e orcamento).
     try {
-      const scoreResult = await runScoreNightly(db, { now: new Date() })
+      const roteiroAi = createRoteiroAi(db)
+      const aiForAccount = accountId => (canAnalyze(accountId).ok ? roteiroAi : null)
+      const scoreResult = await runScoreNightly(db, { now: new Date(), aiForAccount })
       console.log(`[Nightly] Termometro: ${JSON.stringify(scoreResult)}`)
     } catch (e) { console.error('[Nightly] termometro erro:', e.message) }
 

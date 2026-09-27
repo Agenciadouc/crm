@@ -4,6 +4,7 @@ import { getRoteiro, saveDraft, publish, RoteiroError } from './repo.js'
 import { activeVariant, resolveLeadName } from './variants.js'
 import { questionMetrics, accountMinReplyRate, pct } from './metrics.js'
 import { resolveNow, shiftFromNow } from './time.js'
+import { runAiLearning } from './aiLearning.js'
 
 export const SELLER_MIN_SENT = 10
 export const AB_MIN_SENT = 30
@@ -88,6 +89,7 @@ function suggestionText(s, versionIndex) {
 // --- Analise noturna ---------------------------------------------------------------
 
 // Sugestoes sem IA + avaliacao dos testes A/B. Devolve { created }.
+// Com `ai`, soma as sugestoes com IA (runAiLearning) e devolve uma Promise de { created }.
 export function runLearning(db, { accountId, now, ai = null } = {}) {
   const min = accountMinReplyRate(db, accountId)
   const funnels = db.prepare("SELECT DISTINCT funnel_id FROM roteiro_versions WHERE account_id = ? AND status = 'published'").all(accountId)
@@ -135,8 +137,13 @@ export function runLearning(db, { accountId, now, ai = null } = {}) {
   }
 
   evaluateAbTests(db, { accountId, now })
-  // Com `ai`: runAiLearning(db, { accountId, metricsByFunnel, ai }) entra na Task 13.
-  return { created }
+  if (!ai) return { created }
+  return runAiLearning(db, { accountId, metricsByFunnel, ai, now })
+    .then(r => ({ created: created + r.created }))
+    .catch(e => {
+      console.error('[Roteiro] aprendizado com IA:', e && e.message)
+      return { created }
+    })
 }
 
 // --- Teste A/B ---------------------------------------------------------------------

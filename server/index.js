@@ -38,7 +38,8 @@ import globalTemplatesRoutes from './routes/globalTemplates.js'
 import { authenticate, scopeToAccount } from './middleware/auth.js'
 import { addSSEClient, removeSSEClient, broadcastSSE } from './sse.js'
 import { triggerCapiForStageChange } from './services/metaCapi.js'
-import { bootRoteiroRuntime } from './services/roteiro/runtime.js'
+import { bootRoteiroRuntime, bootRoteiroAi } from './services/roteiro/runtime.js'
+import { createRoteiroAi } from './services/roteiro/aiAdapter.js'
 import { startScheduler } from './scheduler.js'
 import { recoverPendingBroadcasts } from './routes/broadcasts.js'
 import { createMediaTemp } from './services/mediaTemp.js'
@@ -50,6 +51,8 @@ const app = express()
 
 // Roteiro + termometro: hook unico da troca de etapa (CAPI, asks, nota, SSE)
 bootRoteiroRuntime({ db, broadcastSSE, triggerCapiForStageChange })
+// Extracao de respostas por IA: fila de 2 min por lead (so roda em conta com IA e orcamento)
+bootRoteiroAi({ db, ai: createRoteiroAi(db) })
 // Atras de Apache reverse proxy — confia no X-Forwarded-For pra req.ip funcionar
 app.set('trust proxy', 1)
 app.use(cors())

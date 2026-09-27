@@ -13,6 +13,7 @@ import { scheduleScore } from '../services/leadScore/recalc.js'
 import { questionMetrics, conversionByBand } from '../services/roteiro/metrics.js'
 import { startAbTest, confirmVariant, keepCurrent, applySuggestion, rejectSuggestion } from '../services/roteiro/learning.js'
 import { pickAnthropicKey } from '../services/anthropicKeyPicker.js'
+import { buildAiDraft } from '../services/roteiro/aiDraft.js'
 import { canAtendenteAccessLead } from '../services/leadAccess.js'
 
 const MANAGER_ROLES = ['super_admin', 'gerente']
@@ -84,9 +85,8 @@ export function createRoteiroRouter(db, { ai = null, now = () => new Date() } = 
     } catch (e) { fail(res, e) }
   })
 
-  // Implementacao real (chamada de IA) e da Task 13. Aqui so os dois portoes que a
-  // tela precisa desde ja: funil de outra conta -> 404, sem IA/sem chave -> 503.
-  router.post('/funnels/:funnelId/ai-draft', manager, (req, res) => {
+  // Montar com IA: funil de outra conta -> 404, sem IA/sem chave -> 503, IA falhou -> 502.
+  router.post('/funnels/:funnelId/ai-draft', manager, async (req, res) => {
     try {
       getRoteiro(db, req.accountId, req.params.funnelId)
     } catch (e) { return fail(res, e) }
@@ -95,7 +95,9 @@ export function createRoteiroRouter(db, { ai = null, now = () => new Date() } = 
     if (!ai || !key) {
       return res.status(503).json({ error: 'A IA não está ligada nesta conta.' })
     }
-    return res.status(501).json({ error: 'Montar com IA ainda não foi implementado.' })
+    try {
+      res.json(await buildAiDraft(db, { accountId: req.accountId, funnelId: req.params.funnelId, ai }))
+    } catch (e) { fail(res, e) }
   })
 
   router.get('/performance', manager, (req, res) => {

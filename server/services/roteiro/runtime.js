@@ -6,13 +6,15 @@ import { configureScoreRuntime, scheduleScore } from '../leadScore/recalc.js'
 import { markAdvanced, markBought, markReplied, recordAsk } from './asks.js'
 import { getLeadRoteiro } from './leadRoteiro.js'
 import { recognizeQuestion } from './recognize.js'
+import { createExtractQueue, extractAnswers, EXTRACT_DELAY_MS } from './aiExtract.js'
 
 const DEFAULT_REPLY_WINDOW_H = 24
 
 let scheduleFn = scheduleScore
+let broadcastFn = () => {}
 let aiExtractHandler = () => {}
 
-// Extracao de respostas por IA (Task 13). Ate la, no-op.
+// Extracao de respostas por IA: no-op ate bootRoteiroAi ligar a fila.
 export function setAiExtractHandler(fn) {
   aiExtractHandler = typeof fn === 'function' ? fn : () => {}
 }
@@ -50,7 +52,25 @@ function buildOnMoved({ broadcastSSE, triggerCapiForStageChange }) {
 export function bootRoteiroRuntime({ db, broadcastSSE, triggerCapiForStageChange, schedule }) {
   configureScoreRuntime({ db, onBandUp: buildOnBandUp(broadcastSSE) })
   scheduleFn = typeof schedule === 'function' ? schedule : scheduleScore
+  broadcastFn = typeof broadcastSSE === 'function' ? broadcastSSE : () => {}
   configureStageMoveHooks({ onMoved: buildOnMoved({ broadcastSSE, triggerCapiForStageChange }) })
+}
+
+// Liga a extracao por IA (spec 6.4): fila de 2 min por lead -> extractAnswers com o
+// adaptador `ai`. Resposta salva ou pergunta fora do roteiro -> nota + SSE lead:roteiro.
+// Chamar depois de bootRoteiroRuntime (usa o broadcastSSE guardado la).
+export function bootRoteiroAi({ db, ai, delayMs = EXTRACT_DELAY_MS, setTimer, clearTimer }) {
+  const queue = createExtractQueue({
+    delayMs, setTimer, clearTimer,
+    run: async ({ lead }) => {
+      const r = await extractAnswers(db, { accountId: lead.account_id, leadId: lead.id, ai })
+      if (!r.saved.length && !r.offscript) return
+      if (r.saved.length) scheduleFn(lead.id)
+      try { broadcastFn(lead.account_id, 'lead:roteiro', { lead_id: lead.id, offscript: r.offscript }) } catch (e) { console.error('[Roteiro] SSE lead:roteiro:', e.message) }
+    },
+  })
+  setAiExtractHandler(queue.enqueue)
+  return queue
 }
 
 // Mensagem do cliente salva: asks respondidos, nota e extracao por IA.

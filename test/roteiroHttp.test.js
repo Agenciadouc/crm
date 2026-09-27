@@ -184,6 +184,27 @@ test('ai-draft de funil de outra conta continua dando 404 (nao 503)', async () =
   })
 })
 
+test('ai-draft com IA e chave monta o rascunho; IA falhando -> 502 em portugues', async (t) => {
+  t.mock.method(console, 'error', () => {})
+  const respostas = [
+    { toolUses: [{ id: 't', name: 'propose_roteiro', input: { questions: [], deviations: [] } }], usage: {}, costUsd: 0 },
+    new Error('Anthropic API 529'),
+  ]
+  const ai = { isAvailable: () => true, call: async () => { const r = respostas.shift(); if (r instanceof Error) throw r; return r } }
+  await comServidor(async ({ db, base }) => {
+    const { accountId, funnelId } = seedRoteiroBase(db)
+    db.prepare("UPDATE accounts SET anthropic_api_key = 'sk-teste' WHERE id = ?").run(accountId)
+    const t = token({ id: 999, role: 'gerente', accountId })
+    const ok = await peca(base, { method: 'POST', path: `/api/roteiro/funnels/${funnelId}/ai-draft`, jwtToken: t, body: {} })
+    assert.equal(ok.status, 200)
+    assert.equal(ok.body.status, 'draft')
+    assert.equal(ok.body.questions.filter(q => q.bant).length, 4)
+    const falha = await peca(base, { method: 'POST', path: `/api/roteiro/funnels/${funnelId}/ai-draft`, jwtToken: t, body: {} })
+    assert.equal(falha.status, 502)
+    assert.equal(falha.body.error, 'A IA não respondeu agora. Monte à mão ou tente de novo.')
+  }, { ai })
+})
+
 test('PUT /settings fora da faixa -> 400, dentro da faixa salva e GET confere', async () => {
   await comServidor(async ({ db, base }) => {
     const { accountId } = seedRoteiroBase(db)

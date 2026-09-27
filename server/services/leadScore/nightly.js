@@ -16,7 +16,8 @@ function listAccountIds(db) {
   return db.prepare(`SELECT id FROM accounts${hasActive ? ' WHERE is_active = 1' : ''} ORDER BY id`).all().map(r => r.id)
 }
 
-export async function runScoreNightly(db, { now = new Date(), batchSize = 200, onBandUp } = {}) {
+// aiForAccount(accountId) -> adaptador de IA ou null (conta sem chave/orcamento roda sem IA).
+export async function runScoreNightly(db, { now = new Date(), batchSize = 200, onBandUp, aiForAccount = null } = {}) {
   const bandUp = onBandUp || getRuntimeOnBandUp() || undefined
   const day = toSqliteDate(now).slice(0, 10)
   const oldestDay = toSqliteDate(new Date(now.getTime() - KEEP_DAYS * DAY_MS)).slice(0, 10)
@@ -52,8 +53,9 @@ export async function runScoreNightly(db, { now = new Date(), batchSize = 200, o
 
       db.prepare('DELETE FROM lead_score_daily WHERE account_id = ? AND day < ?').run(accountId, oldestDay)
 
-      // IA do aprendizado (runAiLearning) e ligada por conta na Task 13.
-      const learned = runLearning(db, { accountId, now })
+      let ai = null
+      try { ai = typeof aiForAccount === 'function' ? aiForAccount(accountId) : null } catch (e) { console.error('[Termometro] IA da conta', accountId, e.message) }
+      const learned = await runLearning(db, { accountId, now, ai })
       totals.suggestions += learned.created
       totals.accounts++
     } catch (e) {

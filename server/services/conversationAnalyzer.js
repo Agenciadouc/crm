@@ -285,7 +285,8 @@ ${SYSTEM_PROMPT_V2.replace(/^Voce e um analista[\s\S]*?ESCOPO:/, 'ESCOPO:')}`
 // Map temperatura PT (V2) → lead_intent EN (V1 compat)
 const TEMP_TO_INTENT = { quente: 'hot', morno: 'warm', frio: 'cold' }
 
-function canAnalyze(accountId) {
+// Orcamento mensal de IA da conta: analise de conversas, coaching e roteiro somam no mesmo teto.
+export function canAnalyze(accountId) {
   const account = db.prepare('SELECT analysis_token_limit, anthropic_api_key, ai_key_source FROM accounts WHERE id = ?').get(accountId)
   // Sem chave Anthropic (propria ou da Dros, conforme ai_key_source), a conta nao roda IA
   if (!pickAnthropicKey(account)) return { ok: false, reason: 'no_api_key', used: 0, limit: 0 }
@@ -294,7 +295,7 @@ function canAnalyze(accountId) {
   const used = db.prepare(`
     SELECT COALESCE(SUM(input_tokens + output_tokens), 0) as n
     FROM ai_agent_token_log
-    WHERE account_id = ? AND source IN ('conversation_analysis', 'coaching_analysis') AND created_at >= ?
+    WHERE account_id = ? AND source IN ('conversation_analysis', 'coaching_analysis', 'roteiro_extract', 'roteiro_draft', 'roteiro_learning') AND created_at >= ?
   `).get(accountId, monthStart)?.n || 0
   return { ok: used < limit, used, limit }
 }
