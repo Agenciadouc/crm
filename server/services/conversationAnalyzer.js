@@ -295,7 +295,7 @@ export function canAnalyze(accountId) {
   const used = db.prepare(`
     SELECT COALESCE(SUM(input_tokens + output_tokens), 0) as n
     FROM ai_agent_token_log
-    WHERE account_id = ? AND source IN ('conversation_analysis', 'coaching_analysis', 'roteiro_extract', 'roteiro_draft', 'roteiro_learning') AND created_at >= ?
+    WHERE account_id = ? AND source IN ('conversation_analysis', 'coaching_analysis', 'roteiro_extraction', 'roteiro_draft', 'roteiro_learning') AND created_at >= ?
   `).get(accountId, monthStart)?.n || 0
   return { ok: used < limit, used, limit }
 }

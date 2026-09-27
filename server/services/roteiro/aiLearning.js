@@ -195,8 +195,10 @@ export async function runAiLearning(db, { accountId, metricsByFunnel = {}, ai, m
       WHERE account_id = ? AND question_key = ? AND answer_text IS NOT NULL AND TRIM(answer_text) <> '' AND answered_at >= ?
       ORDER BY answered_at DESC LIMIT ?
     `)
+    // Pergunta com sugestao de opcao ainda aberta nao volta pra IA (evita o mesmo grupo reescrito).
+    const open = new Set(pendingPayloads(funnelId, 'new_option').map(r => r.question_key))
     const candidates = questions
-      .filter(q => q.kind === 'text')
+      .filter(q => q.kind === 'text' && !open.has(q.question_key))
       .map(q => ({ q, answers: answersStmt.all(accountId, q.question_key, since, MAX_ITEMS).map(r => r.answer_text.trim()) }))
       .filter(c => c.answers.length >= NEW_OPTION_MIN)
     if (!candidates.length) return
@@ -222,12 +224,17 @@ export async function runAiLearning(db, { accountId, metricsByFunnel = {}, ai, m
 
   // --- new_deviation: >= 3 perguntas parecidas fora do roteiro ---------------------------
   async function suggestNewDeviations({ funnelId, questions }) {
-    const rows = db.prepare(`
-      SELECT o.text FROM roteiro_offscript o JOIN leads l ON l.id = o.lead_id
+    // Desvio sugerido ainda aberto no funil: espera a decisao do gestor antes de pedir outro.
+    if (pendingPayloads(funnelId, 'new_deviation').length) return
+    const found = db.prepare(`
+      SELECT o.text, o.lead_id FROM roteiro_offscript o JOIN leads l ON l.id = o.lead_id
       WHERE o.account_id = ? AND l.account_id = o.account_id AND l.funnel_id = ? AND o.detected_at >= ?
       ORDER BY o.detected_at DESC LIMIT ?
-    `).all(accountId, funnelId, since, MAX_ITEMS).map(r => r.text)
-    if (rows.length < NEW_DEVIATION_MIN) return
+    `).all(accountId, funnelId, since, MAX_ITEMS)
+    const rows = found.map(r => r.text)
+    // Minimo conta leads diferentes: um lead repetindo a pergunta nao vira desvio sozinho.
+    const leads = new Set(found.map(r => r.lead_id)).size
+    if (leads < NEW_DEVIATION_MIN) return
     const content = [
       `Perguntas dos clientes que não estão no roteiro. Agrupe as parecidas; só devolva grupos com ${NEW_DEVIATION_MIN} ou mais perguntas.`,
       'Para cada grupo: palavras-gatilho separadas por vírgula, uma resposta pronta curta e a question_key da pergunta do roteiro para voltar depois.',
@@ -245,11 +252,11 @@ export async function runAiLearning(db, { accountId, metricsByFunnel = {}, ai, m
     for (const d of Array.isArray(input.deviations) ? input.deviations : []) {
       const triggers = str(d?.triggers).slice(0, 300)
       const replyText = str(d?.reply_text).slice(0, 1000)
-      const count = Math.min(Math.round(Number(d?.count)) || 0, rows.length)
+      const count = Math.min(Math.round(Number(d?.count)) || 0, leads)
       if (!triggers || !replyText || count < NEW_DEVIATION_MIN || seen.has(norm(triggers))) continue
       seen.add(norm(triggers))
       const returnKey = keys.has(d.return_question_key) ? d.return_question_key : null
-      add(funnelId, null, 'new_deviation', { triggers, reply_text: replyText, return_question_key: returnKey, count }, { offscript: rows.length })
+      add(funnelId, null, 'new_deviation', { triggers, reply_text: replyText, return_question_key: returnKey, count }, { offscript: rows.length, leads })
     }
   }
 

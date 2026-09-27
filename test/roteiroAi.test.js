@@ -74,7 +74,7 @@ const answer = (db, leadId, key) => db.prepare('SELECT * FROM lead_answers WHERE
 test('extractAnswers: grava resposta de opcoes e de texto com origem ia, marca o ask e avanca a etapa', async () => {
   const { db, s, leadId } = setupExtract()
   const askId = recordAsk(db, { accountId: s.accountId, leadId, questionKey: 'orcamento', textSent: 'Qual sua faixa?', source: 'button' })
-  const ai = fakeAi({ roteiro_extract: [tool('record_answers', { answers: [
+  const ai = fakeAi({ roteiro_extraction: [tool('record_answers', { answers: [
     { question_key: 'orcamento', option_key: 'acima20', evidence: 'Uns 25 mil' },
     { question_key: 'prazo', text: 'até dezembro', evidence: 'preciso até dezembro' },
   ] })] })
@@ -93,7 +93,7 @@ test('extractAnswers: grava resposta de opcoes e de texto com origem ia, marca o
   assert.equal(r.advanced.to, s.stages.proposta)
 
   const call = ai.calls[0]
-  assert.equal(call.source, 'roteiro_extract')
+  assert.equal(call.source, 'roteiro_extraction')
   assert.equal(call.accountId, s.accountId)
   assert.deepEqual(call.toolChoice, { type: 'tool', name: 'record_answers' })
   assert.equal(call.tools[0].name, 'record_answers')
@@ -107,7 +107,7 @@ test('extractAnswers: grava resposta de opcoes e de texto com origem ia, marca o
 
 test('extractAnswers: ignora pergunta/opcao desconhecida e sem trecho; corta trecho em 300', async () => {
   const { db, s, leadId } = setupExtract()
-  const ai = fakeAi({ roteiro_extract: [tool('record_answers', { answers: [
+  const ai = fakeAi({ roteiro_extraction: [tool('record_answers', { answers: [
     { question_key: 'inexistente', text: 'x', evidence: 'x' },
     { question_key: 'orcamento', option_key: 'nao-existe', evidence: 'Uns 25 mil' },
     { question_key: 'decisor', text: 'ela', evidence: 'ela decide' }, // fora da etapa atual
@@ -117,7 +117,7 @@ test('extractAnswers: ignora pergunta/opcao desconhecida e sem trecho; corta tre
   assert.deepEqual(r.saved, [])
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM lead_answers').get().n, 0)
 
-  const ai2 = fakeAi({ roteiro_extract: [tool('record_answers', { answers: [{ question_key: 'prazo', text: 'dezembro', evidence: 'a'.repeat(400) }] })] })
+  const ai2 = fakeAi({ roteiro_extraction: [tool('record_answers', { answers: [{ question_key: 'prazo', text: 'dezembro', evidence: 'a'.repeat(400) }] })] })
   await extractAnswers(db, { accountId: s.accountId, leadId, ai: ai2 })
   assert.equal(answer(db, leadId, 'prazo').evidence.length, 300)
 })
@@ -125,7 +125,7 @@ test('extractAnswers: ignora pergunta/opcao desconhecida e sem trecho; corta tre
 test('extractAnswers: nunca sobrescreve resposta manual', async () => {
   const { db, s, leadId } = setupExtract()
   saveAnswer(db, { accountId: s.accountId, leadId, questionKey: 'orcamento', optionKey: 'ate5', origin: 'manual', userId: s.atendenteId })
-  const ai = fakeAi({ roteiro_extract: [tool('record_answers', { answers: [
+  const ai = fakeAi({ roteiro_extraction: [tool('record_answers', { answers: [
     { question_key: 'orcamento', option_key: 'acima20', evidence: 'Uns 25 mil' },
   ] })] })
   const r = await extractAnswers(db, { accountId: s.accountId, leadId, ai })
@@ -137,7 +137,7 @@ test('extractAnswers: nunca sobrescreve resposta manual', async () => {
 
 test('extractAnswers: pergunta fora do roteiro sem desvio grava roteiro_offscript; com desvio, nada', async () => {
   const { db, s, leadId } = setupExtract()
-  const ai = fakeAi({ roteiro_extract: [
+  const ai = fakeAi({ roteiro_extraction: [
     tool('record_answers', { answers: [], off_script: { question: 'Vocês atendem em Floripa?', suggested_reply: 'Atendemos sim!' } }),
     tool('record_answers', { answers: [], off_script: { question: 'Dá pra parcelar?', suggested_reply: 'Dá sim.' } }),
   ] })
@@ -152,6 +152,19 @@ test('extractAnswers: pergunta fora do roteiro sem desvio grava roteiro_offscrip
   const r2 = await extractAnswers(db, { accountId: s.accountId, leadId, ai })
   assert.equal(r2.offscript, null)
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM roteiro_offscript').get().n, 1)
+})
+
+test('extractAnswers: mesma pergunta fora do roteiro do mesmo lead em 7 dias nao grava de novo', async () => {
+  const { db, s, leadId } = setupExtract()
+  const off = q => tool('record_answers', { answers: [], off_script: { question: q, suggested_reply: 'Atendemos sim!' } })
+  const ai = fakeAi({ roteiro_extraction: [off('Vocês atendem em Floripa?'), off('  voces atendem em floripa  '), off('Vocês atendem em Floripa?')] })
+  assert.ok((await extractAnswers(db, { accountId: s.accountId, leadId, ai })).offscript)
+  assert.equal((await extractAnswers(db, { accountId: s.accountId, leadId, ai })).offscript, null)
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM roteiro_offscript').get().n, 1)
+  // Registro de mais de 7 dias nao conta como repeticao
+  db.prepare("UPDATE roteiro_offscript SET detected_at = datetime('now', '-8 days')").run()
+  assert.ok((await extractAnswers(db, { accountId: s.accountId, leadId, ai })).offscript)
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM roteiro_offscript').get().n, 2)
 })
 
 test('extractAnswers: sem pendente na etapa, sem roteiro ou IA indisponivel -> nao chama a IA', async () => {
@@ -196,13 +209,19 @@ test('bootRoteiroAi: mensagem recebida -> extracao na fila -> SSE lead:roteiro c
   const { db, s, leadId } = setupExtract()
   const sse = []
   bootRoteiroRuntime({ db, broadcastSSE: (...a) => sse.push(a), triggerCapiForStageChange: () => {}, schedule: () => {} })
-  const ai = fakeAi({ roteiro_extract: [tool('record_answers', { answers: [], off_script: { question: 'Tem estacionamento?', suggested_reply: 'Temos sim.' } })] })
+  const reply = () => tool('record_answers', { answers: [], off_script: { question: 'Tem estacionamento?', suggested_reply: 'Temos sim.' } })
+  const ai = fakeAi({ roteiro_extraction: [reply(), reply()] })
   const queue = bootRoteiroAi({ db, ai, setTimer: () => 1, clearTimer: () => {} })
   const lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(leadId)
   enqueueAiExtract({ db, account: null, lead, message: { id: 1 } })
   await queue.flushAll()
   const ev = sse.find(e => e[1] === 'lead:roteiro')
   assert.deepEqual(ev, [s.accountId, 'lead:roteiro', { lead_id: leadId, offscript: { question: 'Tem estacionamento?', suggested_reply: 'Temos sim.' } }])
+  // Mesma pergunta de novo na proxima janela: sem SSE repetido
+  enqueueAiExtract({ db, account: null, lead, message: { id: 2 } })
+  await queue.flushAll()
+  assert.equal(ai.calls.length, 2)
+  assert.equal(sse.filter(e => e[1] === 'lead:roteiro').length, 1)
 })
 
 // --- Adaptador (canAnalyze, chave, log de tokens) --------------------------------------
@@ -215,9 +234,9 @@ test('buildRoteiroAi: canAnalyze falso -> nao chama o modelo; ok -> chama com a 
 
   const off = buildRoteiroAi({ db, canAnalyze: () => ({ ok: false }), resolveKey: () => 'k', callModel })
   assert.equal(off.isAvailable(s.accountId), false)
-  await assert.rejects(off.call({ accountId: s.accountId, source: 'roteiro_extract', messages: [] }), e => e.code === AI_UNAVAILABLE)
+  await assert.rejects(off.call({ accountId: s.accountId, source: 'roteiro_extraction', messages: [] }), e => e.code === AI_UNAVAILABLE)
   const noKey = buildRoteiroAi({ db, canAnalyze: () => ({ ok: true }), resolveKey: () => null, callModel })
-  await assert.rejects(noKey.call({ accountId: s.accountId, source: 'roteiro_extract', messages: [] }), e => e.code === AI_UNAVAILABLE)
+  await assert.rejects(noKey.call({ accountId: s.accountId, source: 'roteiro_extraction', messages: [] }), e => e.code === AI_UNAVAILABLE)
   assert.equal(modelCalls.length, 0)
 
   const on = buildRoteiroAi({ db, canAnalyze: () => ({ ok: true }), resolveKey: () => 'chave-x', callModel })
@@ -263,6 +282,7 @@ test('buildAiDraft: salva rascunho, completa as 4 BANT, corrige etapa invalida e
       { stage_id: s.stages.venda, text: 'Qual o orçamento?', kind: 'options', required: true, bant: 'budget',
         options: [{ label: 'Até 10 mil', points: 0 }, { label: 'Acima de 10 mil', points: 80 }] },
       { stage_id: s.stages.qualificando, text: 'Opções sem opções', kind: 'options', options: [{ label: 'só uma', points: 1 }] },
+      { stage_id: s.stages.qualificando, text: 'O que você precisa?', kind: 'text', bant: 'need' },
     ],
     deviations: [{ triggers: 'preço, valor', reply_text: 'Depende do número de convidados.', return_question_index: 1 }],
   })] })
@@ -281,6 +301,8 @@ test('buildAiDraft: salva rascunho, completa as 4 BANT, corrige etapa invalida e
   assert.equal(orcamento.stage_id, s.stages.novo) // etapa final nao tem pergunta
   assert.equal(orcamento.options[1].points, 50) // pontos no limite
   assert.equal(qs.find(q => q.text === 'Opções sem opções').kind, 'text')
+  assert.equal(qs.find(q => q.text === 'O que você precisa?').bant, null) // BANT so em opcoes
+  assert.equal(qs.find(q => q.bant === 'need').kind, 'options') // veio do modelo BANT
   assert.equal(draft.deviations[0].return_question_key, convidados.question_key)
 
   const call = ai.calls[0]
@@ -392,8 +414,10 @@ test('runAiLearning: respeita maxCalls', async () => {
 test('runAiLearning: new_option agrupa >= 5 respostas de texto; new_deviation com >= 3 fora do roteiro', async () => {
   const { db, s, leadId } = setupLearning()
   seedTextAnswers(db, s, 6)
+  void leadId
   for (const t of ['Dá pra parcelar?', 'Parcela no cartão?', 'Aceita parcelado?']) {
-    db.prepare('INSERT INTO roteiro_offscript (account_id, lead_id, text, detected_at) VALUES (?, ?, ?, ?)').run(s.accountId, leadId, t, at(2))
+    const outro = addLead(db, { account_id: s.accountId, funnel_id: s.funnelId, stage_id: s.stages.qualificando, phone: `5548777${t.length}` })
+    db.prepare('INSERT INTO roteiro_offscript (account_id, lead_id, text, detected_at) VALUES (?, ?, ?, ?)').run(s.accountId, outro, t, at(2))
   }
   const metricsByFunnel = await metricsFor(db, s)
   const ai = fakeAi({ roteiro_learning: [
@@ -413,13 +437,33 @@ test('runAiLearning: new_option agrupa >= 5 respostas de texto; new_deviation co
   assert.deepEqual(devs[0].payload, { triggers: 'parcelar, parcela, parcelado', reply_text: 'Parcelamos em até 10x.', return_question_key: 'q1', count: 3 })
   assert.equal(devs[0].funnel_id, s.funnelId)
 
-  // Segunda noite: mesmas respostas da IA nao duplicam as sugestoes novas
+  // Segunda noite: com sugestoes ainda abertas, a IA nem e chamada (textos reescritos nao viram cartao novo)
   const ai2 = fakeAi({ roteiro_learning: [
-    tool('group_answers', { groups: [{ question_key: 'q2', label: 'com a esposa', count: 6 }] }),
-    tool('group_offscript', { deviations: [{ triggers: 'parcelar, parcela, parcelado', reply_text: 'Parcelamos.', return_question_key: null, count: 3 }] }),
+    tool('group_answers', { groups: [{ question_key: 'q2', label: 'Junto com a esposa', count: 6 }] }),
+    tool('group_offscript', { deviations: [{ triggers: 'parcelamento, parcelas', reply_text: 'Parcelamos.', return_question_key: null, count: 3 }] }),
   ] })
   const r2 = await runAiLearning(db, { accountId: s.accountId, metricsByFunnel, ai: ai2, now: NOW })
   assert.equal(r2.created, 0)
+  assert.equal(ai2.calls.length, 0)
+  assert.equal(suggestions(db, s.accountId, 'new_option').length, 1)
+  assert.equal(suggestions(db, s.accountId, 'new_deviation').length, 1)
+
+  // Recusadas: a IA volta a olhar
+  db.prepare("UPDATE roteiro_suggestions SET status = 'rejected' WHERE account_id = ?").run(s.accountId)
+  const ai3 = fakeAi({ roteiro_learning: [tool('group_answers', { groups: [] }), tool('group_offscript', { deviations: [] })] })
+  await runAiLearning(db, { accountId: s.accountId, metricsByFunnel, ai: ai3, now: NOW })
+  assert.equal(ai3.calls.length, 2)
+})
+
+test('runAiLearning: um lead so repetindo a pergunta fora do roteiro nao vira desvio', async () => {
+  const { db, s, leadId } = setupLearning()
+  for (const t of ['Dá pra parcelar?', 'Parcela no cartão?', 'Aceita parcelado?', 'E parcelado?']) {
+    db.prepare('INSERT INTO roteiro_offscript (account_id, lead_id, text, detected_at) VALUES (?, ?, ?, ?)').run(s.accountId, leadId, t, at(2))
+  }
+  const ai = fakeAi({ roteiro_learning: [tool('group_offscript', { deviations: [{ triggers: 'parcelar', reply_text: 'Sim.', count: 4 }] })] })
+  const r = await runAiLearning(db, { accountId: s.accountId, metricsByFunnel: await metricsFor(db, s), ai, now: NOW })
+  assert.equal(r.created, 0)
+  assert.equal(ai.calls.length, 0)
 })
 
 test('runAiLearning: reorder quando a pergunta posterior responde >= 15 pts mais feita antes (regra calculada, IA so explica)', async () => {

@@ -130,7 +130,8 @@ function sanitizeQuestion(raw, { stageIds, fallbackStageId, usedBant }) {
       .slice(0, 10)
     if (options.length < 2) { kind = 'text'; options = [] }
   }
-  let bant = BANT_KEYS.includes(raw.bant) ? raw.bant : null
+  // BANT so vale em pergunta de opcoes; senao o modelo BANT completa depois.
+  let bant = kind === 'options' && BANT_KEYS.includes(raw.bant) ? raw.bant : null
   if (bant && usedBant.has(bant)) bant = null
   if (bant) usedBant.add(bant)
   return {

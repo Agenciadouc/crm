@@ -6,6 +6,7 @@ import { getLeadRoteiro, safeGetPublishedQuestions, saveAnswer } from './leadRot
 import { markAnswered } from './asks.js'
 import { maybeAutoAdvance } from './autoAdvance.js'
 import { matchDeviation } from './deviations.js'
+import { normalizeText } from './recognize.js'
 import { AI_UNAVAILABLE, toolInput } from './aiCall.js'
 
 export const EXTRACT_DELAY_MS = 120000
@@ -13,6 +14,7 @@ const MAX_MESSAGES = 20
 const MAX_EVIDENCE = 300
 const MAX_TEXT = 1000
 const MAX_OFFSCRIPT = 500
+const OFFSCRIPT_REPEAT_DAYS = 7
 
 const SYSTEM_PROMPT = `Você lê conversas de WhatsApp entre um vendedor e um cliente e anota as respostas do cliente para as perguntas do roteiro de qualificação.
 Regras:
@@ -79,7 +81,7 @@ function describeQuestion(q, hint) {
 // Responde as pendentes da etapa atual; devolve { saved, offscript, advanced }.
 export async function extractAnswers(db, { accountId, leadId, ai }) {
   const empty = { saved: [], offscript: null, advanced: null }
-  if (!ai || (typeof ai.isAvailable === 'function' && !ai.isAvailable(accountId))) return empty
+  if (!ai) return empty
 
   const roteiro = getLeadRoteiro(db, { accountId, leadId }) // 404 se o lead nao e da conta
   if (!roteiro.has_roteiro) return empty
@@ -89,6 +91,8 @@ export async function extractAnswers(db, { accountId, leadId, ai }) {
 
   const messages = lastMessages(db, leadId)
   if (!messages.length) return empty
+  // Orcamento (canAnalyze soma o mes) so depois dos filtros baratos.
+  if (typeof ai.isAvailable === 'function' && !ai.isAvailable(accountId)) return empty
 
   const lead = db.prepare('SELECT funnel_id FROM leads WHERE id = ? AND account_id = ?').get(leadId, accountId)
   const hints = new Map(safeGetPublishedQuestions(db, accountId, lead.funnel_id).map(q => [q.question_key, q.ai_hint]))
@@ -107,7 +111,7 @@ export async function extractAnswers(db, { accountId, leadId, ai }) {
     tools: [RECORD_ANSWERS_TOOL],
     toolChoice: { type: 'tool', name: 'record_answers' },
     maxTokens: 800,
-    source: 'roteiro_extract',
+    source: 'roteiro_extraction',
   })
   const input = toolInput(result, 'record_answers') || {}
 
@@ -143,6 +147,8 @@ export async function extractAnswers(db, { accountId, leadId, ai }) {
 
 // Pergunta fora do roteiro: se casar um desvio cadastrado, o cartao ja mostra o desvio
 // (nada a fazer); senao grava em roteiro_offscript e devolve a sugestao da IA.
+// A mesma pergunta do mesmo lead nos ultimos 7 dias nao repete (o prompt reenvia as
+// ultimas 20 mensagens, entao a IA reporta de novo a pergunta ainda sem resposta).
 function handleOffscript(db, { accountId, leadId, funnelId, raw }) {
   const question = str(raw?.question).slice(0, MAX_OFFSCRIPT)
   const suggestedReply = str(raw?.suggested_reply).slice(0, MAX_TEXT)
@@ -154,6 +160,12 @@ function handleOffscript(db, { accountId, leadId, funnelId, raw }) {
     const lastInbound = db.prepare("SELECT content FROM messages WHERE lead_id = ? AND direction = 'inbound' ORDER BY created_at DESC, id DESC LIMIT 1").get(leadId)
     if (matchDeviation(question, deviations) || (lastInbound && matchDeviation(lastInbound.content, deviations))) return null
   }
+
+  const normQuestion = normalizeText(question)
+  const recent = db.prepare(`
+    SELECT text FROM roteiro_offscript WHERE account_id = ? AND lead_id = ? AND detected_at >= datetime('now', ?)
+  `).all(accountId, leadId, `-${OFFSCRIPT_REPEAT_DAYS} days`)
+  if (recent.some(r => normalizeText(r.text) === normQuestion)) return null
 
   db.prepare("INSERT INTO roteiro_offscript (account_id, lead_id, text, detected_at) VALUES (?, ?, ?, datetime('now'))").run(accountId, leadId, question)
   return { question, suggested_reply: suggestedReply }
