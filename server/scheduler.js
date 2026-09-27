@@ -524,7 +524,7 @@ async function tick() {
   hotLeadTickCount = (hotLeadTickCount + 1) % HOT_LEAD_EVERY_TICKS
   if (hotLeadTickCount === 0) {
     try {
-      runHotLeadAlerts(db, { now: new Date() })
+      runHotLeadAlerts(db, { now: new Date(), broadcast: broadcastSSE })
     } catch (e) { console.error('[Termometro] aviso de lead quente:', e.message) }
   }
   try {

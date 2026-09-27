@@ -43,6 +43,29 @@ test('businessMinutesBetween: limita a 7 dias de contagem', () => {
   assert.ok(businessMinutesBetween(everyDay, from, to) <= 10080)
 })
 
+test('businessMinutesBetween: fim de semana inteiro sem horario = 0; atravessa semana conta so dias uteis', () => {
+  // sabado 26/09 09:00 SP -> domingo 27/09 20:00 SP
+  assert.equal(businessMinutesBetween(WEEKDAYS_8_18, new Date('2026-09-26T12:00:00Z'), new Date('2026-09-27T23:00:00Z')), 0)
+  // sexta 17:30 -> terca 09:00 = 30 (sex) + 600 (seg) + 60 (ter)
+  assert.equal(businessMinutesBetween(WEEKDAYS_8_18, FRI_1730, new Date('2026-09-29T12:00:00Z')), 690)
+  // varias faixas no dia (almoco) e segundos quebrados
+  const lunch = JSON.stringify({ mon: [{ start: '08:00', end: '12:00' }, { start: '13:00', end: '18:00' }] })
+  assert.equal(businessMinutesBetween(lunch, new Date('2026-09-28T14:30:30Z'), new Date('2026-09-28T16:30:00Z')), 59)
+})
+
+test('businessMinutesBetween: cap para cedo e devolve no maximo o cap', () => {
+  assert.equal(businessMinutesBetween(WEEKDAYS_8_18, FRI_1730, new Date('2026-09-29T12:00:00Z'), 'America/Sao_Paulo', { cap: 60 }), 60)
+  assert.equal(businessMinutesBetween(WEEKDAYS_8_18, FRI_1730, MON_0830, 'America/Sao_Paulo', { cap: 1000 }), 60)
+  assert.equal(businessMinutesBetween(null, FRI_1730, MON_0830, 'America/Sao_Paulo', { cap: 100 }), 100)
+})
+
+test('businessMinutesBetween: rapido (200 chamadas de fim de semana em < 200 ms)', () => {
+  const t0 = process.hrtime.bigint()
+  for (let i = 0; i < 200; i++) businessMinutesBetween(WEEKDAYS_8_18, FRI_1730, MON_0830)
+  const ms = Number(process.hrtime.bigint() - t0) / 1e6
+  assert.ok(ms < 200, `levou ${ms.toFixed(1)} ms`)
+})
+
 // --- runHotLeadAlerts ------------------------------------------------------------------
 
 function insertMsg(db, { leadId, accountId, direction, createdAt }) {
@@ -133,6 +156,72 @@ test('runHotLeadAlerts: aviso resolvido nao impede um novo depois', () => {
   const now = new Date('2026-09-23T15:00:00Z')
   const leadId = hotLead(db, s)
   insertMsg(db, { leadId, accountId: s.accountId, direction: 'inbound', createdAt: new Date(now.getTime() - 90 * 60000) })
-  db.prepare(`INSERT INTO analyst_alerts (account_id, lead_id, type, severity, title, status) VALUES (?, ?, 'lead_quente_sem_resposta', 'alta', 'x', 'resolved')`).run(s.accountId, leadId)
+  // aviso antigo, de antes da ultima mensagem do cliente
+  db.prepare(`INSERT INTO analyst_alerts (account_id, lead_id, type, severity, title, status, created_at) VALUES (?, ?, 'lead_quente_sem_resposta', 'alta', 'x', 'resolved', ?)`)
+    .run(s.accountId, leadId, toSqliteDate(new Date(now.getTime() - 5 * 3600000)))
   assert.equal(runHotLeadAlerts(db, { now }).created, 1)
+})
+
+test('runHotLeadAlerts: aviso dispensado depois da ultima mensagem do cliente nao volta', () => {
+  const db = createRoteiroTestDb()
+  const s = seedRoteiroBase(db)
+  const now = new Date('2026-09-23T15:00:00Z')
+  const leadId = hotLead(db, s)
+  insertMsg(db, { leadId, accountId: s.accountId, direction: 'inbound', createdAt: new Date(now.getTime() - 90 * 60000) })
+  assert.equal(runHotLeadAlerts(db, { now }).created, 1)
+  db.prepare("UPDATE analyst_alerts SET status = 'dismissed' WHERE lead_id = ?").run(leadId)
+  assert.equal(runHotLeadAlerts(db, { now: new Date(now.getTime() + 5 * 60000) }).created, 0)
+  assert.equal(runHotLeadAlerts(db, { now: new Date(now.getTime() + 60 * 60000) }).created, 0)
+  // cliente escreve de novo e ninguem responde: aviso novo
+  insertMsg(db, { leadId, accountId: s.accountId, direction: 'inbound', createdAt: new Date(now.getTime() + 10 * 60000) })
+  assert.equal(runHotLeadAlerts(db, { now: new Date(now.getTime() + 90 * 60000) }).created, 1)
+  assert.equal(alertsFor(db, leadId).length, 2)
+})
+
+test('runHotLeadAlerts: resolve sozinho o aviso quando a resposta sai fora do CRM ou o lead esfria', () => {
+  const db = createRoteiroTestDb()
+  const s = seedRoteiroBase(db)
+  const now = new Date('2026-09-23T15:00:00Z')
+  const respondido = hotLead(db, s, { name: 'Respondido' })
+  const esfriou = hotLead(db, s, { name: 'Esfriou' })
+  const aindaSem = hotLead(db, s, { name: 'Ainda sem' })
+  for (const id of [respondido, esfriou, aindaSem]) insertMsg(db, { leadId: id, accountId: s.accountId, direction: 'inbound', createdAt: new Date(now.getTime() - 90 * 60000) })
+  assert.equal(runHotLeadAlerts(db, { now }).created, 3)
+
+  // resposta pelo celular / agente de IA / follow-up: so grava a mensagem de saida
+  insertMsg(db, { leadId: respondido, accountId: s.accountId, direction: 'outbound', createdAt: new Date(now.getTime() + 60000) })
+  db.prepare("UPDATE leads SET score = 40, score_band = 'morno' WHERE id = ?").run(esfriou)
+
+  const r = runHotLeadAlerts(db, { now: new Date(now.getTime() + 5 * 60000) })
+  assert.equal(r.resolved, 2)
+  assert.equal(r.created, 0)
+  assert.equal(alertsFor(db, respondido)[0].status, 'resolved')
+  assert.ok(alertsFor(db, respondido)[0].resolved_at)
+  assert.equal(alertsFor(db, esfriou)[0].status, 'resolved')
+  assert.equal(alertsFor(db, aindaSem)[0].status, 'open')
+})
+
+test('runHotLeadAlerts: avisa por SSE lead:hot_alert ao criar', () => {
+  const db = createRoteiroTestDb()
+  const s = seedRoteiroBase(db)
+  const now = new Date('2026-09-23T15:00:00Z')
+  const leadId = hotLead(db, s, { name: 'Maria' })
+  insertMsg(db, { leadId, accountId: s.accountId, direction: 'inbound', createdAt: new Date(now.getTime() - 90 * 60000) })
+  const sent = []
+  runHotLeadAlerts(db, { now, broadcast: (...a) => sent.push(a) })
+  assert.deepEqual(sent, [[s.accountId, 'lead:hot_alert', { lead_id: leadId, name: 'Maria', band: 'quente', minutes: 90, capped: false, attendant_id: s.atendenteId }]])
+  // broadcast que falha nao derruba
+  const leadB = hotLead(db, s, { name: 'Bia' })
+  insertMsg(db, { leadId: leadB, accountId: s.accountId, direction: 'inbound', createdAt: new Date(now.getTime() - 90 * 60000) })
+  assert.equal(runHotLeadAlerts(db, { now, broadcast: () => { throw new Error('sse fora') } }).created, 1)
+})
+
+test('runHotLeadAlerts: espera muito longa mostra "mais de" com o teto de contagem', () => {
+  const db = createRoteiroTestDb()
+  const s = seedRoteiroBase(db)
+  const now = new Date('2026-09-23T15:00:00Z')
+  const leadId = hotLead(db, s)
+  insertMsg(db, { leadId, accountId: s.accountId, direction: 'inbound', createdAt: new Date(now.getTime() - 3 * 86400000) })
+  runHotLeadAlerts(db, { now })
+  assert.equal(alertsFor(db, leadId)[0].description, 'Última mensagem do cliente há mais de 600 min (horário de atendimento).')
 })
