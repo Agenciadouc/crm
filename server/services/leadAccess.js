@@ -20,7 +20,9 @@ export function canAtendenteAccessLead(userId, lead, database = defaultDb) {
 }
 
 // Le primary_instance_id do user (nao vem no JWT, precisa consultar DB).
-export function getUserPrimaryInstanceId(userId) {
-  const row = db.prepare('SELECT primary_instance_id FROM users WHERE id = ?').get(userId)
+// Mesmo `database` opcional de canAtendenteAccessLead, por simetria (nao ha caller
+// testavel usando ainda, mas evita repetir o mesmo erro se um dia usar).
+export function getUserPrimaryInstanceId(userId, database = defaultDb) {
+  const row = database.prepare('SELECT primary_instance_id FROM users WHERE id = ?').get(userId)
   return row?.primary_instance_id || null
 }
