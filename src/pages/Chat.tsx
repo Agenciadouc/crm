@@ -46,7 +46,7 @@ import {
   MessageCircle, Search, Send, Phone, User, Edit3, Save, X, Plus,
   StickyNote, Tag as TagIcon, Smartphone, ListOrdered, ChevronRight, Check, Clock, Archive, Ban, ListTodo, ChevronDown, ChevronUp, Trash2, Paperclip, FileText, MessageSquarePlus, Copy, Zap, Pause, Play, Bot,
   Menu as MenuIcon, MessagesSquare, Info as InfoIcon, ListChecks, ChevronLeft,
-  DollarSign, SlidersHorizontal,
+  DollarSign, SlidersHorizontal, AlertTriangle,
 } from 'lucide-react'
 import MessageMedia from '../components/MessageMedia'
 import AudioRecorder from '../components/AudioRecorder'
@@ -236,17 +236,24 @@ export default function Chat() {
   // "Arrumar" a aba Atendimento: layouts salvos (conta e meu), modo arrumar aberto
   const [savedLayouts, setSavedLayouts] = useState<SavedLayouts | null>(null)
   const [arrangingLayout, setArrangingLayout] = useState(false)
+  // 'loading' ate a resposta chegar: o Arrumar fica desabilitado (senao o rascunho sairia da fabrica
+  // e "Salvar para mim" apagaria o jeito salvo). 'error' = abre com aviso de que vai substituir.
+  const [layoutStatus, setLayoutStatus] = useState<'loading' | 'ok' | 'error'>('loading')
   const layoutAccountRef = useRef<number | null>(null)
   const atendimentoLayout = useMemo(() => resolveLayout(savedLayouts), [savedLayouts])
   useEffect(() => {
     layoutAccountRef.current = accountId ?? null
     setSavedLayouts(null)
     setArrangingLayout(false)
+    setLayoutStatus('loading')
     if (!accountId) return
     const acc = accountId
     fetchAtendimentoLayouts(acc)
-      .then(d => { if (layoutAccountRef.current === acc) setSavedLayouts(d) })
-      .catch(e => console.warn('[Arrumar] nao carregou o layout, usando o padrao:', e?.message))
+      .then(d => { if (layoutAccountRef.current === acc) { setSavedLayouts(d); setLayoutStatus('ok') } })
+      .catch(e => {
+        console.warn('[Arrumar] nao carregou o layout, usando o padrao:', e?.message)
+        if (layoutAccountRef.current === acc) setLayoutStatus('error')
+      })
   }, [accountId])
   const chatEndRef = useRef<HTMLDivElement>(null)
 
@@ -1422,7 +1429,7 @@ export default function Chat() {
       ) : (
         <div style={{ fontSize: 11, display: 'flex', flexDirection: 'column', gap: 4 }}>
           <div><span style={{ color: '#6B6580' }}>Nome:</span> {lead.name || '-'}</div>
-          <div><span style={{ color: '#6B6580' }}>Tel:</span> {lead.phone || '-'} {lead.phone && lead.phone.replace(/\D/g,'').length !== 13 && <span style={{ color: '#FF6B6B', fontSize: 9 }}>⚠ numero incompleto</span>}</div>
+          <div><span style={{ color: '#6B6580' }}>Tel:</span> {lead.phone || '-'} {lead.phone && lead.phone.replace(/\D/g,'').length !== 13 && <span style={{ color: '#FF6B6B', fontSize: 9, display: 'inline-flex', alignItems: 'center', gap: 2 }}><AlertTriangle size={9} /> numero incompleto</span>}</div>
           <div><span style={{ color: '#6B6580' }}>Email:</span> {lead.email || '-'}</div>
           <div><span style={{ color: '#6B6580' }}>Cidade:</span> {lead.city || '-'}</div>
           {lead.empresa && <div><span style={{ color: '#6B6580' }}>Empresa:</span> {lead.empresa}</div>}
@@ -2012,6 +2019,8 @@ export default function Chat() {
                 if (arrangingLayout) {
                   return (
                     <PanelLayoutEditor
+                      key={`${layoutStatus}-${JSON.stringify(savedLayouts)}`}
+                      loadFailed={layoutStatus === 'error'}
                       initial={atendimentoLayout.layout}
                       source={atendimentoLayout.source}
                       hasOwn={!!savedLayouts?.user}
@@ -2378,12 +2387,12 @@ export default function Chat() {
                 return (
                   <>
                     <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 4, marginBottom: 8 }}>
-                      <button className="btn btn-secondary btn-sm" onClick={() => setArrangingLayout(true)} style={{ padding: '2px 8px', fontSize: 10 }} title="Mude a ordem e escolha o que aparece. Ex.: esconda Vendas e suba Tarefas.">
+                      <button className="btn btn-secondary btn-sm" onClick={() => setArrangingLayout(true)} disabled={layoutStatus === 'loading'} style={{ padding: '2px 8px', fontSize: 10 }} title={layoutStatus === 'loading' ? 'Carregando a arrumação...' : 'Mude a ordem e escolha o que aparece. Ex.: esconda Vendas e suba Tarefas.'}>
                         <SlidersHorizontal size={10} /> Arrumar
                       </button>
                       <HelpTip title="Arrumar">Mude a ordem e escolha o que aparece. Ex.: esconda Vendas e suba Tarefas.</HelpTip>
                     </div>
-                    {visibleIds(atendimentoLayout.layout).map(id => <Fragment key={id}>{blocks[id]()}</Fragment>)}
+                    {visibleIds(atendimentoLayout.layout).map(id => <Fragment key={id}>{blocks[id]?.()}</Fragment>)}
                   </>
                 )
               })()}

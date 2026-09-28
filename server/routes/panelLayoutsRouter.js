@@ -16,7 +16,8 @@ export function createPanelLayoutsRouter(db) {
   }
 
   router.use((req, res, next) => {
-    if (req.user.role === 'super_admin' && !req.accountId) return res.status(400).json({ error: 'Selecione uma conta.' })
+    // super_admin sem conta escolhida, ou usuario sem conta (account_id nulo): nada a gravar
+    if (!req.accountId) return res.status(400).json({ error: 'Selecione uma conta.' })
     next()
   })
   router.param('panel', (req, res, next, panel) => {

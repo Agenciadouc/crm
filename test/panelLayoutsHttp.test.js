@@ -149,3 +149,16 @@ test('guarda so id e visible (campos extras saem)', async () => {
     assert.deepEqual(r.body.user, [{ id: 'score', visible: true }])
   })
 })
+
+test('usuario sem conta (account_id nulo) recebe 400, nao 500', async () => {
+  await comServidor(async ({ db, url }) => {
+    const semConta = Number(db.prepare("INSERT INTO users (account_id, name, email, role) VALUES (NULL, 'Solto', 's@t.local', 'atendente')").run().lastInsertRowid)
+    const t = token({ id: semConta, role: 'atendente', accountId: null })
+    for (const [method, path, body] of [['GET', P], ['PUT', `${P}/me`, { layout: layoutA }], ['DELETE', `${P}/me`]]) {
+      const r = await peca(url, { method, path, jwtToken: t, body })
+      assert.equal(r.status, 400, `${method} ${path}`)
+      assert.equal(r.body.error, 'Selecione uma conta.')
+    }
+    assert.equal(db.prepare('SELECT COUNT(*) AS n FROM panel_layouts').get().n, 0)
+  })
+})
