@@ -18,6 +18,7 @@ export const ATENDIMENTO_BLOCKS = [
 const BY_ID = new Map(ATENDIMENTO_BLOCKS.map(b => [b.id, b]))
 
 export function blockLabel(id) {
+  if (id === CADENCE_ROW) return 'Cadência (etapa + avulsa)'
   return BY_ID.get(id)?.label ?? id
 }
 
@@ -83,4 +84,46 @@ export function validateLayout(layout) {
     if (typeof b.visible !== 'boolean') return `Diga se o bloco "${b.id}" fica visível (sim ou não).`
   }
   return null
+}
+
+// Arrumar: etapa (proximo_passo) e avulsa sao UMA linha "cadencia" (os ids salvos continuam os dois).
+// A linha fica onde aparece o primeiro dos dois; parts guarda a visibilidade de cada um.
+const CADENCE_ROW = 'cadencia'
+const CADENCE_PARTS = ['proximo_passo', 'avulsa']
+
+export function editorRows(layout) {
+  const out = []
+  const parts = {}
+  for (const b of layout) if (CADENCE_PARTS.includes(b.id)) parts[b.id] = b.visible
+  for (const b of layout) {
+    if (!CADENCE_PARTS.includes(b.id)) out.push({ id: b.id, visible: b.visible })
+    else if (!out.some(r => r.id === CADENCE_ROW)) {
+      out.push({ id: CADENCE_ROW, visible: CADENCE_PARTS.some(id => parts[id]), parts: { ...parts } })
+    }
+  }
+  return out
+}
+
+// Linhas -> layout para salvar: a linha "cadencia" vira as duas, juntas (etapa em cima)
+export function expandRows(rows) {
+  const out = []
+  for (const r of rows) {
+    if (r.id !== CADENCE_ROW) { out.push({ id: r.id, visible: r.visible }); continue }
+    for (const id of CADENCE_PARTS) {
+      if (r.parts && id in r.parts) out.push({ id, visible: r.parts[id] })
+    }
+  }
+  return out
+}
+
+// Olho da linha: na "cadencia" esconde/mostra as duas
+export function toggleRow(rows, id) {
+  return rows.map(r => {
+    if (r.id !== id) return r
+    const visible = !r.visible
+    if (id !== CADENCE_ROW) return { ...r, visible }
+    const parts = {}
+    for (const k of Object.keys(r.parts || {})) parts[k] = visible
+    return { ...r, visible, parts }
+  })
 }

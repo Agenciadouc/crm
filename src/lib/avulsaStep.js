@@ -20,9 +20,9 @@ export function avulsaStepView(lc, fill = t => t) {
   if (MESSAGE_TYPES.includes(t)) {
     const text = str(lc.attempt_message) ? str(fill(String(lc.attempt_message))) : ''
     // Descricao (ex.: "Boas-vindas") aparece em cima do texto
-    if (text) return { kind: 'mensagem', title: str(lc.attempt_description), text, actions: ['enviar', 'pular'] }
+    if (text) return { kind: 'mensagem', title: str(lc.attempt_description), text, actions: ['enviar', 'feito', 'pular'] }
     // Passo sem texto pronto: [Enviar] abre a janela vazia e o vendedor escreve; a descricao vira titulo
-    return { kind: 'mensagem', title: str(lc.attempt_description), text: '', actions: ['enviar', 'pular'] }
+    return { kind: 'mensagem', title: str(lc.attempt_description), text: '', actions: ['enviar', 'feito', 'pular'] }
   }
   if (t === 'ligacao') {
     return { kind: 'ligacao', text: str(lc.attempt_script) || str(lc.attempt_description) || str(lc.attempt_instructions), actions: ['roteiro', 'pular'] }

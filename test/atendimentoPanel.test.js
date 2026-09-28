@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   reviewPosition, reviewTitle, reviewFromPendingAsk, reviewSendKeys, canSendReview,
-  boxKeysAfterReviewSend, offerRecognition, leadTaskRows, manualTaskRows, attendantView, sectionTitle,
+  boxKeysAfterReviewSend, offerRecognition, leadTaskRows, manualTaskRows, reviewTextToSend, attendantView, sectionTitle,
 } from '../src/lib/atendimentoPanel.js'
 
 const data = {
@@ -104,6 +104,18 @@ test('tarefas do Chat: so as manuais (passo de cadencia ja aparece no bloco Cade
   assert.deepEqual(rows.map(r => r.key), ['s-4', 's-1'])
   assert.ok(rows.every(r => !r.isCadence))
   assert.deepEqual(manualTaskRows(null, 7, now), [])
+})
+
+test('janela Conferir: uma troca de variaveis so (texto que abriu ja trocado nao passa de novo)', () => {
+  const fill = t => t.replace(/\{\{primeiro_nome\}\}/g, 'Ana')
+  // mensagem nao mexida: vai como abriu (ja trocada na abertura)
+  assert.equal(reviewTextToSend({ kind: 'mensagem', text: 'Oi Ana' }, 'Oi Ana', fill), 'Oi Ana')
+  const once = t => `${t}!`
+  assert.equal(reviewTextToSend({ kind: 'mensagem', text: 'Oi Ana' }, 'Oi Ana', once), 'Oi Ana')
+  // mensagem escrita/mexida na janela: troca o que foi digitado
+  assert.equal(reviewTextToSend({ kind: 'mensagem', text: '' }, 'Oi {{primeiro_nome}}', fill), 'Oi Ana')
+  // pergunta: vai como esta
+  assert.equal(reviewTextToSend({ kind: 'pergunta', text: 'x' }, 'Oi {{primeiro_nome}}', fill), 'Oi {{primeiro_nome}}')
 })
 
 test('atendente: vendedor ve quem atende; gestor troca', () => {

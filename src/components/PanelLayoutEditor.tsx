@@ -2,10 +2,11 @@ import { useState } from 'react'
 import { GripVertical, ChevronUp, ChevronDown, Eye, EyeOff, Save, RotateCcw, Users, X, AlertTriangle } from 'lucide-react'
 import { useIsMobile } from '../hooks/useIsMobile'
 import HelpTip from './HelpTip'
-import { blockLabel, moveBlock, moveBlockTo, toggleVisible, validateLayout, type PanelBlock, type LayoutSource } from '../lib/panelLayout.js'
+import { blockLabel, moveBlock, moveBlockTo, toggleRow, validateLayout, editorRows, expandRows, type PanelBlock, type LayoutSource, type EditorRow } from '../lib/panelLayout.js'
 
 // Modo "Arrumar" da aba Atendimento: arrastar (ou setas) muda a ordem; o olho mostra/esconde.
 // Nada e apagado: esconder so tira o bloco da aba Atendimento. No celular nao ha arrastar (so setas).
+// Etapa + avulsa aparecem como UMA linha "Cadência" (mover/esconder vale para as duas; salvas juntas).
 interface Props {
   initial: PanelBlock[]
   loadFailed?: boolean
@@ -25,7 +26,7 @@ const SOURCE_TEXT: Record<LayoutSource, string> = {
 }
 
 export default function PanelLayoutEditor({ initial, loadFailed = false, source, hasOwn, canSaveAccount, onSaveMine, onSaveAccount, onReset, onCancel }: Props) {
-  const [draft, setDraft] = useState<PanelBlock[]>(initial)
+  const [draft, setDraft] = useState<EditorRow[]>(() => editorRows(initial))
   const [dragFrom, setDragFrom] = useState<number | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -33,9 +34,10 @@ export default function PanelLayoutEditor({ initial, loadFailed = false, source,
   const canDrag = !isMobile && !busy
 
   const run = async (fn: () => Promise<void>, needsValid = true) => {
-    const invalid = needsValid ? validateLayout(draft) : null
+    const layout = expandRows(draft)
+    const invalid = needsValid ? validateLayout(layout) : null
     if (invalid) { setError(invalid); return }
-    if (needsValid && !draft.some(b => b.visible)) { setError('Deixe pelo menos um bloco visível.'); return }
+    if (needsValid && !layout.some(b => b.visible)) { setError('Deixe pelo menos um bloco visível.'); return }
     setBusy(true); setError(null)
     try { await fn() } catch (e: any) { setError(e?.message || 'Não deu para salvar. Tente de novo.'); setBusy(false) }
   }
@@ -75,7 +77,7 @@ export default function PanelLayoutEditor({ initial, loadFailed = false, source,
             <button className="btn btn-secondary btn-sm" style={btn} disabled={busy || i === draft.length - 1} onClick={() => setDraft(d => moveBlock(d, b.id, 1))} title="Descer" aria-label={`Descer ${blockLabel(b.id)}`}><ChevronDown size={11} /></button>
             <button
               className="btn btn-secondary btn-sm" style={btn} disabled={busy}
-              onClick={() => setDraft(d => toggleVisible(d, b.id))}
+              onClick={() => setDraft(d => toggleRow(d, b.id))}
               title={b.visible ? 'Esconder' : 'Mostrar'} aria-label={`${b.visible ? 'Esconder' : 'Mostrar'} ${blockLabel(b.id)}`} aria-pressed={b.visible}
             >
               {b.visible ? <Eye size={11} /> : <EyeOff size={11} />}
@@ -87,11 +89,11 @@ export default function PanelLayoutEditor({ initial, loadFailed = false, source,
       {error && <div role="alert" style={{ fontSize: 11, color: '#FF6B6B', marginBottom: 8 }}>{error}</div>}
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-        <button className="btn btn-primary btn-sm" style={{ width: '100%', fontSize: 11 }} disabled={busy} onClick={() => run(() => onSaveMine(draft))}>
+        <button className="btn btn-primary btn-sm" style={{ width: '100%', fontSize: 11 }} disabled={busy} onClick={() => run(() => onSaveMine(expandRows(draft)))}>
           <Save size={10} /> Salvar para mim
         </button>
         {canSaveAccount && (
-          <button className="btn btn-secondary btn-sm" style={{ width: '100%', fontSize: 11 }} disabled={busy} onClick={() => run(() => onSaveAccount(draft))} title="Todos da conta que não arrumaram do seu jeito passam a ver assim">
+          <button className="btn btn-secondary btn-sm" style={{ width: '100%', fontSize: 11 }} disabled={busy} onClick={() => run(() => onSaveAccount(expandRows(draft)))} title="Todos da conta que não arrumaram do seu jeito passam a ver assim">
             <Users size={10} /> Salvar como padrão da conta
           </button>
         )}

@@ -11,7 +11,7 @@ import {
   fetchAvailableGlobalTemplates, applyGlobalCadenceHere, applyGlobalFollowUpHere,
   type GlobalTemplateAvailable, type GlobalFollowUpAvailable,
   fetchLeadFollowUp, fetchFollowUps, assignFollowUp, pauseLeadFollowUp, resumeLeadFollowUp, cancelLeadFollowUp,
-  archiveLead, blockLead, createStandaloneTask, fetchLeadTasks, completeStandaloneTask, deleteStandaloneTask, completeTask, skipTask, fetchLeadConversations, forceAiRespond, type LeadConversation,
+  archiveLead, blockLead, createStandaloneTask, fetchLeadTasks, completeStandaloneTask, deleteStandaloneTask, fetchLeadConversations, forceAiRespond, type LeadConversation,
   fetchReadyMessages, type ReadyMessage,
   fetchPendingAiSuggestion, resolveAiSuggestion, pauseLeadAi, resumeLeadAi, type AiSuggestion,
   createLeadOrFindExisting, markLeadAsRead, RoteiroGateError, type RoteiroPendingQuestion,
@@ -36,9 +36,9 @@ import { fetchLeadStageCadence, markLeadStepDone } from '../lib/cadenceApi'
 import { avulsaStepLabel, avulsaStepView, avulsaReviewPos, telHref } from '../lib/avulsaStep.js'
 import {
   reviewPosition, reviewTitle, reviewFromPendingAsk, reviewSendKeys, boxKeysAfterReviewSend, offerRecognition,
-  manualTaskRows, attendantView, sectionTitle, type StepReview, type ReviewPos,
+  manualTaskRows, reviewTextToSend, attendantView, sectionTitle, type StepReview, type ReviewPos,
 } from '../lib/atendimentoPanel.js'
-import { cardHeader, avulsaCardActions, cadenceTitleIds, NO_TEXT_HINT } from '../lib/cadenceCard.js'
+import { cardHeader, avulsaCardActions, cadenceRenderList, NO_TEXT_HINT } from '../lib/cadenceCard.js'
 import { stepTypeLabel } from '../lib/nextStep.js'
 import { PANEL_CARD, CADENCE_CARD, PRIMARY_BTN, HEAD_BTN, LinkButton, PanelTitle } from '../components/atendimento/PanelParts'
 import StageGateModal from '../components/roteiro/StageGateModal'
@@ -48,7 +48,7 @@ import { geoParams, leadMatchesGeo } from '../lib/geoFilter.js'
 import { scoreParams, leadMatchesScore } from '../lib/scoreFilter.js'
 import {
   MessageCircle, Search, Send, Phone, User, Edit3, Save, X, Plus,
-  StickyNote, Tag as TagIcon, Smartphone, ListOrdered, ChevronRight, Check, Clock, Archive, Ban, ListTodo, ChevronDown, ChevronUp, Trash2, Paperclip, FileText, MessageSquarePlus, Copy, Zap, Pause, Play, Bot,
+  StickyNote, Tag as TagIcon, Smartphone, ListOrdered, Check, Clock, Archive, Ban, ListTodo, ChevronDown, ChevronUp, Trash2, Paperclip, FileText, MessageSquarePlus, Copy, Zap, Pause, Play, Bot,
   Menu as MenuIcon, MessagesSquare, Info as InfoIcon, ListChecks, ChevronLeft,
   DollarSign, SlidersHorizontal, AlertTriangle,
 } from 'lucide-react'
@@ -543,7 +543,8 @@ export default function Chat() {
     setCadenceStepKey(attemptId)
   }, [handleRoteiroAsk, fillLeadVars])
 
-  // Abre a janela "Conferir mensagem" para o lead aberto (texto ja com as variaveis trocadas)
+  // Abre a janela "Conferir mensagem" para o lead aberto. A mensagem chega com as variaveis ja trocadas
+  // (o vendedor ve o texto final); no envio so troca de novo o que foi escrito/mexido na janela (reviewTextToSend).
   const openReview = useCallback((r: StepReview & { avulsa?: boolean }, pos: ReviewPos | null) => {
     const id = ++reviewSeqRef.current
     setReviewError(null); setReviewSending(false)
@@ -1020,7 +1021,8 @@ export default function Chat() {
           return
         }
       }
-      const finalText = r.kind === 'mensagem' ? fillLeadVars(text) : text
+      // Uma troca de variaveis so: o texto ja abriu trocado; aqui so troca o que foi escrito/mexido na janela
+      const finalText = reviewTextToSend(r, text, fillLeadVars)
       const { sameLead } = await deliverText(r.leadId, finalText, override, keys.askKey, keys.stepKey)
       if (sameLead) {
         // A caixa perde a chave igual a que acabou de ir (senao a proxima mensagem contaria de novo)
@@ -1446,7 +1448,6 @@ export default function Chat() {
   const attendants = users.filter(u => (u.role === 'atendente' || u.role === 'gerente') && u.is_active)
   const availableTags = lead ? tags.filter(t => !lead.tags?.some(lt => lt.id === t.id)) : []
   // Titulo das secoes da aba Atendimento (mesmo estilo dos cartoes da aba Info)
-  const sectionHeadStyle: React.CSSProperties = { fontSize: 10, color: '#9B96B0', textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: 3, marginBottom: 4 }
   // Cartao "Informacoes" da aba Info = bloco "Dados do contato" da Atendimento (mesmo estado e mesma edicao).
   // So uma aba aparece por vez, entao o estado de edicao compartilhado nao aparece duas vezes.
   const renderContatoCard = (lead: Lead, help?: React.ReactNode) => (
@@ -2085,8 +2086,8 @@ export default function Chat() {
                 }
                 // Cada bloco da aba (ids estaveis de panelLayout.js). A ordem e o que aparece vem do "Arrumar"
                 // (vendedor > conta > fabrica); o padrao de fabrica e a aba de sempre.
-                const cadTitles = cadenceTitleIds(visibleIds(atendimentoLayout.layout))
-                const cadenceTitle = (id: AtendimentoBlockId) => cadTitles.includes(id) && (
+                const shownIds = visibleIds(atendimentoLayout.layout)
+                const cadenceTitle = (
                   <PanelTitle
                     icon={<ListOrdered size={10} />}
                     label="Cadência"
@@ -2182,7 +2183,6 @@ export default function Chat() {
                   </>),
                   proximo_passo: () => (<>
                   {/* 5. Cadencia da etapa: [Enviar pergunta]/[Enviar mensagem] abrem a janela Conferir mensagem */}
-                  {cadenceTitle('proximo_passo')}
                   <NextStepCard
                     key={`cad-${lead.id}`}
                     leadId={lead.id}
@@ -2198,7 +2198,6 @@ export default function Chat() {
                   </>),
                   avulsa: () => (<>
                   {/* 5b. Cadencia avulsa do lead: mesmo cartao da etapa (um botao principal; Pular, Editar, Trocar e Remover como link) */}
-                  {cadenceTitle('avulsa')}
                   {(() => {
                     const menuAnchor = (trigger: React.ReactNode) => (
                       <span style={{ position: 'relative', display: 'inline-block' }}>
@@ -2291,7 +2290,7 @@ export default function Chat() {
                               )}
                               <span style={{ flex: 1 }} />
                               {secondary.map(a => (
-                                <LinkButton key={a.id} disabled={avulsaBusy} onClick={() => runAvulsa(a.id)} title={a.id === 'pular' ? 'Passa para o próximo passo sem enviar nada' : undefined}>{a.label}</LinkButton>
+                                <LinkButton key={a.id} disabled={avulsaBusy} onClick={() => runAvulsa(a.id)} title={a.id === 'pular' ? 'Passa para o próximo passo sem enviar nada' : 'Já fez por outro caminho? Marca o passo sem enviar nada'}>{a.label}</LinkButton>
                               ))}
                             </div>
                           </>
@@ -2309,6 +2308,7 @@ export default function Chat() {
                         <PanelTitle
                           icon={<ListTodo size={10} />}
                           label={sectionTitle('Tarefas', rows.length)}
+                          helpTitle="Tarefas"
                           help={<>Tarefas que você criou para este cliente, com prazo. Vermelho = atrasada. Os passos das cadências ficam no bloco Cadência. Ex.: "Ligar amanhã às 10h para confirmar a data".</>}
                           right={
                           <button className="btn btn-secondary btn-sm" onClick={() => setShowTaskForm(v => !v)} aria-expanded={showTaskForm} style={HEAD_BTN} title="Criar tarefa para este lead">
@@ -2395,8 +2395,9 @@ export default function Chat() {
                   {/* 7. Vendas do lead — total + lista + [+ venda] (veio da aba Info) */}
                   <div className="card" style={PANEL_CARD}>
                     <PanelTitle
-                      icon={<DollarSign size={10} />}
+                      icon={<DollarSign size={10} style={{ color: '#34C759' }} />}
                       label={sectionTitle('Vendas', sales.length)}
+                      helpTitle="Vendas"
                       help={<>Cada compra deste cliente, com valor e data. O total entra no painel Funil &amp; ROI. Ex.: fechou o pacote de R$ 1.500 hoje, clique em + venda.</>}
                       right={<button className="btn btn-secondary btn-sm" onClick={openSaleModalStandalone} style={HEAD_BTN} title="Registrar nova venda"><Plus size={10} /> venda</button>}
                     />
@@ -2447,7 +2448,14 @@ export default function Chat() {
                       </button>
                       <HelpTip title="Arrumar">Mude a ordem e escolha o que aparece. Ex.: esconda Vendas e suba Tarefas.</HelpTip>
                     </div>
-                    {visibleIds(atendimentoLayout.layout).map(id => <Fragment key={id}>{blocks[id]?.()}</Fragment>)}
+                    {/* Etapa e avulsa sempre juntas num bloco "Cadência", onde aparece o primeiro dos dois */}
+                    {cadenceRenderList(shownIds).map(id => id === 'cadencia' ? (
+                      <Fragment key="cadencia">
+                        {cadenceTitle}
+                        {shownIds.includes('proximo_passo') && blocks.proximo_passo()}
+                        {shownIds.includes('avulsa') && blocks.avulsa()}
+                      </Fragment>
+                    ) : <Fragment key={id}>{blocks[id]?.()}</Fragment>)}
                   </>
                 )
               })()}

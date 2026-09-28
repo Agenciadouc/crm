@@ -16,19 +16,19 @@ test('rotulo "Passo N de M · Tipo" da cadencia avulsa', () => {
 
 test('passo mensagem: mostra o texto com as variaveis e tem [Enviar] + [Pular]', () => {
   const v = avulsaStepView({ action_type: 'mensagem', attempt_message: 'Oi {{primeiro_nome}}, tudo bem?' }, fill)
-  assert.deepEqual(v, { kind: 'mensagem', title: '', text: 'Oi Ana, tudo bem?', actions: ['enviar', 'pular'] })
+  assert.deepEqual(v, { kind: 'mensagem', title: '', text: 'Oi Ana, tudo bem?', actions: ['enviar', 'feito', 'pular'] })
   const w = avulsaStepView({ action_type: 'whatsapp', attempt_message: 'Oi' }, fill)
-  assert.deepEqual(w.actions, ['enviar', 'pular'])
+  assert.deepEqual(w.actions, ['enviar', 'feito', 'pular'])
 })
 
 test('passo mensagem sem texto: continua com [Enviar] (a janela abre vazia) + [Pular]; descricao vira titulo', () => {
   assert.deepEqual(
     avulsaStepView({ action_type: 'mensagem', attempt_message: '   ', attempt_description: 'Mandar o catálogo' }, fill),
-    { kind: 'mensagem', title: 'Mandar o catálogo', text: '', actions: ['enviar', 'pular'] },
+    { kind: 'mensagem', title: 'Mandar o catálogo', text: '', actions: ['enviar', 'feito', 'pular'] },
   )
   // variavel que some (empresa vazia) tambem conta como vazio
-  assert.deepEqual(avulsaStepView({ action_type: 'mensagem', attempt_message: null }, fill), { kind: 'mensagem', title: '', text: '', actions: ['enviar', 'pular'] })
-  assert.deepEqual(avulsaStepView({ action_type: 'mensagem', attempt_message: '{{x}}' }, () => '').actions, ['enviar', 'pular'])
+  assert.deepEqual(avulsaStepView({ action_type: 'mensagem', attempt_message: null }, fill), { kind: 'mensagem', title: '', text: '', actions: ['enviar', 'feito', 'pular'] })
+  assert.deepEqual(avulsaStepView({ action_type: 'mensagem', attempt_message: '{{x}}' }, () => '').actions, ['enviar', 'feito', 'pular'])
 })
 
 test('passo ligacao: mostra o roteiro (ou a descricao) e tem [Ver roteiro e concluir] + [Pular]', () => {
@@ -71,7 +71,7 @@ test('link de ligar: so os digitos (com + se tiver)', () => {
 test('passo mensagem com descricao e texto: a descricao vai em cima como titulo', () => {
   assert.deepEqual(
     avulsaStepView({ action_type: 'mensagem', attempt_message: 'Oi {{primeiro_nome}}!', attempt_description: '  Boas-vindas ' }, fill),
-    { kind: 'mensagem', title: 'Boas-vindas', text: 'Oi Ana!', actions: ['enviar', 'pular'] },
+    { kind: 'mensagem', title: 'Boas-vindas', text: 'Oi Ana!', actions: ['enviar', 'feito', 'pular'] },
   )
   // sem texto: a descricao fica so como titulo (o texto vem vazio para o vendedor escrever)
   const empty = avulsaStepView({ action_type: 'mensagem', attempt_message: '', attempt_description: 'Boas-vindas' }, fill)

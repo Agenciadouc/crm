@@ -34,6 +34,13 @@ export function reviewSendKeys(review) {
     : { askKey: null, stepKey: review.attemptId ?? null }
 }
 
+// Uma troca de variaveis so: o texto da mensagem ja abre trocado; no envio so troca se o vendedor
+// mexeu/escreveu na janela (ex.: digitou {{primeiro_nome}}). Pergunta vai como esta.
+export function reviewTextToSend(review, text, fill) {
+  if (!review || review.kind !== 'mensagem' || text === review.text) return text
+  return fill(text)
+}
+
 export function canSendReview({ text, hasInstance, sending }) {
   return !!String(text || '').trim() && !!hasInstance && !sending
 }

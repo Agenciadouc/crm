@@ -9,6 +9,7 @@ export function reviewPosition(
 export function reviewTitle(kind: ReviewKind, pos: ReviewPos | null | undefined): string
 export function reviewFromPendingAsk(p: { leadId: number; text: string; questionKey: string | null; attemptId: number | null } | null | undefined): StepReview | null
 export function reviewSendKeys(review: Pick<StepReview, 'kind' | 'questionKey' | 'attemptId'>): { askKey: string | null; stepKey: number | null }
+export function reviewTextToSend(review: { kind: ReviewKind; text: string } | null | undefined, text: string, fill: (t: string) => string): string
 export function canSendReview(opts: { text: string; hasInstance: boolean; sending: boolean }): boolean
 export function boxKeysAfterReviewSend(
   box: { askKey: string | null; stepKey: number | null },

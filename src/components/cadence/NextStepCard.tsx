@@ -14,7 +14,7 @@ import { useSSE } from '../../context/SSEContext'
 import { AUTOMATION_PATH } from '../../lib/automationTabs.js'
 import { STEP_ICONS } from '../../pages/cadencias/StepRow'
 import { reviewPosition, type ReviewPos } from '../../lib/atendimentoPanel.js'
-import { cardHeader, stageCardActions, NO_TEXT_HINT } from '../../lib/cadenceCard.js'
+import { cardHeader, stageCardActions, stageStepView, NO_TEXT_HINT } from '../../lib/cadenceCard.js'
 import { CADENCE_CARD, PRIMARY_BTN, LinkButton } from '../atendimento/PanelParts'
 import HelpTip from '../HelpTip'
 import AnswerEditor from '../roteiro/AnswerEditor'
@@ -380,7 +380,9 @@ export default function NextStepCard({ leadId, accountId, mode, onAsk, onSendSte
     const { primary, secondary } = stageCardActions(step)
     const isBusy = busy === step.attempt_id
     const isMsg = step.action_type === 'mensagem' || step.action_type === 'whatsapp'
-    const sendText = stepSendText(step)
+    // Mensagem: so o texto pronto vai para a janela (a descricao e interna: vira titulo). Sem texto, abre vazia.
+    const view = stageStepView(step)
+    const sendText = isMsg ? view.text : stepSendText(step)
     const pos = () => reviewPosition(data, { attemptId: step.attempt_id })
     const run = (id: string) => {
       if (id === 'perguntar' && step.question) {
@@ -397,15 +399,16 @@ export default function NextStepCard({ leadId, accountId, mode, onAsk, onSendSte
         else setScriptOpen(v => (v === step.attempt_id ? null : step.attempt_id))
       }
     }
-    const title = stepTitle(step)
+    const title = isMsg ? view.text : view.text || stepTitle(step)
     const primaryIcon = primary?.id === 'perguntar' || primary?.id === 'enviar' ? <Send size={11} /> : primary?.id === 'ligar' ? <Phone size={11} /> : <Check size={11} />
     return (
       <div>
         <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--accent)', textTransform: 'uppercase', marginBottom: 4 }}>{typeLine(step)}</div>
+        {view.title && <div style={{ fontSize: 12, color: 'var(--text-primary)', fontWeight: 600, marginBottom: 2 }}>{view.title}</div>}
         {isMsg && !sendText
           ? <div style={{ fontSize: 12, color: 'var(--text-muted)', fontStyle: 'italic' }}>{NO_TEXT_HINT}</div>
           : <div style={{ fontSize: 13, color: 'var(--text-primary)', lineHeight: 1.4, whiteSpace: 'pre-wrap', maxHeight: 140, overflowY: 'auto' }}>{title}</div>}
-        {step.instructions && step.action_type !== 'pergunta' && step.instructions !== title && (
+        {step.instructions && step.action_type !== 'pergunta' && step.instructions !== title && step.instructions !== view.title && (
           <div style={{ fontSize: 10, color: 'var(--text-muted)', fontStyle: 'italic', marginTop: 2 }}>{step.instructions}</div>
         )}
         {waitLine(step)}

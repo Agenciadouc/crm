@@ -26,12 +26,13 @@ export function LinkButton({ children, onClick, disabled, title, danger }: { chi
 }
 
 // Titulo do bloco: icone + texto + "?" (com exemplo) e, a direita, um botao pequeno
-export function PanelTitle({ icon, label, help, right, onClick, style }: { icon?: ReactNode; label: ReactNode; help: ReactNode; right?: ReactNode; onClick?: () => void; style?: CSSProperties }) {
+// helpTitle: titulo do balao do "?" sem a contagem (ex.: "Tarefas", nao "Tarefas (2)")
+export function PanelTitle({ icon, label, help, helpTitle, right, onClick, style }: { icon?: ReactNode; label: ReactNode; help: ReactNode; helpTitle?: string; right?: ReactNode; onClick?: () => void; style?: CSSProperties }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 8, ...style }}>
       <div onClick={onClick} style={{ ...PANEL_TITLE, flex: 1, cursor: onClick ? 'pointer' : 'default' }}>
         {icon} {label}
-        <HelpTip title={typeof label === 'string' ? label : undefined}>{help}</HelpTip>
+        <HelpTip title={helpTitle ?? (typeof label === 'string' ? label : undefined)}>{help}</HelpTip>
       </div>
       {right}
     </div>

@@ -9,7 +9,11 @@ export function factoryLayout(): PanelBlock[]
 export function normalizeLayout(saved: unknown): PanelBlock[]
 export function resolveLayout(saved: SavedLayouts | null | undefined): { layout: PanelBlock[]; source: LayoutSource }
 export function visibleIds(layout: PanelBlock[]): AtendimentoBlockId[]
-export function moveBlockTo(layout: PanelBlock[], from: number, to: number): PanelBlock[]
-export function moveBlock(layout: PanelBlock[], id: string, delta: number): PanelBlock[]
+export function moveBlockTo<T extends { id: string }>(layout: T[], from: number, to: number): T[]
+export function moveBlock<T extends { id: string }>(layout: T[], id: string, delta: number): T[]
 export function toggleVisible(layout: PanelBlock[], id: string): PanelBlock[]
 export function validateLayout(layout: unknown): string | null
+export interface EditorRow { id: AtendimentoBlockId | 'cadencia'; visible: boolean; parts?: Partial<Record<'proximo_passo' | 'avulsa', boolean>> }
+export function editorRows(layout: PanelBlock[]): EditorRow[]
+export function expandRows(rows: EditorRow[]): PanelBlock[]
+export function toggleRow(rows: EditorRow[], id: string): EditorRow[]

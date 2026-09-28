@@ -1,3 +1,5 @@
+import { stepTitle } from './nextStep.js'
+
 // Logica pura dos dois cartoes do bloco "Cadencia" da aba Atendimento (etapa e avulsa).
 // Mesma estrutura: cabecalho "Etapa · nome" / "Avulsa · nome" com "N de M", um botao principal
 // (laranja) e as acoes secundarias como links discretos. JS puro com .d.ts.
@@ -28,7 +30,18 @@ export function stageCardActions(step) {
   return { primary: { id: 'feito', label: 'Feito' }, secondary: [] }
 }
 
+// Passo da vez da etapa no Chat: na mensagem, a descricao (interna) e so o titulo e o texto e
+// SO o texto pronto (auto_message). Sem texto pronto a janela abre vazia. Igual ao cartao da avulsa.
+export function stageStepView(step) {
+  if (!step) return { title: '', text: '' }
+  if (MESSAGE_TYPES.includes(step.action_type)) {
+    return { title: String(step.description || '').trim(), text: String(step.auto_message || '').trim() }
+  }
+  return { title: '', text: stepTitle(step) }
+}
+
 const AVULSA_PRIMARY = { enviar: 'Enviar mensagem', roteiro: 'Ver roteiro e ligar', feito: 'Feito' }
+const AVULSA_SECONDARY = { feito: 'Marcar como feito', pular: 'Pular' }
 
 // Passo da vez da avulsa (a partir de avulsaStepView(...).actions)
 export function avulsaCardActions(view) {
@@ -36,13 +49,20 @@ export function avulsaCardActions(view) {
   const p = actions.find(a => AVULSA_PRIMARY[a])
   return {
     primary: p ? { id: p, label: AVULSA_PRIMARY[p] } : null,
-    secondary: actions.includes('pular') ? [{ id: 'pular', label: 'Pular' }] : [],
+    secondary: actions.filter(a => a !== p && AVULSA_SECONDARY[a]).map(a => ({ id: a, label: AVULSA_SECONDARY[a] })),
   }
 }
 
+export const CADENCE_GROUP = 'cadencia'
 const CADENCE_BLOCKS = ['proximo_passo', 'avulsa']
 
-// Blocos que mostram o titulo "Cadencia": o primeiro de cada sequencia de blocos de cadencia lado a lado
-export function cadenceTitleIds(ids) {
-  return (ids || []).filter((id, i) => CADENCE_BLOCKS.includes(id) && !CADENCE_BLOCKS.includes(ids[i - 1]))
+// Ordem de desenho da aba: etapa e avulsa viram UM grupo "cadencia", na posicao do primeiro
+// dos dois que aparece (o segundo sai da propria posicao). Um so visivel: o grupo tem so ele.
+export function cadenceRenderList(ids) {
+  const out = []
+  for (const id of ids || []) {
+    if (!CADENCE_BLOCKS.includes(id)) out.push(id)
+    else if (!out.includes(CADENCE_GROUP)) out.push(CADENCE_GROUP)
+  }
+  return out
 }
