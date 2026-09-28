@@ -541,6 +541,18 @@ export default function Chat() {
     openReview({ leadId: lead.id, kind: r.kind, text, questionKey: r.kind === 'pergunta' ? r.questionKey : null, attemptId: r.attemptId }, r.pos)
   }, [lead, user?.name, openReview])
 
+  // Abre a janela e busca o "N de M" na cadencia da etapa (so aplica se a mesma janela ainda estiver aberta)
+  const openReviewWithPos = useCallback((r: StepReview) => {
+    const id = openReview(r, null)
+    if (!accountId) return
+    fetchLeadStageCadence(r.leadId, accountId)
+      .then(d => {
+        const pos = reviewPosition(d, r.kind === 'mensagem' ? { attemptId: r.attemptId } : { questionKey: r.questionKey })
+        if (pos) setReview(cur => (cur && cur.id === id ? { ...cur, pos } : cur))
+      })
+      .catch(() => { /* sem numero no titulo */ })
+  }, [openReview, accountId])
+
   // Pergunta/passo vindo da ficha/Pipeline: aplica quando a conversa do lead estiver aberta.
   // Passo da cadencia (pergunta com chave ou mensagem com attempt_id) abre a janela de conferir;
   // texto solto (ex.: [Usar] de um desvio) continua indo para a caixa.
@@ -548,21 +560,18 @@ export default function Chat() {
     if (!pendingRoteiroAsk || !lead || lead.id !== pendingRoteiroAsk.leadId) return
     const r = reviewFromPendingAsk(pendingRoteiroAsk)
     setPendingRoteiroAsk(null)
-    if (!r) {
-      handleRoteiroAsk(pendingRoteiroAsk.text, pendingRoteiroAsk.questionKey)
-      return
-    }
-    const id = openReview(r, null)
-    // "N de M": busca a cadencia da etapa; so aplica se a mesma janela ainda estiver aberta
-    if (accountId) {
-      fetchLeadStageCadence(r.leadId, accountId)
-        .then(d => {
-          const pos = reviewPosition(d, r.kind === 'mensagem' ? { attemptId: r.attemptId } : { questionKey: r.questionKey })
-          if (pos) setReview(cur => (cur && cur.id === id ? { ...cur, pos } : cur))
-        })
-        .catch(() => { /* sem numero no titulo */ })
-    }
-  }, [pendingRoteiroAsk, lead, handleRoteiroAsk, openReview, accountId])
+    if (r) openReviewWithPos(r)
+    else handleRoteiroAsk(pendingRoteiroAsk.text, pendingRoteiroAsk.questionKey)
+  }, [pendingRoteiroAsk, lead, handleRoteiroAsk, openReviewWithPos])
+
+  // [Perguntar] da janela "Falta saber" (trava de etapa): pergunta com chave tambem passa pela
+  // janela de conferir; texto sem chave continua indo para a caixa
+  const handleGateAsk = useCallback((text: string, questionKey: string | null) => {
+    if (!lead) return
+    const r = reviewFromPendingAsk({ leadId: lead.id, text, questionKey, attemptId: null })
+    if (r) openReviewWithPos(r)
+    else handleRoteiroAsk(text, questionKey)
+  }, [lead, openReviewWithPos, handleRoteiroAsk])
 
   const handleConfirmRecognized = async () => {
     if (!recognized || !accountId) return
@@ -1874,7 +1883,7 @@ export default function Chat() {
                   <ScoreLine key={`score-${lead.id}`} leadId={lead.id} accountId={accountId} />
                   {/* 2. Quem atende o lead: gerente/admin troca (mesmo modal de antes); vendedor so ve o nome */}
                   {(() => {
-                    const av = attendantView({ role: user?.role, attendantId: lead.attendant_id ?? null, attendants, fallbackName: (lead as any).attendant_name })
+                    const av = attendantView({ role: user?.role, attendantId: lead.attendant_id ?? null, attendants, fallbackName: lead.attendant_name })
                     return (
                       <div style={{ marginBottom: 10 }}>
                         <div style={sectionHeadStyle}>
@@ -2663,7 +2672,7 @@ export default function Chat() {
           toStage={stageGate.toStage}
           pending={stageGate.pending}
           canForce={user?.role === 'gerente' || user?.role === 'super_admin'}
-          onAsk={handleRoteiroAsk}
+          onAsk={handleGateAsk}
           onDone={moved => { setStageGate(null); if (moved) { loadLead(); loadLeadsList() } }}
         />
       )}

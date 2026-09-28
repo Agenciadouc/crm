@@ -103,3 +103,11 @@ test('titulo de secao com contagem', () => {
   assert.equal(sectionTitle('Tarefas', 2), 'Tarefas (2)')
   assert.equal(sectionTitle('Vendas', 0), 'Vendas (0)')
 })
+
+test('parseSqlDate unico (sqlDate.js): SQLite sem fuso = UTC; ISO com Z/offset como veio', async () => {
+  const { parseSqlDate } = await import('../src/lib/sqlDate.js')
+  assert.equal(parseSqlDate('2026-09-28 12:00:00').toISOString(), '2026-09-28T12:00:00.000Z')
+  assert.equal(parseSqlDate('2026-09-28T12:00:00.000Z').toISOString(), '2026-09-28T12:00:00.000Z')
+  assert.equal(parseSqlDate('2026-09-28T09:00:00-03:00').toISOString(), '2026-09-28T12:00:00.000Z')
+  assert.ok(Number.isNaN(parseSqlDate(null).getTime()))
+})

@@ -1,3 +1,5 @@
+import { parseSqlDate } from './sqlDate.js'
+
 // Logica pura da aba Atendimento do Chat e da janela "Conferir mensagem" (ajuste 28/09). JS puro com .d.ts.
 
 // Mesma conta do servidor (services/cadence/nextStep.js): pergunta orfa sem resposta nao entra no total
@@ -49,19 +51,13 @@ export function offerRecognition(askKey, result) {
   return !askKey && !!(result && result.recognized_question) && !!(result && result.message && result.message.id)
 }
 
-function parseSql(s) {
-  if (!s) return new Date(NaN)
-  if (/Z$/.test(s) || /[+-]\d{2}:?\d{2}$/.test(s)) return new Date(s)
-  return new Date(String(s).replace(' ', 'T') + 'Z')
-}
-
 // Tarefas pendentes do lead aberto (avulsas + passo de cadencia que virou tarefa), por prazo
 export function leadTaskRows(tasks, leadId, nowMs = Date.now()) {
   return (tasks || [])
     .filter(t => t.lead_id == null || Number(t.lead_id) === Number(leadId))
     .map(t => {
       const isCadence = t.type === 'cadence'
-      const due = parseSql(t.due_datetime)
+      const due = parseSqlDate(t.due_datetime)
       const rawDesc = isCadence ? (t.attempt_description || t.auto_message) : t.description
       const desc = rawDesc ? (rawDesc.length > 100 ? `${rawDesc.substring(0, 100)}...` : rawDesc) : ''
       return {

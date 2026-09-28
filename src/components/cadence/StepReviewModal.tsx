@@ -3,7 +3,7 @@ import { Send, Smartphone } from 'lucide-react'
 import { canSendReview } from '../../lib/atendimentoPanel.js'
 
 // Janela "Conferir mensagem": o vendedor ve (e pode mudar) o texto do passo da cadencia antes de enviar.
-// [Cancelar] nao envia nem marca nada. Erro de envio mostra a mensagem e mantem o texto.
+// [Cancelar] (ou Esc) nao envia nem marca nada; clicar fora nao fecha. Erro de envio mostra a mensagem e mantem o texto.
 interface Props {
   title: string
   initialText: string
@@ -27,7 +27,8 @@ export default function StepReviewModal({ title, initialText, leadName, instance
   }, [sending, onCancel])
 
   return (
-    <div className="modal-overlay" onClick={() => !sending && onCancel()}>
+    // Clique fora NAO fecha: o texto editado nao pode sumir sem querer. So [Cancelar] e Esc fecham.
+    <div className="modal-overlay">
       <div className="modal" role="dialog" aria-label={title} onClick={e => e.stopPropagation()} style={{ maxWidth: 560 }}>
         <h2 style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <Send size={16} style={{ color: '#FFB300' }} /> {title}
