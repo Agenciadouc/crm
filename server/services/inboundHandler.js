@@ -6,6 +6,7 @@ import { numberRole } from './whatsapp/numberRole.js'
 import { isOptOutMessage, isOptedOut, DEFAULT_OPTOUT_CONFIRM } from './antiban.js'
 import { moveLeadToStage } from './stageMove.js'
 import { ensureStageCadence } from './cadence/leadCadence.js'
+import { warnMissingCadenceTable } from './cadence/errors.js'
 import { onInboundSaved } from './roteiro/runtime.js'
 
 const STATUS_RANK = { sent: 1, delivered: 2, read: 3 }
@@ -161,7 +162,7 @@ export function createInboundHandler(deps) {
       )
       lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(result.lastInsertRowid)
       const histRes = db.prepare('INSERT INTO stage_history (lead_id, to_stage_id, trigger_type) VALUES (?, ?, ?)').run(lead.id, stage.id, 'polling')
-      try { ensureStageCadence(db, { leadId: Number(lead.id) }) } catch (e) { if (!/no such table/.test(e.message)) console.error('[Cadencia] etapa do lead novo:', e.message) }
+      try { ensureStageCadence(db, { leadId: Number(lead.id) }) } catch (e) { if (!warnMissingCadenceTable(e)) console.error('[Cadencia] etapa do lead novo:', e.message) }
       broadcastSSE(account.id, 'lead:created', lead)
       triggerCapiForStageChange(lead.id, stage.id, histRes.lastInsertRowid)
     }

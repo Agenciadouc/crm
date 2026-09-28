@@ -1,95 +1,14 @@
 import { Router } from 'express'
 import db from '../db.js'
 import { broadcastSSE } from '../sse.js'
-import { createTaskCadenceRouter, computeDueDatetime } from './taskCadenceRouter.js'
+import { createTaskCadenceRouter } from './taskCadenceRouter.js'
+import { listCadenceTasks, computeDueDatetime, TASK_STEP_SQL } from '../services/cadence/tasks.js'
 
 const router = Router()
 
-/**
- * Build query that returns all active task instances (lead_cadences with current_attempt_id)
- * with calculated due_datetime based on lc.started_at + delay_days + scheduled_time.
- *
- * Filters by attendant when role=atendente, or all leads of account otherwise.
- */
+// Tarefas de cadencia: avulsas + passos com data da cadencia da etapa (regra no servico).
 function getMyTasks({ accountId, userId, role }) {
-  // Role-based scoping
-  let attendantFilter = ''
-  const params = [accountId]
-  if (role === 'atendente') {
-    attendantFilter = 'AND l.attendant_id = ?'
-    params.push(userId)
-  }
-
-  const rows = db.prepare(`
-    SELECT
-      lc.id as lead_cadence_id,
-      lc.lead_id,
-      lc.cadence_id,
-      lc.current_attempt_id,
-      lc.status,
-      lc.last_executed_at,
-      lc.started_at,
-      l.name as lead_name,
-      l.phone as lead_phone,
-      l.empresa as lead_empresa,
-      l.city as lead_city,
-      l.profile_pic_url,
-      l.created_at as lead_created_at,
-      l.stage_id,
-      l.attendant_id,
-      u.name as attendant_name,
-      fs.name as stage_name,
-      fs.color as stage_color,
-      c.name as cadence_name,
-      ca.position as attempt_position,
-      ca.action_type,
-      ca.description as attempt_description,
-      ca.instructions as attempt_instructions,
-      ca.delay_days,
-      ca.scheduled_time,
-      ca.schedule_mode,
-      ca.delay_minutes,
-      ca.auto_message,
-      ca.call_script,
-      (SELECT COUNT(*) FROM cadence_attempts WHERE cadence_id = lc.cadence_id) as total_attempts
-    FROM lead_cadences lc
-    JOIN cadence_attempts ca ON ca.id = lc.current_attempt_id
-    JOIN leads l ON l.id = lc.lead_id
-    LEFT JOIN users u ON u.id = l.attendant_id
-    LEFT JOIN funnel_stages fs ON fs.id = l.stage_id
-    JOIN cadences c ON c.id = lc.cadence_id
-    WHERE lc.status = 'active' AND l.is_active = 1 AND l.account_id = ?
-    ${attendantFilter}
-    ORDER BY l.created_at ASC
-  `).all(...params)
-
-  // Calculate due_datetime in JS for each task
-  const now = new Date()
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
-  const tomorrow = new Date(today); tomorrow.setDate(today.getDate() + 1)
-  const dayAfterTomorrow = new Date(today); dayAfterTomorrow.setDate(today.getDate() + 2)
-  const weekEnd = new Date(today); weekEnd.setDate(today.getDate() + 7)
-
-  const enriched = rows.map(r => {
-    const due = computeDueDatetime({
-      startedAt: r.started_at,
-      lastExecutedAt: r.last_executed_at,
-      delay_days: r.delay_days,
-      scheduled_time: r.scheduled_time,
-      schedule_mode: r.schedule_mode,
-      delay_minutes: r.delay_minutes,
-    })
-
-    let bucket = 'later'
-    if (due < today) bucket = 'overdue'
-    else if (due < tomorrow) bucket = 'today'
-    else if (due < dayAfterTomorrow) bucket = 'tomorrow'
-    else if (due < weekEnd) bucket = 'week'
-
-    return { ...r, due_datetime: due.toISOString(), bucket }
-  })
-
-  return enriched
+  return listCadenceTasks(db, { accountId, userId, role })
 }
 
 // Get standalone tasks and compute buckets
@@ -226,7 +145,7 @@ router.get('/standalone/by-lead/:leadId', (req, res) => {
     JOIN cadence_attempts ca ON ca.id = lc.current_attempt_id
     JOIN cadences c ON c.id = lc.cadence_id
     JOIN leads l ON l.id = lc.lead_id
-    WHERE lc.lead_id = ? AND l.account_id = ? AND lc.status = 'active' AND l.is_active = 1
+    WHERE lc.lead_id = ? AND l.account_id = ? AND lc.status = 'active' AND l.is_active = 1 AND ${TASK_STEP_SQL}
   `).all(req.params.leadId, req.accountId).map(t => {
     const due = computeDueDatetime({
       startedAt: t.started_at,

@@ -6,6 +6,7 @@ import { configureScoreRuntime, scheduleScore } from '../leadScore/recalc.js'
 import { markAdvanced, markBought, markReplied, recordAsk } from './asks.js'
 import { getLeadRoteiro } from './leadRoteiro.js'
 import { refreshLeadStageCadence } from '../cadence/leadCadence.js'
+import { warnMissingCadenceTable } from '../cadence/errors.js'
 import { recordStepSend } from '../cadence/metrics.js'
 import { recognizeQuestion } from './recognize.js'
 import { createExtractQueue, extractAnswers, EXTRACT_DELAY_MS } from './aiExtract.js'
@@ -77,7 +78,7 @@ export function bootRoteiroAi({ db, ai, delayMs = EXTRACT_DELAY_MS, setTimer, cl
       const r = await extractAnswers(db, { accountId: lead.account_id, leadId: lead.id, ai })
       if (!r.saved.length && !r.offscript) return
       if (r.saved.length) {
-        try { refreshLeadStageCadence(db, { leadId: lead.id }) } catch (e) { if (!/no such table/.test(e.message)) console.error('[Cadencia] proximo passo:', e.message) }
+        try { refreshLeadStageCadence(db, { leadId: lead.id }) } catch (e) { if (!warnMissingCadenceTable(e)) console.error('[Cadencia] proximo passo:', e.message) }
         try { scheduleFn(lead.id) } catch (e) { console.error('[Roteiro] agendar nota:', e.message) }
       }
       // advanced: a IA completou a etapa e o lead avancou -> cartao mostra o banner com Desfazer

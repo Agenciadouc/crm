@@ -198,9 +198,10 @@ export default function Tasks() {
               )}
               {!isStandalone && (
                 <>
-                  <button className="btn btn-primary btn-sm" onClick={() => handleComplete(t.lead_cadence_id)} disabled={actioning === t.lead_cadence_id} style={{ fontSize: 11, background: '#34C759', borderColor: '#34C759' }}>
+                  {/* Pergunta fica feita com a resposta (no Chat), nao com Concluido */}
+                  {t.action_type !== 'pergunta' && <button className="btn btn-primary btn-sm" onClick={() => handleComplete(t.lead_cadence_id)} disabled={actioning === t.lead_cadence_id} style={{ fontSize: 11, background: '#34C759', borderColor: '#34C759' }}>
                     <Check size={11} /> Concluido
-                  </button>
+                  </button>}
                   <button className="btn btn-secondary btn-sm" onClick={() => handleSkip(t.lead_cadence_id)} disabled={actioning === t.lead_cadence_id} style={{ fontSize: 11 }}>
                     <SkipForward size={11} /> Pular
                   </button>

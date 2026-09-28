@@ -22,6 +22,8 @@ import { runAutoRescue } from './services/botAutoRescue.js'
 import { checkReplyRates } from './services/replyRate.js'
 import { runScoreNightly } from './services/leadScore/nightly.js'
 import { runHotLeadAlerts } from './services/leadScore/hotLeadAlerts.js'
+import { collectDueCadenceTasks } from './services/cadence/tasks.js'
+import { warnMissingCadenceTable } from './services/cadence/errors.js'
 
 // Roda a cada 1min — precisao do agendamento <= 60s. Custo desprezivel (1 SELECT/min).
 const INTERVAL_MS = 60 * 1000
@@ -89,47 +91,17 @@ async function checkWhatsAppInstances() {
 }
 
 // ─── Execute due cadence steps ───────────────────────────────────
+// Auto-send DISABLED — mensagens de cadencia sao so manuais (Tarefas/Chat). O agendador so
+// avisa task:due, UMA vez por passo (notified_attempt_id); pergunta/passo imediato da etapa nao.
 async function processCadences() {
-  // Find all active lead_cadences with current_attempt_id set
-  const active = db.prepare(`
-    SELECT lc.*, ca.delay_days, ca.scheduled_time, ca.schedule_mode, ca.delay_minutes, ca.action_type, ca.auto_message,
-      l.phone, l.name as lead_name, l.account_id
-    FROM lead_cadences lc
-    JOIN cadence_attempts ca ON ca.id = lc.current_attempt_id
-    JOIN leads l ON l.id = lc.lead_id
-    WHERE lc.status = 'active' AND l.is_active = 1
-  `).all()
-
-  const now = new Date()
-
-  for (const row of active) {
-    // Anchor for current step: last_executed_at (previous step done time) OR started_at (step 1)
-    const anchorIso = row.last_executed_attempt_id && row.last_executed_at ? row.last_executed_at : row.started_at
-    const anchor = new Date(anchorIso.replace(' ', 'T') + 'Z')
-    let target
-
-    if (row.schedule_mode === 'duration') {
-      target = new Date(anchor.getTime() + (row.delay_minutes || 0) * 60000)
-    } else {
-      target = new Date(anchor)
-      target.setDate(target.getDate() + (row.delay_days || 0))
-      if (row.scheduled_time) {
-        const [h, m] = row.scheduled_time.split(':').map(Number)
-        target.setUTCHours((h || 0) + 3, m || 0, 0, 0) // America/Sao_Paulo UTC-3
-      } else if ((row.delay_days || 0) > 0) {
-        target.setUTCHours(3, 0, 0, 0) // midnight local = 03:00 UTC
-      }
-    }
-
-    // Only execute if target time has passed
-    if (now < target) continue
-    // Skip if this attempt was already executed (last_executed_attempt_id === current_attempt_id)
-    if (row.last_executed_attempt_id === row.current_attempt_id) continue
-
-    // Auto-send DISABLED — all cadence messages are manual only (via Tasks/Chat button)
-    // Just notify that the task is due
-    broadcastSSE(row.account_id, 'task:due', { lead_cadence_id: row.id, lead_id: row.lead_id })
-    console.log(`[Scheduler] Task due: lead #${row.lead_id} attempt #${row.current_attempt_id} (${row.action_type})`)
+  let due
+  try { due = collectDueCadenceTasks(db) } catch (e) {
+    if (warnMissingCadenceTable(e)) return
+    throw e
+  }
+  for (const row of due) {
+    broadcastSSE(row.account_id, 'task:due', { lead_cadence_id: row.lead_cadence_id, lead_id: row.lead_id })
+    console.log(`[Scheduler] Task due: lead #${row.lead_id} attempt #${row.attempt_id} (${row.action_type})`)
   }
 }
 

@@ -80,3 +80,18 @@ test('colunas novas, tabela de passos feitos e uma cadencia ativa por etapa', ()
   ins.run(s.accountId, 'Avulsa A', null, null, 1)
   ins.run(s.accountId, 'Avulsa B', null, null, 1) // avulsas sem limite
 })
+
+test('reconstrucao falhou: lead_cadence_steps, colunas novas e indices ja existem (reconstrucao roda por ultimo)', () => {
+  const { db } = legacyDbWithData()
+  const tables = () => db.prepare("SELECT name FROM sqlite_master WHERE type IN ('table', 'index')").all().map(r => r.name)
+  assert.equal(tables().includes('lead_cadence_steps'), false)
+  assert.throws(() => applyCadenceSchema(db, { rebuild: () => { throw new Error('disco cheio') } }), /disco cheio/)
+  assert.ok(tables().includes('lead_cadence_steps'))
+  assert.ok(tables().includes('idx_lead_cadences_lead_kind'))
+  const cols = db.prepare('PRAGMA table_info(lead_cadences)').all().map(c => c.name)
+  for (const c of ['kind', 'stage_id', 'stage_entry_id', 'notified_attempt_id']) assert.ok(cols.includes(c), c)
+  // a tabela antiga continua recusando 'pergunta' (nada meio trocado)
+  assert.equal(db.prepare("SELECT sql FROM sqlite_master WHERE name = 'cadence_attempts'").get().sql.includes("'pergunta'"), false)
+  // proxima subida: reconstroi normalmente
+  assert.deepEqual(applyCadenceSchema(db), { rebuilt: true, count: 3 })
+})

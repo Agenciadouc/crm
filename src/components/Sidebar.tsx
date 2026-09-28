@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { NavLink } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { useAccount } from '../context/AccountContext'
@@ -33,8 +33,15 @@ export default function Sidebar() {
     fetchTaskCounts(accountId).then(c => setTaskCount(c.overdue + c.today)).catch(() => {})
   }, [accountId])
   useEffect(() => { loadTaskCount() }, [loadTaskCount])
-  useSSE('task:updated', loadTaskCount)
-  useSSE('task:due', loadTaskCount)
+  // Varios avisos seguidos (task:due de muitos leads no mesmo minuto) viram uma busca so
+  const taskCountTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(() => () => { if (taskCountTimer.current) clearTimeout(taskCountTimer.current) }, [])
+  const loadTaskCountSoon = useCallback(() => {
+    if (taskCountTimer.current) clearTimeout(taskCountTimer.current)
+    taskCountTimer.current = setTimeout(loadTaskCount, 1000)
+  }, [loadTaskCount])
+  useSSE('task:updated', loadTaskCountSoon)
+  useSSE('task:due', loadTaskCountSoon)
 
   const loadTransferCount = useCallback(() => {
     fetchPendingTransferRequests().then(r => setTransferCount((r.requests || []).length)).catch(() => {})

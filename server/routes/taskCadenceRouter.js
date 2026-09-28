@@ -2,32 +2,9 @@
 // conferida (404) e atendente so em lead que acessa (403). Recebe db (tasks.js injeta).
 import { Router } from 'express'
 import { completeCurrentStep } from '../services/cadence/leadCadence.js'
+import { computeDueDatetime } from '../services/cadence/tasks.js'
 import { CadenceError } from '../services/cadence/errors.js'
 import { canAtendenteAccessLead } from '../services/leadAccess.js'
-
-// Calculate due datetime for a cadence attempt.
-// Anchor: last_executed_at (when previous step was completed) OR started_at (for step 1).
-// Mode 'duration': anchor + delay_minutes
-// Mode 'date': anchor + delay_days at scheduled_time (clock time)
-export function computeDueDatetime({ startedAt, lastExecutedAt, delay_days, scheduled_time, schedule_mode, delay_minutes }) {
-  const anchorIso = lastExecutedAt || startedAt
-  const anchor = new Date(anchorIso.replace(' ', 'T') + 'Z')
-
-  if (schedule_mode === 'duration') {
-    return new Date(anchor.getTime() + (delay_minutes || 0) * 60000)
-  }
-
-  // Date mode (default)
-  const due = new Date(anchor)
-  due.setDate(due.getDate() + (delay_days || 0))
-  if (scheduled_time) {
-    const [h, m] = scheduled_time.split(':').map(Number)
-    due.setHours(h || 0, m || 0, 0, 0)
-  } else if ((delay_days || 0) > 0) {
-    due.setHours(0, 0, 0, 0)
-  }
-  return due
-}
 
 export function createTaskCadenceRouter(db, { broadcast = () => {} } = {}) {
   const router = Router()

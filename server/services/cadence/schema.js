@@ -103,7 +103,9 @@ export function rebuildCadenceAttempts(db) {
   return { rebuilt: true, count }
 }
 
-export function applyCadenceSchema(db) {
+// Ordem: colunas, tabela de passos feitos e indices PRIMEIRO; a reconstrucao de
+// cadence_attempts (a parte que pode falhar) por ULTIMO — se ela falhar, o resto ja existe.
+export function applyCadenceSchema(db, { rebuild = rebuildCadenceAttempts } = {}) {
   addColumnIfNotExists(db, 'cadences', 'funnel_id', 'INTEGER')
   addColumnIfNotExists(db, 'cadences', 'stage_id', 'INTEGER REFERENCES funnel_stages(id) ON DELETE SET NULL')
   addColumnIfNotExists(db, 'lead_cadences', 'kind', "TEXT NOT NULL DEFAULT 'avulsa'")
@@ -111,7 +113,8 @@ export function applyCadenceSchema(db) {
   addColumnIfNotExists(db, 'lead_cadences', 'stage_entry_id', 'INTEGER')
   addColumnIfNotExists(db, 'lead_cadences', 'last_executed_at', 'TEXT')
   addColumnIfNotExists(db, 'lead_cadences', 'last_executed_attempt_id', 'INTEGER')
-  const result = rebuildCadenceAttempts(db)
+  // passo ja avisado pelo agendador (task:due sai uma vez por passo)
+  addColumnIfNotExists(db, 'lead_cadences', 'notified_attempt_id', 'INTEGER')
   db.exec(`
     CREATE UNIQUE INDEX IF NOT EXISTS uq_cadences_stage_active ON cadences(stage_id) WHERE stage_id IS NOT NULL AND is_active = 1;
     CREATE INDEX IF NOT EXISTS idx_lead_cadences_lead_kind ON lead_cadences(lead_id, kind, status);
@@ -129,5 +132,5 @@ export function applyCadenceSchema(db) {
     CREATE INDEX IF NOT EXISTS idx_lead_cadence_steps_attempt ON lead_cadence_steps(attempt_id, done_at);
   `)
   if (tableExists(db, 'roteiro_asks')) addColumnIfNotExists(db, 'roteiro_asks', 'attempt_id', 'INTEGER')
-  return result
+  return rebuild(db)
 }

@@ -3,6 +3,7 @@
 import { normalizePhone, phoneCompareKey } from './whatsapp/normalize.js'
 import { moveLeadToStage } from './stageMove.js'
 import { ensureStageCadence } from './cadence/leadCadence.js'
+import { warnMissingCadenceTable } from './cadence/errors.js'
 
 export function createLeadIntake({ db, pickFromRoulette, notifyAndOpenLead, triggerCapiForStageChange }) {
   function getOrCreateLead(accountId, phone, name, source, waJid, instanceId, opts = {}) {
@@ -79,7 +80,7 @@ export function createLeadIntake({ db, pickFromRoulette, notifyAndOpenLead, trig
 
     // Log stage history
     db.prepare('INSERT INTO stage_history (lead_id, to_stage_id, trigger_type) VALUES (?, ?, ?)').run(result.lastInsertRowid, firstStage.id, 'webhook')
-    try { ensureStageCadence(db, { leadId: Number(result.lastInsertRowid) }) } catch (e) { if (!/no such table/.test(e.message)) console.error('[Cadencia] etapa do lead novo:', e.message) }
+    try { ensureStageCadence(db, { leadId: Number(result.lastInsertRowid) }) } catch (e) { if (!warnMissingCadenceTable(e)) console.error('[Cadencia] etapa do lead novo:', e.message) }
 
     lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(result.lastInsertRowid)
 
