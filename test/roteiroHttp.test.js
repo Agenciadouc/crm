@@ -243,6 +243,18 @@ test('GET /performance e /suggestions sem dados devolvem listas vazias', async (
   })
 })
 
+test('GET /conversion-by-band: gestor ve as 4 faixas; atendente recebe 403', async () => {
+  await comServidor(async ({ db, base }) => {
+    const { accountId, gerenteId, atendenteId } = seedRoteiroBase(db)
+    const r = await peca(base, { path: '/api/roteiro/conversion-by-band', jwtToken: token({ id: gerenteId, role: 'gerente', accountId }) })
+    assert.equal(r.status, 200)
+    assert.deepEqual(r.body.bands.map(b => b.band), ['frio', 'morno', 'quente', 'pronto'])
+    assert.equal(r.body.warning, false)
+    const a = await peca(base, { path: '/api/roteiro/conversion-by-band', jwtToken: token({ id: atendenteId, role: 'atendente', accountId }) })
+    assert.equal(a.status, 403)
+  })
+})
+
 test('super_admin sem account_id recebe 400 em vez de 500/vazio', async () => {
   await comServidor(async ({ base }) => {
     const t = token({ id: 1, role: 'super_admin' })

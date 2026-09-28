@@ -232,6 +232,10 @@ export async function aiDraft(funnelId: number, accountId: number): Promise<Rote
 export const fetchPerformance = (funnelId: number, accountId: number) =>
   apiFetch<RoteiroPerformance>(`/api/roteiro/performance?account_id=${accountId}&funnel_id=${funnelId}`)
 
+export type ConversionByBand = RoteiroPerformance['conversion']
+export const fetchConversionByBand = (accountId: number) =>
+  apiFetch<ConversionByBand>(`/api/roteiro/conversion-by-band?account_id=${accountId}`)
+
 export const fetchRoteiroSettings = (accountId: number) =>
   apiFetch<RoteiroSettings>(`/api/roteiro/settings?account_id=${accountId}`)
 

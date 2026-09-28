@@ -111,6 +111,13 @@ export function createRoteiroRouter(db, { ai = null, now = () => new Date() } = 
     } catch (e) { fail(res, e) }
   })
 
+  // Quadro do Dashboard (spec 2026-09-27 §5.2): nao depende de funil.
+  router.get('/conversion-by-band', manager, (req, res) => {
+    try {
+      res.json(conversionByBand(db, { accountId: req.accountId, now: now() }))
+    } catch (e) { fail(res, e) }
+  })
+
   function readSettings(accountId) {
     const row = db.prepare('SELECT roteiro_min_reply_rate, roteiro_reply_window_h, score_alert_minutes FROM accounts WHERE id = ?').get(accountId)
     if (!row) throw new RoteiroError('not_found', 404, 'Conta não encontrada.')
