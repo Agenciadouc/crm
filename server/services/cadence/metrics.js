@@ -2,7 +2,7 @@
 // ask 'step-<id>' e ganha "respondem X%" pelo mesmo calculo das perguntas; ligacao/visita/
 // reuniao/e-mail = "feitas X de Y leads". Recebe db.
 import { recordAsk } from '../roteiro/asks.js'
-import { questionMetrics, pct, accountMinReplyRate, MIN_SAMPLE } from '../roteiro/metrics.js'
+import { questionMetrics, pct, accountMinReplyRate, statusFor, askTotals } from '../roteiro/metrics.js'
 import { resolveNow, shiftFromNow } from '../roteiro/time.js'
 import { markStepDone } from './leadCadence.js'
 import { CadenceError } from './errors.js'
@@ -40,13 +40,6 @@ export function stepMetrics(db, { accountId, cadenceId, days = 90, now } = {}) {
   const byQuestion = c.funnel_id && steps.some(s => s.action_type === 'pergunta')
     ? new Map(questionMetrics(db, { accountId, funnelId: c.funnel_id, days, now }).map(m => [m.question_key, m]))
     : new Map()
-  const totals = db.prepare(`
-    SELECT COUNT(*) AS sent,
-      SUM(CASE WHEN replied_at IS NOT NULL THEN 1 ELSE 0 END) AS replied,
-      SUM(CASE WHEN advanced_at IS NOT NULL THEN 1 ELSE 0 END) AS advanced,
-      SUM(CASE WHEN bought_at IS NOT NULL THEN 1 ELSE 0 END) AS bought
-    FROM roteiro_asks WHERE account_id = ? AND question_key = ? AND asked_at >= ? AND asked_at <= ?
-  `)
   const doneStmt = db.prepare("SELECT COUNT(DISTINCT lead_id) AS n FROM lead_cadence_steps WHERE attempt_id = ? AND how IN ('feito','enviado') AND done_at >= ? AND done_at <= ?")
   const reached = db.prepare('SELECT COUNT(DISTINCT lead_id) AS n FROM lead_cadences WHERE cadence_id = ? AND started_at >= ? AND started_at <= ?').get(c.id, since, until).n
   return steps.map(s => {
@@ -59,13 +52,12 @@ export function stepMetrics(db, { accountId, cadenceId, days = 90, now } = {}) {
       }
     }
     if (MESSAGE_TYPES.includes(s.action_type)) {
-      const t = totals.get(accountId, stepAskKey(s.id), since, until)
+      const t = askTotals(db, { accountId, questionKey: stepAskKey(s.id), since, until })
       const sent = t.sent || 0
       const replyRate = pct(t.replied || 0, sent)
-      const status = sent < MIN_SAMPLE ? 'amostra_pequena' : (replyRate < min ? 'fraca' : 'ok')
       return {
         attempt_id: s.id, kind: 'resposta', sent, reply_rate: replyRate,
-        advanced_rate: pct(t.advanced || 0, sent), bought_rate: pct(t.bought || 0, sent), status, by_seller: [],
+        advanced_rate: pct(t.advanced || 0, sent), bought_rate: pct(t.bought || 0, sent), status: statusFor(sent, replyRate, min), by_seller: [],
       }
     }
     return { attempt_id: s.id, kind: 'feitas', done: doneStmt.get(s.id, since, until).n, reached }

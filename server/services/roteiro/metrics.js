@@ -19,9 +19,21 @@ export function accountMinReplyRate(db, accountId) {
   return row?.roteiro_min_reply_rate ?? DEFAULT_MIN_REPLY_RATE
 }
 
-function statusFor(sent, replyRate, min) {
+export function statusFor(sent, replyRate, min) {
   if (sent < MIN_SAMPLE) return 'amostra_pequena'
   return replyRate < min ? 'fraca' : 'ok'
+}
+
+// Totais de um question_key (pergunta ou passo mensagem via 'step-<id>') na janela: enviados,
+// respondidos, avancou e comprou. Usado por questionMetrics e por cadence/metrics.js (stepMetrics).
+export function askTotals(db, { accountId, questionKey, since, until }) {
+  return db.prepare(`
+    SELECT COUNT(*) AS sent,
+      SUM(CASE WHEN replied_at IS NOT NULL THEN 1 ELSE 0 END) AS replied,
+      SUM(CASE WHEN advanced_at IS NOT NULL THEN 1 ELSE 0 END) AS advanced,
+      SUM(CASE WHEN bought_at IS NOT NULL THEN 1 ELSE 0 END) AS bought
+    FROM roteiro_asks WHERE account_id = ? AND question_key = ? AND asked_at >= ? AND asked_at <= ?
+  `).get(accountId, questionKey, since, until)
 }
 
 // Por vendedor: envios, taxa e ate 3 textos distintos (o mais usado primeiro).
@@ -69,15 +81,8 @@ export function questionMetrics(db, { accountId, funnelId, days = 90, now } = {}
   const min = accountMinReplyRate(db, accountId)
   const until = resolveNow(db, now)
   const since = shiftFromNow(db, until, `-${days} days`)
-  const totalsStmt = db.prepare(`
-    SELECT COUNT(*) AS sent,
-      SUM(CASE WHEN replied_at IS NOT NULL THEN 1 ELSE 0 END) AS replied,
-      SUM(CASE WHEN advanced_at IS NOT NULL THEN 1 ELSE 0 END) AS advanced,
-      SUM(CASE WHEN bought_at IS NOT NULL THEN 1 ELSE 0 END) AS bought
-    FROM roteiro_asks WHERE account_id = ? AND question_key = ? AND asked_at >= ? AND asked_at <= ?
-  `)
   return questions.map(q => {
-    const t = totalsStmt.get(accountId, q.question_key, since, until)
+    const t = askTotals(db, { accountId, questionKey: q.question_key, since, until })
     const sent = t.sent || 0
     const replyRate = pct(t.replied || 0, sent)
     return {
