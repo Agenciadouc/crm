@@ -317,6 +317,22 @@ test('guarda da avulsa no servico: passo fora da vez -> 409 no Feito e no botao 
   assert.equal(db.prepare('SELECT current_attempt_id FROM lead_cadences WHERE id = ?').get(m.lcAvulsa.id).current_attempt_id, segundo)
 })
 
+test('envio do passo da avulsa na vez (Chat, janela Conferir): grava e avanca a avulsa uma vez so', () => {
+  const db = createCadenceTestDb()
+  const s = seedCadenceBase(db)
+  const m = montar(db, s)
+  const [primeiro, segundo] = getCadence(db, s.accountId, m.avulsa.id).attempts.map(a => a.id)
+  const lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(m.leadId)
+  assert.ok(recordStepSend(db, { lead, attemptId: primeiro, content: 'oi' }))
+  assert.equal(db.prepare('SELECT how FROM lead_cadence_steps WHERE attempt_id = ?').get(primeiro).how, 'enviado')
+  // A tela nao chama o avanco depois: o envio ja levou a avulsa para o passo 2 (e nao para o fim)
+  const lc = db.prepare('SELECT status, current_attempt_id FROM lead_cadences WHERE id = ?').get(m.lcAvulsa.id)
+  assert.deepEqual([lc.status, lc.current_attempt_id], ['active', segundo])
+  // Reenvio atrasado do mesmo passo: fora da vez, nao anda de novo
+  assert.equal(recordStepSend(db, { lead, attemptId: primeiro, content: 'oi' }), null)
+  assert.equal(db.prepare('SELECT current_attempt_id FROM lead_cadences WHERE id = ?').get(m.lcAvulsa.id).current_attempt_id, segundo)
+})
+
 test('GET /cadences sem kind traz so avulsas; etapa so com ?kind=etapa', async () => {
   await comServidor(async ({ db, s, base }) => {
     const m = montar(db, s)

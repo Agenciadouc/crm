@@ -32,7 +32,8 @@ import HelpTip from '../components/HelpTip'
 import PanelLayoutEditor from '../components/PanelLayoutEditor'
 import { resolveLayout, visibleIds, type AtendimentoBlockId, type PanelBlock, type SavedLayouts } from '../lib/panelLayout.js'
 import { fetchAtendimentoLayouts, saveMyAtendimentoLayout, saveAccountAtendimentoLayout, resetMyAtendimentoLayout } from '../lib/panelLayoutApi'
-import { fetchLeadStageCadence } from '../lib/cadenceApi'
+import { fetchLeadStageCadence, markLeadStepDone } from '../lib/cadenceApi'
+import { avulsaStepLabel, avulsaStepView, avulsaReviewPos, telHref } from '../lib/avulsaStep.js'
 import {
   reviewPosition, reviewTitle, reviewFromPendingAsk, reviewSendKeys, boxKeysAfterReviewSend, offerRecognition,
   leadTaskRows, attendantView, sectionTitle, type StepReview, type ReviewPos,
@@ -174,7 +175,8 @@ export default function Chat() {
   const [recognized, setRecognized] = useState<{ leadId: number; messageId: number; question: { question_key: string; text: string } } | null>(null)
   const [confirmingAsk, setConfirmingAsk] = useState(false)
   // Janela "Conferir mensagem" do passo da cadencia (sempre de UM lead: fecha ao trocar de conversa)
-  const [review, setReview] = useState<(StepReview & { id: number; pos: ReviewPos | null }) | null>(null)
+  // avulsa = passo da cadencia avulsa (depois do envio recarrega a avulsa, que o servidor ja avancou)
+  const [review, setReview] = useState<(StepReview & { id: number; pos: ReviewPos | null; avulsa?: boolean }) | null>(null)
   const reviewRef = useRef<typeof review>(null)
   reviewRef.current = review
   const reviewSeqRef = useRef(0)
@@ -230,9 +232,9 @@ export default function Chat() {
   const [taskDate, setTaskDate] = useState('')
   const [taskTime, setTaskTime] = useState('')
   const [creatingTask, setCreatingTask] = useState(false)
-  const [cadenceMsgText, setCadenceMsgText] = useState('')
-  const [scriptModal, setScriptModal] = useState<{ text: string } | null>(null)
-  const [sendCadenceModal, setSendCadenceModal] = useState(false)
+  // Cadencia avulsa: janela do roteiro da ligacao (guarda o lead e o passo) e [Feito]/[Pular] em andamento
+  const [callModal, setCallModal] = useState<{ leadId: number; lcId: number; attemptId: number | null; label: string; text: string } | null>(null)
+  const [avulsaBusy, setAvulsaBusy] = useState(false)
   // "Arrumar" a aba Atendimento: layouts salvos (conta e meu), modo arrumar aberto
   const [savedLayouts, setSavedLayouts] = useState<SavedLayouts | null>(null)
   const [arrangingLayout, setArrangingLayout] = useState(false)
@@ -413,15 +415,7 @@ export default function Chat() {
         const lc = await fetchLeadCadence(reqLeadId, accountId)
         if (myToken !== loadLeadTokenRef.current) return
         setLeadCadence(lc)
-        if (lc?.attempt_message) {
-          setCadenceMsgText(applyMessageVars(lc.attempt_message, {
-            leadName: data.lead.name,
-            leadEmpresa: data.lead.empresa,
-            leadCity: data.lead.city,
-            attendantName: user?.name,
-          }))
-        } else setCadenceMsgText('')
-      } catch { if (myToken === loadLeadTokenRef.current) { setLeadCadence(null); setCadenceMsgText('') } }
+      } catch { if (myToken === loadLeadTokenRef.current) setLeadCadence(null) }
       try {
         const lfu = await fetchLeadFollowUp(reqLeadId, accountId)
         if (myToken === loadLeadTokenRef.current) setLeadFollowUp(lfu)
@@ -508,6 +502,7 @@ export default function Chat() {
   useEffect(() => {
     setRoteiroAskKey(null); setCadenceStepKey(null); setRecognized(null); setStageGate(null); setShowTaskForm(false)
     setReview(null); setReviewSending(false); setReviewError(null)
+    setCallModal(null); setAvulsaBusy(false)
   }, [selectedLeadId])
 
   // [Perguntar]/[Usar] do roteiro: poe o texto na caixa (mesmo estado da digitacao)
@@ -545,7 +540,7 @@ export default function Chat() {
   }, [handleRoteiroAsk, lead?.name, lead?.empresa, lead?.city, user?.name])
 
   // Abre a janela "Conferir mensagem" para o lead aberto (texto ja com as variaveis trocadas)
-  const openReview = useCallback((r: StepReview, pos: ReviewPos | null) => {
+  const openReview = useCallback((r: StepReview & { avulsa?: boolean }, pos: ReviewPos | null) => {
     const id = ++reviewSeqRef.current
     setReviewError(null); setReviewSending(false)
     setReview({ ...r, id, pos })
@@ -1016,6 +1011,8 @@ export default function Chat() {
         setRoteiroAskKey(k => boxKeysAfterReviewSend({ askKey: k, stepKey: null }, keys).askKey)
         setCadenceStepKey(k => boxKeysAfterReviewSend({ askKey: null, stepKey: k }, keys).stepKey)
         setNextStepReload(n => n + 1)
+        // Passo da avulsa: o envio com cadence_attempt_id ja avancou a avulsa no servidor (so recarrega)
+        if (r.avulsa) reloadAvulsa(r.leadId)
       }
       if (reviewRef.current?.id === r.id) { setReview(null); setReviewSending(false) }
     } catch (e: any) {
@@ -1272,7 +1269,49 @@ export default function Chat() {
   }
   const handleAddTag = async (tagId: number) => { if (lead) { await addLeadTag(lead.id, tagId); loadLead(); setShowTagMenu(false) } }
   const handleRemoveTag = async (tagId: number) => { if (lead) { await removeLeadTag(lead.id, tagId); loadLead() } }
-  const handleAdvanceCadence = async () => { if (leadCadence && accountId) { await advanceLeadCadence(leadCadence.id, accountId); loadLead() } }
+
+  // ─── Cadencia avulsa: passo da vez com [Enviar] (janela de conferir), roteiro da ligacao, [Feito] e [Pular] ───
+  // Recarrega so a avulsa do lead; resposta que chega depois de trocar de conversa e ignorada
+  const reloadAvulsa = useCallback(async (leadId: number) => {
+    if (!accountId) return
+    try {
+      const lc = await fetchLeadCadence(leadId, accountId)
+      if (selectedLeadIdRef.current === leadId) setLeadCadence(lc)
+    } catch { /* fica como esta; o proximo carregamento do lead acerta */ }
+  }, [accountId])
+
+  // Mesma troca de variaveis do envio da cadencia da etapa
+  const fillAvulsaVars = useCallback((text: string) => applyMessageVars(text, {
+    leadName: lead?.name, leadEmpresa: lead?.empresa, leadCity: lead?.city, attendantName: user?.name,
+  }), [lead?.name, lead?.empresa, lead?.city, user?.name])
+
+  // [Enviar]: abre a mesma janela "Conferir mensagem"; o envio leva o cadence_attempt_id do passo da vez
+  const handleAvulsaSend = () => {
+    if (!lead || !leadCadence || leadCadence.lead_id !== lead.id || !leadCadence.current_attempt_id) return
+    const v = avulsaStepView(leadCadence, fillAvulsaVars)
+    if (!v || !v.actions.includes('enviar')) return
+    openReview({ leadId: lead.id, kind: 'mensagem', text: v.text, questionKey: null, attemptId: leadCadence.current_attempt_id, avulsa: true }, avulsaReviewPos(leadCadence))
+  }
+
+  // [Feito]/[Pular] do passo (tambem o [Feito] da janela do roteiro). Vai pelo passo exato: se o passo
+  // mudou (gestor editou, outra aba avancou) o servidor devolve 409 e a tela recarrega.
+  const handleAvulsaStep = async (how: 'feito' | 'pulado', target: { leadId: number; lcId: number; attemptId: number | null }) => {
+    if (!accountId || avulsaBusy || selectedLeadIdRef.current !== target.leadId) return
+    const { leadId } = target
+    setAvulsaBusy(true)
+    try {
+      if (target.attemptId) await markLeadStepDone(leadId, target.attemptId, accountId, how)
+      else await advanceLeadCadence(target.lcId, accountId) // avulsa sem passo atual: avanco antigo
+      if (selectedLeadIdRef.current === leadId) setCallModal(null)
+    } catch (e: any) {
+      if (selectedLeadIdRef.current === leadId) {
+        if (e?.status === 409) setCallModal(null)
+        setNotice({ kind: 'error', title: e?.status === 409 ? 'O passo mudou' : 'Não deu para concluir o passo', message: e?.message || 'Erro desconhecido' })
+      }
+    } finally {
+      if (selectedLeadIdRef.current === leadId) { setAvulsaBusy(false); reloadAvulsa(leadId) }
+    }
+  }
 
   const handleAssignFollowUp = async (followUpId: number) => {
     if (!lead || !accountId) return
@@ -1328,25 +1367,6 @@ export default function Chat() {
     if (!confirm('Cancelar follow-up deste lead? Não enviará mais nenhuma mensagem automática.')) return
     try { await cancelLeadFollowUp(leadFollowUp.id, accountId); loadLead() }
     catch (e: any) { setNotice({ kind: 'error', title: 'Erro', message: e?.message || '' }) }
-  }
-  const handleViewScript = () => { if (leadCadence?.attempt_script) setScriptModal({ text: leadCadence.attempt_script }) }
-  const handleSendCadenceMessage = async () => {
-    if (!cadenceMsgText.trim() || !lead || !accountId || !leadCadence) return
-    setSending(true)
-    try {
-      const result = await sendMessage(lead.id, accountId, cadenceMsgText)
-      setMessages(prev => [...prev, result.message])
-      if (result.delivered) {
-        await advanceLeadCadence(leadCadence.id, accountId)
-        setSendCadenceModal(false)
-        loadLead()
-      } else {
-        setNotice({ kind: 'error', title: 'Mensagem nao entregue', message: 'A mensagem NAO foi entregue no WhatsApp. Cadencia mantida na etapa atual. Verifique a conexao e tente novamente.' })
-      }
-    } catch (err: any) {
-      setNotice({ kind: 'error', title: 'Erro ao enviar', message: err?.message || 'Erro desconhecido' })
-    }
-    setSending(false)
   }
   const handleAssignCadence = async (cadenceId: number) => { if (lead && accountId) { await assignLeadCadence(cadenceId, accountId, lead.id); setShowCadenceMenu(false); loadLead() } }
   const handleAssignGlobalCadence = async (globalId: number) => {
@@ -2145,7 +2165,7 @@ export default function Chat() {
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
                       <div style={{ fontSize: 10, color: '#9B96B0', textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: 3, flex: 1 }}>
                         <ListOrdered size={10} /> Cadência avulsa
-                        <HelpTip title="Cadência avulsa">Passos extras que você escolheu só para este cliente, fora da cadência da etapa. Ex.: "Pós-venda": dia 1 mandar mensagem, dia 7 ligar.</HelpTip>
+                        <HelpTip title="Cadência avulsa">Passos extras que você escolheu só para este cliente, fora da cadência da etapa. Ex.: "Pós-venda": passo 1 mandar mensagem (clique em Enviar, confira o texto e envie), passo 2 ligar (Ver roteiro e concluir). Pular passa para o próximo passo sem enviar nada.</HelpTip>
                       </div>
                       <div style={{ position: 'relative' }}>
                         <button className="btn btn-secondary btn-sm" onClick={() => setShowCadenceMenu(!showCadenceMenu)} style={{ padding: '2px 8px', fontSize: 10 }}>{leadCadence ? 'Trocar' : 'Atribuir'}</button>
@@ -2194,27 +2214,37 @@ export default function Chat() {
                         </div>
                         {leadCadence.status === 'completed' ? (
                           <div style={{ fontSize: 11, color: '#34C759', display: 'flex', alignItems: 'center', gap: 3, marginTop: 4 }}><Check size={10} /> Concluida</div>
-                        ) : (
-                          <>
-                            <div style={{ fontSize: 11, color: '#FFB300', marginTop: 2 }}>Etapa {(leadCadence.attempt_position ?? 0) + 1}/{leadCadence.total_attempts}: {leadCadence.action_type?.toUpperCase()}</div>
-                            {leadCadence.attempt_description && <div style={{ fontSize: 11, color: '#fff', marginTop: 2, fontWeight: 500 }}>{leadCadence.attempt_description}</div>}
-                            {leadCadence.attempt_instructions && <div style={{ fontSize: 10, color: '#9B96B0', marginTop: 2, fontStyle: 'italic' }}>{leadCadence.attempt_instructions}</div>}
-                            {leadCadence.attempt_message ? (
-                              <>
-                                <textarea className="input" value={cadenceMsgText} onChange={e => setCadenceMsgText(e.target.value)} rows={3} style={{ marginTop: 8, fontSize: 11, resize: 'vertical', background: 'rgba(255,179,0,0.05)', border: '1px solid rgba(255,179,0,0.2)' }} />
-                                <button className="btn btn-primary btn-sm" style={{ marginTop: 8, width: '100%', fontSize: 11 }} onClick={() => setSendCadenceModal(true)} disabled={sending || !cadenceMsgText.trim()}><Send size={10} /> Revisar e enviar</button>
-                                <button className="btn btn-secondary btn-sm" style={{ marginTop: 6, width: '100%', fontSize: 10 }} onClick={handleAdvanceCadence}><ChevronRight size={10} /> So avancar (sem enviar)</button>
-                              </>
-                            ) : leadCadence.attempt_script ? (
-                              <>
-                                <button className="btn btn-primary btn-sm" style={{ marginTop: 8, width: '100%', fontSize: 11 }} onClick={handleViewScript}><FileText size={10} /> Ver script</button>
-                                <button className="btn btn-secondary btn-sm" style={{ marginTop: 6, width: '100%', fontSize: 10 }} onClick={handleAdvanceCadence}><ChevronRight size={10} /> Avancar</button>
-                              </>
-                            ) : (
-                              <button className="btn btn-primary btn-sm" style={{ marginTop: 8, width: '100%', fontSize: 11 }} onClick={handleAdvanceCadence}><ChevronRight size={10} /> Avancar</button>
-                            )}
-                          </>
-                        )}
+                        ) : (() => {
+                          const v = avulsaStepView(leadCadence, fillAvulsaVars)
+                          if (!v) return null
+                          const target = { leadId: lead.id, lcId: leadCadence.id, attemptId: leadCadence.current_attempt_id }
+                          const label = avulsaStepLabel(leadCadence)
+                          return (
+                            <>
+                              <div style={{ fontSize: 11, color: '#FFB300', marginTop: 2 }}>{label}</div>
+                              {v.text ? (
+                                <div style={{ marginTop: 6, padding: '8px 10px', fontSize: 11, lineHeight: 1.5, color: 'var(--text-primary)', whiteSpace: 'pre-wrap', background: 'rgba(255,179,0,0.05)', border: '1px solid rgba(255,179,0,0.2)', borderRadius: 6, maxHeight: 140, overflowY: 'auto' }}>{v.text}</div>
+                              ) : (
+                                <div style={{ marginTop: 6, fontSize: 10, color: '#6B6580' }}>Passo sem texto. Ex.: faça o que combinou e clique em Feito.</div>
+                              )}
+                              {leadCadence.attempt_instructions && leadCadence.attempt_instructions.trim() !== v.text && (
+                                <div style={{ fontSize: 10, color: '#9B96B0', marginTop: 4, fontStyle: 'italic' }}>{leadCadence.attempt_instructions}</div>
+                              )}
+                              <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+                                {v.actions.includes('enviar') && (
+                                  <button className="btn btn-primary btn-sm" style={{ flex: 1, fontSize: 11 }} onClick={handleAvulsaSend} disabled={avulsaBusy} title="Abre a janela para conferir o texto antes de enviar"><Send size={10} /> Enviar</button>
+                                )}
+                                {v.actions.includes('roteiro') && (
+                                  <button className="btn btn-primary btn-sm" style={{ flex: 1, fontSize: 11 }} disabled={avulsaBusy} onClick={() => setCallModal({ ...target, label, text: v.text })}><Phone size={10} /> Ver roteiro e concluir</button>
+                                )}
+                                {v.actions.includes('feito') && (
+                                  <button className="btn btn-primary btn-sm" style={{ flex: 1, fontSize: 11 }} disabled={avulsaBusy} onClick={() => handleAvulsaStep('feito', target)}><Check size={10} /> Feito</button>
+                                )}
+                                <button className="btn btn-secondary btn-sm" style={{ fontSize: 11 }} disabled={avulsaBusy} onClick={() => handleAvulsaStep('pulado', target)} title="Passa para o próximo passo sem enviar nada"><ChevronRight size={10} /> Pular</button>
+                              </div>
+                            </>
+                          )
+                        })()}
                       </>
                     ) : (
                       <div style={{ fontSize: 11, color: '#6B6580' }}>Nenhuma cadência avulsa. Ex.: clique em Atribuir e escolha "Pós-venda"</div>
@@ -2559,64 +2589,31 @@ export default function Chat() {
       {editingTask && lead && accountId && (
         <EditTaskModal task={editingTask} onClose={() => setEditingTask(null)} onSaved={() => { fetchLeadTasks(lead.id, accountId).then(setLeadTasks); setEditingTask(null) }} />
       )}
-      {scriptModal && (
-        <div className="modal-overlay" onClick={() => setScriptModal(null)}>
-          <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 600 }}>
-            <h2 style={{ display: 'flex', alignItems: 'center', gap: 8 }}><Phone size={16} style={{ color: '#FFB300' }} /> Script de Ligacao</h2>
-            <div style={{ background: 'rgba(255,179,0,0.05)', border: '1px solid rgba(255,179,0,0.2)', borderRadius: 8, padding: 16, marginTop: 12, maxHeight: 400, overflowY: 'auto', whiteSpace: 'pre-wrap', fontSize: 13, lineHeight: 1.6, color: '#F0EDF5' }}>
-              {scriptModal.text}
-            </div>
-            <div className="modal-actions">
-              <button className="btn btn-primary" onClick={() => setScriptModal(null)}>Fechar</button>
+      {/* Roteiro da ligacao da cadencia avulsa: [Feito] conclui o passo (so para o lead aberto) */}
+      {callModal && lead && lead.id === callModal.leadId && (() => {
+        const tel = telHref(lead.phone)
+        return (
+          <div className="modal-overlay" onClick={() => !avulsaBusy && setCallModal(null)}>
+            <div className="modal" role="dialog" aria-label="Roteiro da ligação" onClick={e => e.stopPropagation()} style={{ maxWidth: 600 }}>
+              <h2 style={{ display: 'flex', alignItems: 'center', gap: 8 }}><Phone size={16} style={{ color: '#FFB300' }} /> Roteiro da ligação</h2>
+              <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 6 }}>{callModal.label}</div>
+              <div style={{ marginTop: 10, fontSize: 13, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                <span style={{ color: 'var(--text-secondary)' }}>Ligar para <b style={{ color: 'var(--text-primary)' }}>{lead.name || 'o cliente'}</b>:</span>
+                {tel ? <a href={tel} style={{ color: '#FFB300', fontFamily: 'monospace', fontWeight: 600 }}>{lead.phone}</a> : <span style={{ color: '#FBBC04' }}>sem telefone no cadastro</span>}
+              </div>
+              <div style={{ background: 'rgba(255,179,0,0.05)', border: '1px solid rgba(255,179,0,0.2)', borderRadius: 8, padding: 16, marginTop: 12, maxHeight: 400, overflowY: 'auto', whiteSpace: 'pre-wrap', fontSize: 13, lineHeight: 1.6, color: 'var(--text-primary)' }}>
+                {callModal.text || 'Sem roteiro neste passo. Ex.: se apresente, pergunte se é um bom momento e combine o próximo contato.'}
+              </div>
+              <div className="modal-actions">
+                <button className="btn btn-secondary" onClick={() => setCallModal(null)} disabled={avulsaBusy}>Cancelar</button>
+                <button className="btn btn-primary" disabled={avulsaBusy} onClick={() => handleAvulsaStep('feito', { leadId: callModal.leadId, lcId: callModal.lcId, attemptId: callModal.attemptId })}>
+                  <Check size={14} /> {avulsaBusy ? 'Salvando...' : 'Feito'}
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
-
-      {sendCadenceModal && leadCadence && lead && (
-        <div className="modal-overlay" onClick={() => !sending && setSendCadenceModal(false)}>
-          <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 620 }}>
-            <h2 style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <Send size={16} style={{ color: '#FFB300' }} /> Revisar mensagem da cadencia
-            </h2>
-            <div style={{ marginTop: 12, padding: '10px 14px', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 8, display: 'flex', gap: 16, flexWrap: 'wrap', fontSize: 12 }}>
-              <div>
-                <div style={{ color: '#9B96B0', fontSize: 10, textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 2 }}>Pra</div>
-                <div style={{ color: '#fff', fontWeight: 600 }}>{lead.name || '(sem nome)'}</div>
-              </div>
-              <div>
-                <div style={{ color: '#9B96B0', fontSize: 10, textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 2 }}>WhatsApp</div>
-                <div style={{ color: '#fff', fontFamily: 'monospace' }}>{lead.phone || '-'}</div>
-              </div>
-              <div>
-                <div style={{ color: '#9B96B0', fontSize: 10, textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 2 }}>Etapa</div>
-                <div style={{ color: '#FFB300', fontWeight: 600 }}>
-                  {(leadCadence.attempt_position ?? 0) + 1}/{leadCadence.total_attempts}
-                  {leadCadence.attempt_description ? ` · ${leadCadence.attempt_description}` : ''}
-                </div>
-              </div>
-            </div>
-            <div style={{ marginTop: 14, fontSize: 11, color: '#9B96B0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span>Edite se precisar antes de confirmar o envio</span>
-              <span style={{ color: cadenceMsgText.length > 800 ? '#FF6B6B' : '#6B6580' }}>{cadenceMsgText.length} caracteres</span>
-            </div>
-            <textarea
-              className="input"
-              value={cadenceMsgText}
-              onChange={e => setCadenceMsgText(e.target.value)}
-              rows={10}
-              autoFocus
-              style={{ marginTop: 6, fontSize: 13, resize: 'vertical', minHeight: 180, background: 'rgba(255,179,0,0.05)', border: '1px solid rgba(255,179,0,0.25)', lineHeight: 1.55, fontFamily: 'inherit', whiteSpace: 'pre-wrap' }}
-            />
-            <div className="modal-actions" style={{ marginTop: 14 }}>
-              <button className="btn btn-secondary" onClick={() => setSendCadenceModal(false)} disabled={sending}>Cancelar</button>
-              <button className="btn btn-primary" onClick={handleSendCadenceMessage} disabled={sending || !cadenceMsgText.trim()}>
-                <Send size={14} /> {sending ? 'Enviando...' : 'Confirmar e enviar'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+        )
+      })()}
 
       {/* Janela "Conferir mensagem" do passo da cadencia da etapa (so para o lead aberto) */}
       {review && lead && lead.id === review.leadId && (
