@@ -6,6 +6,7 @@ import { configureScoreRuntime, scheduleScore } from '../leadScore/recalc.js'
 import { markAdvanced, markBought, markReplied, recordAsk } from './asks.js'
 import { getLeadRoteiro } from './leadRoteiro.js'
 import { refreshLeadStageCadence } from '../cadence/leadCadence.js'
+import { recordStepSend } from '../cadence/metrics.js'
 import { recognizeQuestion } from './recognize.js'
 import { createExtractQueue, extractAnswers, EXTRACT_DELAY_MS } from './aiExtract.js'
 
@@ -108,10 +109,18 @@ export function onOutboundSaved({ db, lead }) {
   scheduleFn(lead.id)
 }
 
-// Envio pelo Chat: com questionKey (botao) grava o ask com a variante vigente;
-// sem, tenta reconhecer a pergunta digitada entre as pendentes da etapa atual.
-// Devolve { question_key, text } reconhecida ou null.
-export function roteiroOnChatSend(db, { lead, userId = null, content, messageId = null, questionKey = null }) {
+// Envio pelo Chat: com attemptId (botao [Enviar] do passo mensagem) registra o envio do passo;
+// com questionKey (botao) grava o ask com a variante vigente; sem nenhum, tenta reconhecer a
+// pergunta digitada entre as pendentes da etapa atual. Devolve { question_key, text } ou null.
+export function roteiroOnChatSend(db, { lead, userId = null, content, messageId = null, questionKey = null, attemptId = null }) {
+  if (attemptId) {
+    try {
+      if (recordStepSend(db, { lead, attemptId, userId, messageId, content })) {
+        broadcastFn(lead.account_id, 'lead:cadence', { lead_id: lead.id })
+      }
+    } catch (e) { console.error('[Cadencia] envio do passo:', e.message) }
+    return null
+  }
   const roteiro = getLeadRoteiro(db, { accountId: lead.account_id, leadId: lead.id })
   if (!roteiro.has_roteiro) return null
 

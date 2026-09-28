@@ -11,10 +11,10 @@ const router = Router()
 
 // Roteiro/termometro apos salvar a mensagem enviada pelo Chat (so quando entregou).
 // Falha aqui nunca derruba o envio: so loga. Devolve a pergunta reconhecida ou null.
-function roteiroAfterChatSend({ lead, userId, content, messageId, questionKey }) {
+function roteiroAfterChatSend({ lead, userId, content, messageId, questionKey, attemptId }) {
   try {
     onOutboundSaved({ db, lead })
-    return roteiroOnChatSend(db, { lead, userId, content, messageId, questionKey: questionKey || null })
+    return roteiroOnChatSend(db, { lead, userId, content, messageId, questionKey: questionKey || null, attemptId: attemptId || null })
   } catch (e) {
     console.error('[Roteiro] envio do chat:', e.message)
     return null
@@ -171,7 +171,7 @@ router.post('/:leadId', async (req, res) => {
 
     const message = db.prepare('SELECT * FROM messages WHERE id = ?').get(result.lastInsertRowid)
     const recognized_question = delivered
-      ? roteiroAfterChatSend({ lead, userId: req.user.id, content, messageId: message.id, questionKey: req.body.roteiro_question_key })
+      ? roteiroAfterChatSend({ lead, userId: req.user.id, content, messageId: message.id, questionKey: req.body.roteiro_question_key, attemptId: req.body.cadence_attempt_id })
       : null
     const errorMsg = delivered ? undefined : (sendRes.reason === 'number_not_on_whatsapp'
       ? 'Numero nao tem WhatsApp. Mensagem nao foi enviada.'
@@ -280,7 +280,7 @@ router.post('/:leadId/media', jsonBodyParser({ limit: '150mb' }), async (req, re
     const message = db.prepare('SELECT * FROM messages WHERE id = ?').get(result.lastInsertRowid)
     // Midia: so a legenda conta como texto da pergunta
     const recognized_question = delivered
-      ? roteiroAfterChatSend({ lead, userId: req.user.id, content: caption || '', messageId: message.id, questionKey: req.body.roteiro_question_key })
+      ? roteiroAfterChatSend({ lead, userId: req.user.id, content: caption || '', messageId: message.id, questionKey: req.body.roteiro_question_key, attemptId: req.body.cadence_attempt_id })
       : null
     res.json({ message, delivered, instance: { id: instance.id, name: instance.instance_name }, error: delivered ? undefined : 'Falha ao enviar pelo WhatsApp.', recognized_question })
   } catch (err) {
