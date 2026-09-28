@@ -3,11 +3,11 @@ import assert from 'node:assert/strict'
 import { createCadenceTestDb, seedCadenceBase, leadIn, Q_PRAZO, Q_LIVRE, publishedRoteiro } from './helpers/cadenceDb.js'
 import {
   createCadence, getCadence, listCadences, updateCadence, deleteCadence, addStep, updateStep, deleteStep, reorderSteps,
-  replaceAttemptsById, saveDeviations, addQuestionSteps, bantStepQuestions, aiStepQuestions, applySuggestionLive, confirmVariantLive, getStageView,
+  replaceAttemptsById, saveDeviations, addQuestionSteps, bantStepQuestions, aiStepQuestions, applySuggestionLive, confirmVariantLive, getStageView, syncStageQuestions,
 } from '../server/services/cadence/repo.js'
 import { CadenceError } from '../server/services/cadence/errors.js'
 import { getLeadRoteiro, saveAnswer, checkRoteiroGate } from '../server/services/roteiro/leadRoteiro.js'
-import { saveDraft, getRoteiro } from '../server/services/roteiro/repo.js'
+import { saveDraft, getRoteiro, publish } from '../server/services/roteiro/repo.js'
 
 const versions = (db, s) => db.prepare("SELECT COUNT(*) AS n FROM roteiro_versions WHERE account_id = ? AND status IN ('published','archived')").get(s.accountId).n
 const stageCad = (db, s, key = 'qualificando') => createCadence(db, s.accountId, { stageId: s.stages[key] })
@@ -37,7 +37,7 @@ test('cadencia da etapa: uma ativa por etapa, etapa final, outra conta, nao apag
   assert.throws(() => stageCad(db, s, 'venda'), e => e.status === 400 && /finais/.test(e.message))
   assert.throws(() => createCadence(db, s.otherAccountId, { stageId: s.stages.novo }), e => e.status === 404)
   assert.throws(() => deleteCadence(db, s.accountId, c.id), e => e.status === 400)
-  updateCadence(db, s.accountId, c.id, { is_active: 0 })
+  db.prepare('UPDATE cadences SET is_active = 0 WHERE id = ?').run(c.id) // inativa (dado antigo): a tela nao desativa mais
   assert.notEqual(stageCad(db, s).id, c.id) // inativa libera a etapa
   assert.throws(() => updateCadence(db, s.accountId, c.id, { is_active: 1 }), e => e.status === 409)
   assert.deepEqual(listCadences(db, s.accountId, { kind: 'etapa' }).length, 1)
@@ -212,4 +212,67 @@ test('A/B confirmado entra no ar sem rascunho velho e avisa a cadencia cujo text
   assert.deepEqual(r.cadence_ids, [c.id])
   assert.deepEqual(publishedRoteiro(db, s).questions.map(q => q.text), ['Me conta do evento?'])
   assert.equal(getCadence(db, s.accountId, c.id).attempts.find(a => a.id === stepId).description, 'Me conta do evento?')
+})
+
+test('cadencia da etapa desativada: escrita da 409 e nao apaga as perguntas da cadencia ativa', () => {
+  const db = createCadenceTestDb(); const s = seedCadenceBase(db)
+  const a = stageCad(db, s)
+  const m1 = addStep(db, s.accountId, a.id, { action_type: 'mensagem', auto_message: 'Oi' }).step_id
+  const m2 = addStep(db, s.accountId, a.id, { action_type: 'mensagem', auto_message: 'Tchau' }).step_id
+  db.prepare('UPDATE cadences SET is_active = 0 WHERE id = ?').run(a.id)
+  const b = stageCad(db, s)
+  addStep(db, s.accountId, b.id, { action_type: 'pergunta', question: Q_LIVRE })
+  const key = stageQuestions(db, s)[0].question_key
+  db.prepare("INSERT INTO roteiro_variants (account_id, question_key, text, status) VALUES (?, ?, 'Versão B', 'testing')").run(s.accountId, key)
+  const v = versions(db, s)
+  const off = e => e instanceof CadenceError && e.status === 409 && e.message === 'Esta cadência está desativada.'
+  assert.throws(() => reorderSteps(db, s.accountId, a.id, [m2, m1]), off)
+  assert.throws(() => addStep(db, s.accountId, a.id, { action_type: 'mensagem', auto_message: 'x' }), off)
+  assert.throws(() => updateStep(db, s.accountId, a.id, m1, { auto_message: 'y' }), off)
+  assert.throws(() => deleteStep(db, s.accountId, a.id, m1), off)
+  assert.equal(syncStageQuestions(db, s.accountId, a.id).published, false)
+  assert.deepEqual(stageQuestions(db, s).map(q => q.question_key), [key])
+  assert.equal(db.prepare('SELECT status FROM roteiro_variants WHERE question_key = ?').get(key).status, 'testing')
+  assert.equal(versions(db, s), v)
+})
+
+test('passo pergunta orfao (fora do publicado) nao trava a cadencia e aparece marcado', () => {
+  const db = createCadenceTestDb(); const s = seedCadenceBase(db)
+  const c = stageCad(db, s)
+  const p = addStep(db, s.accountId, c.id, { action_type: 'pergunta', question: Q_LIVRE }).step_id
+  const m = addStep(db, s.accountId, c.id, { action_type: 'mensagem', auto_message: 'Oi' }).step_id
+  saveDraft(db, s.accountId, s.funnelId, { questions: [], deviations: [] })
+  publish(db, s.accountId, s.funnelId, null)
+  assert.equal(reorderSteps(db, s.accountId, c.id, [m, p]).published, false)
+  const st = getStageView(db, s.accountId, s.funnelId).stages.find(x => x.id === s.stages.qualificando)
+  assert.deepEqual(st.cadence.attempts.map(a => [a.id, !!a.orphan]), [[m, false], [p, true]])
+  assert.equal(addStep(db, s.accountId, c.id, { action_type: 'pergunta', question: Q_PRAZO }).published, true)
+  assert.equal(stageQuestions(db, s).length, 1)
+  deleteStep(db, s.accountId, c.id, p)
+  assert.ok(!getCadence(db, s.accountId, c.id).attempts.some(a => a.id === p))
+})
+
+test('cadencia da etapa nao pode ser desativada; avulsa pode', () => {
+  const db = createCadenceTestDb(); const s = seedCadenceBase(db)
+  const c = stageCad(db, s)
+  assert.throws(() => updateCadence(db, s.accountId, c.id, { is_active: 0 }),
+    e => e.status === 400 && e.message === 'A cadência da etapa não pode ser desativada. Apague os passos que não quiser.')
+  assert.equal(getCadence(db, s.accountId, c.id).is_active, 1)
+  const av = createCadence(db, s.accountId, { name: 'Avulsa' })
+  assert.equal(updateCadence(db, s.accountId, av.id, { is_active: 0 }).is_active, 0)
+})
+
+test('editar opcoes sem option_key mantem as chaves (por texto, depois por posicao) e a resposta antiga vale', () => {
+  const db = createCadenceTestDb(); const s = seedCadenceBase(db)
+  const c = stageCad(db, s)
+  const id = addStep(db, s.accountId, c.id, { action_type: 'pergunta', question: Q_PRAZO }).step_id
+  const [kAte, kMais] = stageQuestions(db, s)[0].options.map(o => o.option_key)
+  const leadId = leadIn(db, s, 'qualificando')
+  saveAnswer(db, { accountId: s.accountId, leadId, questionKey: stageQuestions(db, s)[0].question_key, optionKey: kAte, origin: 'manual' })
+  updateStep(db, s.accountId, c.id, id, { question: { ...Q_PRAZO, options: [{ label: 'Mais de 30 dias', points: 5 }, { label: 'Até 30 dias', points: 15 }] } })
+  assert.deepEqual(stageQuestions(db, s)[0].options.map(o => [o.label, o.option_key]), [['Mais de 30 dias', kMais], ['Até 30 dias', kAte]])
+  updateStep(db, s.accountId, c.id, id, { question: { ...Q_PRAZO, options: [{ label: 'Em até 1 mês', points: 15 }, { label: 'Até 30 dias', points: 15 }] } })
+  assert.deepEqual(stageQuestions(db, s)[0].options.map(o => o.option_key), [kMais, kAte])
+  const cur = getLeadRoteiro(db, { accountId: s.accountId, leadId }).stages.find(x => x.is_current)
+  assert.equal(cur.questions[0].answer.option_label, 'Até 30 dias') // resposta antiga ainda casa com a opcao
 })

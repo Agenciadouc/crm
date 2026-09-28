@@ -51,7 +51,14 @@ function withSteps(db, accountId, c) {
   if (c.funnel_id && attempts.some(a => a.action_type === 'pergunta')) {
     byKey = new Map(publishedContent(db, accountId, c.funnel_id).content.questions.map(q => [q.question_key, q]))
   }
-  return { ...c, attempts: attempts.map(a => ({ ...a, question: a.question_key ? (byKey.get(a.question_key) || null) : null })) }
+  return {
+    ...c,
+    attempts: attempts.map(a => {
+      const question = a.question_key ? (byKey.get(a.question_key) || null) : null
+      // Pergunta que saiu do publicado (tela antiga, restauracao): a tela oferece apagar.
+      return { ...a, question, orphan: a.action_type === 'pergunta' && !question }
+    }),
+  }
 }
 
 export function getCadence(db, accountId, cadenceId) {
@@ -140,6 +147,7 @@ export function updateCadence(db, accountId, cadenceId, { name, description, is_
   if (description !== undefined) { sets.push('description = ?'); params.push(strOrNull(description)) }
   if (is_active !== undefined) {
     const on = is_active ? 1 : 0
+    if (!on && c.stage_id) throw new CadenceError('invalid', 400, 'A cadência da etapa não pode ser desativada. Apague os passos que não quiser.')
     if (on && c.stage_id && db.prepare('SELECT id FROM cadences WHERE stage_id = ? AND is_active = 1 AND id <> ?').get(c.stage_id, c.id)) {
       throw new CadenceError('stage_taken', 409, 'Esta etapa já tem cadência.')
     }
@@ -203,15 +211,18 @@ function funnelOfQuestion(db, accountId, questionKey) {
 // Publica so quando o conteudo muda (spec 3.4; decisoes D1/D2).
 export function syncStageQuestions(db, accountId, cadenceId, { overrides = new Map(), deviations = null, userId = null } = {}) {
   const c = loadCadenceRow(db, accountId, cadenceId)
-  if (!c.stage_id || !c.funnel_id) return { published: false }
+  // Inativa nao manda no roteiro: quem manda e a cadencia ativa da etapa.
+  if (!c.stage_id || !c.funnel_id || !c.is_active) return { published: false }
   const { rot, content } = publishedContent(db, accountId, c.funnel_id)
   const baseByKey = new Map(content.questions.map(q => [q.question_key, q]))
-  const steps = c.is_active ? loadAttempts(db, c.id).filter(a => a.action_type === 'pergunta') : []
+  // Passo orfao (pergunta fora do publicado e sem edicao nova) fica de fora, sem travar.
+  const steps = loadAttempts(db, c.id)
+    .filter(a => a.action_type === 'pergunta' && (baseByKey.has(a.question_key) || overrides.has(a.question_key)))
   const stageQuestions = steps.map((a, idx) => {
     const base = baseByKey.get(a.question_key)
     const patch = overrides.get(a.question_key)
-    if (!base && !patch) throw new CadenceError('invalid', 400, QUESTION_NOT_IN_STAGE)
     const m = { ...(base || { kind: 'text', required: false, bant: null, ai_hint: null, options: [] }), ...(patch || {}) }
+    if (base && patch && Array.isArray(patch.options)) m.options = keepOptionKeys(base.options || [], patch.options)
     return {
       question_key: a.question_key, stage_id: c.stage_id, position: idx,
       text: m.text, kind: m.kind, required: !!m.required, bant: m.bant ?? null, ai_hint: m.ai_hint ?? null,
@@ -236,6 +247,29 @@ export function syncStageQuestions(db, accountId, cadenceId, { overrides = new M
   return { published: true }
 }
 
+// Opcao editada sem option_key herda a chave da opcao igual (mesmo texto; senao mesma
+// posicao), para as respostas antigas dos leads continuarem valendo.
+function keepOptionKeys(baseOptions, options) {
+  const used = new Set(options.map(o => o.option_key).filter(Boolean))
+  const norm = t => String(t || '').trim().toLowerCase()
+  const withLabel = options.map(o => {
+    if (o.option_key) return { ...o }
+    const same = baseOptions.find(b => !used.has(b.option_key) && norm(b.label) === norm(o.label))
+    if (same) { used.add(same.option_key); return { ...o, option_key: same.option_key } }
+    return { ...o }
+  })
+  return withLabel.map((o, i) => {
+    if (o.option_key) return o
+    const atPos = baseOptions[i]
+    if (atPos && !used.has(atPos.option_key)) { used.add(atPos.option_key); return { ...o, option_key: atPos.option_key } }
+    return o
+  })
+}
+
+function assertActive(c) {
+  if (!c.is_active) throw new CadenceError('inactive', 409, 'Esta cadência está desativada.')
+}
+
 function assertQuestionInStage(db, accountId, c, questionKey) {
   const { content } = publishedContent(db, accountId, c.funnel_id)
   if (!content.questions.some(q => q.question_key === questionKey && q.stage_id === c.stage_id)) {
@@ -248,6 +282,7 @@ function assertQuestionInStage(db, accountId, c, questionKey) {
 
 export function addStep(db, accountId, cadenceId, input = {}, { userId = null } = {}) {
   const c = loadCadenceRow(db, accountId, cadenceId)
+  if (c.stage_id) assertActive(c)
   const step = normalizeStep(input, { isStage: !!c.stage_id })
   let stepId
   let published = false
@@ -282,6 +317,7 @@ function loadStep(db, c, attemptId) {
 
 export function updateStep(db, accountId, cadenceId, attemptId, patch = {}, { userId = null } = {}) {
   const c = loadCadenceRow(db, accountId, cadenceId)
+  if (c.stage_id) assertActive(c)
   const row = loadStep(db, c, attemptId)
   const nextType = patch.action_type || row.action_type
   if (nextType !== row.action_type && (nextType === 'pergunta' || row.action_type === 'pergunta')) {
@@ -301,6 +337,7 @@ export function updateStep(db, accountId, cadenceId, attemptId, patch = {}, { us
 
 export function deleteStep(db, accountId, cadenceId, attemptId, { userId = null } = {}) {
   const c = loadCadenceRow(db, accountId, cadenceId)
+  if (c.stage_id) assertActive(c)
   const row = loadStep(db, c, attemptId)
   let published = false
   db.transaction(() => {
@@ -314,6 +351,7 @@ export function deleteStep(db, accountId, cadenceId, attemptId, { userId = null 
 
 export function reorderSteps(db, accountId, cadenceId, attemptIds, { userId = null } = {}) {
   const c = loadCadenceRow(db, accountId, cadenceId)
+  if (c.stage_id) assertActive(c)
   const current = loadAttempts(db, c.id).map(a => a.id)
   const ids = (Array.isArray(attemptIds) ? attemptIds : []).map(Number)
   if (ids.length !== current.length || new Set(ids).size !== ids.length || !ids.every(id => current.includes(id))) {
