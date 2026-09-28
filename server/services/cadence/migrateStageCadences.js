@@ -4,6 +4,7 @@
 // Falha isolada por conta; a marca e gravada no fim para nao travar o boot. Recebe db.
 import { getPublishedQuestions } from '../roteiro/repo.js'
 import { attachLeadsInStage } from './leadCadence.js'
+import { acceptsPergunta } from './schema.js'
 
 export const CADENCIA_ETAPA_FLAG = 'cadencia_etapa_migrada'
 
@@ -31,6 +32,10 @@ function migrateAccount(db, accountId, funnelIds) {
 
 export function migrateStageCadences(db) {
   if (db.prepare('SELECT value FROM app_settings WHERE key = ?').get(CADENCIA_ETAPA_FLAG)) return { accounts: 0, cadences: 0, leads: 0, skipped: true }
+  if (!acceptsPergunta(db)) {
+    console.error("[Cadencia] migracao adiada: a tabela de passos ainda nao aceita 'pergunta'")
+    return { accounts: 0, cadences: 0, leads: 0, skipped: true }
+  }
   const rows = db.prepare("SELECT DISTINCT account_id, funnel_id FROM roteiro_versions WHERE status = 'published' ORDER BY account_id, funnel_id").all()
   const byAccount = new Map()
   for (const r of rows) {

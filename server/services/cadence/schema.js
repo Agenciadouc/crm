@@ -13,7 +13,7 @@ function tableExists(db, name) {
   return !!db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(name)
 }
 
-function acceptsPergunta(db) {
+export function acceptsPergunta(db) {
   const row = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'cadence_attempts'").get()
   return !!row && row.sql.includes("'pergunta'")
 }

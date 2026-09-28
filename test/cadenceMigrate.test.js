@@ -1,6 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { createCadenceTestDb, seedCadenceBase, leadIn, Q_PRAZO, Q_LIVRE } from './helpers/cadenceDb.js'
+import { createCadenceTestDb, createLegacyCadenceTables, seedCadenceBase, leadIn, Q_PRAZO, Q_LIVRE } from './helpers/cadenceDb.js'
+import { createRoteiroTestDb } from './helpers/roteiroDb.js'
 import { saveDraft, publish } from '../server/services/roteiro/repo.js'
 import { migrateStageCadences, CADENCIA_ETAPA_FLAG } from '../server/services/cadence/migrateStageCadences.js'
 
@@ -46,7 +47,8 @@ test('rodar 2x nao duplica (com e sem a marca)', () => {
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM cadence_attempts').get().n, 3)
 })
 
-test('falha de uma conta nao trava as outras e a marca fica gravada', () => {
+test('falha de uma conta nao trava as outras e a marca fica gravada', (t) => {
+  const logged = t.mock.method(console, 'error', () => {})
   const db = createCadenceTestDb(); const s = seedCadenceBase(db)
   publicarRoteiro(db, s)
   // versao publicada da conta B apontando para um funil que nao e dela -> getPublishedQuestions lanca 404
@@ -54,4 +56,19 @@ test('falha de uma conta nao trava as outras e a marca fica gravada', () => {
   const r = migrateStageCadences(db)
   assert.deepEqual([r.accounts, r.cadences], [1, 2])
   assert.ok(db.prepare('SELECT value FROM app_settings WHERE key = ?').get(CADENCIA_ETAPA_FLAG))
+  assert.equal(logged.mock.callCount(), 1)
+  assert.match(logged.mock.calls[0].arguments[0], new RegExp(`conta ${s.otherAccountId}`))
+})
+
+test('schema ainda com o CHECK antigo (sem pergunta): adia a migracao, nao marca e nao cria nada', (t) => {
+  const logged = t.mock.method(console, 'error', () => {})
+  const db = createRoteiroTestDb(); const s = seedCadenceBase(db)
+  createLegacyCadenceTables(db) // cadence_attempts com o CHECK antigo, sem 'pergunta' (rebuild do schema nao rodou)
+  publicarRoteiro(db, s)
+  const r = migrateStageCadences(db)
+  assert.equal(r.skipped, true)
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM cadences').get().n, 0)
+  assert.equal(db.prepare('SELECT value FROM app_settings WHERE key = ?').get(CADENCIA_ETAPA_FLAG), undefined)
+  assert.equal(logged.mock.callCount(), 1)
+  assert.match(logged.mock.calls[0].arguments[0], /nao aceita 'pergunta'/)
 })
