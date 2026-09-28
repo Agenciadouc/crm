@@ -38,10 +38,12 @@ export function cadenceCardActions(kind, step) {
 
 // Passo da vez da etapa no Chat: na mensagem, a descricao (interna) e so o titulo e o texto e
 // SO o texto pronto (auto_message). Sem texto pronto a janela abre vazia. Igual ao cartao da avulsa.
-export function stageStepView(step) {
+// fill = troca das variaveis so para a previa (a janela troca na abertura, do texto cru)
+export function stageStepView(step, fill = t => t) {
   if (!step) return { title: '', text: '' }
   if (MESSAGE_TYPES.includes(step.action_type)) {
-    return { title: String(step.description || '').trim(), text: String(step.auto_message || '').trim() }
+    const raw = String(step.auto_message || '').trim()
+    return { title: String(step.description || '').trim(), text: raw ? String(fill(raw) || '').trim() : '' }
   }
   return { title: '', text: stepTitle(step) }
 }

@@ -34,13 +34,15 @@ interface Props {
   reloadSignal?: number // muda depois de um envio pela janela: recarrega na hora
   // Chat: [Ver roteiro e ligar] abre a janela do roteiro da ligacao (com [Feito] dentro)
   onCall?: (r: { attemptId: number; text: string; pos: ReviewPos | null }) => void
+  // Chat: troca das variaveis do lead para a previa da mensagem (ex.: {{primeiro_nome}} -> Ana)
+  fill?: (text: string) => string
 }
 
 const smallBtn = { fontSize: 10, padding: '2px 8px' }
 // Varios avisos seguidos (salvar automatico do gestor, mensagens, IA) viram uma recarga so
 const SSE_RELOAD_DEBOUNCE_MS = 600
 
-export default function NextStepCard({ leadId, accountId, mode, onAsk, onSendStep, canManage, onReview, reloadSignal, onCall }: Props) {
+export default function NextStepCard({ leadId, accountId, mode, onAsk, onSendStep, canManage, onReview, reloadSignal, onCall, fill }: Props) {
   const [data, setData] = useState<LeadStageCadence | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(false)
@@ -233,6 +235,7 @@ export default function NextStepCard({ leadId, accountId, mode, onAsk, onSendSte
   if (!data) return null
 
   const manager = canManage ?? data.can_force
+  const hasNotices = !!(advanced || actionMsg || data.deviation || offscript)
   const notices = (
     <>
       {advanced && <AdvanceBanner toName={advanced.toName} fromName={advanced.fromName} undoing={undoing} onUndo={handleUndo} />}
@@ -383,8 +386,9 @@ export default function NextStepCard({ leadId, accountId, mode, onAsk, onSendSte
     const isMsg = step.action_type === 'mensagem' || step.action_type === 'whatsapp'
     const isAsk = step.action_type === 'pergunta'
     // Mensagem: so o texto pronto vai para a janela (a descricao e interna). Sem texto, abre vazia.
-    const view = stageStepView(step)
-    const sendText = isMsg ? view.text : stepSendText(step)
+    // Previa com as variaveis trocadas; a janela recebe o texto cru e troca na abertura (uma vez so)
+    const view = stageStepView(step, fill)
+    const sendText = isMsg ? (view.text ? String(step.auto_message || '').trim() : '') : stepSendText(step)
     const pos = reviewPosition(data, { attemptId: step.attempt_id })
     const run = (id: string) => {
       if (id === 'perguntar' && step.question) {
@@ -522,8 +526,8 @@ export default function NextStepCard({ leadId, accountId, mode, onAsk, onSendSte
   return box(
     <>
       {next ? chatStep(next) : allDone}
-      {/* Avisos (IA, desvio, avanco com Desfazer) ficam compactos embaixo dos botoes */}
-      <div style={{ marginTop: 8 }}>{notices}</div>
+      {/* Avisos (IA, desvio, avanco com Desfazer) ficam compactos embaixo dos botoes (so se houver) */}
+      {hasNotices && <div style={{ marginTop: 8 }}>{notices}</div>}
       {fresh.length > 0 && <div style={{ marginBottom: 6 }}>{fresh.map(doneRow)}</div>}
       {after1 && <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 8, lineHeight: 1.4 }}>{after1}</div>}
       {done.length > 0 && (

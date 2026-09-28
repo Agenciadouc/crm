@@ -82,3 +82,14 @@ test('passo mensagem: os dois cartoes mostram igual (descricao = titulo; so o te
   assert.deepEqual(stageStepView({ action_type: 'visita', description: 'Levar amostras' }), { title: '', text: 'Levar amostras' })
   assert.deepEqual(stageStepView({ action_type: 'pergunta', question: { text_for_lead: 'Para quando?' } }), { title: '', text: 'Para quando?' })
 })
+
+test('previa da etapa com as variaveis trocadas (igual a avulsa)', () => {
+  const fill = t => t.replace(/\{\{primeiro_nome\}\}/g, 'Ana')
+  assert.deepEqual(stageStepView({ action_type: 'mensagem', auto_message: 'Oi {{primeiro_nome}}!', description: 'Boas-vindas' }, fill), { title: 'Boas-vindas', text: 'Oi Ana!' })
+  const av = avulsaStepView({ action_type: 'mensagem', attempt_message: 'Oi {{primeiro_nome}}!', attempt_description: 'Boas-vindas' }, fill)
+  assert.equal(av.text, 'Oi Ana!')
+  // variavel que some vira vazio (caixa vazia), igual a avulsa
+  assert.equal(stageStepView({ action_type: 'mensagem', auto_message: '{{empresa}}' }, () => '').text, '')
+  // sem fill: texto como esta
+  assert.equal(stageStepView({ action_type: 'mensagem', auto_message: 'Oi {{primeiro_nome}}' }).text, 'Oi {{primeiro_nome}}')
+})

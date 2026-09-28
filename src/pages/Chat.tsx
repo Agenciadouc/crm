@@ -2227,6 +2227,7 @@ export default function Chat() {
                     onAsk={handleRoteiroAsk}
                     onSendStep={handleStepSend}
                     onReview={handleReviewStep}
+                    fill={fillLeadVars}
                     onCall={c => setCallModal({ source: 'etapa', leadId: lead.id, lcId: 0, attemptId: c.attemptId, label: c.pos ? `Passo ${c.pos.n} de ${c.pos.m} · Ligação` : 'Ligação', text: c.text })}
                     reloadSignal={nextStepReload}
                     canManage={user?.role === 'gerente' || user?.role === 'super_admin'}
