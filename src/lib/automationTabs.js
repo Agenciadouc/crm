@@ -5,7 +5,7 @@
 export const AUTOMATION_PATH = '/cadencias-e-follow-ups'
 export const ABAS = ['manuais', 'automaticas']
 
-const LEGACY = { '/cadences': 'manuais', '/follow-ups': 'automaticas' }
+const LEGACY = { '/cadences': 'manuais', '/follow-ups': 'automaticas', '/qualifications': 'manuais' }
 
 export function parseAba(search) {
   const aba = new URLSearchParams(search || '').get('aba')

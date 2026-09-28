@@ -2,12 +2,13 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import { ListOrdered, Zap } from 'lucide-react'
 import Cadences from './Cadences'
 import FollowUps from './FollowUps'
+import StageCadences from './cadencias/StageCadences'
 import { parseAba, automationUrl, type Aba } from '../lib/automationTabs'
 
 // Tela unica: cadencias (manuais, o vendedor executa) e follow-ups (automaticos, WhatsApp envia).
 // A aba fica em ?aba= para o link poder abrir direto na aba certa.
 const TABS: { key: Aba; label: string; icon: typeof Zap }[] = [
-  { key: 'manuais', label: 'Manuais (o vendedor faz)', icon: ListOrdered },
+  { key: 'manuais', label: 'Cadências (o vendedor faz)', icon: ListOrdered },
   { key: 'automaticas', label: 'Automáticas (WhatsApp envia)', icon: Zap },
 ]
 
@@ -41,7 +42,12 @@ export default function CadencesAndFollowUps() {
         })}
       </div>
 
-      {aba === 'manuais' ? <Cadences embedded /> : <FollowUps embedded />}
+      {aba === 'manuais' ? (
+        <>
+          <StageCadences />
+          <div style={{ marginTop: 24 }}><Cadences embedded avulsasOnly /></div>
+        </>
+      ) : <FollowUps embedded />}
     </div>
   )
 }

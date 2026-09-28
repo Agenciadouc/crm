@@ -9,7 +9,7 @@ import { AUTOMATION_PATH } from '../lib/automationTabs'
 import {
   LayoutDashboard, Kanban, Users, MessageCircle, UserCog, GitBranch,
   Plug, Settings, Building2, LogOut, UsersRound, Menu, X,
-  ListOrdered, MessageSquarePlus, ClipboardList, Rocket, ListTodo, ExternalLink, Tag as TagIcon, FileText, FileSignature, ArrowRightLeft, Bot, Sun, Moon, BarChart3, Layers, TrendingUp,
+  ListOrdered, MessageSquarePlus, Rocket, ListTodo, ExternalLink, Tag as TagIcon, FileText, FileSignature, ArrowRightLeft, Bot, Sun, Moon, BarChart3, Layers, TrendingUp,
 } from 'lucide-react'
 
 function getInitials(name: string): string {
@@ -213,7 +213,6 @@ export default function Sidebar() {
                 <NavLink to="/agents" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`} onClick={closeMobile}><Bot size={16} /> Agentes de IA</NavLink>
               )}
               <NavLink to="/ready-messages" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`} onClick={closeMobile}><MessageSquarePlus size={16} /> Msgs Prontas</NavLink>
-              <NavLink to="/qualifications" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`} onClick={closeMobile}><ClipboardList size={16} /> Qualificação</NavLink>
               <NavLink to="/launches" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`} onClick={closeMobile}><Rocket size={16} /> Lancamentos</NavLink>
               <div className="nav-section">Sistemas</div>
               <a href="/hub/" target="_blank" rel="noopener noreferrer" className="nav-item" style={{ textDecoration: 'none' }} onClick={closeMobile}><ExternalLink size={16} /> HUB</a>

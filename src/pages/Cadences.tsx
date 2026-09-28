@@ -8,6 +8,7 @@ import {
 } from '../lib/api'
 import { Plus, Trash2, Save, ListOrdered, Phone, Mail, MessageCircle, Video, MapPin, ChevronDown, ChevronUp, HelpCircle, Copy, Check, Layers, Download, Globe } from 'lucide-react'
 import { MESSAGE_VARIABLES } from '../lib/messageVars'
+import HelpTip from '../components/HelpTip'
 
 const ACTION_TYPES = [
   { value: 'mensagem', label: 'Mensagem', icon: MessageCircle },
@@ -18,7 +19,7 @@ const ACTION_TYPES = [
   { value: 'visita', label: 'Visita', icon: MapPin },
 ]
 
-export default function Cadences({ embedded = false }: { embedded?: boolean } = {}) {
+export default function Cadences({ embedded = false, avulsasOnly = false }: { embedded?: boolean; avulsasOnly?: boolean } = {}) {
   const { accountId } = useAccount()
   const { user } = useAuth()
   const isSuperAdmin = user?.role === 'super_admin'
@@ -51,7 +52,7 @@ export default function Cadences({ embedded = false }: { embedded?: boolean } = 
     if (!accountId) return
     setLoading(true)
     Promise.all([
-      fetchCadences(accountId),
+      fetchCadences(accountId, avulsasOnly ? 'avulsa' : undefined),
       fetchAvailableGlobalTemplates(accountId).then(d => d.cadences).catch(() => []),
     ]).then(([cads, globs]) => {
       setCadences(cads)
@@ -123,7 +124,14 @@ export default function Cadences({ embedded = false }: { embedded?: boolean } = 
   return (
     <div>
       <div className="page-header">
-        {embedded
+        {avulsasOnly
+          ? (
+            <h2 style={{ fontSize: 16, fontWeight: 600, margin: 0, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+              Avulsas
+              <HelpTip title="Avulsas">Cadências que o vendedor aplica à mão num lead, fora da etapa. Ex.: "Reativar cliente sumido": mensagem no dia 0, ligação no dia 2.</HelpTip>
+            </h2>
+          )
+          : embedded
           ? <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: 0 }}>Roteiro de passos que o vendedor executa (ligação, e-mail, visita...). Nada é enviado sozinho: cada passo vira tarefa.</p>
           : <h1>Cadencias de Atendimento</h1>}
         <div style={{ display: 'flex', gap: 8 }}>
@@ -228,7 +236,8 @@ export default function Cadences({ embedded = false }: { embedded?: boolean } = 
                     </button>
                   )}
                   <button className="btn btn-secondary btn-sm" onClick={() => startEdit(c)}>Editar</button>
-                  <button className="btn btn-danger btn-sm btn-icon" onClick={() => handleDelete(c.id)}><Trash2 size={12} /></button>
+                  {/* cadencia da etapa nao se apaga (so os passos, na tela da etapa) */}
+                  {!c.stage_id && <button className="btn btn-danger btn-sm btn-icon" onClick={() => handleDelete(c.id)}><Trash2 size={12} /></button>}
                 </div>
               </div>
               {expanded === c.id && c.attempts.length > 0 && (

@@ -42,3 +42,7 @@ test('legacyAutomationRedirect: /follow-ups vai para automaticas preservando que
 test('legacyAutomationRedirect: aba vinda na URL antiga e sobrescrita pela rota', () => {
   assert.equal(legacyAutomationRedirect('/cadences', '?aba=automaticas'), '/cadencias-e-follow-ups?aba=manuais')
 })
+
+test('legacyAutomationRedirect: /qualifications vai para a aba das cadencias das etapas', () => {
+  assert.equal(legacyAutomationRedirect('/qualifications', ''), '/cadencias-e-follow-ups?aba=manuais')
+})

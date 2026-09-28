@@ -13,7 +13,11 @@ export async function apiFetch<T = any>(path: string, opts: RequestInit = {}): P
     headers: { Authorization: `Bearer ${getToken()}`, 'Content-Type': 'application/json', ...opts.headers },
   })
   if (res.status === 401) { localStorage.removeItem('dros_crm_token'); window.location.href = `${BASE}/login`; throw new Error('Unauthorized') }
-  if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error(err.error || `API error: ${res.status}`) }
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    // status e code vao junto no erro (ex.: 503 code 'ai_off') sem mudar a mensagem
+    throw Object.assign(new Error(err.error || `API error: ${res.status}`), { status: res.status, code: err.code })
+  }
   return res.json()
 }
 
@@ -654,13 +658,13 @@ export const fetchPipelineMetrics = (accountId: number, funnelId: number, city?:
 // =============================================
 
 export interface CadenceAttempt { id: number; cadence_id: number; position: number; action_type: string; description: string | null; instructions: string | null; delay_days: number; scheduled_time: string | null; auto_message: string | null; schedule_mode: 'date' | 'duration'; delay_minutes: number; call_script?: string | null }
-export interface Cadence { id: number; account_id: number; name: string; description: string | null; is_active: number; created_at: string; attempts: CadenceAttempt[] }
+export interface Cadence { id: number; account_id: number; name: string; description: string | null; is_active: number; created_at: string; attempts: CadenceAttempt[]; stage_id?: number | null; funnel_id?: number | null }
 export interface LeadCadence {
   id: number; lead_id: number; cadence_id: number; current_attempt_id: number | null; status: string; started_at: string
   cadence_name?: string; action_type?: string; attempt_description?: string; attempt_instructions?: string; attempt_message?: string | null; attempt_script?: string | null; attempt_position?: number; total_attempts?: number
 }
 
-export const fetchCadences = (accountId: number) => apiFetch<{ cadences: Cadence[] }>(`/api/cadences?account_id=${accountId}`).then(d => d.cadences)
+export const fetchCadences = (accountId: number, kind?: 'avulsa' | 'etapa') => apiFetch<{ cadences: Cadence[] }>(`/api/cadences?account_id=${accountId}${kind ? `&kind=${kind}` : ''}`).then(d => d.cadences)
 export const createCadence = (accountId: number, data: { name: string; description?: string; attempts?: Partial<CadenceAttempt>[] }) => apiFetch<{ cadence: Cadence }>(`/api/cadences?account_id=${accountId}`, { method: 'POST', body: JSON.stringify(data) }).then(d => d.cadence)
 export const updateCadence = (id: number, accountId: number, data: Partial<Cadence>) => apiFetch(`/api/cadences/${id}?account_id=${accountId}`, { method: 'PUT', body: JSON.stringify(data) })
 export const updateCadenceAttempts = (id: number, accountId: number, attempts: Partial<CadenceAttempt>[]) => apiFetch(`/api/cadences/${id}/attempts?account_id=${accountId}`, { method: 'PUT', body: JSON.stringify({ attempts }) })

@@ -11,6 +11,7 @@ import {
 import { splitCurrentStage, progressText, stageName } from '../../lib/roteiroView.js'
 import { parseSqlDate } from '../../lib/dates'
 import { useSSE } from '../../context/SSEContext'
+import { AUTOMATION_PATH } from '../../lib/automationTabs.js'
 import HelpTip from '../HelpTip'
 import AnswerEditor from './AnswerEditor'
 
@@ -163,11 +164,11 @@ export default function RoteiroCard({ leadId, accountId, mode, onAsk, canForce }
         {(canForce ?? data.can_force) ? (
           <div style={{ marginTop: 4 }}>
             Monte as perguntas de cada etapa — ex.: "Para quando é o seu evento?" na etapa Qualificando.{' '}
-            <Link to="/qualifications" style={{ color: 'var(--accent)', fontWeight: 600 }}>Montar roteiro</Link>
+            <Link to={`${AUTOMATION_PATH}?aba=manuais`} style={{ color: 'var(--accent)', fontWeight: 600 }}>Montar a cadência das etapas</Link>
           </div>
         ) : (
           <div style={{ marginTop: 4 }}>
-            Peça ao gestor para montar em Qualificação. Ex.: ele cadastra "Para quando é o seu evento?" e a pergunta aparece aqui para você fazer.
+            Peça ao gestor para montar em Cadências. Ex.: ele cadastra "Para quando é o seu evento?" e a pergunta aparece aqui para você fazer.
           </div>
         )}
       </div>,
