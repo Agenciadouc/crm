@@ -1493,7 +1493,7 @@ try {
   const r = applyCadenceSchema(db)
   if (r.rebuilt) console.log(`[DB] cadence_attempts reconstruida: ${r.count} passos, ids mantidos`)
 } catch (err) {
-  console.error('[DB] cadencia da etapa (schema) FALHOU:', err.message)
+  console.error('[DB] cadencia da etapa (schema) FALHOU (passos "pergunta" serao recusados ate isso ser corrigido):', err.message)
 }
 
 export default db

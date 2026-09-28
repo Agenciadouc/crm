@@ -51,6 +51,19 @@ test('reconstrucao e idempotente e o novo CHECK aceita pergunta so com question_
   assert.throws(() => db.prepare("INSERT INTO cadence_attempts (cadence_id, position, action_type) VALUES (?, 6, 'telepatia')").run(cad), /CHECK/)
 })
 
+test('reconstrucao recusa rodar dentro de uma transacao aberta (FK fica ligada) e nao muda nada', () => {
+  const { db, cad, leadId } = legacyDbWithData()
+  assert.equal(db.pragma('foreign_keys', { simple: true }), 1)
+  const before = db.prepare('SELECT current_attempt_id, last_executed_attempt_id FROM lead_cadences WHERE lead_id = ?').get(leadId)
+  assert.throws(() => db.transaction(() => rebuildCadenceAttempts(db))(), /transacao/)
+  // FK nunca foi desligado de verdade (pragma ignorado dentro da transacao aberta pelo teste)
+  assert.equal(db.pragma('foreign_keys', { simple: true }), 1)
+  const after = db.prepare('SELECT current_attempt_id, last_executed_attempt_id FROM lead_cadences WHERE lead_id = ?').get(leadId)
+  assert.deepEqual(after, before)
+  // tabela nao foi trocada: CHECK antigo continua valendo (nao aceita 'pergunta')
+  assert.throws(() => db.prepare("INSERT INTO cadence_attempts (cadence_id, position, action_type) VALUES (?, 9, 'pergunta')").run(cad), /CHECK/)
+})
+
 test('colunas novas, tabela de passos feitos e uma cadencia ativa por etapa', () => {
   const db = createCadenceTestDb()
   const s = seedRoteiroBase(db)

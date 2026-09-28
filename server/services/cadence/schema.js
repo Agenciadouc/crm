@@ -1,5 +1,7 @@
 // Cadencia da etapa (spec 2026-09-27 §3): colunas novas, passos feitos por lead e
 // cadence_attempts aceitando 'pergunta'. Idempotente. Recebe db (nao importa server/db.js).
+import { CadenceError } from './errors.js'
+
 export const CADENCE_ACTION_TYPES = ['mensagem', 'ligacao', 'email', 'reuniao', 'whatsapp', 'visita', 'pergunta']
 
 function addColumnIfNotExists(db, table, column, type) {
@@ -39,29 +41,43 @@ const NEW_TABLE_SQL = `
   )
 `
 
-function orphanPointers(db) {
+// Conta ponteiros nao-nulos (current_attempt_id e last_executed_attempt_id) em lead_cadences.
+// Se o FK ficar ligado durante o DROP, ON DELETE SET NULL zera current_attempt_id sem apagar
+// a linha nem "sobrar" um id orfao — so contar orfaos nao pega essa perda, por isso comparamos
+// as contagens de nao-nulos antes/depois (devem ficar iguais).
+function pointerCounts(db) {
   return db.prepare(`
-    SELECT COUNT(*) AS n FROM lead_cadences
-    WHERE current_attempt_id IS NOT NULL AND current_attempt_id NOT IN (SELECT id FROM cadence_attempts)
-  `).get().n
+    SELECT
+      SUM(CASE WHEN current_attempt_id IS NOT NULL THEN 1 ELSE 0 END) AS current_attempt_id,
+      SUM(CASE WHEN last_executed_attempt_id IS NOT NULL THEN 1 ELSE 0 END) AS last_executed_attempt_id
+    FROM lead_cadences
+  `).get()
 }
 
 // SQLite nao altera CHECK: cria a tabela nova, copia com os MESMOS ids, confere e troca.
 // Com FK ligada o DROP apagaria as linhas "de verdade" e o ON DELETE SET NULL zeraria
-// lead_cadences.current_attempt_id; PRAGMA foreign_keys nao muda dentro de transacao,
-// entao desliga ANTES e religa no finally.
+// lead_cadences.current_attempt_id; PRAGMA foreign_keys nao muda dentro de uma transacao ja
+// aberta (fica em silencio, sem erro), entao desligamos ANTES de abrir a nossa transacao,
+// conferimos que realmente desligou (senao quem chamou esta dentro de outra transacao) e
+// religamos no finally.
 export function rebuildCadenceAttempts(db) {
   if (acceptsPergunta(db)) return { rebuilt: false, count: null }
   // bancos muito antigos: garante as colunas que a copia le
   for (const [c, t] of [['delay_days', 'INTEGER NOT NULL DEFAULT 0'], ['scheduled_time', 'TEXT'], ['auto_message', 'TEXT'],
     ['schedule_mode', "TEXT NOT NULL DEFAULT 'date'"], ['delay_minutes', 'INTEGER NOT NULL DEFAULT 0'], ['call_script', 'TEXT']]) addColumnIfNotExists(db, 'cadence_attempts', c, t)
 
+  const fkWasOn = db.pragma('foreign_keys', { simple: true }) === 1
+  db.pragma('foreign_keys = OFF')
+  if (db.pragma('foreign_keys', { simple: true }) === 1) {
+    // PRAGMA foreign_keys ignorado: ja estamos dentro de uma transacao aberta por quem chamou.
+    // Rodar assim faria o DROP TABLE disparar ON DELETE SET NULL de verdade.
+    throw new CadenceError('cadence_rebuild_requires_no_transaction', 500, 'Reconstrucao de cadence_attempts precisa rodar fora de uma transacao (nao foi possivel desligar o FK)')
+  }
+
   const count = db.prepare('SELECT COUNT(*) AS n FROM cadence_attempts').get().n
   const seqRow = tableExists(db, 'sqlite_sequence') ? db.prepare("SELECT seq FROM sqlite_sequence WHERE name = 'cadence_attempts'").get() : null
   const oldSeq = seqRow ? seqRow.seq : 0
-  const orphansBefore = orphanPointers(db)
-  const fkWasOn = db.pragma('foreign_keys', { simple: true }) === 1
-  db.pragma('foreign_keys = OFF')
+  const pointersBefore = pointerCounts(db)
   try {
     db.transaction(() => {
       db.exec('DROP TABLE IF EXISTS cadence_attempts_new')
@@ -74,7 +90,12 @@ export function rebuildCadenceAttempts(db) {
       db.exec('CREATE INDEX IF NOT EXISTS idx_cadence_attempts_cadence ON cadence_attempts(cadence_id, position)')
       // id novo nunca reaproveita id antigo (lead_cadences.last_executed_attempt_id nao tem FK)
       db.prepare("UPDATE sqlite_sequence SET seq = MAX(seq, ?) WHERE name = 'cadence_attempts'").run(oldSeq)
-      if (orphanPointers(db) !== orphansBefore) throw new Error('lead_cadences perderia o passo atual')
+      const pointersAfter = pointerCounts(db)
+      if (pointersAfter.current_attempt_id !== pointersBefore.current_attempt_id || pointersAfter.last_executed_attempt_id !== pointersBefore.last_executed_attempt_id) {
+        throw new Error('lead_cadences perderia o passo atual')
+      }
+      const fkViolations = db.pragma('foreign_key_check')
+      if (fkViolations.length > 0) throw new Error(`cadence_attempts reconstruida com FK quebrada: ${JSON.stringify(fkViolations)}`)
     })()
   } finally {
     if (fkWasOn) db.pragma('foreign_keys = ON')
