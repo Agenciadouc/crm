@@ -10,6 +10,7 @@ import { applyGeoSchema } from './services/geo.js'
 import { applyRoteiroSchema } from './services/roteiro/schema.js'
 import { migrateLegacyQualifications } from './services/roteiro/migrateLegacy.js'
 import { applyCadenceSchema } from './services/cadence/schema.js'
+import { migrateStageCadences } from './services/cadence/migrateStageCadences.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const dbPath = resolve(__dirname, 'data', 'crm.db')
@@ -1494,6 +1495,14 @@ try {
   if (r.rebuilt) console.log(`[DB] cadence_attempts reconstruida: ${r.count} passos, ids mantidos`)
 } catch (err) {
   console.error('[DB] cadencia da etapa (schema) FALHOU (passos "pergunta" serao recusados ate isso ser corrigido):', err.message)
+}
+
+// Perguntas publicadas do roteiro viram cadencias da etapa (uma vez; marca em app_settings).
+try {
+  const r = migrateStageCadences(db)
+  if (!r.skipped && r.cadences) console.log(`[Cadencia] migracao: ${r.cadences} cadencias de etapa, ${r.leads} leads, ${r.accounts} contas`)
+} catch (err) {
+  console.error('[Cadencia] migracao das cadencias da etapa:', err.message)
 }
 
 export default db
