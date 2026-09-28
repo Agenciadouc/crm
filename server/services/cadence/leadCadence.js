@@ -20,7 +20,15 @@ function activeEtapa(db, leadId) {
 }
 
 // Passos na ordem; pergunta que saiu do roteiro publicado vem com orphan: true (nao trava).
-function stepsOf(db, cadenceId) {
+// `cache` (Map cadence_id -> passos): recalculo em lote le o roteiro publicado uma vez so.
+function stepsOf(db, cadenceId, cache = null) {
+  if (cache && cache.has(cadenceId)) return cache.get(cadenceId)
+  const steps = loadSteps(db, cadenceId)
+  if (cache) cache.set(cadenceId, steps)
+  return steps
+}
+
+function loadSteps(db, cadenceId) {
   const steps = db.prepare('SELECT * FROM cadence_attempts WHERE cadence_id = ? ORDER BY position ASC, id ASC').all(cadenceId)
   if (!steps.some(s => s.action_type === 'pergunta')) return steps.map(s => ({ ...s, orphan: false }))
   const cad = db.prepare('SELECT account_id, funnel_id FROM cadences WHERE id = ?').get(cadenceId)
@@ -54,10 +62,10 @@ function close(db, leadCadenceId) {
   db.prepare("UPDATE lead_cadences SET status = 'completed', updated_at = datetime('now') WHERE id = ?").run(leadCadenceId)
 }
 
-export function refreshLeadCadence(db, { leadCadenceId }) {
+export function refreshLeadCadence(db, { leadCadenceId, stepsCache = null }) {
   const lc = db.prepare('SELECT * FROM lead_cadences WHERE id = ?').get(leadCadenceId)
   if (!lc || lc.status !== 'active' || lc.kind !== 'etapa') return lc || null
-  const steps = stepsOf(db, lc.cadence_id)
+  const steps = stepsOf(db, lc.cadence_id, stepsCache)
   if (!steps.length) return lc // sem passos: fica aberta, sem passo atual (spec 9)
   const { nextAttemptId } = computeNext(steps, ctxFor(db, lc, steps))
   if (nextAttemptId === null) {
@@ -82,26 +90,27 @@ export function refreshLeadStageCadence(db, { leadId }) {
 
 export function refreshLeadsOfCadence(db, cadenceId) {
   const rows = db.prepare("SELECT id FROM lead_cadences WHERE cadence_id = ? AND kind = 'etapa' AND status = 'active'").all(cadenceId)
-  for (const r of rows) refreshLeadCadence(db, { leadCadenceId: r.id })
+  const stepsCache = new Map() // passos + perguntas orfas calculados uma vez para todos os leads
+  for (const r of rows) refreshLeadCadence(db, { leadCadenceId: r.id, stepsCache })
   return rows.length
 }
 
 // Abre a cadencia da etapa atual do lead, uma vez por entrada na etapa (decisao D3).
-export function ensureStageCadence(db, { leadId }) {
+export function ensureStageCadence(db, { leadId, stepsCache = null }) {
   const lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(leadId)
   if (!lead || !lead.stage_id || lead.is_active === 0) return null
   const stage = db.prepare('SELECT id, is_terminal FROM funnel_stages WHERE id = ?').get(lead.stage_id)
   if (!stage || stage.is_terminal) return null
   const cad = db.prepare('SELECT * FROM cadences WHERE stage_id = ? AND is_active = 1 AND account_id = ?').get(stage.id, lead.account_id)
   const active = activeEtapa(db, lead.id)
-  if (active && cad && active.cadence_id === cad.id) return refreshLeadCadence(db, { leadCadenceId: active.id })
+  if (active && cad && active.cadence_id === cad.id) return refreshLeadCadence(db, { leadCadenceId: active.id, stepsCache })
   if (active) close(db, active.id)
   if (!cad || !db.prepare('SELECT 1 FROM cadence_attempts WHERE cadence_id = ? LIMIT 1').get(cad.id)) return null
   const entry = stageEntryId(db, lead)
   if (db.prepare("SELECT 1 FROM lead_cadences WHERE lead_id = ? AND cadence_id = ? AND kind = 'etapa' AND COALESCE(stage_entry_id, 0) = ?").get(lead.id, cad.id, entry)) return null
   const id = Number(db.prepare("INSERT INTO lead_cadences (lead_id, cadence_id, current_attempt_id, kind, stage_id, stage_entry_id) VALUES (?, ?, NULL, 'etapa', ?, ?)")
     .run(lead.id, cad.id, stage.id, entry).lastInsertRowid)
-  return refreshLeadCadence(db, { leadCadenceId: id })
+  return refreshLeadCadence(db, { leadCadenceId: id, stepsCache })
 }
 
 // Porta unica da troca de etapa (stageMove) chama aqui: fecha a de etapa e abre a da nova.
@@ -129,8 +138,9 @@ export function attachLeadsInStage(db, { accountId, cadenceId }) {
   if (!cad) return 0
   const leads = db.prepare('SELECT id FROM leads WHERE account_id = ? AND stage_id = ? AND COALESCE(is_active, 1) = 1 AND COALESCE(is_archived, 0) = 0').all(accountId, cad.stage_id)
   let n = 0
+  const stepsCache = new Map() // roteiro publicado lido uma vez, nao uma por lead
   for (const l of leads) {
-    ensureStageCadence(db, { leadId: l.id })
+    ensureStageCadence(db, { leadId: l.id, stepsCache })
     if (db.prepare("SELECT 1 FROM lead_cadences WHERE lead_id = ? AND cadence_id = ? AND kind = 'etapa' AND status = 'active'").get(l.id, cad.id)) n++
   }
   return n

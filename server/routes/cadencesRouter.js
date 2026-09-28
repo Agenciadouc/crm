@@ -52,7 +52,7 @@ export function createCadencesRouter(db, { ai = null, broadcast = () => {} } = {
   }
 
   // Mudou a cadencia da etapa: as telas abertas recarregam (cadence:updated). So mudanca
-  // ESTRUTURAL (passo novo/apagado, ordem, pergunta, criar/ativar) recalcula os leads — o
+  // ESTRUTURAL (passo novo/apagado, ordem, criar/ativar) recalcula os leads — o
   // recalculo e por lead, e o salvamento automatico do texto chega a cada 500 ms.
   // `cadence` vem sempre de um servico que ja conferiu a conta (refreshLeadsOfCadence nao confere).
   function afterStageChange(req, cadence, { structural }) {
@@ -63,7 +63,7 @@ export function createCadencesRouter(db, { ai = null, broadcast = () => {} } = {
         attachLeadsInStage(db, { accountId: req.accountId, cadenceId: cadence.id }) // D5
       } catch (e) { console.error('[Cadencias] leads da etapa:', e.message) }
     }
-    send(req.accountId, 'cadence:updated', { cadence_id: cadence.id, stage_id: cadence.stage_id })
+    send(req.accountId, 'cadence:updated', { account_id: req.accountId, cadence_id: cadence.id, stage_id: cadence.stage_id })
   }
 
   // Sugestao/A-B ja gravados e publicados: daqui em diante nada pode virar erro na resposta.
@@ -92,7 +92,7 @@ export function createCadencesRouter(db, { ai = null, broadcast = () => {} } = {
     try {
       funnelScoped(req, req.params.funnelId)
       const r = saveDeviations(db, req.accountId, req.params.funnelId, req.body?.deviations, { userId: req.user.id })
-      if (r.published) send(req.accountId, 'cadence:updated', { funnel_id: Number(req.params.funnelId) })
+      if (r.published) send(req.accountId, 'cadence:updated', { account_id: req.accountId, funnel_id: Number(req.params.funnelId) })
       res.json(r)
     } catch (e) { fail(res, e) }
   })
@@ -240,9 +240,9 @@ export function createCadencesRouter(db, { ai = null, broadcast = () => {} } = {
     try {
       const patch = req.body || {}
       const r = updateStep(db, req.accountId, req.params.id, Number(req.params.attemptId), patch, { userId: req.user.id })
-      // Texto de mensagem/ligacao/visita (descricao, dia...) so avisa a tela; pergunta recalcula.
-      const step = r.cadence.attempts.find(a => a.id === r.step_id)
-      afterStageChange(req, r.cadence, { structural: !!(step && step.action_type === 'pergunta' && patch.question) })
+      // Editar um passo (texto, dia, pergunta/opcoes/obrigatoria) so avisa a tela: o "feito" nao
+      // depende do texto e a chave da pergunta nao muda. O salvar automatico chega a cada 500 ms.
+      afterStageChange(req, r.cadence, { structural: false })
       res.json(r)
     } catch (e) { fail(res, e) }
   })

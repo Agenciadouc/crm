@@ -210,3 +210,24 @@ test('pergunta que saiu do roteiro publicado nao trava: o proximo passo pula ela
   markStepDone(db, { accountId: s.accountId, leadId, attemptId: mensagem, how: 'enviado' })
   assert.equal(etapaRows(db, leadId)[0].status, 'completed')
 })
+
+test('recalculo em lote le o roteiro publicado uma vez por cadencia, nao uma por lead', () => {
+  const db = createCadenceTestDb()
+  const s = seedCadenceBase(db)
+  const etapa = createCadence(db, s.accountId, { stageId: s.stages.qualificando })
+  const pergunta = addStep(db, s.accountId, etapa.id, { action_type: 'pergunta', question: Q_PRAZO }).step_id
+  addStep(db, s.accountId, etapa.id, { action_type: 'mensagem', auto_message: 'Catálogo' })
+  const leads = [1, 2, 3, 4].map(() => leadIn(db, s, 'qualificando'))
+  let leituras = 0
+  const prepare = db.prepare.bind(db)
+  db.prepare = sql => { if (sql.includes('SELECT account_id, funnel_id FROM cadences WHERE id = ?')) leituras++; return prepare(sql) }
+  assert.equal(attachLeadsInStage(db, { accountId: s.accountId, cadenceId: etapa.id }), 4)
+  assert.equal(leituras, 1, 'attachLeadsInStage')
+  leituras = 0
+  assert.equal(refreshLeadsOfCadence(db, etapa.id), 4)
+  assert.equal(leituras, 1, 'refreshLeadsOfCadence')
+  db.prepare = prepare
+  for (const leadId of leads) {
+    assert.equal(db.prepare("SELECT current_attempt_id FROM lead_cadences WHERE lead_id = ? AND status = 'active'").get(leadId).current_attempt_id, pergunta)
+  }
+})

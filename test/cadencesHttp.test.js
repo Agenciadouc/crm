@@ -90,7 +90,7 @@ test('PATCH do passo por id mantem o id e o ponteiro do lead e avisa cadence:upd
     assert.equal(r.body.step_id, m.mensagem)
     assert.equal(r.body.published, false)
     assert.equal(db.prepare('SELECT current_attempt_id FROM lead_cadences WHERE id = ?').get(m.lcEtapa.id).current_attempt_id, m.pergunta)
-    assert.deepEqual(sent.filter(x => x[1] === 'cadence:updated'), [[s.accountId, 'cadence:updated', { cadence_id: m.etapa.id, stage_id: s.stages.qualificando }]])
+    assert.deepEqual(sent.filter(x => x[1] === 'cadence:updated'), [[s.accountId, 'cadence:updated', { account_id: s.accountId, cadence_id: m.etapa.id, stage_id: s.stages.qualificando }]])
     const bad = await peca(base, { method: 'POST', path: `/api/cadences/${m.etapa.id}/steps`, jwtToken: t, body: { action_type: 'pergunta', question_key: 'naoexiste' } })
     assert.deepEqual([bad.status, bad.body.error], [400, 'Esta pergunta não está no roteiro da etapa.'])
   })
@@ -201,11 +201,20 @@ test('so mudanca estrutural recalcula os leads da etapa; texto de passo so avisa
     assert.equal(temEtapaAtiva(db, novo, m.etapa.id), false, 'edicao de texto nao recalcula')
     assert.equal(sent.filter(x => x[1] === 'cadence:updated').length, 3, 'mas a tela sempre e avisada')
 
-    // Mudanca na pergunta (texto/obrigatoria/opcoes) e estrutural.
-    const q = await peca(base, { method: 'PATCH', path: `${caminho}/${m.pergunta}`, jwtToken: tg, body: { question: { ...Q_PRAZO, text: 'Qual a data do evento?' } } })
-    assert.equal(q.status, 200)
-    assert.equal(q.body.published, true)
-    assert.equal(temEtapaAtiva(db, novo, m.etapa.id), true)
+    // Texto/obrigatoria/opcoes da pergunta (salvar automatico) tambem NAO recalcula: o "feito"
+    // da pergunta depende da resposta, nao do texto, e a chave nao muda. So avisa a tela.
+    db.prepare("UPDATE lead_cadences SET updated_at = '2000-01-01 00:00:00' WHERE id = ?").run(m.lcEtapa.id)
+    for (const question of [{ ...Q_PRAZO, text: 'Qual a data do evento?' }, { ...Q_PRAZO, required: false }]) {
+      const q = await peca(base, { method: 'PATCH', path: `${caminho}/${m.pergunta}`, jwtToken: tg, body: { question } })
+      assert.equal(q.status, 200)
+      assert.equal(q.body.published, true)
+    }
+    assert.equal(temEtapaAtiva(db, novo, m.etapa.id), false, 'pergunta editada nao recalcula')
+    assert.equal(db.prepare('SELECT updated_at FROM lead_cadences WHERE id = ?').get(m.lcEtapa.id).updated_at, '2000-01-01 00:00:00')
+    const avisos = sent.filter(x => x[1] === 'cadence:updated')
+    assert.equal(avisos.length, 5)
+    // aviso leva a conta: tela de admin (recebe todas as contas) filtra pela conta aberta
+    assert.ok(avisos.every(([acc, , data]) => acc === s.accountId && data.account_id === s.accountId))
 
     // Reordenar recalcula o ponteiro dos leads que ja estao na cadencia.
     const ord = await peca(base, { method: 'PUT', path: `${caminho}/order`, jwtToken: tg, body: { attempt_ids: [m.mensagem, m.pergunta] } })
