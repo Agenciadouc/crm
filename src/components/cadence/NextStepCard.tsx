@@ -13,6 +13,7 @@ import {
 import { useSSE } from '../../context/SSEContext'
 import { AUTOMATION_PATH } from '../../lib/automationTabs.js'
 import { STEP_ICONS } from '../../pages/cadencias/StepRow'
+import { reviewPosition, type ReviewPos } from '../../lib/atendimentoPanel.js'
 import HelpTip from '../HelpTip'
 import AnswerEditor from '../roteiro/AnswerEditor'
 import { AdvanceBanner, DeviationBox, OffscriptBox } from '../roteiro/RoteiroNotices'
@@ -26,13 +27,16 @@ interface Props {
   onAsk: (text: string, questionKey: string | null) => void // [Perguntar] / [Usar]
   onSendStep: (text: string, attemptId: number) => void // [Enviar] do passo mensagem
   canManage?: boolean // gestor: link para montar a cadencia
+  // Chat: [Perguntar]/[Enviar] abrem a janela "Conferir mensagem" (em vez de por o texto na caixa)
+  onReview?: (r: { kind: 'pergunta' | 'mensagem'; text: string; questionKey: string | null; attemptId: number; pos: ReviewPos | null }) => void
+  reloadSignal?: number // muda depois de um envio pela janela: recarrega na hora
 }
 
 const smallBtn = { fontSize: 10, padding: '2px 8px' }
 // Varios avisos seguidos (salvar automatico do gestor, mensagens, IA) viram uma recarga so
 const SSE_RELOAD_DEBOUNCE_MS = 600
 
-export default function NextStepCard({ leadId, accountId, mode, onAsk, onSendStep, canManage }: Props) {
+export default function NextStepCard({ leadId, accountId, mode, onAsk, onSendStep, canManage, onReview, reloadSignal }: Props) {
   const [data, setData] = useState<LeadStageCadence | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(false)
@@ -91,6 +95,13 @@ export default function NextStepCard({ leadId, accountId, mode, onAsk, onSendSte
     setEditing(null); setAdvanced(null); setOffscript(null); setSaveError(null); setActionMsg(null); setScriptOpen(null); setAiFresh([])
   }, [leadId])
   useEffect(() => () => reloaderRef.current!.cancel(), [])
+  // Envio pela janela "Conferir mensagem": o passo ficou enviado, busca o proximo agora
+  const lastSignal = useRef(reloadSignal)
+  useEffect(() => {
+    if (lastSignal.current === reloadSignal) return
+    lastSignal.current = reloadSignal
+    reloadNow()
+  }, [reloadSignal, reloadNow])
 
   // Resposta salva por outra tela / passo feito pelo Chat (lead:cadence) ou por Tarefas (task:updated)
   useSSE('lead:cadence', useCallback((d: any) => { if (Number(d?.lead_id) === leadId) reloadSoon() }, [leadId, reloadSoon]))
@@ -300,7 +311,13 @@ export default function NextStepCard({ leadId, accountId, mode, onAsk, onSendSte
         {scriptLink(step)}
         <div style={{ display: 'flex', gap: 4, marginTop: 6, flexWrap: 'wrap' }}>
           {actions.includes('perguntar') && step.question && (
-            <button type="button" className="btn btn-primary btn-sm" style={smallBtn} onClick={() => onAsk(step.question!.text_for_lead, step.question_key)} title="Colocar a pergunta na caixa de mensagem">
+            <button
+              type="button" className="btn btn-primary btn-sm" style={smallBtn}
+              onClick={() => onReview
+                ? onReview({ kind: 'pergunta', text: step.question!.text_for_lead, questionKey: step.question_key, attemptId: step.attempt_id, pos: reviewPosition(data, { attemptId: step.attempt_id }) })
+                : onAsk(step.question!.text_for_lead, step.question_key)}
+              title={onReview ? 'Conferir a pergunta antes de enviar' : 'Colocar a pergunta na caixa de mensagem'}
+            >
               <Send size={10} /> Perguntar
             </button>
           )}
@@ -308,7 +325,13 @@ export default function NextStepCard({ leadId, accountId, mode, onAsk, onSendSte
             <button type="button" className="btn btn-secondary btn-sm" style={smallBtn} onClick={() => openEditor(step)}>Já sei a resposta</button>
           )}
           {actions.includes('enviar') && (
-            <button type="button" className="btn btn-primary btn-sm" style={smallBtn} onClick={() => onSendStep(stepSendText(step), step.attempt_id)} title="Colocar a mensagem na caixa para você revisar e enviar">
+            <button
+              type="button" className="btn btn-primary btn-sm" style={smallBtn}
+              onClick={() => onReview
+                ? onReview({ kind: 'mensagem', text: stepSendText(step), questionKey: null, attemptId: step.attempt_id, pos: reviewPosition(data, { attemptId: step.attempt_id }) })
+                : onSendStep(stepSendText(step), step.attempt_id)}
+              title={onReview ? 'Conferir a mensagem antes de enviar' : 'Colocar a mensagem na caixa para você revisar e enviar'}
+            >
               <Send size={10} /> Enviar
             </button>
           )}
