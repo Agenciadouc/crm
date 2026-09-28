@@ -223,7 +223,13 @@ export const fetchMessages = (leadId: number, accountId: number) => apiFetch<{ m
 // recognized_question: o servidor reconheceu na mensagem digitada uma pergunta pendente do roteiro
 export interface SendResult { message: Message; delivered: boolean; error?: string; recognized_question?: { question_key: string; text: string } | null }
 // roteiroQuestionKey: mensagem veio do botao [Perguntar] do roteiro (vira registro de pergunta enviada)
-export const sendMessage = (leadId: number, accountId: number, content: string, instance_id?: number, roteiroQuestionKey?: string | null) => apiFetch<SendResult>(`/api/messages/${leadId}?account_id=${accountId}`, { method: 'POST', body: JSON.stringify({ content, instance_id, ...(roteiroQuestionKey ? { roteiro_question_key: roteiroQuestionKey } : {}) }) })
+// roteiroQuestionKey: [Perguntar] do roteiro; cadenceAttemptId: [Enviar] do passo mensagem da cadencia da etapa
+export const sendMessage = (leadId: number, accountId: number, content: string, instance_id?: number, roteiroQuestionKey?: string | null, cadenceAttemptId?: number | null) =>
+  apiFetch<SendResult>(`/api/messages/${leadId}?account_id=${accountId}`, { method: 'POST', body: JSON.stringify({
+    content, instance_id,
+    ...(roteiroQuestionKey ? { roteiro_question_key: roteiroQuestionKey } : {}),
+    ...(cadenceAttemptId ? { cadence_attempt_id: cadenceAttemptId } : {}),
+  }) })
 export const sendMessageMedia = (leadId: number, accountId: number, payload: { base64: string; mime: string; file_name: string; caption?: string; instance_id?: number }) => apiFetch<SendResult>(`/api/messages/${leadId}/media?account_id=${accountId}`, { method: 'POST', body: JSON.stringify(payload) })
 
 // Proposals

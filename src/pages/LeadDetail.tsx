@@ -17,6 +17,8 @@ import { ArrowLeft, Phone, Mail, MapPin, MessageCircle, Send, Clock, User, GitBr
 import MessageMedia from '../components/MessageMedia'
 import ScoreThermometer from '../components/score/ScoreThermometer'
 import RoteiroCard from '../components/roteiro/RoteiroCard'
+import NextStepCard from '../components/cadence/NextStepCard'
+import { applyMessageVars } from '../lib/messageVars'
 import StageGateModal from '../components/roteiro/StageGateModal'
 import { parseSqlDate } from '../lib/dates'
 
@@ -155,6 +157,11 @@ export default function LeadDetail() {
     navigate(`/chat?lead_id=${lead.id}`, { state: { roteiroAsk: { text, questionKey } } })
   }
   const canForce = user?.role === 'gerente' || user?.role === 'super_admin'
+  // [Enviar] do passo mensagem na ficha: abre o Chat com o texto (variaveis ja trocadas) na caixa
+  const sendStepInChat = (text: string) => {
+    if (!lead) return
+    askInChat(applyMessageVars(text, { leadName: lead.name, leadEmpresa: lead.empresa, leadCity: lead.city, attendantName: user?.name }), null)
+  }
   const confirmSaleValue = async () => {
     if (!saleModal || !accountId) return
     const numeric = parseFloat(String(saleValue).replace(/\./g, '').replace(',', '.'))
@@ -461,7 +468,7 @@ export default function LeadDetail() {
           {/* Cadence */}
           <div className="card" style={{ marginBottom: 16 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-              <div style={{ fontSize: 12, fontWeight: 600, color: '#9B96B0', textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: 4 }}><ListOrdered size={12} /> Cadencia</div>
+              <div style={{ fontSize: 12, fontWeight: 600, color: '#9B96B0', textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: 4 }}><ListOrdered size={12} /> Cadência avulsa</div>
               <div style={{ position: 'relative', display: 'flex', gap: 4 }}>
                 <button className="btn btn-secondary btn-sm" onClick={() => setShowCadenceMenu(!showCadenceMenu)}>{leadCadence ? 'Trocar' : 'Atribuir'}</button>
                 {leadCadence && <button className="btn btn-danger btn-sm" onClick={async () => { if (!accountId || !confirm('Remover cadencia?')) return; await removeLeadCadence(leadCadence.id, accountId); loadCadence() }}>Remover</button>}
@@ -532,7 +539,7 @@ export default function LeadDetail() {
           <div style={{ display: 'flex', gap: 4, marginBottom: 8, flexWrap: 'wrap' }}>
             {(['notes', 'qualification', 'history'] as const).map(tab => (
               <button key={tab} className={`btn btn-sm ${activeTab === tab ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setActiveTab(tab)}>
-                {tab === 'notes' ? <><StickyNote size={12} /> Notas ({notes.length})</> : tab === 'qualification' ? <><ClipboardList size={12} /> Qualificação</> : <><GitBranch size={12} /> Historico</>}
+                {tab === 'notes' ? <><StickyNote size={12} /> Notas ({notes.length})</> : tab === 'qualification' ? <><ClipboardList size={12} /> Cadência e respostas</> : <><GitBranch size={12} /> Historico</>}
               </button>
             ))}
           </div>
@@ -556,9 +563,10 @@ export default function LeadDetail() {
             </div>
           )}
 
-          {/* Qualification tab: roteiro completo (todas as etapas) */}
+          {/* Cadencia e respostas: cadencia da etapa inteira + roteiro completo (todas as etapas) */}
           {activeTab === 'qualification' && accountId && (
             <div className="card" style={{ minHeight: 400 }}>
+              <NextStepCard key={`cad-${lead.id}`} leadId={lead.id} accountId={accountId} mode="full" onAsk={askInChat} onSendStep={sendStepInChat} canManage={canForce} />
               <RoteiroCard key={`roteiro-${lead.id}`} leadId={lead.id} accountId={accountId} mode="full" onAsk={askInChat} canForce={canForce} />
             </div>
           )}

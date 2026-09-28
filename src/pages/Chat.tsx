@@ -16,7 +16,7 @@ import {
   fetchPendingAiSuggestion, resolveAiSuggestion, pauseLeadAi, resumeLeadAi, type AiSuggestion,
   createLeadOrFindExisting, markLeadAsRead, RoteiroGateError, type RoteiroPendingQuestion,
   requestLeadTransfer, acceptTransferRequest, rejectTransferRequest, fetchPendingTransferRequests, grabLead, type TransferRequest,
-  type WhatsAppInstance, type Lead, type Message, type StageHistoryEntry, type LeadNote,
+  type WhatsAppInstance, type Lead, type Message, type LeadNote,
   type Funnel, type User as UserType, type Tag, type LeadCadence, type Cadence, type LeadFollowUp, type FollowUp,
 } from '../lib/api'
 import EditTaskModal from '../components/EditTaskModal'
@@ -24,9 +24,9 @@ import FilterDropdown, { type FilterValue } from '../components/FilterDropdown'
 import { useCityFilter } from '../components/CityFilter'
 import MoreFilters, { useScoreFilter } from '../components/MoreFilters'
 import ScoreBadge from '../components/score/ScoreBadge'
-import ScoreThermometer from '../components/score/ScoreThermometer'
+import ScoreLine from '../components/score/ScoreLine'
 import { isScoreBand } from '../lib/score'
-import RoteiroCard from '../components/roteiro/RoteiroCard'
+import NextStepCard from '../components/cadence/NextStepCard'
 import StageGateModal from '../components/roteiro/StageGateModal'
 import RecognizedQuestionBar from '../components/roteiro/RecognizedQuestionBar'
 import { confirmAsk } from '../lib/roteiroApi'
@@ -34,8 +34,8 @@ import { geoParams, leadMatchesGeo } from '../lib/geoFilter.js'
 import { scoreParams, leadMatchesScore } from '../lib/scoreFilter.js'
 import {
   MessageCircle, Search, Send, Phone, User, Edit3, Save, X, Plus,
-  StickyNote, Tag as TagIcon, GitBranch, Smartphone, ListOrdered, ChevronRight, Check, Clock, Archive, Ban, ListTodo, ChevronDown, ChevronUp, Trash2, Paperclip, FileText, MessageSquarePlus, Copy, Zap, Pause, Play, Bot,
-  Menu as MenuIcon, MessagesSquare, Info as InfoIcon, History as HistoryIcon, ChevronLeft,
+  StickyNote, Tag as TagIcon, Smartphone, ListOrdered, ChevronRight, Check, Clock, Archive, Ban, ListTodo, ChevronDown, ChevronUp, Trash2, Paperclip, FileText, MessageSquarePlus, Copy, Zap, Pause, Play, Bot,
+  Menu as MenuIcon, MessagesSquare, Info as InfoIcon, ListChecks, ChevronLeft,
   DollarSign,
 } from 'lucide-react'
 import MessageMedia from '../components/MessageMedia'
@@ -79,7 +79,7 @@ export default function Chat() {
 
   // Mobile single-pane com bottom nav de 5 tabs
   const isMobile = useIsMobile()
-  const [mobileTab, setMobileTab] = useState<'conversas' | 'chat' | 'info' | 'history'>('conversas')
+  const [mobileTab, setMobileTab] = useState<'conversas' | 'chat' | 'atendimento' | 'info'>('conversas')
   // Guarda leads que o user acabou de marcar como lidos NESTA sessao — a lista de sort
   // trata como se ainda estivessem "unread" pra nao afundar o item na hora do clique.
   // Ao recarregar a pagina (F5) ou trocar de conta, esse set some naturalmente.
@@ -116,11 +116,11 @@ export default function Chat() {
     if (id && ask?.text) setPendingRoteiroAsk({ leadId: id, text: ask.text, questionKey: ask.questionKey ?? null })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.key])
-  // Quando vai pra Info/Historico via bottom nav, sincroniza com a rightTab interna
-  const switchMobileTab = (tab: 'conversas' | 'chat' | 'info' | 'history') => {
+  // Quando vai pra Atendimento/Info via bottom nav, sincroniza com a rightTab interna
+  const switchMobileTab = (tab: 'conversas' | 'chat' | 'atendimento' | 'info') => {
     setMobileTab(tab)
     if (tab === 'info') setRightTab('info')
-    if (tab === 'history') setRightTab('history')
+    if (tab === 'atendimento') setRightTab('atendimento')
   }
   // Pra "Menu" abrir a sidebar — reusa o hamburger button da Sidebar via custom event
   const openSidebarMenu = () => {
@@ -129,7 +129,6 @@ export default function Chat() {
   }
   const [lead, setLead] = useState<Lead | null>(null)
   const [messages, setMessages] = useState<Message[]>([])
-  const [history, setHistory] = useState<StageHistoryEntry[]>([])
   const [notes, setNotes] = useState<LeadNote[]>([])
   const [funnels, setFunnels] = useState<Funnel[]>([])
   const [users, setUsers] = useState<UserType[]>([])
@@ -156,6 +155,8 @@ export default function Chat() {
   const [msgText, setMsgText] = useState('')
   // Roteiro: pergunta posta na caixa pelo [Perguntar] (vai no envio como roteiro_question_key)
   const [roteiroAskKey, setRoteiroAskKey] = useState<string | null>(null)
+  // Cadencia da etapa: passo mensagem posto na caixa pelo [Enviar] (vai no envio como cadence_attempt_id)
+  const [cadenceStepKey, setCadenceStepKey] = useState<number | null>(null)
   // Pergunta vinda de outra tela: aplicada quando a conversa desse lead abrir
   const [pendingRoteiroAsk, setPendingRoteiroAsk] = useState<{ leadId: number; text: string; questionKey: string | null } | null>(null)
   // "Voce perguntou X?" depois de enviar uma mensagem digitada
@@ -199,7 +200,9 @@ export default function Chat() {
   const [conversations, setConversations] = useState<LeadConversation[]>([])
   const [activeConvInstance, setActiveConvInstance] = useState<number | null>(null)
   const [editData, setEditData] = useState<Record<string, any>>({ name: '', phone: '', email: '', city: '' })
-  const [rightTab, setRightTab] = useState<'info' | 'notes' | 'history'>('info')
+  const [rightTab, setRightTab] = useState<'atendimento' | 'notes' | 'info'>('atendimento')
+  // Aba Atendimento: select de etapa aberto pelo [mudar]
+  const [stagePickerOpen, setStagePickerOpen] = useState(false)
   const [showTagMenu, setShowTagMenu] = useState(false)
   const [newTagName, setNewTagName] = useState('')
   const [newTagColor, setNewTagColor] = useState('#FFB300')
@@ -277,6 +280,7 @@ export default function Chat() {
     }
     setMsgText(filled)
     setRoteiroAskKey(null)
+    setCadenceStepKey(null)
     setShowReadyMsgs(false)
     setReadyMsgFilter('')
     setTimeout(() => msgInputRef.current?.focus(), 0)
@@ -352,7 +356,6 @@ export default function Chat() {
       if (myToken !== loadLeadTokenRef.current) return  // outra chamada mais recente — descarta
       setLead(data.lead)
       setMessages(data.messages)
-      setHistory(data.stageHistory)
       setNotes(data.notes || [])
       fetchLeadTasks(reqLeadId, accountId).then(r => { if (myToken === loadLeadTokenRef.current) setLeadTasks(r) }).catch(() => {})
       fetchLeadConversations(reqLeadId, accountId).then(convs => {
@@ -396,8 +399,9 @@ export default function Chat() {
     suggestionInBoxRef.current = s
     setSuggestionInBox(s)
     setMsgText(s.content)
-    // Texto da IA substitui a caixa: nao e mais a pergunta do roteiro
+    // Texto da IA substitui a caixa: nao e mais a pergunta do roteiro nem o passo da cadencia
     setRoteiroAskKey(null)
+    setCadenceStepKey(null)
   }, [])
 
   const clearSuggestionFromBox = useCallback(() => {
@@ -458,9 +462,9 @@ export default function Chat() {
 
   // ─── Roteiro: pergunta na caixa, reconhecimento e trava de etapa ───
   // Apagou o texto: a mensagem nao e mais a pergunta do roteiro
-  useEffect(() => { if (!msgText.trim()) setRoteiroAskKey(null) }, [msgText])
-  // Troca de conversa: pergunta e "voce perguntou?" sao do lead anterior
-  useEffect(() => { setRoteiroAskKey(null); setRecognized(null); setStageGate(null) }, [selectedLeadId])
+  useEffect(() => { if (!msgText.trim()) { setRoteiroAskKey(null); setCadenceStepKey(null) } }, [msgText])
+  // Troca de conversa: pergunta, passo da cadencia e "voce perguntou?" sao do lead anterior
+  useEffect(() => { setRoteiroAskKey(null); setCadenceStepKey(null); setRecognized(null); setStageGate(null); setStagePickerOpen(false) }, [selectedLeadId])
 
   // [Perguntar]/[Usar] do roteiro: poe o texto na caixa (mesmo estado da digitacao)
   const handleRoteiroAsk = useCallback((text: string, questionKey: string | null) => {
@@ -475,10 +479,23 @@ export default function Chat() {
     setShowReadyMsgs(false)
     setMsgText(text)
     setRoteiroAskKey(questionKey)
+    setCadenceStepKey(null)
     setRecognized(null)
     if (isMobile) setMobileTab('chat')
     setTimeout(() => msgInputRef.current?.focus(), 0)
   }, [accountId, isMobile])
+
+  // [Enviar] do passo mensagem da cadencia da etapa: texto com as variaveis na caixa para revisar;
+  // o envio leva o cadence_attempt_id e o passo fica feito
+  const handleStepSend = useCallback((text: string, attemptId: number) => {
+    handleRoteiroAsk(applyMessageVars(text, {
+      leadName: lead?.name,
+      leadEmpresa: lead?.empresa,
+      leadCity: lead?.city,
+      attendantName: user?.name,
+    }), null)
+    setCadenceStepKey(attemptId)
+  }, [handleRoteiroAsk, lead?.name, lead?.empresa, lead?.city, user?.name])
 
   // Pergunta vinda da ficha/Pipeline: aplica quando a conversa do lead estiver aberta
   useEffect(() => {
@@ -854,14 +871,15 @@ export default function Chat() {
     const sentText = msgText
     const suggestionUsed = suggestionInBoxRef.current
     const askKey = roteiroAskKey
+    const stepKey = cadenceStepKey
     const sentLeadId = lead.id
     setSending(true)
     try {
-      const result = await sendMessage(lead.id, accountId, sentText, override, askKey)
+      const result = await sendMessage(lead.id, accountId, sentText, override, askKey, stepKey)
       setMessages(prev => [...prev, result.message])
       // Trocou de conversa durante o envio: a caixa (texto e pergunta do roteiro) ja e de outro lead
       const sameLead = selectedLeadIdRef.current === sentLeadId
-      if (sameLead) setRoteiroAskKey(null)
+      if (sameLead) { setRoteiroAskKey(null); setCadenceStepKey(null) }
       if (!askKey && result.recognized_question && result.message?.id) {
         setRecognized({ leadId: sentLeadId, messageId: result.message.id, question: result.recognized_question })
       }
@@ -1747,37 +1765,48 @@ export default function Chat() {
         {lead && (
           <div className="chat-details">
             <div style={{ display: 'flex', gap: 4, padding: 8, borderBottom: '1px solid var(--border-subtle)' }}>
-              {(['info', 'notes', 'history'] as const).map(tab => (
+              {(['atendimento', 'notes', 'info'] as const).map(tab => (
                 <button key={tab} className={`btn btn-sm ${rightTab === tab ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setRightTab(tab)} style={{ flex: 1, fontSize: 11 }}>
-                  {tab === 'info' && <><User size={11} /> Info</>}
+                  {tab === 'atendimento' && <><ListChecks size={11} /> Atendimento</>}
                   {tab === 'notes' && <><StickyNote size={11} /> Notas ({notes.length})</>}
-                  {tab === 'history' && <><GitBranch size={11} /> Historico</>}
+                  {tab === 'info' && <><User size={11} /> Info</>}
                 </button>
               ))}
             </div>
 
             <div style={{ flex: 1, overflowY: 'auto', padding: 12 }}>
+              {rightTab === 'atendimento' && accountId && (
+                <>
+                  <ScoreLine key={`score-${lead.id}`} leadId={lead.id} accountId={accountId} />
+                  {/* Etapa com [mudar]: o select passa pela mesma trava do roteiro (handleStageChange) */}
+                  <div style={{ marginBottom: 10 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--text-secondary)' }}>
+                      <span>Etapa: <b style={{ color: 'var(--text-primary)' }}>{allStages.find(s => s.id === lead.stage_id)?.name || '—'}</b></span>
+                      <button type="button" onClick={() => setStagePickerOpen(v => !v)} aria-expanded={stagePickerOpen} style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontSize: 11, color: 'var(--accent)', fontWeight: 600 }}>
+                        {stagePickerOpen ? 'fechar' : 'mudar'}
+                      </button>
+                    </div>
+                    {stagePickerOpen && (
+                      <select className="select" style={{ width: '100%', marginTop: 4 }} value={lead.stage_id} onChange={e => { setStagePickerOpen(false); handleStageChange(+e.target.value) }}>
+                        {allStages.filter(s => s.funnel_id === lead.funnel_id).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                      </select>
+                    )}
+                  </div>
+                  <NextStepCard
+                    key={`cad-${lead.id}`}
+                    leadId={lead.id}
+                    accountId={accountId}
+                    mode="chat"
+                    onAsk={handleRoteiroAsk}
+                    onSendStep={handleStepSend}
+                    canManage={user?.role === 'gerente' || user?.role === 'super_admin'}
+                  />
+                </>
+              )}
+
               {rightTab === 'info' && (
                 <>
-                  {accountId && <ScoreThermometer key={lead.id} leadId={lead.id} accountId={accountId} />}
-                  {accountId && (
-                    <RoteiroCard
-                      key={`roteiro-${lead.id}`}
-                      leadId={lead.id}
-                      accountId={accountId}
-                      mode="chat"
-                      onAsk={handleRoteiroAsk}
-                      canForce={user?.role === 'gerente' || user?.role === 'super_admin'}
-                    />
-                  )}
-                  {/* Stage + Attendant */}
-                  <div style={{ marginBottom: 12 }}>
-                    <div style={{ fontSize: 10, color: '#9B96B0', textTransform: 'uppercase', marginBottom: 4 }}>Etapa</div>
-                    <select className="select" style={{ width: '100%' }} value={lead.stage_id} onChange={e => handleStageChange(+e.target.value)}>
-                      {allStages.filter(s => s.funnel_id === lead.funnel_id).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                    </select>
-                  </div>
-
+                  {/* Attendant */}
                   {user?.role !== 'atendente' && (
                     <div style={{ marginBottom: 12 }}>
                       <div style={{ fontSize: 10, color: '#9B96B0', textTransform: 'uppercase', marginBottom: 4 }}>Atendente</div>
@@ -1963,7 +1992,7 @@ export default function Chat() {
                     {!cadenceCollapsed && (
                       <>
                         <div style={{ display: 'flex', gap: 4, marginBottom: 10 }}>
-                          {([['manuais', 'Manuais', !!leadCadence && leadCadence.status !== 'completed'], ['automaticas', 'Automáticas', !!leadFollowUp && leadFollowUp.status !== 'completed' && leadFollowUp.status !== 'cancelled']] as const).map(([key, label, active]) => (
+                          {([['manuais', 'Avulsa', !!leadCadence && leadCadence.status !== 'completed'], ['automaticas', 'Automáticas', !!leadFollowUp && leadFollowUp.status !== 'completed' && leadFollowUp.status !== 'cancelled']] as const).map(([key, label, active]) => (
                             <button
                               key={key}
                               className={`btn btn-sm ${automationTab === key ? 'btn-primary' : 'btn-secondary'}`}
@@ -2306,22 +2335,6 @@ export default function Chat() {
                   </div>
                 </>
               )}
-
-              {rightTab === 'history' && (
-                <>
-                  {history.map((h, i) => (
-                    <div key={h.id} style={{ display: 'flex', gap: 8, padding: '6px 0', borderBottom: i < history.length - 1 ? '1px solid var(--border-subtle)' : 'none' }}>
-                      <Clock size={10} style={{ color: '#FFB300', marginTop: 3, flexShrink: 0 }} />
-                      <div>
-                        <div style={{ fontSize: 11 }}>{h.from_stage_name ? `${h.from_stage_name} → ${h.to_stage_name}` : `Entrada: ${h.to_stage_name}`}</div>
-                        <div style={{ fontSize: 9, color: '#6B6580' }}>{h.trigger_type === 'ai_qualified' ? 'Movido pela IA — qualificação completa' : h.trigger_type}{h.user_name ? ` · ${h.user_name}` : ''}</div>
-                        <div style={{ fontSize: 9, color: '#6B6580' }}>{parseSqlDate(h.created_at).toLocaleString('pt-BR')}</div>
-                      </div>
-                    </div>
-                  ))}
-                  {history.length === 0 && <div style={{ textAlign: 'center', color: '#6B6580', padding: 20, fontSize: 11 }}>Sem historico</div>}
-                </>
-              )}
             </div>
           </div>
         )}
@@ -2506,6 +2519,15 @@ export default function Chat() {
             <span>Chat</span>
           </button>
           <button
+            className={`chat-mobile-tab ${mobileTab === 'atendimento' ? 'active' : ''}`}
+            onClick={() => switchMobileTab('atendimento')}
+            disabled={!lead}
+            title="Atendimento"
+          >
+            <ListChecks size={18} />
+            <span>Atendimento</span>
+          </button>
+          <button
             className={`chat-mobile-tab ${mobileTab === 'info' ? 'active' : ''}`}
             onClick={() => switchMobileTab('info')}
             disabled={!lead}
@@ -2513,15 +2535,6 @@ export default function Chat() {
           >
             <InfoIcon size={18} />
             <span>Info</span>
-          </button>
-          <button
-            className={`chat-mobile-tab ${mobileTab === 'history' ? 'active' : ''}`}
-            onClick={() => switchMobileTab('history')}
-            disabled={!lead}
-            title="Histórico"
-          >
-            <HistoryIcon size={18} />
-            <span>Histórico</span>
           </button>
         </nav>
       )}

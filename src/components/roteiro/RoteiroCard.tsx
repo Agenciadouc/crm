@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import {
   ListChecks, Play, Check, CheckCircle2, Hourglass, MessageSquareReply, Bot, User, Pencil,
-  ChevronDown, ChevronUp, AlertTriangle, X, Undo2, Send,
+  ChevronDown, ChevronUp, Send,
 } from 'lucide-react'
 import {
   fetchLeadRoteiro, saveLeadAnswer, undoAdvance,
@@ -14,6 +14,7 @@ import { useSSE } from '../../context/SSEContext'
 import { AUTOMATION_PATH } from '../../lib/automationTabs.js'
 import HelpTip from '../HelpTip'
 import AnswerEditor from './AnswerEditor'
+import { AdvanceBanner, DeviationBox, OffscriptBox } from './RoteiroNotices'
 
 // Cartao "Roteiro" (spec 4.1/4.2): o que perguntar agora, pendentes, respondidas e desvio.
 // mode 'chat' = etapa atual (painel do Chat); 'full' = todas as etapas (ficha do lead).
@@ -259,52 +260,15 @@ export default function RoteiroCard({ leadId, accountId, mode, onAsk, canForce }
   )
 
   const advanceBanner = advanced && (
-    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6, padding: '6px 8px', marginBottom: 8, borderRadius: 6, background: 'var(--positive-bg)', color: 'var(--positive)', fontSize: 11, lineHeight: 1.45 }}>
-      <CheckCircle2 size={13} style={{ flexShrink: 0, marginTop: 1 }} />
-      <span style={{ flex: 1 }}>
-        Avançou para '{advanced.toName}' — todas as perguntas de '{advanced.fromName || 'etapa anterior'}' respondidas.
-      </span>
-      <button type="button" className="btn btn-secondary btn-sm" style={smallBtn} disabled={undoing} onClick={handleUndo}>
-        <Undo2 size={10} /> {undoing ? 'Desfazendo...' : 'Desfazer'}
-      </button>
-    </div>
+    <AdvanceBanner toName={advanced.toName} fromName={advanced.fromName} undoing={undoing} onUndo={handleUndo} />
   )
 
   const deviationBox = data.deviation && (
-    <div style={{ padding: '6px 8px', marginBottom: 8, borderRadius: 6, background: 'var(--warning-bg)', border: '1px solid var(--border-subtle)', fontSize: 11, lineHeight: 1.45 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 4, fontWeight: 700, color: 'var(--warning)' }}>
-        <AlertTriangle size={11} /> Desvio detectado
-      </div>
-      <div style={{ color: 'var(--text-secondary)', marginTop: 2 }}>O cliente saiu do roteiro. Resposta sugerida:</div>
-      <div style={{ color: 'var(--text-primary)', marginTop: 2 }}>{data.deviation.reply_text}</div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4, flexWrap: 'wrap' }}>
-        <button type="button" className="btn btn-primary btn-sm" style={smallBtn} onClick={() => onAsk(data.deviation!.reply_text, null)}>
-          <Send size={10} /> Usar
-        </button>
-        {data.deviation.return_question_text && (
-          <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>volta para: {data.deviation.return_question_text}</span>
-        )}
-      </div>
-    </div>
+    <DeviationBox deviation={data.deviation} onUse={text => onAsk(text, null)} />
   )
 
   const offscriptBox = offscript && (
-    <div style={{ padding: '6px 8px', marginBottom: 8, borderRadius: 6, background: 'var(--info-bg)', border: '1px solid var(--border-subtle)', fontSize: 11, lineHeight: 1.45 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 4, fontWeight: 700, color: 'var(--info)' }}>
-        <Bot size={11} /> A IA viu uma pergunta fora do roteiro
-        <span style={{ flex: 1 }} />
-        <button type="button" onClick={() => setOffscript(null)} aria-label="Fechar aviso" style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: 'var(--text-muted)' }}><X size={11} /></button>
-      </div>
-      <div style={{ color: 'var(--text-secondary)', marginTop: 2 }}>O cliente perguntou: <i>"{offscript.question}"</i></div>
-      {offscript.suggested_reply && (
-        <>
-          <div style={{ color: 'var(--text-primary)', marginTop: 2 }}>{offscript.suggested_reply}</div>
-          <button type="button" className="btn btn-primary btn-sm" style={{ ...smallBtn, marginTop: 4 }} onClick={() => onAsk(offscript.suggested_reply, null)}>
-            <Send size={10} /> Usar
-          </button>
-        </>
-      )}
-    </div>
+    <OffscriptBox offscript={offscript} onUse={text => onAsk(text, null)} onClose={() => setOffscript(null)} />
   )
 
   const askNow = split.next && (

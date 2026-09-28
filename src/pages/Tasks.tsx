@@ -6,7 +6,7 @@ import { useSSE } from '../context/SSEContext'
 import { fetchMyTasks, completeTask, skipTask, sendMessage, completeStandaloneTask, type Task, type TaskGroups, type NextStep } from '../lib/api'
 import { applyMessageVars } from '../lib/messageVars'
 import {
-  ListTodo, Phone, MessageCircle, Mail, Video, MapPin, Check, SkipForward,
+  ListTodo, Phone, MessageCircle, Mail, Video, MapPin, Check, SkipForward, HelpCircle,
   ExternalLink, Clock, AlertCircle, User, Calendar, CheckCircle, Send, Edit3, FileText,
 } from 'lucide-react'
 import EditTaskModal from '../components/EditTaskModal'
@@ -14,11 +14,11 @@ import { parseSqlDate } from '../lib/dates'
 
 const ACTION_ICONS: Record<string, React.ComponentType<{ size?: number }>> = {
   mensagem: MessageCircle, whatsapp: MessageCircle, ligacao: Phone,
-  email: Mail, reuniao: Video, visita: MapPin,
+  email: Mail, reuniao: Video, visita: MapPin, pergunta: HelpCircle,
 }
 const ACTION_LABELS: Record<string, string> = {
   mensagem: 'Mensagem', whatsapp: 'WhatsApp', ligacao: 'Ligacao',
-  email: 'Email', reuniao: 'Reuniao', visita: 'Visita',
+  email: 'Email', reuniao: 'Reuniao', visita: 'Visita', pergunta: 'Pergunta',
 }
 
 const BUCKETS = [
@@ -57,7 +57,7 @@ export default function Tasks() {
   const handleComplete = async (lcId: number) => {
     if (!accountId) return
     setActioning(lcId)
-    try { await completeTask(lcId, accountId); load() } catch (e: any) { alert('Erro: ' + e.message) }
+    try { await completeTask(lcId, accountId); load() } catch (e: any) { alert(e?.message || 'Não deu para concluir a tarefa.'); load() }
     setActioning(null)
   }
 

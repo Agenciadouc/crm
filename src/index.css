@@ -416,7 +416,7 @@ th.right, td.right { text-align: right; }
   .chat-page.chat-mobile-active.mobile-tab-conversas .chat-contacts { display: flex; }
   .chat-page.chat-mobile-active.mobile-tab-chat .chat-conversation { display: flex; }
   .chat-page.chat-mobile-active.mobile-tab-info .chat-details,
-  .chat-page.chat-mobile-active.mobile-tab-history .chat-details { display: flex; }
+  .chat-page.chat-mobile-active.mobile-tab-atendimento .chat-details { display: flex; }
 
   .chat-page.chat-mobile-active .chat-mobile-bottom-nav { display: flex; }
   .chat-page.chat-mobile-active.mobile-tab-chat .chat-mobile-back { display: flex; }
