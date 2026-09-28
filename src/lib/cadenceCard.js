@@ -1,33 +1,39 @@
-import { stepTitle } from './nextStep.js'
+import { stepTitle, stepTypeLabel } from './nextStep.js'
 
-// Logica pura dos dois cartoes do bloco "Cadencia" da aba Atendimento (etapa e avulsa).
-// Mesma estrutura: cabecalho "Etapa · nome" / "Avulsa · nome" com "N de M", um botao principal
-// (laranja) e as acoes secundarias como links discretos. JS puro com .d.ts.
+// Logica pura dos dois cartoes do bloco "Cadencia" da aba Atendimento (etapa e avulsa), no visual
+// do bloco antigo: linha laranja "Etapa N/M: TIPO", caixa com o texto, botao principal e botao
+// "So avancar" de largura toda, e links pequenos embaixo. JS puro com .d.ts.
 
-export const NO_TEXT_HINT = '(sem texto pronto — você escreve)'
+// Caixa do texto vazia (mensagem sem texto pronto): a janela de conferir abre vazia
+export const BOX_PLACEHOLDER = 'Sem texto pronto — você escreve ao enviar'
 
 const MESSAGE_TYPES = ['mensagem', 'whatsapp']
 
-export function cardHeader(kind, name, n, m) {
-  const base = kind === 'avulsa' ? 'Avulsa' : 'Etapa'
-  const nm = String(name == null ? '' : name).trim()
-  return { title: nm ? `${base} · ${nm}` : base, count: m ? `${n || 0} de ${m}` : '' }
+// "Passo 1/4: PERGUNTA" (etapa) / "Etapa 6/7: MENSAGEM" (avulsa); sem total, so o tipo
+export function stepLine(kind, n, m, type) {
+  const t = String(stepTypeLabel(type) || '').toUpperCase()
+  if (!m) return t
+  return `${kind === 'avulsa' ? 'Etapa' : 'Passo'} ${n || 1}/${m}: ${t}`
 }
 
-// Passo da vez da cadencia da etapa
-export function stageCardActions(step) {
-  if (!step) return { primary: null, secondary: [] }
+const PULAR = { id: 'pular', label: 'Só avançar (sem enviar)' }
+
+// Botao principal, botao "So avancar"/"Ja sei a resposta" e links pequenos do passo da vez
+export function cadenceCardActions(kind, step) {
+  if (!step) return { primary: null, secondary: null, links: [] }
   const t = step.action_type
-  if (t === 'pergunta') {
-    // Ja perguntou: o que falta e anotar a resposta
-    if (step.state === 'aguardando') return { primary: { id: 'ja_sei', label: 'Já sei a resposta' }, secondary: [] }
-    return { primary: { id: 'perguntar', label: 'Enviar pergunta' }, secondary: [{ id: 'ja_sei', label: 'Já sei a resposta' }] }
+  if (MESSAGE_TYPES.includes(t)) {
+    return { primary: { id: 'enviar', label: 'Revisar e enviar' }, secondary: PULAR, links: [{ id: 'feito', label: 'Marcar como feito' }] }
   }
-  // Mensagem sempre envia pela janela (sem texto pronto ela abre vazia); Feito fica discreto
-  if (MESSAGE_TYPES.includes(t)) return { primary: { id: 'enviar', label: 'Enviar mensagem' }, secondary: [{ id: 'feito', label: 'Marcar como feito' }] }
+  if (t === 'pergunta') {
+    // Avulsa: a pergunta nao tem resposta por aqui; o servidor so aceita pular
+    if (kind === 'avulsa') return { primary: null, secondary: PULAR, links: [] }
+    if (step.state === 'aguardando') return { primary: { id: 'ja_sei', label: 'Já sei a resposta' }, secondary: null, links: [] }
+    return { primary: { id: 'perguntar', label: 'Revisar e enviar' }, secondary: { id: 'ja_sei', label: 'Já sei a resposta' }, links: [] }
+  }
   // Ligacao: a janela do roteiro tem o [Feito]
-  if (t === 'ligacao') return { primary: { id: 'ligar', label: 'Ver roteiro e ligar' }, secondary: [] }
-  return { primary: { id: 'feito', label: 'Feito' }, secondary: [] }
+  if (t === 'ligacao') return { primary: { id: 'ligar', label: 'Ver roteiro e ligar' }, secondary: PULAR, links: [] }
+  return { primary: { id: 'feito', label: 'Feito' }, secondary: { id: 'pular', label: 'Só avançar' }, links: [] }
 }
 
 // Passo da vez da etapa no Chat: na mensagem, a descricao (interna) e so o titulo e o texto e
@@ -38,19 +44,6 @@ export function stageStepView(step) {
     return { title: String(step.description || '').trim(), text: String(step.auto_message || '').trim() }
   }
   return { title: '', text: stepTitle(step) }
-}
-
-const AVULSA_PRIMARY = { enviar: 'Enviar mensagem', roteiro: 'Ver roteiro e ligar', feito: 'Feito' }
-const AVULSA_SECONDARY = { feito: 'Marcar como feito', pular: 'Pular' }
-
-// Passo da vez da avulsa (a partir de avulsaStepView(...).actions)
-export function avulsaCardActions(view) {
-  const actions = (view && view.actions) || []
-  const p = actions.find(a => AVULSA_PRIMARY[a])
-  return {
-    primary: p ? { id: p, label: AVULSA_PRIMARY[p] } : null,
-    secondary: actions.filter(a => a !== p && AVULSA_SECONDARY[a]).map(a => ({ id: a, label: AVULSA_SECONDARY[a] })),
-  }
 }
 
 export const CADENCE_GROUP = 'cadencia'

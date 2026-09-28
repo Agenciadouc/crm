@@ -1,64 +1,57 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { cardHeader, stageCardActions, avulsaCardActions, cadenceRenderList, stageStepView, NO_TEXT_HINT } from '../src/lib/cadenceCard.js'
+import { cadenceCardActions, stepLine, cadenceRenderList, stageStepView, BOX_PLACEHOLDER } from '../src/lib/cadenceCard.js'
 import { avulsaStepView } from '../src/lib/avulsaStep.js'
 
-const ids = r => ({ primary: r.primary && r.primary.id, secondary: r.secondary.map(s => s.id) })
+const ids = r => ({ primary: r.primary && r.primary.id, secondary: r.secondary && r.secondary.id, links: r.links.map(l => l.id) })
 
-test('cabecalho do cartao: "Etapa · nome" / "Avulsa · nome" e "N de M" a direita', () => {
-  assert.deepEqual(cardHeader('etapa', 'Novo Lead', 0, 4), { title: 'Etapa · Novo Lead', count: '0 de 4' })
-  assert.deepEqual(cardHeader('avulsa', 'teste', 2, 2), { title: 'Avulsa · teste', count: '2 de 2' })
-  // sem nome (carregando) e sem total: so o tipo, sem contagem
-  assert.deepEqual(cardHeader('etapa', '', 0, 0), { title: 'Etapa', count: '' })
-  assert.deepEqual(cardHeader('avulsa', null, null, null), { title: 'Avulsa', count: '' })
+test('linha laranja: "Passo 1/4: PERGUNTA" (etapa) e "Etapa 6/7: MENSAGEM" (avulsa)', () => {
+  assert.equal(stepLine('etapa', 1, 4, 'pergunta'), 'Passo 1/4: PERGUNTA')
+  assert.equal(stepLine('avulsa', 6, 7, 'mensagem'), 'Etapa 6/7: MENSAGEM')
+  assert.equal(stepLine('avulsa', 2, 3, 'ligacao'), 'Etapa 2/3: LIGAÇÃO')
+  // sem total: so o tipo
+  assert.equal(stepLine('etapa', null, null, 'visita'), 'VISITA')
 })
 
-test('cartao da etapa: pergunta tem [Enviar pergunta] e o link Ja sei a resposta', () => {
-  const r = stageCardActions({ action_type: 'pergunta', state: 'pendente' })
-  assert.deepEqual(r.primary, { id: 'perguntar', label: 'Enviar pergunta' })
-  assert.deepEqual(r.secondary, [{ id: 'ja_sei', label: 'Já sei a resposta' }])
-  // ja perguntou (aguardando): o principal vira anotar a resposta
-  assert.deepEqual(ids(stageCardActions({ action_type: 'pergunta', state: 'aguardando' })), { primary: 'ja_sei', secondary: [] })
-})
-
-test('cartao da etapa: mensagem SEMPRE tem [Enviar mensagem], com ou sem texto', () => {
-  for (const step of [
-    { action_type: 'mensagem', auto_message: 'Oi {{primeiro_nome}}' },
-    { action_type: 'mensagem', auto_message: '', description: '' },
-    { action_type: 'whatsapp' },
-  ]) {
-    const r = stageCardActions(step)
-    assert.deepEqual(r.primary, { id: 'enviar', label: 'Enviar mensagem' })
-    // Feito continua possivel, mas discreto
-    assert.deepEqual(r.secondary, [{ id: 'feito', label: 'Marcar como feito' }])
+test('mensagem (etapa e avulsa): [Revisar e enviar] + [So avancar (sem enviar)] + link Marcar como feito', () => {
+  for (const kind of ['etapa', 'avulsa']) {
+    for (const t of ['mensagem', 'whatsapp']) {
+      const r = cadenceCardActions(kind, { action_type: t })
+      assert.deepEqual(r.primary, { id: 'enviar', label: 'Revisar e enviar' })
+      assert.deepEqual(r.secondary, { id: 'pular', label: 'Só avançar (sem enviar)' })
+      assert.deepEqual(r.links, [{ id: 'feito', label: 'Marcar como feito' }])
+    }
   }
 })
 
-test('cartao da etapa: ligacao abre o roteiro; visita/reuniao/e-mail tem [Feito]', () => {
-  assert.deepEqual(ids(stageCardActions({ action_type: 'ligacao' })), { primary: 'ligar', secondary: [] })
-  assert.equal(stageCardActions({ action_type: 'ligacao' }).primary.label, 'Ver roteiro e ligar')
-  for (const t of ['visita', 'reuniao', 'email']) {
-    assert.deepEqual(stageCardActions({ action_type: t }).primary, { id: 'feito', label: 'Feito' })
-    assert.deepEqual(stageCardActions({ action_type: t }).secondary, [])
+test('pergunta: etapa = [Revisar e enviar] + [Ja sei a resposta]; avulsa so avanca', () => {
+  const r = cadenceCardActions('etapa', { action_type: 'pergunta', state: 'pendente' })
+  assert.deepEqual(r.primary, { id: 'perguntar', label: 'Revisar e enviar' })
+  assert.deepEqual(r.secondary, { id: 'ja_sei', label: 'Já sei a resposta' })
+  assert.deepEqual(r.links, [])
+  // ja perguntou: falta anotar a resposta
+  assert.deepEqual(ids(cadenceCardActions('etapa', { action_type: 'pergunta', state: 'aguardando' })), { primary: 'ja_sei', secondary: null, links: [] })
+  // avulsa: o servidor so aceita pular a pergunta (sem resposta pela avulsa)
+  const a = cadenceCardActions('avulsa', { action_type: 'pergunta' })
+  assert.equal(a.primary, null)
+  assert.deepEqual(a.secondary, { id: 'pular', label: 'Só avançar (sem enviar)' })
+})
+
+test('ligacao: [Ver roteiro e ligar] + [So avancar]; visita/reuniao/e-mail: [Feito] + [So avancar]', () => {
+  for (const kind of ['etapa', 'avulsa']) {
+    assert.deepEqual(ids(cadenceCardActions(kind, { action_type: 'ligacao' })), { primary: 'ligar', secondary: 'pular', links: [] })
+    assert.equal(cadenceCardActions(kind, { action_type: 'ligacao' }).primary.label, 'Ver roteiro e ligar')
+    for (const t of ['visita', 'reuniao', 'email']) {
+      const r = cadenceCardActions(kind, { action_type: t })
+      assert.deepEqual(r.primary, { id: 'feito', label: 'Feito' })
+      assert.deepEqual(r.secondary, { id: 'pular', label: 'Só avançar' })
+    }
   }
-  assert.deepEqual(stageCardActions(null), { primary: null, secondary: [] })
+  assert.deepEqual(cadenceCardActions('etapa', null), { primary: null, secondary: null, links: [] })
 })
 
-test('cartao da avulsa: um botao principal e Pular como link', () => {
-  assert.deepEqual(avulsaCardActions({ actions: ['enviar', 'feito', 'pular'] }), {
-    primary: { id: 'enviar', label: 'Enviar mensagem' },
-    secondary: [{ id: 'feito', label: 'Marcar como feito' }, { id: 'pular', label: 'Pular' }],
-  })
-  assert.deepEqual(ids(avulsaCardActions({ actions: ['roteiro', 'pular'] })), { primary: 'roteiro', secondary: ['pular'] })
-  assert.equal(avulsaCardActions({ actions: ['roteiro', 'pular'] }).primary.label, 'Ver roteiro e ligar')
-  assert.deepEqual(avulsaCardActions({ actions: ['feito', 'pular'] }).primary, { id: 'feito', label: 'Feito' })
-  // pergunta numa avulsa: so Pular
-  assert.deepEqual(ids(avulsaCardActions({ actions: ['pular'] })), { primary: null, secondary: ['pular'] })
-  assert.deepEqual(avulsaCardActions(null), { primary: null, secondary: [] })
-})
-
-test('aviso de passo sem texto pronto', () => {
-  assert.equal(NO_TEXT_HINT, '(sem texto pronto — você escreve)')
+test('caixa vazia: placeholder de passo sem texto pronto', () => {
+  assert.equal(BOX_PLACEHOLDER, 'Sem texto pronto — você escreve ao enviar')
 })
 
 test('Cadencia sempre junta: um grupo na posicao do primeiro dos dois', () => {

@@ -38,9 +38,8 @@ import {
   reviewPosition, reviewTitle, reviewFromPendingAsk, reviewSendKeys, boxKeysAfterReviewSend, offerRecognition,
   manualTaskRows, reviewTextToSend, attendantView, sectionTitle, type StepReview, type ReviewPos,
 } from '../lib/atendimentoPanel.js'
-import { cardHeader, avulsaCardActions, cadenceRenderList, NO_TEXT_HINT } from '../lib/cadenceCard.js'
-import { stepTypeLabel } from '../lib/nextStep.js'
-import { PANEL_CARD, CADENCE_CARD, PRIMARY_BTN, HEAD_BTN, LinkButton, PanelTitle } from '../components/atendimento/PanelParts'
+import { cadenceCardActions, cadenceRenderList, stepLine, BOX_PLACEHOLDER } from '../lib/cadenceCard.js'
+import { PANEL_CARD, CADENCE_INNER, CARD_NAME, STEP_LINE, STEP_DESC, PILL_BTN, PRIMARY_BTN, HEAD_BTN, LinkButton, PanelTitle, TextPreview, StepButtons } from '../components/atendimento/PanelParts'
 import StageGateModal from '../components/roteiro/StageGateModal'
 import RecognizedQuestionBar from '../components/roteiro/RecognizedQuestionBar'
 import { confirmAsk } from '../lib/roteiroApi'
@@ -216,6 +215,8 @@ export default function Chat() {
   const [notesCollapsed, setNotesCollapsed] = useState(() => localStorage.getItem('chat_notes_collapsed') === '1')
   const [tagsCollapsed, setTagsCollapsed] = useState(() => localStorage.getItem('chat_tags_collapsed') === '1')
   const [cadenceCollapsed, setCadenceCollapsed] = useState(() => localStorage.getItem('chat_cadence_collapsed') === '1')
+  // Bloco "Cadência" da aba Atendimento (etapa + avulsa) recolhido
+  const [cadenciaCollapsed, setCadenciaCollapsed] = useState(() => { try { return localStorage.getItem('chat_cadencia_collapsed') === '1' } catch { return false } })
   const [leadTasks, setLeadTasks] = useState<any[]>([])
   const [editingTask, setEditingTask] = useState<any>(null)
   const [sendInstanceOverride, setSendInstanceOverride] = useState<number | null>(null)
@@ -2089,9 +2090,44 @@ export default function Chat() {
                 const shownIds = visibleIds(atendimentoLayout.layout)
                 const cadenceTitle = (
                   <PanelTitle
-                    icon={<ListOrdered size={10} />}
+                    icon={<>{cadenciaCollapsed ? <ChevronDown size={12} style={{ color: '#9B96B0' }} /> : <ChevronUp size={12} style={{ color: '#9B96B0' }} />}<ListOrdered size={10} /></>}
                     label="Cadência"
-                    help={<>O que fazer agora com este cliente. Em cima, a cadência da etapa (muda quando ele muda de etapa); embaixo, a cadência avulsa que você aplicou só para ele. Cada cartão tem um botão principal. Ex.: "Enviar pergunta" (Para quando é o evento?), depois "Enviar mensagem" com o catálogo. Pular passa para o próximo passo sem enviar nada.</>}
+                    help={<>O que fazer agora com este cliente. Em cima, a cadência da etapa (muda quando ele muda de etapa); embaixo, a cadência avulsa que você aplicou só para ele. Ex.: "Revisar e enviar" abre a janela para conferir a pergunta "Para quando é o evento?" antes de mandar. "Só avançar (sem enviar)" passa para o próximo passo sem mandar nada.</>}
+                    onClick={() => setCadenciaCollapsed(p => { const v = !p; try { localStorage.setItem('chat_cadencia_collapsed', v ? '1' : '0') } catch { /* sem storage */ } return v })}
+                    style={{ marginBottom: 0 }}
+                    right={shownIds.includes('avulsa') ? (
+                      <div style={{ position: 'relative' }}>
+                        <button className="btn btn-secondary btn-sm" onClick={() => { setCadenciaCollapsed(false); setShowCadenceMenu(!showCadenceMenu) }} style={HEAD_BTN} title={leadCadence ? 'Escolher outra cadência avulsa para este cliente' : 'Ex.: escolha "Pós-venda" para mandar mensagens extras só para este cliente'}>{leadCadence ? 'Trocar' : 'Atribuir'}</button>
+                        {showCadenceMenu && (
+                          <div style={{ position: 'absolute', right: 0, top: '100%', marginTop: 4, background: 'var(--bg-card)', border: '1px solid var(--border-medium)', borderRadius: 8, padding: 4, zIndex: 50, minWidth: 220, maxHeight: 320, overflowY: 'auto' }}>
+                            {cadences.length === 0 && globalCadences.length === 0 && <div style={{ padding: 8, fontSize: 11, color: 'var(--text-muted)' }}>Nenhuma cadência. Crie em Cadências e Follow-ups (aba Manuais)</div>}
+                            {cadences.length > 0 && (
+                              <>
+                                <div style={{ padding: '4px 10px', fontSize: 9, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 0.5 }}>Desta conta</div>
+                                {cadences.map(c => (
+                                  <button key={c.id} onClick={() => handleAssignCadence(c.id)} style={{ display: 'block', padding: '6px 10px', border: 'none', background: 'none', color: 'var(--text-primary)', fontSize: 11, cursor: 'pointer', borderRadius: 4, width: '100%', textAlign: 'left' }}>
+                                    {c.name} <span style={{ color: 'var(--text-muted)' }}>({c.attempts.length} etapas)</span>
+                                  </button>
+                                ))}
+                              </>
+                            )}
+                            {globalCadences.length > 0 && (
+                              <>
+                                <div style={{ padding: '6px 10px 4px', fontSize: 9, color: '#7ee787', textTransform: 'uppercase', letterSpacing: 0.5, borderTop: cadences.length > 0 ? '1px dashed var(--border-subtle)' : 'none', marginTop: cadences.length > 0 ? 4 : 0 }}>Templates globais</div>
+                                {globalCadences.map(g => (
+                                  <button key={`g-${g.id}`} onClick={() => handleAssignGlobalCadence(g.id)} disabled={applyingGlobalId === g.id} style={{ display: 'block', padding: '6px 10px', border: 'none', background: 'none', color: 'var(--text-primary)', fontSize: 11, cursor: 'pointer', borderRadius: 4, width: '100%', textAlign: 'left', opacity: applyingGlobalId === g.id ? 0.5 : 1 }}>
+                                    <span style={{ color: '#7ee787', fontSize: 9, marginRight: 4 }}>★</span>
+                                    {g.name} <span style={{ color: 'var(--text-muted)' }}>({g.attempts.length} etapas)</span>
+                                    {g.applied_here && <span style={{ color: '#7ee787', fontSize: 9, marginLeft: 4 }}>✓</span>}
+                                    {applyingGlobalId === g.id && <span style={{ color: 'var(--text-muted)', fontSize: 9, marginLeft: 4 }}>aplicando...</span>}
+                                  </button>
+                                ))}
+                              </>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    ) : undefined}
                   />
                 )
                 const blocks: Record<AtendimentoBlockId, () => React.ReactNode> = {
@@ -2197,102 +2233,64 @@ export default function Chat() {
                   />
                   </>),
                   avulsa: () => (<>
-                  {/* 5b. Cadencia avulsa do lead: mesmo cartao da etapa (um botao principal; Pular, Editar, Trocar e Remover como link) */}
+                  {/* 5b. Cadencia avulsa do lead: mesmo cartao da etapa (visual do bloco antigo de cadencia) */}
                   {(() => {
-                    const menuAnchor = (trigger: React.ReactNode) => (
-                      <span style={{ position: 'relative', display: 'inline-block' }}>
-                        {trigger}
-                        {showCadenceMenu && (
-                          <div style={{ position: 'absolute', left: 0, top: '100%', marginTop: 4, background: 'var(--bg-card)', border: '1px solid var(--border-medium)', borderRadius: 8, padding: 4, zIndex: 50, minWidth: 220, maxHeight: 320, overflowY: 'auto' }}>
-                            {cadences.length === 0 && globalCadences.length === 0 && <div style={{ padding: 8, fontSize: 11, color: 'var(--text-muted)' }}>Nenhuma cadência. Crie em Cadências e Follow-ups (aba Manuais)</div>}
-                            {cadences.length > 0 && (
-                              <>
-                                <div style={{ padding: '4px 10px', fontSize: 9, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 0.5 }}>Desta conta</div>
-                                {cadences.map(c => (
-                                  <button key={c.id} onClick={() => handleAssignCadence(c.id)} style={{ display: 'block', padding: '6px 10px', border: 'none', background: 'none', color: 'var(--text-primary)', fontSize: 11, cursor: 'pointer', borderRadius: 4, width: '100%', textAlign: 'left' }}>
-                                    {c.name} <span style={{ color: 'var(--text-muted)' }}>({c.attempts.length} etapas)</span>
-                                  </button>
-                                ))}
-                              </>
-                            )}
-                            {globalCadences.length > 0 && (
-                              <>
-                                <div style={{ padding: '6px 10px 4px', fontSize: 9, color: '#7ee787', textTransform: 'uppercase', letterSpacing: 0.5, borderTop: cadences.length > 0 ? '1px dashed var(--border-subtle)' : 'none', marginTop: cadences.length > 0 ? 4 : 0 }}>Templates globais</div>
-                                {globalCadences.map(g => (
-                                  <button key={`g-${g.id}`} onClick={() => handleAssignGlobalCadence(g.id)} disabled={applyingGlobalId === g.id} style={{ display: 'block', padding: '6px 10px', border: 'none', background: 'none', color: 'var(--text-primary)', fontSize: 11, cursor: 'pointer', borderRadius: 4, width: '100%', textAlign: 'left', opacity: applyingGlobalId === g.id ? 0.5 : 1 }}>
-                                    <span style={{ color: '#7ee787', fontSize: 9, marginRight: 4 }}>★</span>
-                                    {g.name} <span style={{ color: 'var(--text-muted)' }}>({g.attempts.length} etapas)</span>
-                                    {g.applied_here && <span style={{ color: '#7ee787', fontSize: 9, marginLeft: 4 }}>✓</span>}
-                                    {applyingGlobalId === g.id && <span style={{ color: 'var(--text-muted)', fontSize: 9, marginLeft: 4 }}>aplicando...</span>}
-                                  </button>
-                                ))}
-                              </>
-                            )}
-                          </div>
-                        )}
-                      </span>
-                    )
                     if (!leadCadence) {
-                      return (
-                        <div style={{ marginBottom: 12 }}>
-                          {menuAnchor(<LinkButton onClick={() => setShowCadenceMenu(!showCadenceMenu)} title='Ex.: escolha "Pós-venda" para mandar mensagens extras só para este cliente'><Plus size={10} style={{ verticalAlign: -1 }} /> Aplicar cadência avulsa</LinkButton>)}
-                        </div>
+                      // Sem avulsa: so um exemplo quando o cartao da etapa nao aparece (o [Atribuir] fica no titulo)
+                      return shownIds.includes('proximo_passo') ? null : (
+                        <div style={{ fontSize: 11, color: '#6B6580', marginTop: 8 }}>Nenhuma cadência avulsa. Ex.: clique em Atribuir e escolha "Pós-venda".</div>
                       )
                     }
                     const completed = leadCadence.status === 'completed'
                     const total = leadCadence.total_attempts ?? 0
-                    const h = cardHeader('avulsa', leadCadence.cadence_name, completed ? total : (leadCadence.attempt_position ?? 0) + 1, total)
                     const v = completed ? null : avulsaStepView(leadCadence, fillLeadVars)
                     const target = { leadId: lead.id, lcId: leadCadence.id, attemptId: leadCadence.current_attempt_id }
                     const label = avulsaStepLabel(leadCadence)
-                    const { primary, secondary } = avulsaCardActions(v)
+                    const acts = cadenceCardActions('avulsa', v ? { action_type: leadCadence.action_type || '' } : null)
+                    const isMsg = v?.kind === 'mensagem'
+                    const isAsk = leadCadence.action_type === 'pergunta'
                     const runAvulsa = (id: string) => {
                       if (id === 'enviar') handleAvulsaSend()
-                      else if (id === 'roteiro' && v) setCallModal({ source: 'avulsa', ...target, label, text: v.text })
+                      else if (id === 'ligar' && v) setCallModal({ source: 'avulsa', ...target, label, text: v.text })
                       else if (id === 'feito') handleAvulsaStep('feito', target)
                       else if (id === 'pular') handleAvulsaStep('pulado', target)
                     }
-                    const primaryIcon = primary?.id === 'enviar' ? <Send size={11} /> : primary?.id === 'roteiro' ? <Phone size={11} /> : <Check size={11} />
+                    // Descricao em cinza italico: na mensagem e o titulo; na ligacao a descricao (o roteiro fica na janela)
+                    const desc = !v ? '' : isMsg ? (v.title || '') : v.kind === 'ligacao' ? (leadCadence.attempt_description || '').trim() : isAsk ? '' : v.text
+                    const instr = (leadCadence.attempt_instructions || '').trim()
                     return (
-                      <div className="card" style={CADENCE_CARD}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                          <span style={{ flex: 1, minWidth: 0, fontSize: 12, fontWeight: 700, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{h.title}</span>
-                          {h.count && <span title={`Passo da vez na cadência avulsa (${h.count}). Ex.: "2 de 2" = último passo.`} style={{ fontSize: 11, fontWeight: 600, color: completed ? 'var(--positive)' : 'var(--text-muted)' }}>{h.count}</span>}
-                        </div>
-                        <div style={{ display: 'flex', gap: 10, marginTop: 2, marginBottom: 6 }}>
-                          <LinkButton onClick={() => { const base = import.meta.env.BASE_URL.replace(/\/$/, ''); window.open(`${base}${automationUrl('manuais')}`, '_blank') }} title="Abre a tela de cadências numa nova aba">Editar</LinkButton>
-                          {menuAnchor(<LinkButton onClick={() => setShowCadenceMenu(!showCadenceMenu)} title="Escolher outra cadência avulsa para este cliente">Trocar</LinkButton>)}
-                          <LinkButton danger onClick={async () => {
-                            if (!accountId || !confirm('Remover cadencia deste lead?')) return
-                            await removeLeadCadence(leadCadence.id, accountId)
-                            loadLead()
-                          }}>Remover</LinkButton>
+                      <div style={CADENCE_INNER}>
+                        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6 }}>
+                          <div style={CARD_NAME}>{leadCadence.cadence_name}</div>
+                          <div style={{ display: 'flex', gap: 3, flexShrink: 0 }}>
+                            <button className="btn btn-secondary btn-sm" style={PILL_BTN} onClick={() => { const base = import.meta.env.BASE_URL.replace(/\/$/, ''); window.open(`${base}${automationUrl('manuais')}`, '_blank') }} title="Abre a tela de cadências numa nova aba">Editar</button>
+                            <button className="btn btn-danger btn-sm" style={PILL_BTN} onClick={async () => {
+                              if (!accountId || !confirm('Remover cadencia deste lead?')) return
+                              await removeLeadCadence(leadCadence.id, accountId)
+                              loadLead()
+                            }}>Remover</button>
+                          </div>
                         </div>
                         {completed || !v ? (
-                          <div style={{ fontSize: 11, color: '#34C759', display: 'flex', alignItems: 'center', gap: 3 }}><Check size={10} /> Concluida</div>
+                          <div style={{ fontSize: 11, color: '#34C759', display: 'flex', alignItems: 'center', gap: 3, marginTop: 4 }}><Check size={10} /> Concluida</div>
                         ) : (
                           <>
-                            <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--accent)', textTransform: 'uppercase', marginBottom: 4 }}>{leadCadence.action_type ? stepTypeLabel(leadCadence.action_type) : 'Passo'}</div>
-                            {v.title && <div style={{ fontSize: 12, color: 'var(--text-primary)', fontWeight: 600, marginBottom: 2 }}>{v.title}</div>}
-                            {v.text ? (
-                              <div style={{ fontSize: 13, lineHeight: 1.4, color: 'var(--text-primary)', whiteSpace: 'pre-wrap', maxHeight: 140, overflowY: 'auto' }}>{v.text}</div>
-                            ) : v.kind === 'mensagem' ? (
-                              <div style={{ fontSize: 12, color: 'var(--text-muted)', fontStyle: 'italic' }}>{NO_TEXT_HINT}</div>
-                            ) : null}
-                            {leadCadence.attempt_instructions && leadCadence.attempt_instructions.trim() !== v.text && leadCadence.attempt_instructions.trim() !== (v.title || '') && (
-                              <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 2, fontStyle: 'italic' }}>{leadCadence.attempt_instructions}</div>
-                            )}
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 8, flexWrap: 'wrap' }}>
-                              {primary && (
-                                <button className="btn btn-primary btn-sm" style={PRIMARY_BTN} disabled={avulsaBusy} onClick={() => runAvulsa(primary.id)} title={primary.id === 'enviar' ? 'Abre a janela para conferir o texto antes de enviar' : undefined}>
-                                  {primaryIcon} {primary.label}
-                                </button>
-                              )}
-                              <span style={{ flex: 1 }} />
-                              {secondary.map(a => (
-                                <LinkButton key={a.id} disabled={avulsaBusy} onClick={() => runAvulsa(a.id)} title={a.id === 'pular' ? 'Passa para o próximo passo sem enviar nada' : 'Já fez por outro caminho? Marca o passo sem enviar nada'}>{a.label}</LinkButton>
-                              ))}
-                            </div>
+                            <div style={STEP_LINE} title="Passo da vez na cadência avulsa. Ex.: 6/7 = sexto de sete passos.">{stepLine('avulsa', (leadCadence.attempt_position ?? 0) + 1, total, leadCadence.action_type)}</div>
+                            {desc && <div style={STEP_DESC}>{desc}</div>}
+                            {instr && instr !== desc && instr !== v.text && <div style={STEP_DESC}>{instr}</div>}
+                            {(isMsg || isAsk) && <TextPreview text={v.text} placeholder={BOX_PLACEHOLDER} />}
+                            <StepButtons
+                              primary={acts.primary}
+                              secondary={acts.secondary}
+                              links={acts.links}
+                              run={runAvulsa}
+                              disabled={avulsaBusy}
+                              titles={{
+                                enviar: 'Abre a janela para conferir o texto antes de enviar',
+                                pular: 'Passa para o próximo passo sem enviar nada',
+                                feito: 'Já fez por outro caminho? Marca o passo sem enviar nada',
+                              }}
+                            />
                           </>
                         )}
                       </div>
@@ -2450,11 +2448,14 @@ export default function Chat() {
                     </div>
                     {/* Etapa e avulsa sempre juntas num bloco "Cadência", onde aparece o primeiro dos dois */}
                     {cadenceRenderList(shownIds).map(id => id === 'cadencia' ? (
-                      <Fragment key="cadencia">
+                      <div key="cadencia" className="card" style={PANEL_CARD}>
                         {cadenceTitle}
-                        {shownIds.includes('proximo_passo') && blocks.proximo_passo()}
-                        {shownIds.includes('avulsa') && blocks.avulsa()}
-                      </Fragment>
+                        {/* Recolher so esconde (os cartoes continuam montados, com avisos e recarga) */}
+                        <div style={{ display: cadenciaCollapsed ? 'none' : 'block' }}>
+                          {shownIds.includes('proximo_passo') && blocks.proximo_passo()}
+                          {shownIds.includes('avulsa') && blocks.avulsa()}
+                        </div>
+                      </div>
                     ) : <Fragment key={id}>{blocks[id]?.()}</Fragment>)}
                   </>
                 )

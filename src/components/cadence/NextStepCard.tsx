@@ -14,8 +14,8 @@ import { useSSE } from '../../context/SSEContext'
 import { AUTOMATION_PATH } from '../../lib/automationTabs.js'
 import { STEP_ICONS } from '../../pages/cadencias/StepRow'
 import { reviewPosition, type ReviewPos } from '../../lib/atendimentoPanel.js'
-import { cardHeader, stageCardActions, stageStepView, NO_TEXT_HINT } from '../../lib/cadenceCard.js'
-import { CADENCE_CARD, PRIMARY_BTN, LinkButton } from '../atendimento/PanelParts'
+import { cadenceCardActions, stageStepView, stepLine, BOX_PLACEHOLDER } from '../../lib/cadenceCard.js'
+import { CADENCE_INNER, CARD_NAME, STEP_LINE, STEP_DESC, LinkButton, TextPreview, StepButtons } from '../atendimento/PanelParts'
 import HelpTip from '../HelpTip'
 import AnswerEditor from '../roteiro/AnswerEditor'
 import { AdvanceBanner, DeviationBox, OffscriptBox } from '../roteiro/RoteiroNotices'
@@ -49,6 +49,7 @@ export default function NextStepCard({ leadId, accountId, mode, onAsk, onSendSte
   const [saveError, setSaveError] = useState<string | null>(null)
   const [actionMsg, setActionMsg] = useState<string | null>(null)
   const [busy, setBusy] = useState<number | null>(null)
+  const [busyHow, setBusyHow] = useState<'feito' | 'pulado'>('feito')
   const [advanced, setAdvanced] = useState<{ toName: string; fromName: string } | null>(null)
   const [undoing, setUndoing] = useState(false)
   const [offscript, setOffscript] = useState<RoteiroOffscript | null>(null)
@@ -139,11 +140,12 @@ export default function NextStepCard({ leadId, accountId, mode, onAsk, onSendSte
     reloadNow()
   }
 
-  const handleDone = async (step: LeadStep) => {
+  // how 'pulado' = [So avancar (sem enviar)] no Chat
+  const handleDone = async (step: LeadStep, how: 'feito' | 'pulado' = 'feito') => {
     if (busy) return
-    setBusy(step.attempt_id); setActionMsg(null)
+    setBusy(step.attempt_id); setBusyHow(how); setActionMsg(null)
     try {
-      const r = await markLeadStepDone(leadId, step.attempt_id, accountId)
+      const r = await markLeadStepDone(leadId, step.attempt_id, accountId, how)
       // A resposta ja e o estado novo: descarta recarga silenciosa que estiver no ar
       if (leadRef.current === leadId) { reloaderRef.current!.cancel(); tokenRef.current++; setData(r); setError(false) }
     } catch (e: any) {
@@ -189,20 +191,19 @@ export default function NextStepCard({ leadId, accountId, mode, onAsk, onSendSte
     </div>
   )
 
-  // Chat: cartao "Etapa · <nome>" com "N de M" a direita (mesma estrutura do cartao da avulsa)
+  // Chat: cartao da etapa no visual do bloco antigo: nome da etapa em negrito e, a direita, quantos ja foram feitos
   const chatBox = (children: ReactNode) => {
-    const h = cardHeader('etapa', data?.stage?.name, data?.done_count, data?.total)
     const allOk = !!data && !!data.total && data.done_count === data.total
     return (
-      <div className="card" style={CADENCE_CARD}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
-          <span style={{ flex: 1, minWidth: 0, fontSize: 12, fontWeight: 700, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{h.title}</span>
-          {h.count && (
+      <div style={CADENCE_INNER}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6 }}>
+          <div style={CARD_NAME}>{data?.stage?.name || 'Cadência da etapa'}</div>
+          {!!data?.total && (
             <span
-              title={`${data?.done_count} de ${data?.total} passos desta etapa já feitos (pergunta com resposta, mensagem enviada ou marcada Feito).`}
-              style={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 11, fontWeight: 600, color: allOk ? 'var(--positive)' : 'var(--text-muted)' }}
+              title={`${data.done_count} de ${data.total} passos desta etapa já feitos (pergunta com resposta, mensagem enviada ou marcada Feito).`}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 10, fontWeight: 600, marginTop: 3, whiteSpace: 'nowrap', color: allOk ? 'var(--positive)' : 'var(--text-muted)' }}
             >
-              {h.count} {allOk && <Check size={10} />}
+              {data.done_count}/{data.total} feitos {allOk && <Check size={10} />}
             </span>
           )}
         </div>
@@ -375,64 +376,64 @@ export default function NextStepCard({ leadId, accountId, mode, onAsk, onSendSte
     )
   }
 
-  // Chat: passo da vez no mesmo formato do cartao da avulsa (tipo, texto, UM botao laranja e links)
+  // Chat: passo da vez no mesmo formato do cartao da avulsa: linha laranja, descricao, caixa do texto,
+  // botao principal e "So avancar"/"Ja sei a resposta" de largura toda, links pequenos embaixo
   const chatStep = (step: LeadStep) => {
-    const { primary, secondary } = stageCardActions(step)
-    const isBusy = busy === step.attempt_id
+    const acts = cadenceCardActions('etapa', step)
     const isMsg = step.action_type === 'mensagem' || step.action_type === 'whatsapp'
-    // Mensagem: so o texto pronto vai para a janela (a descricao e interna: vira titulo). Sem texto, abre vazia.
+    const isAsk = step.action_type === 'pergunta'
+    // Mensagem: so o texto pronto vai para a janela (a descricao e interna). Sem texto, abre vazia.
     const view = stageStepView(step)
     const sendText = isMsg ? view.text : stepSendText(step)
-    const pos = () => reviewPosition(data, { attemptId: step.attempt_id })
+    const pos = reviewPosition(data, { attemptId: step.attempt_id })
     const run = (id: string) => {
       if (id === 'perguntar' && step.question) {
-        if (onReview) onReview({ kind: 'pergunta', text: step.question.text_for_lead, questionKey: step.question_key, attemptId: step.attempt_id, pos: pos() })
+        if (onReview) onReview({ kind: 'pergunta', text: step.question.text_for_lead, questionKey: step.question_key, attemptId: step.attempt_id, pos })
         else onAsk(step.question.text_for_lead, step.question_key)
       } else if (id === 'ja_sei') openEditor(step)
-      // Sem texto pronto a janela abre vazia para o vendedor escrever
       else if (id === 'enviar') {
-        if (onReview) onReview({ kind: 'mensagem', text: sendText, questionKey: null, attemptId: step.attempt_id, pos: pos() })
+        if (onReview) onReview({ kind: 'mensagem', text: sendText, questionKey: null, attemptId: step.attempt_id, pos })
         else onSendStep(sendText, step.attempt_id)
-      } else if (id === 'feito') handleDone(step)
+      } else if (id === 'feito') handleDone(step, 'feito')
+      else if (id === 'pular') handleDone(step, 'pulado')
       else if (id === 'ligar') {
-        if (onCall) onCall({ attemptId: step.attempt_id, text: step.call_script || step.description || step.instructions || '', pos: pos() })
+        if (onCall) onCall({ attemptId: step.attempt_id, text: step.call_script || step.description || step.instructions || '', pos })
         else setScriptOpen(v => (v === step.attempt_id ? null : step.attempt_id))
       }
     }
-    const title = isMsg ? view.text : view.text || stepTitle(step)
-    const primaryIcon = primary?.id === 'perguntar' || primary?.id === 'enviar' ? <Send size={11} /> : primary?.id === 'ligar' ? <Phone size={11} /> : <Check size={11} />
+    const isBusy = busy === step.attempt_id
+    const desc = isMsg ? view.title : isAsk ? '' : view.text
     return (
       <div>
-        <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--accent)', textTransform: 'uppercase', marginBottom: 4 }}>{typeLine(step)}</div>
-        {view.title && <div style={{ fontSize: 12, color: 'var(--text-primary)', fontWeight: 600, marginBottom: 2 }}>{view.title}</div>}
-        {isMsg && !sendText
-          ? <div style={{ fontSize: 12, color: 'var(--text-muted)', fontStyle: 'italic' }}>{NO_TEXT_HINT}</div>
-          : <div style={{ fontSize: 13, color: 'var(--text-primary)', lineHeight: 1.4, whiteSpace: 'pre-wrap', maxHeight: 140, overflowY: 'auto' }}>{title}</div>}
-        {step.instructions && step.action_type !== 'pergunta' && step.instructions !== title && step.instructions !== view.title && (
-          <div style={{ fontSize: 10, color: 'var(--text-muted)', fontStyle: 'italic', marginTop: 2 }}>{step.instructions}</div>
-        )}
+        <div style={STEP_LINE}>
+          {stepLine('etapa', pos?.n, pos?.m, step.action_type)}
+          {isAsk && step.question?.required && (
+            <span title="Obrigatória: trava a mudança de etapa até ter resposta" style={{ display: 'inline-flex', alignItems: 'center', gap: 2, marginLeft: 4 }}>
+              · <Lock size={9} /> obrigatória
+            </span>
+          )}
+        </div>
+        {desc && <div style={STEP_DESC}>{desc}</div>}
+        {step.instructions && !isAsk && step.instructions !== desc && step.instructions !== view.text && <div style={STEP_DESC}>{step.instructions}</div>}
+        {(isMsg || isAsk) && <TextPreview text={view.text} placeholder={BOX_PLACEHOLDER} />}
         {waitLine(step)}
         {!onCall && scriptOpen === step.attempt_id && step.call_script && (
           <div style={{ marginTop: 4, fontSize: 11, color: 'var(--text-secondary)', whiteSpace: 'pre-wrap', lineHeight: 1.45 }}>{step.call_script}</div>
         )}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 8, flexWrap: 'wrap' }}>
-          {primary && (
-            <button
-              type="button" className="btn btn-primary btn-sm" style={PRIMARY_BTN}
-              disabled={primary.id === 'feito' && isBusy}
-              onClick={() => run(primary.id)}
-              title={primary.id === 'perguntar' || primary.id === 'enviar' ? 'Abre a janela para conferir o texto antes de enviar' : undefined}
-            >
-              {primaryIcon} {primary.id === 'feito' && isBusy ? 'Salvando...' : primary.label}
-            </button>
-          )}
-          <span style={{ flex: 1 }} />
-          {secondary.map(a => (
-            <LinkButton key={a.id} onClick={() => run(a.id)} disabled={a.id === 'feito' && isBusy} title={a.id === 'feito' ? 'Já fez por outro caminho? Marca o passo sem enviar nada' : undefined}>
-              {a.id === 'feito' && isBusy ? 'Salvando...' : a.label}
-            </LinkButton>
-          ))}
-        </div>
+        <StepButtons
+          primary={acts.primary}
+          secondary={acts.secondary}
+          links={acts.links}
+          run={run}
+          disabled={isBusy}
+          busyId={isBusy ? (busyHow === 'pulado' ? 'pular' : 'feito') : null}
+          titles={{
+            enviar: 'Abre a janela para conferir o texto antes de enviar',
+            perguntar: 'Abre a janela para conferir a pergunta antes de enviar',
+            pular: 'Passa para o próximo passo sem enviar nada',
+            feito: 'Já fez por outro caminho? Marca o passo sem enviar nada',
+          }}
+        />
         {editor(step)}
       </div>
     )
@@ -520,9 +521,10 @@ export default function NextStepCard({ leadId, accountId, mode, onAsk, onSendSte
   const fresh = showDone ? [] : done.filter(s => aiFresh.includes(s.attempt_id))
   return box(
     <>
-      {notices}
-      {fresh.length > 0 && <div style={{ marginBottom: 6 }}>{fresh.map(doneRow)}</div>}
       {next ? chatStep(next) : allDone}
+      {/* Avisos (IA, desvio, avanco com Desfazer) ficam compactos embaixo dos botoes */}
+      <div style={{ marginTop: 8 }}>{notices}</div>
+      {fresh.length > 0 && <div style={{ marginBottom: 6 }}>{fresh.map(doneRow)}</div>}
       {after1 && <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 8, lineHeight: 1.4 }}>{after1}</div>}
       {done.length > 0 && (
         <div style={{ marginTop: 6 }}>
