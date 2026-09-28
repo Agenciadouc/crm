@@ -1,6 +1,8 @@
 import { Router } from 'express'
 import db from '../db.js'
 import { broadcastSSE } from '../sse.js'
+import { completeCurrentStep } from '../services/cadence/leadCadence.js'
+import { CadenceError } from '../services/cadence/errors.js'
 
 const router = Router()
 
@@ -175,75 +177,37 @@ router.get('/counts', (req, res) => {
   res.json(counts)
 })
 
-// POST /api/tasks/:lcId/complete — mark current attempt as done and advance
+// POST /api/tasks/:lcId/complete — conclui o passo atual pela mesma regra do Chat (conta conferida)
 router.post('/:lcId/complete', (req, res) => {
-  const lc = db.prepare('SELECT * FROM lead_cadences WHERE id = ?').get(req.params.lcId)
-  if (!lc) return res.status(404).json({ error: 'Tarefa nao encontrada' })
-  if (lc.status !== 'active') return res.status(400).json({ error: 'Cadencia nao esta ativa' })
-
-  const currentAttempt = lc.current_attempt_id
-    ? db.prepare('SELECT * FROM cadence_attempts WHERE id = ?').get(lc.current_attempt_id)
-    : null
-  const currentPos = currentAttempt ? currentAttempt.position : -1
-  const nextAttempt = db.prepare('SELECT * FROM cadence_attempts WHERE cadence_id = ? AND position > ? ORDER BY position LIMIT 1').get(lc.cadence_id, currentPos)
-
-  if (nextAttempt) {
-    db.prepare("UPDATE lead_cadences SET current_attempt_id = ?, last_executed_at = datetime('now'), last_executed_attempt_id = ?, updated_at = datetime('now') WHERE id = ?").run(nextAttempt.id, lc.current_attempt_id, lc.id)
-  } else {
-    db.prepare("UPDATE lead_cadences SET status = 'completed', last_executed_at = datetime('now'), last_executed_attempt_id = ?, updated_at = datetime('now') WHERE id = ?").run(lc.current_attempt_id, lc.id)
+  let r
+  try {
+    r = completeCurrentStep(db, { accountId: req.accountId, leadCadenceId: req.params.lcId, how: 'feito', userId: req.user.id })
+  } catch (e) {
+    if (e instanceof CadenceError) return res.status(e.status).json({ error: e.message, code: e.code })
+    throw e
   }
-
-  // Notify via SSE
-  const lead = db.prepare('SELECT account_id, attendant_id FROM leads WHERE id = ?').get(lc.lead_id)
-  if (lead) broadcastSSE(lead.account_id, 'task:updated', { lead_cadence_id: lc.id, attendant_id: lead.attendant_id })
-
+  broadcastSSE(r.lead.account_id, 'task:updated', { lead_cadence_id: Number(req.params.lcId), attendant_id: r.lead.attendant_id })
   let nextStep = null
-  if (nextAttempt) {
+  if (r.nextAttempt) {
     // Anchor for the newly-current step is NOW (we just completed the previous one)
     const nowIso = new Date().toISOString().slice(0, 19).replace('T', ' ')
-    const due = computeDueDatetime({
-      startedAt: lc.started_at,
-      lastExecutedAt: nowIso,
-      delay_days: nextAttempt.delay_days,
-      scheduled_time: nextAttempt.scheduled_time,
-      schedule_mode: nextAttempt.schedule_mode,
-      delay_minutes: nextAttempt.delay_minutes,
-    })
-    nextStep = {
-      position: nextAttempt.position,
-      action_type: nextAttempt.action_type,
-      description: nextAttempt.description,
-      delay_days: nextAttempt.delay_days,
-      scheduled_time: nextAttempt.scheduled_time,
-      schedule_mode: nextAttempt.schedule_mode,
-      delay_minutes: nextAttempt.delay_minutes,
-      due_datetime: due.toISOString(),
-    }
+    const n = r.nextAttempt
+    const due = computeDueDatetime({ startedAt: nowIso, lastExecutedAt: nowIso, delay_days: n.delay_days, scheduled_time: n.scheduled_time, schedule_mode: n.schedule_mode, delay_minutes: n.delay_minutes })
+    nextStep = { position: n.position, action_type: n.action_type, description: n.description, delay_days: n.delay_days, scheduled_time: n.scheduled_time, schedule_mode: n.schedule_mode, delay_minutes: n.delay_minutes, due_datetime: due.toISOString() }
   }
-  res.json({ ok: true, completed: !nextAttempt, nextStep })
+  res.json({ ok: true, completed: r.completed, nextStep })
 })
 
-// POST /api/tasks/:lcId/skip — skip current attempt without executing
+// POST /api/tasks/:lcId/skip — pula o passo atual (mesma regra, conta conferida)
 router.post('/:lcId/skip', (req, res) => {
-  const lc = db.prepare('SELECT * FROM lead_cadences WHERE id = ?').get(req.params.lcId)
-  if (!lc) return res.status(404).json({ error: 'Tarefa nao encontrada' })
-
-  const currentAttempt = lc.current_attempt_id
-    ? db.prepare('SELECT * FROM cadence_attempts WHERE id = ?').get(lc.current_attempt_id)
-    : null
-  const currentPos = currentAttempt ? currentAttempt.position : -1
-  const nextAttempt = db.prepare('SELECT * FROM cadence_attempts WHERE cadence_id = ? AND position > ? ORDER BY position LIMIT 1').get(lc.cadence_id, currentPos)
-
-  if (nextAttempt) {
-    // Skip also resets the anchor for the next step (so D+1 / X minutes start counting now)
-    db.prepare("UPDATE lead_cadences SET current_attempt_id = ?, last_executed_at = datetime('now'), last_executed_attempt_id = ?, updated_at = datetime('now') WHERE id = ?").run(nextAttempt.id, lc.current_attempt_id, lc.id)
-  } else {
-    db.prepare("UPDATE lead_cadences SET status = 'completed', last_executed_at = datetime('now'), last_executed_attempt_id = ?, updated_at = datetime('now') WHERE id = ?").run(lc.current_attempt_id, lc.id)
+  let r
+  try {
+    r = completeCurrentStep(db, { accountId: req.accountId, leadCadenceId: req.params.lcId, how: 'pulado', userId: req.user.id })
+  } catch (e) {
+    if (e instanceof CadenceError) return res.status(e.status).json({ error: e.message, code: e.code })
+    throw e
   }
-
-  const lead = db.prepare('SELECT account_id, attendant_id FROM leads WHERE id = ?').get(lc.lead_id)
-  if (lead) broadcastSSE(lead.account_id, 'task:updated', { lead_cadence_id: lc.id, attendant_id: lead.attendant_id })
-
+  broadcastSSE(r.lead.account_id, 'task:updated', { lead_cadence_id: Number(req.params.lcId), attendant_id: r.lead.attendant_id })
   res.json({ ok: true })
 })
 
