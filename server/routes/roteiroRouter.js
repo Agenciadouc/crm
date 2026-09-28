@@ -15,6 +15,7 @@ import { startAbTest, confirmVariant, keepCurrent, applySuggestion, rejectSugges
 import { pickAnthropicKey } from '../services/anthropicKeyPicker.js'
 import { buildAiDraft } from '../services/roteiro/aiDraft.js'
 import { canAtendenteAccessLead } from '../services/leadAccess.js'
+import { refreshLeadStageCadence } from '../services/cadence/leadCadence.js'
 
 const MANAGER_ROLES = ['super_admin', 'gerente']
 
@@ -223,6 +224,7 @@ export function createRoteiroRouter(db, { ai = null, now = () => new Date() } = 
         userId: req.user.id,
       })
       markAnswered(db, { leadId: lead.id, questionKey: req.params.questionKey, now: now() })
+      try { refreshLeadStageCadence(db, { leadId: lead.id }) } catch (e) { if (!/no such table/.test(e.message)) console.error('[Cadencia] proximo passo:', e.message) }
       const advanced = maybeAutoAdvance(db, { accountId: req.accountId, leadId: lead.id, userId: req.user.id })
       scheduleScore(lead.id)
       const roteiro = getLeadRoteiro(db, { accountId: req.accountId, leadId: lead.id })

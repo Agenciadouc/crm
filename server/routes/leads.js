@@ -4,6 +4,7 @@ import { requireRole } from '../middleware/auth.js'
 import { broadcastSSE } from '../sse.js'
 import { triggerCapiForStageChange } from '../services/metaCapi.js'
 import { moveLeadToStage, resolveManualMove, bulkMoveLeads } from '../services/stageMove.js'
+import { ensureStageCadence } from '../services/cadence/leadCadence.js'
 import { markBought } from '../services/roteiro/asks.js'
 import { scheduleScore } from '../services/leadScore/recalc.js'
 import { notifyAndOpenLead } from '../services/leadHandoff.js'
@@ -223,6 +224,7 @@ router.post('/', (req, res) => {
   const histRes = db.prepare('INSERT INTO stage_history (lead_id, to_stage_id, trigger_type, triggered_by) VALUES (?, ?, ?, ?)').run(
     result.lastInsertRowid, firstStage.id, 'manual', req.user.id
   )
+  try { ensureStageCadence(db, { leadId: Number(result.lastInsertRowid) }) } catch (e) { if (!/no such table/.test(e.message)) console.error('[Cadencia] etapa do lead novo:', e.message) }
 
   const lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(result.lastInsertRowid)
 

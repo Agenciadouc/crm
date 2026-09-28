@@ -5,6 +5,7 @@ import { configureStageMoveHooks } from '../stageMove.js'
 import { configureScoreRuntime, scheduleScore } from '../leadScore/recalc.js'
 import { markAdvanced, markBought, markReplied, recordAsk } from './asks.js'
 import { getLeadRoteiro } from './leadRoteiro.js'
+import { refreshLeadStageCadence } from '../cadence/leadCadence.js'
 import { recognizeQuestion } from './recognize.js'
 import { createExtractQueue, extractAnswers, EXTRACT_DELAY_MS } from './aiExtract.js'
 
@@ -74,7 +75,10 @@ export function bootRoteiroAi({ db, ai, delayMs = EXTRACT_DELAY_MS, setTimer, cl
     run: async ({ lead }) => {
       const r = await extractAnswers(db, { accountId: lead.account_id, leadId: lead.id, ai })
       if (!r.saved.length && !r.offscript) return
-      if (r.saved.length) { try { scheduleFn(lead.id) } catch (e) { console.error('[Roteiro] agendar nota:', e.message) } }
+      if (r.saved.length) {
+        try { refreshLeadStageCadence(db, { leadId: lead.id }) } catch (e) { if (!/no such table/.test(e.message)) console.error('[Cadencia] proximo passo:', e.message) }
+        try { scheduleFn(lead.id) } catch (e) { console.error('[Roteiro] agendar nota:', e.message) }
+      }
       // advanced: a IA completou a etapa e o lead avancou -> cartao mostra o banner com Desfazer
       try { broadcastFn(lead.account_id, 'lead:roteiro', { lead_id: lead.id, offscript: r.offscript, advanced: r.advanced || null }) } catch (e) { console.error('[Roteiro] SSE lead:roteiro:', e.message) }
     },

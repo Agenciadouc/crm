@@ -1,6 +1,7 @@
 // Porta unica de troca de etapa do lead (spec 7.2). Grava historico e chama o hook de
 // producao (CAPI, recalculo de nota, asks, SSE). Nao importa server/db.js: recebe db.
 import { checkRoteiroGate } from './roteiro/leadRoteiro.js'
+import { onStageMoved } from './cadence/leadCadence.js'
 
 let onMovedHook = () => {}
 
@@ -42,6 +43,15 @@ export function moveLeadToStage(db, { lead, toStageId, trigger, userId = null, n
     `).run(current.id, fromStageId, toStageId, trigger, userId, notes)
     historyId = Number(info.lastInsertRowid)
   })()
+
+  // Cadencia da etapa: fecha a da etapa anterior e abre a da nova (spec 2026-09-27 §4.1).
+  // Fora da transacao: se falhar, a troca de etapa continua valendo. Banco sem as tabelas
+  // de cadencia (testes antigos) nao loga.
+  try {
+    onStageMoved(db, { leadId: current.id, trigger })
+  } catch (e) {
+    if (!/no such table/.test(e.message)) console.error('[stageMove] cadencia da etapa:', e.message)
+  }
 
   try {
     onMovedHook({ db, lead: current, fromStageId, toStageId, historyId, trigger, silent })
