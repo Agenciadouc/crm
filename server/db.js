@@ -11,6 +11,7 @@ import { applyRoteiroSchema } from './services/roteiro/schema.js'
 import { migrateLegacyQualifications } from './services/roteiro/migrateLegacy.js'
 import { applyCadenceSchema } from './services/cadence/schema.js'
 import { migrateStageCadences } from './services/cadence/migrateStageCadences.js'
+import { applyPanelLayoutSchema } from './services/panelLayouts.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const dbPath = resolve(__dirname, 'data', 'crm.db')
@@ -1503,6 +1504,13 @@ try {
   if (!r.skipped && r.cadences) console.log(`[Cadencia] migracao: ${r.cadences} cadencias de etapa, ${r.leads} leads, ${r.accounts} contas`)
 } catch (err) {
   console.error('[Cadencia] migracao das cadencias da etapa:', err.message)
+}
+
+// "Arrumar" a aba Atendimento: ordem/visibilidade por conta e por vendedor (idempotente).
+try {
+  applyPanelLayoutSchema(db)
+} catch (err) {
+  console.error('[DB] panel_layouts (Arrumar) FALHOU:', err.message)
 }
 
 export default db

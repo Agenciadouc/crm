@@ -21,6 +21,7 @@ import webhookRoutes from './routes/webhooks.js'
 import integrationRoutes from './routes/integrations.js'
 import broadcastRoutes from './routes/broadcasts.js'
 import cadenceRoutes from './routes/cadences.js'
+import panelLayoutRoutes from './routes/panelLayouts.js'
 import readyMessageRoutes from './routes/ready-messages.js'
 import qualificationRoutes from './routes/qualifications.js'
 import launchRoutes from './routes/launches.js'
@@ -97,6 +98,7 @@ app.use('/api/dashboard', authenticate, scopeToAccount, dashboardRoutes)
 app.use('/api/integrations', authenticate, scopeToAccount, integrationRoutes)
 app.use('/api/broadcasts', authenticate, scopeToAccount, broadcastRoutes)
 app.use('/api/cadences', authenticate, scopeToAccount, cadenceRoutes)
+app.use('/api/panel-layouts', authenticate, scopeToAccount, panelLayoutRoutes)
 app.use('/api/ready-messages', authenticate, scopeToAccount, readyMessageRoutes)
 app.use('/api/qualifications', authenticate, scopeToAccount, qualificationRoutes)
 app.use('/api/launches', authenticate, scopeToAccount, launchRoutes)

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo, Fragment } from 'react'
 import { useLocation } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { useAccount } from '../context/AccountContext'
@@ -29,6 +29,9 @@ import { isScoreBand } from '../lib/score'
 import NextStepCard from '../components/cadence/NextStepCard'
 import StepReviewModal from '../components/cadence/StepReviewModal'
 import HelpTip from '../components/HelpTip'
+import PanelLayoutEditor from '../components/PanelLayoutEditor'
+import { resolveLayout, visibleIds, type AtendimentoBlockId, type PanelBlock, type SavedLayouts } from '../lib/panelLayout.js'
+import { fetchAtendimentoLayouts, saveMyAtendimentoLayout, saveAccountAtendimentoLayout, resetMyAtendimentoLayout } from '../lib/panelLayoutApi'
 import { fetchLeadStageCadence } from '../lib/cadenceApi'
 import {
   reviewPosition, reviewTitle, reviewFromPendingAsk, reviewSendKeys, boxKeysAfterReviewSend, offerRecognition,
@@ -43,7 +46,7 @@ import {
   MessageCircle, Search, Send, Phone, User, Edit3, Save, X, Plus,
   StickyNote, Tag as TagIcon, Smartphone, ListOrdered, ChevronRight, Check, Clock, Archive, Ban, ListTodo, ChevronDown, ChevronUp, Trash2, Paperclip, FileText, MessageSquarePlus, Copy, Zap, Pause, Play, Bot,
   Menu as MenuIcon, MessagesSquare, Info as InfoIcon, ListChecks, ChevronLeft,
-  DollarSign,
+  DollarSign, SlidersHorizontal,
 } from 'lucide-react'
 import MessageMedia from '../components/MessageMedia'
 import AudioRecorder from '../components/AudioRecorder'
@@ -230,6 +233,21 @@ export default function Chat() {
   const [cadenceMsgText, setCadenceMsgText] = useState('')
   const [scriptModal, setScriptModal] = useState<{ text: string } | null>(null)
   const [sendCadenceModal, setSendCadenceModal] = useState(false)
+  // "Arrumar" a aba Atendimento: layouts salvos (conta e meu), modo arrumar aberto
+  const [savedLayouts, setSavedLayouts] = useState<SavedLayouts | null>(null)
+  const [arrangingLayout, setArrangingLayout] = useState(false)
+  const layoutAccountRef = useRef<number | null>(null)
+  const atendimentoLayout = useMemo(() => resolveLayout(savedLayouts), [savedLayouts])
+  useEffect(() => {
+    layoutAccountRef.current = accountId ?? null
+    setSavedLayouts(null)
+    setArrangingLayout(false)
+    if (!accountId) return
+    const acc = accountId
+    fetchAtendimentoLayouts(acc)
+      .then(d => { if (layoutAccountRef.current === acc) setSavedLayouts(d) })
+      .catch(e => console.warn('[Arrumar] nao carregou o layout, usando o padrao:', e?.message))
+  }, [accountId])
   const chatEndRef = useRef<HTMLDivElement>(null)
 
   // Load instances + globals
@@ -1373,6 +1391,119 @@ export default function Chat() {
   const availableTags = lead ? tags.filter(t => !lead.tags?.some(lt => lt.id === t.id)) : []
   // Titulo das secoes da aba Atendimento (mesmo estilo dos cartoes da aba Info)
   const sectionHeadStyle: React.CSSProperties = { fontSize: 10, color: '#9B96B0', textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: 3, marginBottom: 4 }
+  // Cartao "Informacoes" da aba Info = bloco "Dados do contato" da Atendimento (mesmo estado e mesma edicao).
+  // So uma aba aparece por vez, entao o estado de edicao compartilhado nao aparece duas vezes.
+  const renderContatoCard = (lead: Lead) => (
+    <div className="card" style={{ padding: 12, marginBottom: 12 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: infoCollapsed ? 0 : 8 }}>
+        <div onClick={() => { if (!editing) { setInfoCollapsed(p => { const v = !p; localStorage.setItem('chat_info_collapsed', v ? '1' : '0'); return v }) } }} style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: editing ? 'default' : 'pointer', flex: 1 }}>
+          {!editing && (infoCollapsed ? <ChevronDown size={12} style={{ color: '#9B96B0' }} /> : <ChevronUp size={12} style={{ color: '#9B96B0' }} />)}
+          <div style={{ fontSize: 10, color: '#9B96B0', textTransform: 'uppercase' }}>Informacoes</div>
+        </div>
+        {!editing ? (
+          <button className="btn btn-secondary btn-sm" onClick={() => { setInfoCollapsed(false); setEditing(true) }} style={{ padding: '2px 6px', fontSize: 10 }}><Edit3 size={10} /></button>
+        ) : (
+          <div style={{ display: 'flex', gap: 2 }}>
+            <button className="btn btn-primary btn-sm" onClick={handleSaveEdit} style={{ padding: '2px 6px', fontSize: 10 }}><Save size={10} /></button>
+            <button className="btn btn-secondary btn-sm" onClick={() => setEditing(false)} style={{ padding: '2px 6px', fontSize: 10 }}><X size={10} /></button>
+          </div>
+        )}
+      </div>
+      {!infoCollapsed && (editing ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <input className="input" placeholder="Nome" value={editData.name} onChange={e => setEditData(p => ({ ...p, name: e.target.value }))} style={{ fontSize: 12 }} />
+          <input className="input" placeholder="Telefone" value={editData.phone} onChange={e => setEditData(p => ({ ...p, phone: e.target.value }))} style={{ fontSize: 12 }} />
+          <input className="input" placeholder="Email" value={editData.email} onChange={e => setEditData(p => ({ ...p, email: e.target.value }))} style={{ fontSize: 12 }} />
+          <input className="input" placeholder="Cidade" value={editData.city} onChange={e => setEditData(p => ({ ...p, city: e.target.value }))} style={{ fontSize: 12 }} />
+          <input className="input" placeholder="Nome da Empresa" value={editData.empresa} onChange={e => setEditData(p => ({ ...p, empresa: e.target.value }))} style={{ fontSize: 12 }} />
+          <input className="input" placeholder="CPF/CNPJ" value={editData.cpf_cnpj} onChange={e => setEditData(p => ({ ...p, cpf_cnpj: e.target.value }))} style={{ fontSize: 12 }} />
+          <input className="input" placeholder="Instagram (@perfil)" value={editData.instagram} onChange={e => setEditData(p => ({ ...p, instagram: e.target.value }))} style={{ fontSize: 12 }} />
+        </div>
+      ) : (
+        <div style={{ fontSize: 11, display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <div><span style={{ color: '#6B6580' }}>Nome:</span> {lead.name || '-'}</div>
+          <div><span style={{ color: '#6B6580' }}>Tel:</span> {lead.phone || '-'} {lead.phone && lead.phone.replace(/\D/g,'').length !== 13 && <span style={{ color: '#FF6B6B', fontSize: 9 }}>⚠ numero incompleto</span>}</div>
+          <div><span style={{ color: '#6B6580' }}>Email:</span> {lead.email || '-'}</div>
+          <div><span style={{ color: '#6B6580' }}>Cidade:</span> {lead.city || '-'}</div>
+          {lead.empresa && <div><span style={{ color: '#6B6580' }}>Empresa:</span> {lead.empresa}</div>}
+          {lead.cpf_cnpj && <div><span style={{ color: '#6B6580' }}>CPF/CNPJ:</span> {lead.cpf_cnpj}</div>}
+          {lead.instagram && <div><span style={{ color: '#6B6580' }}>Instagram:</span> {lead.instagram}</div>}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            <span style={{ color: '#6B6580' }}>Disparos:</span>
+            {!lead.opted_out_at || (lead.opted_in_at && lead.opted_in_at > lead.opted_out_at)
+              ? <span style={{ color: '#34C759', fontSize: 11 }}>Sim</span>
+              : <span style={{ color: '#FF6B6B', fontSize: 11 }}>Bloqueado</span>}
+          </div>
+          <div><span style={{ color: '#6B6580' }}>Fonte:</span> {lead.source || '-'}</div>
+          <div><span style={{ color: '#6B6580' }}>Criado:</span> {parseSqlDate(lead.created_at).toLocaleDateString('pt-BR')}</div>
+        </div>
+      ))}
+    </div>
+  )
+  // Cartao "Observacoes" da aba Info = bloco "observacoes" da Atendimento.
+  const renderObservacoesCard = (lead: Lead) => (
+    <div className="card" style={{ padding: 12, marginBottom: 12 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: notesCollapsed ? 0 : 6 }}>
+        <div onClick={() => { if (!editingNotes) { setNotesCollapsed(p => { const v = !p; localStorage.setItem('chat_notes_collapsed', v ? '1' : '0'); return v }) } }} style={{ fontSize: 10, color: '#9B96B0', textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: 3, cursor: editingNotes ? 'default' : 'pointer', flex: 1 }}>
+          {!editingNotes && (notesCollapsed ? <ChevronDown size={12} style={{ color: '#9B96B0' }} /> : <ChevronUp size={12} style={{ color: '#9B96B0' }} />)}
+          <FileText size={10} /> Observacoes
+        </div>
+        {!editingNotes ? (
+          <button className="btn btn-secondary btn-sm" onClick={() => { setNotesCollapsed(false); setNotesDraft(lead.notes || ''); setEditingNotes(true) }} style={{ padding: '2px 6px' }}><Edit3 size={10} /></button>
+        ) : (
+          <div style={{ display: 'flex', gap: 4 }}>
+            <button className="btn btn-primary btn-sm" disabled={savingNotes} onClick={async () => {
+              setSavingNotes(true)
+              try { await updateLead(lead.id, { notes: notesDraft }); await loadLead(); setEditingNotes(false) }
+              catch (e: any) { setNotice({ kind: 'error', title: 'Erro ao salvar', message: e.message }) }
+              setSavingNotes(false)
+            }} style={{ padding: '2px 6px' }}><Save size={10} /></button>
+            <button className="btn btn-secondary btn-sm" onClick={() => setEditingNotes(false)} style={{ padding: '2px 6px' }}><X size={10} /></button>
+          </div>
+        )}
+      </div>
+      {!notesCollapsed && (editingNotes ? (
+        <textarea className="input" value={notesDraft} onChange={e => setNotesDraft(e.target.value)} rows={4} style={{ width: '100%', resize: 'vertical', fontSize: 11, lineHeight: 1.4 }} placeholder="Anotacoes sobre o lead..." />
+      ) : (
+        lead.notes ? (
+          <div style={{ fontSize: 11, color: '#C8C4D4', whiteSpace: 'pre-wrap', lineHeight: 1.4 }}>{lead.notes}</div>
+        ) : (
+          <div style={{ fontSize: 10, color: '#6B6580' }}>Sem observacoes</div>
+        )
+      ))}
+    </div>
+  )
+
+  // "Arrumar" a aba Atendimento: salvar para mim / padrao da conta / voltar ao padrao.
+  // So aplica a resposta se a conta ainda for a mesma (trocar de conta recarrega tudo).
+  const handleSaveMyLayout = async (layout: PanelBlock[]) => {
+    if (!accountId) return
+    const acc = accountId
+    const saved = await saveMyAtendimentoLayout(acc, layout)
+    if (layoutAccountRef.current !== acc) return
+    setSavedLayouts(p => ({ account: p?.account ?? null, user: saved }))
+    setArrangingLayout(false)
+  }
+  const handleSaveAccountLayout = async (layout: PanelBlock[]) => {
+    if (!accountId) return
+    const acc = accountId
+    const saved = await saveAccountAtendimentoLayout(acc, layout)
+    if (layoutAccountRef.current !== acc) return
+    const ownStill = !!savedLayouts?.user
+    setSavedLayouts(p => ({ account: saved, user: p?.user ?? null }))
+    setArrangingLayout(false)
+    setNotice(ownStill
+      ? { kind: 'info', title: 'Padrão da conta salvo', message: 'Quem não arrumou do seu jeito já vê assim. Você continua vendo o seu jeito: para ver o da conta, clique em Arrumar e depois em Voltar ao padrão.' }
+      : { kind: 'success', title: 'Padrão da conta salvo', message: 'Quem não arrumou do seu jeito já vê a aba Atendimento assim.' })
+  }
+  const handleResetMyLayout = async () => {
+    if (!accountId) return
+    const acc = accountId
+    await resetMyAtendimentoLayout(acc)
+    if (layoutAccountRef.current !== acc) return
+    setSavedLayouts(p => ({ account: p?.account ?? null, user: null }))
+    setArrangingLayout(false)
+  }
 
   if (user?.role === 'atendente' && !user?.primary_instance_id) {
     return (
@@ -1877,10 +2008,29 @@ export default function Chat() {
             </div>
 
             <div style={{ flex: 1, overflowY: 'auto', padding: 12 }}>
-              {rightTab === 'atendimento' && accountId && (
-                <>
+              {rightTab === 'atendimento' && accountId && (() => {
+                if (arrangingLayout) {
+                  return (
+                    <PanelLayoutEditor
+                      initial={atendimentoLayout.layout}
+                      source={atendimentoLayout.source}
+                      hasOwn={!!savedLayouts?.user}
+                      canSaveAccount={user?.role === 'gerente' || user?.role === 'super_admin'}
+                      onSaveMine={handleSaveMyLayout}
+                      onSaveAccount={handleSaveAccountLayout}
+                      onReset={handleResetMyLayout}
+                      onCancel={() => setArrangingLayout(false)}
+                    />
+                  )
+                }
+                // Cada bloco da aba (ids estaveis de panelLayout.js). A ordem e o que aparece vem do "Arrumar"
+                // (vendedor > conta > fabrica); o padrao de fabrica e a aba de sempre.
+                const blocks: Record<AtendimentoBlockId, () => React.ReactNode> = {
+                  score: () => (<>
                   {/* 1. Termometro em uma linha (clique expande) */}
                   <ScoreLine key={`score-${lead.id}`} leadId={lead.id} accountId={accountId} />
+                  </>),
+                  atendente: () => (<>
                   {/* 2. Quem atende o lead: gerente/admin troca (mesmo modal de antes); vendedor so ve o nome */}
                   {(() => {
                     const av = attendantView({ role: user?.role, attendantId: lead.attendant_id ?? null, attendants, fallbackName: lead.attendant_name })
@@ -1901,6 +2051,8 @@ export default function Chat() {
                       </div>
                     )
                   })()}
+                  </>),
+                  etapa: () => (<>
                   {/* 3. Etapa do funil: seletor grande; passa pela trava (Falta saber) e pela venda (handleStageChange) */}
                   <div style={{ marginBottom: 12 }}>
                     <div style={sectionHeadStyle}>
@@ -1917,6 +2069,10 @@ export default function Chat() {
                       {allStages.filter(s => s.funnel_id === lead.funnel_id).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                     </select>
                   </div>
+                  </>),
+                  // Dados do contato e Observacoes: o mesmo cartao da aba Info (mesma edicao e permissoes)
+                  contato: () => renderContatoCard(lead),
+                  tags: () => (<>
                   {/* 4. Tags do lead (veio da aba Info) */}
                   <div className="card" style={{ padding: 12, marginBottom: 12 }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: tagsCollapsed ? 0 : 6 }}>
@@ -1959,7 +2115,8 @@ export default function Chat() {
                       </div>
                     )}
                   </div>
-
+                  </>),
+                  proximo_passo: () => (<>
                   {/* 5. Proximo passo da cadencia da etapa: [Perguntar]/[Enviar] abrem a janela Conferir mensagem */}
                   <NextStepCard
                     key={`cad-${lead.id}`}
@@ -1972,6 +2129,8 @@ export default function Chat() {
                     reloadSignal={nextStepReload}
                     canManage={user?.role === 'gerente' || user?.role === 'super_admin'}
                   />
+                  </>),
+                  avulsa: () => (<>
                   {/* 5b. Cadencia avulsa do lead (veio da aba Info, com [Feito]/avancar como antes) */}
                   <div className="card" style={{ padding: 12, marginBottom: 12 }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
@@ -2052,7 +2211,8 @@ export default function Chat() {
                       <div style={{ fontSize: 11, color: '#6B6580' }}>Nenhuma cadência avulsa. Ex.: clique em Atribuir e escolha "Pós-venda"</div>
                     ))}
                   </div>
-
+                  </>),
+                  tarefas: () => (<>
                   {/* 6. Tarefas pendentes do lead (avulsas + passo de cadencia que virou tarefa) + [+ tarefa] */}
                   {(() => {
                     const rows = leadTaskRows(leadTasks, lead.id)
@@ -2165,7 +2325,8 @@ export default function Chat() {
                       </div>
                     )
                   })()}
-
+                  </>),
+                  vendas: () => (<>
                   {/* 7. Vendas do lead — total + lista + [+ venda] (veio da aba Info) */}
                   <div className="card" style={{ padding: 12, marginBottom: 12 }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
@@ -2211,89 +2372,29 @@ export default function Chat() {
                       </div>
                     )}
                   </div>
-                </>
-              )}
+                  </>),
+                  observacoes: () => renderObservacoesCard(lead),
+                }
+                return (
+                  <>
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 4, marginBottom: 8 }}>
+                      <button className="btn btn-secondary btn-sm" onClick={() => setArrangingLayout(true)} style={{ padding: '2px 8px', fontSize: 10 }} title="Mude a ordem e escolha o que aparece. Ex.: esconda Vendas e suba Tarefas.">
+                        <SlidersHorizontal size={10} /> Arrumar
+                      </button>
+                      <HelpTip title="Arrumar">Mude a ordem e escolha o que aparece. Ex.: esconda Vendas e suba Tarefas.</HelpTip>
+                    </div>
+                    {visibleIds(atendimentoLayout.layout).map(id => <Fragment key={id}>{blocks[id]()}</Fragment>)}
+                  </>
+                )
+              })()}
 
               {rightTab === 'info' && (
                 <>
-                  {/* Info */}
-                  <div className="card" style={{ padding: 12, marginBottom: 12 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: infoCollapsed ? 0 : 8 }}>
-                      <div onClick={() => { if (!editing) { setInfoCollapsed(p => { const v = !p; localStorage.setItem('chat_info_collapsed', v ? '1' : '0'); return v }) } }} style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: editing ? 'default' : 'pointer', flex: 1 }}>
-                        {!editing && (infoCollapsed ? <ChevronDown size={12} style={{ color: '#9B96B0' }} /> : <ChevronUp size={12} style={{ color: '#9B96B0' }} />)}
-                        <div style={{ fontSize: 10, color: '#9B96B0', textTransform: 'uppercase' }}>Informacoes</div>
-                      </div>
-                      {!editing ? (
-                        <button className="btn btn-secondary btn-sm" onClick={() => { setInfoCollapsed(false); setEditing(true) }} style={{ padding: '2px 6px', fontSize: 10 }}><Edit3 size={10} /></button>
-                      ) : (
-                        <div style={{ display: 'flex', gap: 2 }}>
-                          <button className="btn btn-primary btn-sm" onClick={handleSaveEdit} style={{ padding: '2px 6px', fontSize: 10 }}><Save size={10} /></button>
-                          <button className="btn btn-secondary btn-sm" onClick={() => setEditing(false)} style={{ padding: '2px 6px', fontSize: 10 }}><X size={10} /></button>
-                        </div>
-                      )}
-                    </div>
-                    {!infoCollapsed && (editing ? (
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                        <input className="input" placeholder="Nome" value={editData.name} onChange={e => setEditData(p => ({ ...p, name: e.target.value }))} style={{ fontSize: 12 }} />
-                        <input className="input" placeholder="Telefone" value={editData.phone} onChange={e => setEditData(p => ({ ...p, phone: e.target.value }))} style={{ fontSize: 12 }} />
-                        <input className="input" placeholder="Email" value={editData.email} onChange={e => setEditData(p => ({ ...p, email: e.target.value }))} style={{ fontSize: 12 }} />
-                        <input className="input" placeholder="Cidade" value={editData.city} onChange={e => setEditData(p => ({ ...p, city: e.target.value }))} style={{ fontSize: 12 }} />
-                        <input className="input" placeholder="Nome da Empresa" value={editData.empresa} onChange={e => setEditData(p => ({ ...p, empresa: e.target.value }))} style={{ fontSize: 12 }} />
-                        <input className="input" placeholder="CPF/CNPJ" value={editData.cpf_cnpj} onChange={e => setEditData(p => ({ ...p, cpf_cnpj: e.target.value }))} style={{ fontSize: 12 }} />
-                        <input className="input" placeholder="Instagram (@perfil)" value={editData.instagram} onChange={e => setEditData(p => ({ ...p, instagram: e.target.value }))} style={{ fontSize: 12 }} />
-                      </div>
-                    ) : (
-                      <div style={{ fontSize: 11, display: 'flex', flexDirection: 'column', gap: 4 }}>
-                        <div><span style={{ color: '#6B6580' }}>Nome:</span> {lead.name || '-'}</div>
-                        <div><span style={{ color: '#6B6580' }}>Tel:</span> {lead.phone || '-'} {lead.phone && lead.phone.replace(/\D/g,'').length !== 13 && <span style={{ color: '#FF6B6B', fontSize: 9 }}>⚠ numero incompleto</span>}</div>
-                        <div><span style={{ color: '#6B6580' }}>Email:</span> {lead.email || '-'}</div>
-                        <div><span style={{ color: '#6B6580' }}>Cidade:</span> {lead.city || '-'}</div>
-                        {lead.empresa && <div><span style={{ color: '#6B6580' }}>Empresa:</span> {lead.empresa}</div>}
-                        {lead.cpf_cnpj && <div><span style={{ color: '#6B6580' }}>CPF/CNPJ:</span> {lead.cpf_cnpj}</div>}
-                        {lead.instagram && <div><span style={{ color: '#6B6580' }}>Instagram:</span> {lead.instagram}</div>}
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                          <span style={{ color: '#6B6580' }}>Disparos:</span>
-                          {!lead.opted_out_at || (lead.opted_in_at && lead.opted_in_at > lead.opted_out_at)
-                            ? <span style={{ color: '#34C759', fontSize: 11 }}>Sim</span>
-                            : <span style={{ color: '#FF6B6B', fontSize: 11 }}>Bloqueado</span>}
-                        </div>
-                        <div><span style={{ color: '#6B6580' }}>Fonte:</span> {lead.source || '-'}</div>
-                        <div><span style={{ color: '#6B6580' }}>Criado:</span> {parseSqlDate(lead.created_at).toLocaleDateString('pt-BR')}</div>
-                      </div>
-                    ))}
-                  </div>
+                  {/* Informacoes: o mesmo cartao e o bloco "Dados do contato" da aba Atendimento */}
+                  {renderContatoCard(lead)}
 
-                  {/* Observacoes */}
-                  <div className="card" style={{ padding: 12, marginBottom: 12 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: notesCollapsed ? 0 : 6 }}>
-                      <div onClick={() => { if (!editingNotes) { setNotesCollapsed(p => { const v = !p; localStorage.setItem('chat_notes_collapsed', v ? '1' : '0'); return v }) } }} style={{ fontSize: 10, color: '#9B96B0', textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: 3, cursor: editingNotes ? 'default' : 'pointer', flex: 1 }}>
-                        {!editingNotes && (notesCollapsed ? <ChevronDown size={12} style={{ color: '#9B96B0' }} /> : <ChevronUp size={12} style={{ color: '#9B96B0' }} />)}
-                        <FileText size={10} /> Observacoes
-                      </div>
-                      {!editingNotes ? (
-                        <button className="btn btn-secondary btn-sm" onClick={() => { setNotesCollapsed(false); setNotesDraft(lead.notes || ''); setEditingNotes(true) }} style={{ padding: '2px 6px' }}><Edit3 size={10} /></button>
-                      ) : (
-                        <div style={{ display: 'flex', gap: 4 }}>
-                          <button className="btn btn-primary btn-sm" disabled={savingNotes} onClick={async () => {
-                            setSavingNotes(true)
-                            try { await updateLead(lead.id, { notes: notesDraft }); await loadLead(); setEditingNotes(false) }
-                            catch (e: any) { setNotice({ kind: 'error', title: 'Erro ao salvar', message: e.message }) }
-                            setSavingNotes(false)
-                          }} style={{ padding: '2px 6px' }}><Save size={10} /></button>
-                          <button className="btn btn-secondary btn-sm" onClick={() => setEditingNotes(false)} style={{ padding: '2px 6px' }}><X size={10} /></button>
-                        </div>
-                      )}
-                    </div>
-                    {!notesCollapsed && (editingNotes ? (
-                      <textarea className="input" value={notesDraft} onChange={e => setNotesDraft(e.target.value)} rows={4} style={{ width: '100%', resize: 'vertical', fontSize: 11, lineHeight: 1.4 }} placeholder="Anotacoes sobre o lead..." />
-                    ) : (
-                      lead.notes ? (
-                        <div style={{ fontSize: 11, color: '#C8C4D4', whiteSpace: 'pre-wrap', lineHeight: 1.4 }}>{lead.notes}</div>
-                      ) : (
-                        <div style={{ fontSize: 10, color: '#6B6580' }}>Sem observacoes</div>
-                      )
-                    ))}
-                  </div>
+                  {/* Observacoes (tambem pode aparecer na aba Atendimento) */}
+                  {renderObservacoesCard(lead)}
 
                   {/* Follow-ups automaticos (o WhatsApp envia): continuam na aba Info */}
                   <div className="card" style={{ padding: 12, marginBottom: 12 }}>
