@@ -1,10 +1,48 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createTestDb, seedBasic, TEST_TOKEN } from './helpers/db.js'
-import { createWebhookRegistrar } from '../server/services/whatsapp/webhookRegistration.js'
+import { createWebhookRegistrar, LEGACY_EVOLUTION_WEBHOOK_EVENTS } from '../server/services/whatsapp/webhookRegistration.js'
 import { apiUrlKey, checkApiUrlsAlive } from '../server/services/whatsapp/evolutionHealth.js'
 
 const env = { PUBLIC_BASE_URL: 'https://crm.exemplo.com/crm' }
+
+// Pedido do dono (2026-09-27): numero Evolution ja conectado no upgrade mantem o webhook de hoje.
+test('instancia webhook_mode legacy: registra a URL antiga por slug da conta, com os eventos de producao (PUBLIC_BASE_URL default)', async () => {
+  const db = createTestDb()
+  const { account, instance } = seedBasic(db)
+  db.prepare("UPDATE whatsapp_instances SET webhook_mode = 'legacy' WHERE id = ?").run(instance.id)
+  const legacy = db.prepare('SELECT * FROM whatsapp_instances WHERE id = ?').get(instance.id)
+  const calls = []
+  const provider = { registerWebhook: async (i, url, events) => { calls.push([i.id, url, events]) } }
+  // env vazio: PUBLIC_BASE_URL usa o default, que deve bater com a URL fixa que a producao usa hoje.
+  const r = await createWebhookRegistrar({ db, getProvider: () => provider, env: {} }).registerInstanceWebhook(legacy)
+  assert.deepEqual(r, { ok: true, url: `https://drosagencia.com.br/crm/api/webhooks/evolution/${account.slug}` })
+  assert.deepEqual(calls, [[legacy.id, r.url, LEGACY_EVOLUTION_WEBHOOK_EVENTS]])
+  assert.deepEqual(LEGACY_EVOLUTION_WEBHOOK_EVENTS, ['MESSAGES_UPSERT'])
+})
+
+test('instancia webhook_mode token (ou NULL): continua usando a URL nova por token, nao a legada', async () => {
+  const db = createTestDb()
+  const { instance } = seedBasic(db)
+  db.prepare("UPDATE whatsapp_instances SET webhook_mode = 'token' WHERE id = ?").run(instance.id)
+  const tokenInst = db.prepare('SELECT * FROM whatsapp_instances WHERE id = ?').get(instance.id)
+  const calls = []
+  const provider = { registerWebhook: async (i, url, events) => { calls.push([i.id, url, events]) } }
+  const r = await createWebhookRegistrar({ db, getProvider: () => provider, env }).registerInstanceWebhook(tokenInst)
+  assert.deepEqual(r, { ok: true, url: `https://crm.exemplo.com/crm/api/webhooks/whatsapp/${TEST_TOKEN}` })
+})
+
+test('webhook_mode legacy so vale pra Evolution: numero de outro provedor nao usa a URL legada mesmo se marcado', async () => {
+  const db = createTestDb()
+  const { instance } = seedBasic(db)
+  db.prepare("UPDATE whatsapp_instances SET webhook_mode = 'legacy', provider = 'uzapi' WHERE id = ?").run(instance.id)
+  const uzapiLegacy = db.prepare('SELECT * FROM whatsapp_instances WHERE id = ?').get(instance.id)
+  const calls = []
+  const provider = { registerWebhook: async (i, url) => { calls.push(url) } }
+  const r = await createWebhookRegistrar({ db, getProvider: () => provider, env }).registerInstanceWebhook(uzapiLegacy)
+  assert.equal(r.url, `https://crm.exemplo.com/crm/api/webhooks/whatsapp/${TEST_TOKEN}`)
+  assert.deepEqual(calls, [r.url])
+})
 
 test('registra a URL por token no provedor', async () => {
   const db = createTestDb()

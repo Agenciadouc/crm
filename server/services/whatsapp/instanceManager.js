@@ -111,8 +111,8 @@ export function createInstanceManager({
     try {
       const providerConfig = buildUzapiConfig(created, env)
       const r = db.prepare(`
-        INSERT INTO whatsapp_instances (account_id, instance_name, api_url, api_key, status, qr_code, lead_intake_mode, warmup_until, provider, provider_config, webhook_token)
-        VALUES (?, ?, '', '', 'connecting', ?, ?, datetime('now', '+3 days'), 'uzapi', ?, ?)
+        INSERT INTO whatsapp_instances (account_id, instance_name, api_url, api_key, status, qr_code, lead_intake_mode, warmup_until, provider, provider_config, webhook_token, webhook_mode)
+        VALUES (?, ?, '', '', 'connecting', ?, ?, datetime('now', '+3 days'), 'uzapi', ?, ?, 'token')
       `).run(accountId, instanceName, created.qr || null, leadIntakeMode, providerConfig, webhookToken)
       instance = byId(r.lastInsertRowid)
       logConnectionEvent(db, instance, 'created')
