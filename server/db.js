@@ -9,6 +9,7 @@ import { registerCityFunctions, normalizeExistingCities } from './services/city.
 import { applyGeoSchema } from './services/geo.js'
 import { applyRoteiroSchema } from './services/roteiro/schema.js'
 import { migrateLegacyQualifications } from './services/roteiro/migrateLegacy.js'
+import { applyCadenceSchema } from './services/cadence/schema.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const dbPath = resolve(__dirname, 'data', 'crm.db')
@@ -1484,6 +1485,15 @@ try {
   migrateLegacyQualifications(db)
 } catch (err) {
   console.error('[Roteiro] migracao da qualificacao antiga:', err.message)
+}
+
+// Cadencia da etapa: colunas novas, passos feitos e cadence_attempts aceitando 'pergunta'
+// (reconstroi a tabela mantendo os ids; idempotente).
+try {
+  const r = applyCadenceSchema(db)
+  if (r.rebuilt) console.log(`[DB] cadence_attempts reconstruida: ${r.count} passos, ids mantidos`)
+} catch (err) {
+  console.error('[DB] cadencia da etapa (schema) FALHOU:', err.message)
 }
 
 export default db
