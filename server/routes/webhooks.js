@@ -8,7 +8,7 @@ import { sendBotWelcomeForSheetsLead } from '../services/aiAgent.js'
 import { notifyAndOpenLead } from '../services/leadHandoff.js'
 import { getProvider } from '../services/whatsapp/index.js'
 import { resolveCity } from '../services/city.js'
-import { resolveInstanceByToken, resolveLegacyEvolutionInstance, processWebhook, webhookErrorStatus } from '../services/whatsapp/webhookFlow.js'
+import { resolveInstanceByToken, resolveLegacyEvolutionInstance, resolveLegacyUzapiInstance, processWebhook, webhookErrorStatus } from '../services/whatsapp/webhookFlow.js'
 import { createInstanceManager } from '../services/whatsapp/instanceManager.js'
 import { createEchoResolver } from '../services/whatsapp/uzapiEcho.js'
 import { uzapiPendingSends } from '../services/whatsapp/uzapi.js'
@@ -64,6 +64,24 @@ router.post('/evolution/:accountSlug', (req, res) => {
   } catch (err) {
     console.error('[Webhook Evolution]', err.message)
     res.status(500).json({ error: err.message })
+  }
+})
+
+// UzAPI webhook (URL antiga por conta, pedido do dono 2026-09-27). Mantida so pra numero UzAPI que
+// ja estava conectado no upgrade — a producao registrava esse endereco no provedor pra esses numeros
+// e o dono pediu pra nao mexer no que ja funciona. Numero novo usa /whatsapp/:instanceToken.
+router.post('/uzapi/:accountSlug', (req, res) => {
+  try {
+    const r = resolveLegacyUzapiInstance(db, req.params.accountSlug, req.body || {}, req.headers || {})
+    if (r.ignored) return res.json({ ok: true, note: r.note })
+    if (r.error) {
+      console.warn(`[Webhook UzAPI legado] ${r.status} ${r.error} account=${req.params.accountSlug}`)
+      return res.status(r.status).json({ error: r.error })
+    }
+    return res.json(processWebhook(webhookDeps, r.account, r.instance, req))
+  } catch (err) {
+    console.error('[Webhook UzAPI legado]', err.message)
+    res.status(webhookErrorStatus({ provider: 'uzapi' })).json({ ok: false, error: err.message })
   }
 })
 

@@ -32,10 +32,64 @@ export function markExistingInstancesLegacy(db) {
   if (db.prepare('SELECT value FROM app_settings WHERE key = ?').get(WEBHOOK_LEGACY_MARK_FLAG)) {
     return { marked: 0, skipped: true }
   }
-  const r = db.prepare("UPDATE whatsapp_instances SET webhook_mode = 'legacy' WHERE webhook_mode IS NULL").run()
-  db.prepare('INSERT INTO app_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value')
-    .run(WEBHOOK_LEGACY_MARK_FLAG, new Date().toISOString())
-  return { marked: r.changes, skipped: false }
+  // UPDATE + flag numa transacao so: se cair no meio, ou marca tudo e grava a flag, ou nao marca nada
+  // (nunca fica so com parte das instancias legadas marcadas sem a flag registrada).
+  const marked = db.transaction(() => {
+    const r = db.prepare("UPDATE whatsapp_instances SET webhook_mode = 'legacy' WHERE webhook_mode IS NULL").run()
+    db.prepare('INSERT INTO app_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value')
+      .run(WEBHOOK_LEGACY_MARK_FLAG, new Date().toISOString())
+    return r.changes
+  })()
+  return { marked, skipped: false }
+}
+
+// Migracao unica (pedido do dono, 2026-09-27, item 1c): preenche provider_config das instancias UzAPI
+// legadas SO com o phoneNumberId (vem da coluna antiga uzapi_session da producao, quando ela existe —
+// bancos novos/de teste nunca tem essa coluna, entao a migracao vira no-op nesse caso). Isso e o
+// suficiente e SEGURO pra achar a instancia certa num aviso recebido em /webhooks/uzapi/:slug
+// (readUzapiPhoneNumberId so olha esse campo, nao precisa de chave nenhuma).
+//
+// NUNCA escreve instanceToken: o cliente uzapi novo (uzapiClient.js) bate num caminho com o usuario
+// da conta (`/{username}/v1/...`) diferente do que a producao usava (`/v1/...`, sem usuario) — nao da
+// pra confirmar, so lendo codigo, que o token/instancia antigo (instance.api_key) ainda autentica
+// nesse caminho novo. Sem instanceToken, tryReadUzapiConfig continua falhando de proposito: nenhuma
+// chamada autenticada (reregistro de webhook, status, etc.) e feita numa instancia legada por engano —
+// so o recebimento (que nao precisa de token) volta a funcionar. Documentado no report (item 1c).
+export const UZAPI_PROVIDER_CONFIG_BACKFILL_FLAG = 'webhook_legacy_uzapi_config_backfilled'
+
+export function backfillLegacyUzapiProviderConfig(db) {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS app_settings (
+      key TEXT PRIMARY KEY,
+      value TEXT,
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `)
+  if (db.prepare('SELECT value FROM app_settings WHERE key = ?').get(UZAPI_PROVIDER_CONFIG_BACKFILL_FLAG)) {
+    return { filled: 0, skipped: true }
+  }
+  const cols = db.prepare('PRAGMA table_info(whatsapp_instances)').all()
+  const hasLegacyColumn = cols.some(c => c.name === 'uzapi_session')
+  let filled = 0
+  db.transaction(() => {
+    if (hasLegacyColumn) {
+      const rows = db.prepare(`
+        SELECT id, uzapi_session FROM whatsapp_instances
+        WHERE provider = 'uzapi' AND (provider_config IS NULL OR provider_config = '')
+          AND uzapi_session IS NOT NULL AND uzapi_session != ''
+      `).all()
+      const update = db.prepare('UPDATE whatsapp_instances SET provider_config = ? WHERE id = ?')
+      for (const row of rows) {
+        // instanceToken de proposito ausente (ver comentario acima) — so phoneNumberId, pra casar o
+        // webhook recebido. uzapiInstanceId fica null (nao tinha equivalente na producao).
+        update.run(JSON.stringify({ phoneNumberId: String(row.uzapi_session), instanceToken: null, uzapiInstanceId: null }), row.id)
+        filled++
+      }
+    }
+    db.prepare('INSERT INTO app_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value')
+      .run(UZAPI_PROVIDER_CONFIG_BACKFILL_FLAG, new Date().toISOString())
+  })()
+  return { filled, skipped: false }
 }
 
 // Colunas do provedor por numero (spec secao 6). Idempotente; roda no boot.
@@ -54,6 +108,12 @@ export function migrateWhatsappProviderSchema(db) {
     if (!r.skipped && r.marked > 0) console.log(`[Webhook] migracao: ${r.marked} numero(s) marcado(s) como webhook legado`)
   } catch (err) {
     console.error('[Webhook] migracao webhook_mode legado FALHOU:', err.message)
+  }
+  try {
+    const r = backfillLegacyUzapiProviderConfig(db)
+    if (!r.skipped && r.filled > 0) console.log(`[Webhook] migracao: ${r.filled} numero(s) UzAPI legado(s) ganharam provider_config (so phoneNumberId, sem token)`)
+  } catch (err) {
+    console.error('[Webhook] migracao provider_config UzAPI legado FALHOU:', err.message)
   }
   db.exec(`
     CREATE TABLE IF NOT EXISTS whatsapp_connection_log (

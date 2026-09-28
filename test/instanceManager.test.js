@@ -58,6 +58,8 @@ test('criar numero UzAPI: cria na UzAPI com o webhook do numero, grava provider/
   assert.equal(calls.createInstance[0].webhookUrl, `https://crm.test/api/webhooks/whatsapp/${inst.webhook_token}`)
   assert.match(inst.webhook_token, /^[a-f0-9]{32}$/)
   assert.equal(inst.provider, 'uzapi')
+  // Pedido do dono (2026-09-27): numero criado DEPOIS do upgrade usa o webhook novo por token, nunca o legado.
+  assert.equal(inst.webhook_mode, 'token')
   assert.equal(inst.api_url, '')
   assert.equal(inst.api_key, '')
   assert.equal(inst.status, 'connecting')

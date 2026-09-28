@@ -1,5 +1,7 @@
 // Recebimento de webhooks de WhatsApp: identifica a instancia e passa o corpo pelo parse do provedor + handler.
 import { isValidWebhookToken } from './webhookToken.js'
+import { readUzapiPhoneNumberId } from './providerConfig.js'
+import { extractMetaPhoneNumberId } from './metaFormat.js'
 
 // Rota nova: POST /api/webhooks/whatsapp/:instanceToken
 export function resolveInstanceByToken(db, token) {
@@ -26,6 +28,28 @@ export function resolveLegacyEvolutionInstance(db, accountSlug, body, headers) {
   if (matches.length !== 1) return { status: 401, error: 'Unknown instance' }
   const instance = matches[0]
   if ((instance.provider || 'evolution') !== 'evolution') return { status: 401, error: 'Unknown instance' }
+  if (instance.webhook_secret && headers?.['x-webhook-secret'] !== instance.webhook_secret) {
+    return { status: 401, error: 'Invalid webhook secret' }
+  }
+  return { account, instance }
+}
+
+// Rota antiga: POST /api/webhooks/uzapi/:accountSlug — pedido do dono (2026-09-27): numero UzAPI ja
+// conectado no upgrade continua recebendo aqui (era isso que a producao registrava no provedor).
+// Sem token na URL, entao a instancia e achada pelo phone_number_id do proprio aviso (igual producao
+// fazia por uzapi_session) — mesma exigencia de casamento unico do /evolution/:slug, sem fallback
+// pra "primeira instancia da conta".
+export function resolveLegacyUzapiInstance(db, accountSlug, body, headers) {
+  const account = db.prepare('SELECT * FROM accounts WHERE slug = ? AND is_active = 1').get(accountSlug)
+  if (!account) return { status: 404, error: 'Account not found' }
+  const phoneNumberId = extractMetaPhoneNumberId(body)
+  // Shape nao reconhecido (sem phone_number_id, ex.: history sync): ignora com 200 pra nao gerar retentativa,
+  // igual a producao fazia quando nao conseguia traduzir o aviso.
+  if (!phoneNumberId) return { status: 200, ignored: true, note: 'shape uzapi sem phone_number_id, ignorado' }
+  const candidates = db.prepare("SELECT * FROM whatsapp_instances WHERE account_id = ? AND provider = 'uzapi'").all(account.id)
+  const matches = candidates.filter(i => readUzapiPhoneNumberId(i) === phoneNumberId)
+  if (matches.length !== 1) return { status: 401, error: 'Unknown instance' }
+  const instance = matches[0]
   if (instance.webhook_secret && headers?.['x-webhook-secret'] !== instance.webhook_secret) {
     return { status: 401, error: 'Invalid webhook secret' }
   }

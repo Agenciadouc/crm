@@ -3,10 +3,10 @@ import assert from 'node:assert/strict'
 import * as P from './fixtures/evolution-payloads.js'
 import { createTestDb, seedBasic, TEST_TOKEN } from './helpers/db.js'
 import { createEvolutionAdapter } from '../server/services/whatsapp/evolution.js'
-import { resolveInstanceByToken, resolveLegacyEvolutionInstance, processWebhook, webhookErrorStatus, webhookJsonErrorHandler } from '../server/services/whatsapp/webhookFlow.js'
+import { resolveInstanceByToken, resolveLegacyEvolutionInstance, resolveLegacyUzapiInstance, processWebhook, webhookErrorStatus, webhookJsonErrorHandler } from '../server/services/whatsapp/webhookFlow.js'
 import { createTestInboundHandler } from './helpers/inboundSetup.js'
 import { createUzapiAdapter } from '../server/services/whatsapp/uzapi.js'
-import { insertUzapiInstance, loadUzapiFixture, LEAD_PHONE, UZAPI_TEST_ENV, quietLog } from './helpers/uzapiFixtures.js'
+import { insertUzapiInstance, loadUzapiFixture, LEAD_PHONE, UZAPI_PNID, UZAPI_TEST_ENV, quietLog } from './helpers/uzapiFixtures.js'
 
 test('token valido resolve instancia e conta', () => {
   const db = createTestDb()
@@ -81,6 +81,67 @@ test('rota antiga: webhook_secret e provedor', () => {
   assert.ok(resolveLegacyEvolutionInstance(db, 'conta-teste', { instance: 'inst-teste' }, { 'x-webhook-secret': 's3cr3t' }).instance)
   db.prepare("UPDATE whatsapp_instances SET webhook_secret = NULL, provider = 'custom'").run()
   assert.deepEqual(resolveLegacyEvolutionInstance(db, 'conta-teste', { instance: 'inst-teste' }, {}), { status: 401, error: 'Unknown instance' })
+})
+
+// Rota antiga da UzAPI (pedido do dono 2026-09-27): numero UzAPI ja conectado no upgrade continua
+// recebendo aqui — producao registrava esse endereco no provedor pra esses numeros. Sem token na URL,
+// entao acha a instancia pelo phone_number_id do proprio aviso (igual producao fazia por uzapi_session).
+test('rota antiga UzAPI: resolve pelo phone_number_id do aviso', () => {
+  const db = createTestDb()
+  const seed = seedBasic(db)
+  const instance = insertUzapiInstance(db, seed.account.id)
+  const r = resolveLegacyUzapiInstance(db, 'conta-teste', loadUzapiFixture('message-text.json'), {})
+  assert.equal(r.instance.id, instance.id)
+  assert.equal(r.account.id, seed.account.id)
+})
+
+test('rota antiga UzAPI: phone_number_id de outra instancia (ou inexistente) devolve 401 sem fallback', () => {
+  const db = createTestDb()
+  const seed = seedBasic(db)
+  insertUzapiInstance(db, seed.account.id, { phoneNumberId: '999999999999999' })
+  assert.deepEqual(resolveLegacyUzapiInstance(db, 'conta-teste', loadUzapiFixture('message-text.json'), {}), { status: 401, error: 'Unknown instance' })
+})
+
+test('rota antiga UzAPI: conta inativa ou inexistente devolve 404; shape sem phone_number_id ignora com 200', () => {
+  const db = createTestDb()
+  const seed = seedBasic(db)
+  insertUzapiInstance(db, seed.account.id)
+  assert.deepEqual(resolveLegacyUzapiInstance(db, 'nao-existe', loadUzapiFixture('message-text.json'), {}), { status: 404, error: 'Account not found' })
+  db.prepare('UPDATE accounts SET is_active = 0').run()
+  assert.deepEqual(resolveLegacyUzapiInstance(db, 'conta-teste', loadUzapiFixture('message-text.json'), {}), { status: 404, error: 'Account not found' })
+  db.prepare('UPDATE accounts SET is_active = 1').run()
+  assert.deepEqual(resolveLegacyUzapiInstance(db, 'conta-teste', { object: 'whatsapp_business_account', entry: [] }, {}), { status: 200, ignored: true, note: 'shape uzapi sem phone_number_id, ignorado' })
+})
+
+test('rota antiga UzAPI: webhook_secret, quando configurado, e exigido', () => {
+  const db = createTestDb()
+  const seed = seedBasic(db)
+  const instance = insertUzapiInstance(db, seed.account.id)
+  db.prepare('UPDATE whatsapp_instances SET webhook_secret = ? WHERE id = ?').run('s3cr3t', instance.id)
+  assert.deepEqual(resolveLegacyUzapiInstance(db, 'conta-teste', loadUzapiFixture('message-text.json'), {}), { status: 401, error: 'Invalid webhook secret' })
+  assert.ok(resolveLegacyUzapiInstance(db, 'conta-teste', loadUzapiFixture('message-text.json'), { 'x-webhook-secret': 's3cr3t' }).instance)
+})
+
+// Ponta a ponta pela rota antiga: o mesmo aviso real que a UzAPI manda hoje, resolvido so pelo slug
+// da conta (sem token na URL), cria o lead e a mensagem — prova que o numero legado nao perde recebimento.
+test('rota antiga UzAPI ponta a ponta: aviso real cria lead e mensagem so com o slug da conta', () => {
+  const db = createTestDb()
+  const seed = seedBasic(db)
+  insertUzapiInstance(db, seed.account.id, { phoneNumberId: UZAPI_PNID })
+  const adapter = createUzapiAdapter({ fetch: async () => { throw new Error('sem rede nos testes') }, env: UZAPI_TEST_ENV, log: quietLog })
+  const { handler } = createTestInboundHandler(db)
+  const deps = { getProvider: () => adapter, handleInboundMessage: handler.handleInboundMessage, handleStatusUpdate: handler.handleStatusUpdate }
+
+  const body = loadUzapiFixture('message-text.json')
+  const resolved = resolveLegacyUzapiInstance(db, 'conta-teste', body, {})
+  assert.ok(resolved.instance, 'deveria ter resolvido a instancia pelo phone_number_id')
+  processWebhook(deps, resolved.account, resolved.instance, { body, headers: {} })
+
+  const lead = db.prepare('SELECT * FROM leads WHERE phone = ?').get(LEAD_PHONE)
+  assert.equal(lead.name, 'Contato 02')
+  const msg = db.prepare('SELECT * FROM messages WHERE wa_msg_id = ?').get('2A2ACD4E776A27C10B00')
+  assert.equal(msg.direction, 'inbound')
+  assert.equal(msg.content, 'Teste 1')
 })
 
 function flowDeps() {

@@ -161,7 +161,8 @@ async function pollMissedMessages() {
   }
 }
 
-// ─── Re-register webhooks on every health check (URL por token + MESSAGES_UPSERT/MESSAGES_UPDATE) ─────
+// ─── Re-register webhooks on every health check (pelo webhook_mode: legado = URL fixa de producao,
+// token = URL nova por instancia com MESSAGES_UPSERT/MESSAGES_UPDATE) ─────────────────────────────
 const webhookRegistrar = createWebhookRegistrar({ db, getProvider })
 async function reRegisterWebhooks() {
   const instances = listWebhookReRegister(db)

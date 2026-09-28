@@ -102,6 +102,19 @@ export function parseMetaStatus(s) {
   return { messageId: String(s.id), status, timestamp: toIso(s.timestamp), recipientId: String(s.recipient_id || ''), outboundOnly: true }
 }
 
+// Extrai o phone_number_id de um aviso cru (antes de saber qual instancia e — usado pela rota antiga
+// /webhooks/uzapi/:accountSlug pra achar a instancia pelo numero, ja que a rota nao tem token na URL).
+export function extractMetaPhoneNumberId(body) {
+  if (!body || typeof body !== 'object' || !Array.isArray(body.entry)) return null
+  for (const entry of body.entry) {
+    for (const change of (entry?.changes || [])) {
+      const pnid = change?.value?.metadata?.phone_number_id
+      if (pnid) return String(pnid)
+    }
+  }
+  return null
+}
+
 export function parseMetaWebhook(body, opts = {}) {
   const log = opts.log === undefined ? console.warn : opts.log
   const out = { messages: [], statuses: [], echoes: [], connection: null, qr: null, ignored: 0 }

@@ -1,27 +1,52 @@
 // Registra no provedor o webhook da instancia. Duas rotas, pelo webhook_mode gravado na instancia:
-// - 'legacy' (numero Evolution que ja existia no upgrade): mantem a URL de hoje da producao,
-//   <PUBLIC_BASE_URL>/api/webhooks/evolution/<slug da conta>, com os mesmos eventos de sempre
-//   (['MESSAGES_UPSERT'] — a producao nunca mandou MESSAGES_UPDATE). Pedido do dono: nao mexer
-//   no que ja ta conectado e funcionando.
+// - 'legacy' (numero que ja existia no upgrade): mantem a URL de hoje da producao, com base FIXA
+//   (nunca PUBLIC_BASE_URL — um .env diferente nao pode reapontar numero ja conectado):
+//     Evolution: https://drosagencia.com.br/crm/api/webhooks/evolution/<slug da conta>
+//     UzAPI:     https://drosagencia.com.br/crm/api/webhooks/uzapi/<slug da conta>
+//   com os mesmos eventos de sempre (['MESSAGES_UPSERT'] — a producao nunca mandou MESSAGES_UPDATE).
 // - qualquer outro valor ('token', ou NULL antes de existir a coluna): URL nova por instancia,
 //   <PUBLIC_BASE_URL>/api/webhooks/whatsapp/<webhook_token> (comportamento ja existente).
 // Usado na criacao/conexao da instancia (integrations.js) e no reregistro periodico (scheduler.js).
 import { ensureWebhookToken } from './webhookToken.js'
-import { buildInstanceWebhookUrl, getPublicBaseUrl } from '../publicUrl.js'
+import { buildInstanceWebhookUrl, DEFAULT_PUBLIC_BASE_URL } from '../publicUrl.js'
+import { tryReadUzapiConfig } from './providerConfig.js'
 
-// Eventos que a producao (origin/main scheduler.js) sempre mandou no setWebhook da Evolution.
-export const LEGACY_EVOLUTION_WEBHOOK_EVENTS = ['MESSAGES_UPSERT']
+// Eventos que a producao (origin/main scheduler.js) sempre mandou no setWebhook/setWebhook da Evolution e UzAPI.
+export const LEGACY_WEBHOOK_EVENTS = ['MESSAGES_UPSERT']
+
+function legacyUrlFor(providerName, slug) {
+  const path = providerName === 'uzapi' ? 'uzapi' : 'evolution'
+  return `${DEFAULT_PUBLIC_BASE_URL}/api/webhooks/${path}/${slug}`
+}
 
 export function createWebhookRegistrar({ db, getProvider, env = process.env }) {
-  async function registerLegacyWebhook(instance) {
-    const account = db.prepare('SELECT slug FROM accounts WHERE id = ?').get(instance.account_id)
-    if (!account?.slug) return { ok: false, url: null, reason: 'account_without_slug' }
-    const url = `${getPublicBaseUrl(env)}/api/webhooks/evolution/${account.slug}`
+  async function registerLegacyEvolutionWebhook(instance, url) {
     let provider
     try { provider = getProvider(instance) } catch (e) { return { ok: false, url: null, reason: e.message } }
     if (!provider.registerWebhook) return { ok: false, url: null, reason: 'provider_without_webhook_registration' }
     try {
-      await provider.registerWebhook(instance, url, LEGACY_EVOLUTION_WEBHOOK_EVENTS)
+      await provider.registerWebhook(instance, url, LEGACY_WEBHOOK_EVENTS)
+      return { ok: true, url }
+    } catch (e) {
+      return { ok: false, url, reason: e.message }
+    }
+  }
+
+  // UzAPI legado: o numero ja tinha o webhook antigo registrado no provedor pela producao ANTES do
+  // upgrade (uzapi_session/api_key, formato que nao existe mais aqui). A rota de recebimento
+  // (/api/webhooks/uzapi/:slug) foi restaurada e nao depende disso. Mas REGISTRAR de novo (chamada
+  // autenticada no provedor) so e seguro se a instancia ja tiver provider_config utilizavel — coisa
+  // que a migracao unica preenche so com phoneNumberId (pra casar o webhook recebido), nunca com um
+  // instanceToken reconstruido (formato/URL do cliente uzapi mudou — ver report). Sem instanceToken
+  // valido, tryReadUzapiConfig falha e NUNCA cai pro fluxo por token: so devolve "nao mexido".
+  async function registerLegacyUzapiWebhook(instance, url) {
+    let provider
+    try { provider = getProvider(instance) } catch (e) { return { ok: false, url: null, reason: e.message } }
+    if (!provider.registerWebhook) return { ok: false, url: null, reason: 'provider_without_webhook_registration' }
+    const { error } = tryReadUzapiConfig(instance, env)
+    if (error) return { ok: false, url, reason: 'legacy_uzapi_untouched' }
+    try {
+      await provider.registerWebhook(instance, url, LEGACY_WEBHOOK_EVENTS)
       return { ok: true, url }
     } catch (e) {
       return { ok: false, url, reason: e.message }
@@ -43,11 +68,18 @@ export function createWebhookRegistrar({ db, getProvider, env = process.env }) {
   }
 
   async function registerInstanceWebhook(instance) {
-    // So a Evolution teve webhook legado em producao; UzAPI (e qualquer provedor futuro) nao existia
-    // la e sempre usou a URL por token desde que foi implementada — nunca trata 'legacy' pra eles,
-    // mesmo que a migracao unica tenha marcado webhook_mode='legacy' num numero de outro provedor.
-    const isEvolution = (instance.provider || 'evolution') === 'evolution'
-    if (isEvolution && instance.webhook_mode === 'legacy') return registerLegacyWebhook(instance)
+    if (instance.webhook_mode === 'legacy') {
+      const providerName = instance.provider || 'evolution'
+      // So Evolution e UzAPI tiveram webhook legado em producao; qualquer outro provider marcado
+      // 'legacy' (nao devia acontecer, mas por seguranca) NUNCA cai pro token — so fica sem reregistro.
+      if (providerName !== 'evolution' && providerName !== 'uzapi') {
+        return { ok: false, url: null, reason: 'legacy_unsupported_provider' }
+      }
+      const account = db.prepare('SELECT slug FROM accounts WHERE id = ?').get(instance.account_id)
+      if (!account?.slug) return { ok: false, url: null, reason: 'account_without_slug' }
+      const url = legacyUrlFor(providerName, account.slug)
+      return providerName === 'uzapi' ? registerLegacyUzapiWebhook(instance, url) : registerLegacyEvolutionWebhook(instance, url)
+    }
     return registerTokenWebhook(instance)
   }
 

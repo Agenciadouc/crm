@@ -136,7 +136,8 @@ router.put('/antiban-settings', requireRole('super_admin', 'gerente'), (req, res
   res.json({ settings: r.settings })
 })
 
-// Helper: registra no provedor o webhook exclusivo da instancia (URL por token, MESSAGES_UPSERT + MESSAGES_UPDATE)
+// Helper: registra o webhook no provedor pelo webhook_mode da instancia — legado (URL antiga fixa por
+// slug da conta, eventos de producao) ou token (URL nova por instancia, MESSAGES_UPSERT + MESSAGES_UPDATE)
 const webhookRegistrar = createWebhookRegistrar({ db, getProvider })
 async function registerInstanceWebhook(instance) {
   const r = await webhookRegistrar.registerInstanceWebhook(instance)
