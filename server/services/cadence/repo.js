@@ -319,6 +319,10 @@ export function updateStep(db, accountId, cadenceId, attemptId, patch = {}, { us
   const c = loadCadenceRow(db, accountId, cadenceId)
   if (c.stage_id) assertActive(c)
   const row = loadStep(db, c, attemptId)
+  // A pergunta do passo e fixa (respostas e A/B apontam para a chave).
+  if (patch.question_key !== undefined && (patch.question_key || null) !== (row.question_key || null)) {
+    throw new CadenceError('invalid', 400, 'Não dá para trocar a pergunta do passo. Apague e crie outro.')
+  }
   const nextType = patch.action_type || row.action_type
   if (nextType !== row.action_type && (nextType === 'pergunta' || row.action_type === 'pergunta')) {
     throw new CadenceError('invalid', 400, 'Não dá para trocar pergunta por outro tipo. Apague o passo e crie outro.')

@@ -1,34 +1,9 @@
 import { Router } from 'express'
 import db from '../db.js'
 import { broadcastSSE } from '../sse.js'
-import { completeCurrentStep } from '../services/cadence/leadCadence.js'
-import { CadenceError } from '../services/cadence/errors.js'
+import { createTaskCadenceRouter, computeDueDatetime } from './taskCadenceRouter.js'
 
 const router = Router()
-
-// Calculate due datetime for a cadence attempt.
-// Anchor: last_executed_at (when previous step was completed) OR started_at (for step 1).
-// Mode 'duration': anchor + delay_minutes
-// Mode 'date': anchor + delay_days at scheduled_time (clock time)
-function computeDueDatetime({ startedAt, lastExecutedAt, delay_days, scheduled_time, schedule_mode, delay_minutes }) {
-  const anchorIso = lastExecutedAt || startedAt
-  const anchor = new Date(anchorIso.replace(' ', 'T') + 'Z')
-
-  if (schedule_mode === 'duration') {
-    return new Date(anchor.getTime() + (delay_minutes || 0) * 60000)
-  }
-
-  // Date mode (default)
-  const due = new Date(anchor)
-  due.setDate(due.getDate() + (delay_days || 0))
-  if (scheduled_time) {
-    const [h, m] = scheduled_time.split(':').map(Number)
-    due.setHours(h || 0, m || 0, 0, 0)
-  } else if ((delay_days || 0) > 0) {
-    due.setHours(0, 0, 0, 0)
-  }
-  return due
-}
 
 /**
  * Build query that returns all active task instances (lead_cadences with current_attempt_id)
@@ -177,39 +152,8 @@ router.get('/counts', (req, res) => {
   res.json(counts)
 })
 
-// POST /api/tasks/:lcId/complete — conclui o passo atual pela mesma regra do Chat (conta conferida)
-router.post('/:lcId/complete', (req, res) => {
-  let r
-  try {
-    r = completeCurrentStep(db, { accountId: req.accountId, leadCadenceId: req.params.lcId, how: 'feito', userId: req.user.id })
-  } catch (e) {
-    if (e instanceof CadenceError) return res.status(e.status).json({ error: e.message, code: e.code })
-    throw e
-  }
-  broadcastSSE(r.lead.account_id, 'task:updated', { lead_cadence_id: Number(req.params.lcId), attendant_id: r.lead.attendant_id })
-  let nextStep = null
-  if (r.nextAttempt) {
-    // Anchor for the newly-current step is NOW (we just completed the previous one)
-    const nowIso = new Date().toISOString().slice(0, 19).replace('T', ' ')
-    const n = r.nextAttempt
-    const due = computeDueDatetime({ startedAt: nowIso, lastExecutedAt: nowIso, delay_days: n.delay_days, scheduled_time: n.scheduled_time, schedule_mode: n.schedule_mode, delay_minutes: n.delay_minutes })
-    nextStep = { position: n.position, action_type: n.action_type, description: n.description, delay_days: n.delay_days, scheduled_time: n.scheduled_time, schedule_mode: n.schedule_mode, delay_minutes: n.delay_minutes, due_datetime: due.toISOString() }
-  }
-  res.json({ ok: true, completed: r.completed, nextStep })
-})
-
-// POST /api/tasks/:lcId/skip — pula o passo atual (mesma regra, conta conferida)
-router.post('/:lcId/skip', (req, res) => {
-  let r
-  try {
-    r = completeCurrentStep(db, { accountId: req.accountId, leadCadenceId: req.params.lcId, how: 'pulado', userId: req.user.id })
-  } catch (e) {
-    if (e instanceof CadenceError) return res.status(e.status).json({ error: e.message, code: e.code })
-    throw e
-  }
-  broadcastSSE(r.lead.account_id, 'task:updated', { lead_cadence_id: Number(req.params.lcId), attendant_id: r.lead.attendant_id })
-  res.json({ ok: true })
-})
+// POST /api/tasks/:lcId/complete e /:lcId/skip: mesma regra do Chat (taskCadenceRouter.js, testado com banco em memoria)
+router.use(createTaskCadenceRouter(db, { broadcast: broadcastSSE }))
 
 // ─── Standalone Tasks ─────────────────────────────────────────
 

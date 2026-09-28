@@ -160,6 +160,8 @@ export function markStepDone(db, { accountId, leadId, attemptId, how = 'feito', 
     WHERE ca.id = ? AND lc.lead_id = ? AND lc.status = 'active' ORDER BY lc.id DESC LIMIT 1
   `).get(attemptId, lead.id)
   if (!row) throw new CadenceError('step_changed', 409, 'Esse passo mudou. A tela foi atualizada.')
+  // Avulsa anda pela posicao: passo que nao e o da vez gravaria sem avancar (tela errada).
+  if (row.lc_kind === 'avulsa' && row.lc_current !== row.id) throw new CadenceError('step_changed', 409, 'Esse passo mudou. A tela foi atualizada.')
   if (row.action_type === 'pergunta' && how !== 'pulado') {
     throw new CadenceError('invalid', 400, 'A pergunta fica feita quando tem resposta. Use [Já sei a resposta].')
   }

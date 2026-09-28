@@ -22,11 +22,17 @@ export function recordStepSend(db, { lead, attemptId, userId = null, messageId =
   `).get(id, lead.id, lead.account_id)
   if (!row || !MESSAGE_TYPES.includes(row.action_type)) return null
   let askId
-  db.transaction(() => {
-    askId = recordAsk(db, { accountId: lead.account_id, leadId: lead.id, questionKey: stepAskKey(id), textSent: content, messageId, userId, source: 'button' })
-    db.prepare('UPDATE roteiro_asks SET attempt_id = ? WHERE id = ?').run(id, askId)
-    markStepDone(db, { accountId: lead.account_id, leadId: lead.id, attemptId: id, how: 'enviado', userId })
-  })()
+  try {
+    db.transaction(() => {
+      askId = recordAsk(db, { accountId: lead.account_id, leadId: lead.id, questionKey: stepAskKey(id), textSent: content, messageId, userId, source: 'button' })
+      db.prepare('UPDATE roteiro_asks SET attempt_id = ? WHERE id = ?').run(id, askId)
+      markStepDone(db, { accountId: lead.account_id, leadId: lead.id, attemptId: id, how: 'enviado', userId })
+    })()
+  } catch (e) {
+    // Passo de avulsa fora da vez (ou que mudou): a mensagem sai, mas nao conta como o passo.
+    if (e instanceof CadenceError && e.code === 'step_changed') return null
+    throw e
+  }
   return askId
 }
 

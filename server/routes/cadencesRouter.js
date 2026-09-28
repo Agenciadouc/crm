@@ -18,7 +18,6 @@ import { canAtendenteAccessLead } from '../services/leadAccess.js'
 import { pickAnthropicKey } from '../services/anthropicKeyPicker.js'
 
 const MANAGER_ROLES = ['super_admin', 'gerente']
-const STEP_CHANGED = 'Esse passo mudou. A tela foi atualizada.'
 
 export function createCadencesRouter(db, { ai = null, broadcast = () => {} } = {}) {
   const router = Router()
@@ -67,6 +66,15 @@ export function createCadencesRouter(db, { ai = null, broadcast = () => {} } = {
     send(req.accountId, 'cadence:updated', { cadence_id: cadence.id, stage_id: cadence.stage_id })
   }
 
+  // Sugestao/A-B ja gravados e publicados: daqui em diante nada pode virar erro na resposta.
+  function afterPublishedChange(req, cadenceIds) {
+    for (const id of cadenceIds) {
+      let cadence
+      try { cadence = getCadence(db, req.accountId, id) } catch (e) { console.error('[Cadencias] leads da etapa:', e.message); continue }
+      afterStageChange(req, cadence, { structural: true })
+    }
+  }
+
   router.use((req, res, next) => {
     if (req.user.role === 'super_admin' && !req.accountId) return res.status(400).json({ error: 'Selecione uma conta.' })
     next()
@@ -113,7 +121,7 @@ export function createCadencesRouter(db, { ai = null, broadcast = () => {} } = {
   router.post('/suggestions/:id/apply', manager, (req, res) => {
     try {
       const r = applySuggestionLive(db, req.accountId, req.params.id, { userId: req.user.id })
-      for (const id of r.cadence_ids) afterStageChange(req, getCadence(db, req.accountId, id), { structural: true })
+      afterPublishedChange(req, r.cadence_ids)
       res.json(r)
     } catch (e) { fail(res, e) }
   })
@@ -121,7 +129,7 @@ export function createCadencesRouter(db, { ai = null, broadcast = () => {} } = {
   router.post('/variants/:id/confirm', manager, (req, res) => {
     try {
       const r = confirmVariantLive(db, req.accountId, req.params.id, { userId: req.user.id })
-      for (const id of r.cadence_ids) afterStageChange(req, getCadence(db, req.accountId, id), { structural: true })
+      afterPublishedChange(req, r.cadence_ids)
       res.json(r)
     } catch (e) { fail(res, e) }
   })
@@ -147,10 +155,6 @@ export function createCadencesRouter(db, { ai = null, broadcast = () => {} } = {
       const lead = leadScoped(req, req.params.leadId)
       const attemptId = Number(req.params.attemptId)
       const how = req.body?.how === 'pulado' ? 'pulado' : 'feito'
-      // Passo de avulsa so conta se e o da vez (senao grava sem avancar e a tela fica errada).
-      const lc = db.prepare(`SELECT lc.kind, lc.current_attempt_id FROM lead_cadences lc JOIN cadence_attempts ca ON ca.cadence_id = lc.cadence_id
-        WHERE ca.id = ? AND lc.lead_id = ? AND lc.status = 'active' ORDER BY lc.id DESC LIMIT 1`).get(attemptId, lead.id)
-      if (lc && lc.kind === 'avulsa' && lc.current_attempt_id !== attemptId) throw new CadenceError('step_changed', 409, STEP_CHANGED)
       markStepDone(db, { accountId: req.accountId, leadId: lead.id, attemptId, how, userId: req.user.id })
       send(req.accountId, 'lead:cadence', { lead_id: lead.id })
       res.json(getLeadStageCadence(db, { accountId: req.accountId, leadId: lead.id, role: req.user.role }))
@@ -179,7 +183,8 @@ export function createCadencesRouter(db, { ai = null, broadcast = () => {} } = {
   // ------------------------------------------------------------------ lista e por id ----
   router.get('/', (req, res) => {
     try {
-      const kind = req.query.kind === 'avulsa' || req.query.kind === 'etapa' ? req.query.kind : undefined
+      // Sem kind = so avulsas: menu de aplicar e tela antiga seguem iguais; etapa so com ?kind=etapa.
+      const kind = req.query.kind === 'etapa' ? 'etapa' : 'avulsa'
       res.json({ cadences: listCadences(db, req.accountId, { kind }) })
     } catch (e) { fail(res, e) }
   })
