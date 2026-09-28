@@ -15,8 +15,8 @@ test('rotulo "Passo N de M · Tipo" da cadencia avulsa', () => {
 })
 
 test('passo mensagem: mostra o texto com as variaveis e tem [Enviar] + [Pular]', () => {
-  const v = avulsaStepView({ action_type: 'mensagem', attempt_message: 'Oi {{primeiro_nome}}, tudo bem?', attempt_description: 'Boas-vindas' }, fill)
-  assert.deepEqual(v, { kind: 'mensagem', text: 'Oi Ana, tudo bem?', actions: ['enviar', 'pular'] })
+  const v = avulsaStepView({ action_type: 'mensagem', attempt_message: 'Oi {{primeiro_nome}}, tudo bem?' }, fill)
+  assert.deepEqual(v, { kind: 'mensagem', title: '', text: 'Oi Ana, tudo bem?', actions: ['enviar', 'pular'] })
   const w = avulsaStepView({ action_type: 'whatsapp', attempt_message: 'Oi' }, fill)
   assert.deepEqual(w.actions, ['enviar', 'pular'])
 })
@@ -66,4 +66,13 @@ test('link de ligar: so os digitos (com + se tiver)', () => {
   assert.equal(telHref('11 98888-7777'), 'tel:11988887777')
   assert.equal(telHref(''), null)
   assert.equal(telHref(null), null)
+})
+
+test('passo mensagem com descricao e texto: a descricao vai em cima como titulo', () => {
+  assert.deepEqual(
+    avulsaStepView({ action_type: 'mensagem', attempt_message: 'Oi {{primeiro_nome}}!', attempt_description: '  Boas-vindas ' }, fill),
+    { kind: 'mensagem', title: 'Boas-vindas', text: 'Oi Ana!', actions: ['enviar', 'pular'] },
+  )
+  // sem texto a descricao ja e o texto: nao repete como titulo
+  assert.equal(avulsaStepView({ action_type: 'mensagem', attempt_message: '', attempt_description: 'Boas-vindas' }, fill).title, undefined)
 })

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Send, Smartphone } from 'lucide-react'
+import { Send, Smartphone, AlertTriangle } from 'lucide-react'
 import { canSendReview } from '../../lib/atendimentoPanel.js'
 
 // Janela "Conferir mensagem": o vendedor ve (e pode mudar) o texto do passo da cadencia antes de enviar.
@@ -33,8 +33,15 @@ export default function StepReviewModal({ title, initialText, leadName, instance
         <h2 style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <Send size={16} style={{ color: '#FFB300' }} /> {title}
         </h2>
-        <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 6 }}>
-          Para <b style={{ color: 'var(--text-primary)' }}>{leadName}</b>. Confira o texto e mude se precisar.
+        <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 6, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+          <span>Para <b style={{ color: 'var(--text-primary)' }}>{leadName}</b>. Confira o texto e mude se precisar.</span>
+          {/* Contador como no modal antigo: acima de 800 fica vermelho, com aviso */}
+          <span
+            title={text.length > 800 ? 'Mensagem longa: acima de 800 caracteres o cliente tende a não ler tudo. Ex.: corte em duas mensagens.' : 'Quantidade de letras do texto'}
+            style={{ whiteSpace: 'nowrap', display: 'inline-flex', alignItems: 'center', gap: 3, color: text.length > 800 ? '#FF6B6B' : '#6B6580' }}
+          >
+            {text.length > 800 && <AlertTriangle size={11} />}{text.length} caracteres
+          </span>
         </div>
         <textarea
           className="input"

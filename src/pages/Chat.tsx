@@ -524,20 +524,20 @@ export default function Chat() {
     setTimeout(() => msgInputRef.current?.focus(), 0)
   }, [accountId, isMobile])
 
+  // Troca das variaveis do lead aberto: uma so para o passo da etapa, a janela de conferir e a avulsa
+  const fillLeadVars = useCallback((text: string) => applyMessageVars(text, {
+    leadName: lead?.name, leadEmpresa: lead?.empresa, leadCity: lead?.city, attendantName: user?.name,
+  }), [lead?.name, lead?.empresa, lead?.city, user?.name])
+
   // [Enviar] do passo mensagem da cadencia da etapa: texto com as variaveis na caixa para revisar;
   // o envio leva o cadence_attempt_id e o passo fica feito
   const handleStepSend = useCallback((text: string, attemptId: number) => {
-    const filled = applyMessageVars(text, {
-      leadName: lead?.name,
-      leadEmpresa: lead?.empresa,
-      leadCity: lead?.city,
-      attendantName: user?.name,
-    })
+    const filled = fillLeadVars(text)
     // Passo sem texto: nada na caixa e nada de attempt_id (senao iria na proxima mensagem digitada)
     if (!filled.trim()) return
     handleRoteiroAsk(filled, null)
     setCadenceStepKey(attemptId)
-  }, [handleRoteiroAsk, lead?.name, lead?.empresa, lead?.city, user?.name])
+  }, [handleRoteiroAsk, fillLeadVars])
 
   // Abre a janela "Conferir mensagem" para o lead aberto (texto ja com as variaveis trocadas)
   const openReview = useCallback((r: StepReview & { avulsa?: boolean }, pos: ReviewPos | null) => {
@@ -554,12 +554,12 @@ export default function Chat() {
   const handleReviewStep = useCallback((r: { kind: 'pergunta' | 'mensagem'; text: string; questionKey: string | null; attemptId: number; pos: ReviewPos | null }) => {
     if (!lead) return
     const text = r.kind === 'mensagem'
-      ? applyMessageVars(r.text, { leadName: lead.name, leadEmpresa: lead.empresa, leadCity: lead.city, attendantName: user?.name })
+      ? fillLeadVars(r.text)
       : r.text
     // Passo sem texto: nao abre (e nenhum attempt_id fica pendurado)
     if (!text.trim()) return
     openReview({ leadId: lead.id, kind: r.kind, text, questionKey: r.kind === 'pergunta' ? r.questionKey : null, attemptId: r.attemptId }, r.pos)
-  }, [lead, user?.name, openReview])
+  }, [lead, fillLeadVars, openReview])
 
   // Abre a janela e busca o "N de M" na cadencia da etapa (so aplica se a mesma janela ainda estiver aberta)
   const openReviewWithPos = useCallback((r: StepReview) => {
@@ -1005,6 +1005,16 @@ export default function Chat() {
     const keys = reviewSendKeys(r)
     setReviewSending(true); setReviewError(null)
     try {
+      // Passo da avulsa: o gestor pode ter mudado o passo com a janela aberta; confere antes de enviar
+      if (r.avulsa) {
+        const lc = await fetchLeadCadence(r.leadId, accountId)
+        if (reviewRef.current?.id !== r.id || selectedLeadIdRef.current !== r.leadId) return
+        if (!lc || lc.status !== 'active' || lc.current_attempt_id !== r.attemptId) {
+          setReviewError('Esse passo mudou. A tela foi atualizada.'); setReviewSending(false)
+          reloadAvulsa(r.leadId)
+          return
+        }
+      }
       const { sameLead } = await deliverText(r.leadId, text, override, keys.askKey, keys.stepKey)
       if (sameLead) {
         // A caixa perde a chave igual a que acabou de ir (senao a proxima mensagem contaria de novo)
@@ -1280,15 +1290,10 @@ export default function Chat() {
     } catch { /* fica como esta; o proximo carregamento do lead acerta */ }
   }, [accountId])
 
-  // Mesma troca de variaveis do envio da cadencia da etapa
-  const fillAvulsaVars = useCallback((text: string) => applyMessageVars(text, {
-    leadName: lead?.name, leadEmpresa: lead?.empresa, leadCity: lead?.city, attendantName: user?.name,
-  }), [lead?.name, lead?.empresa, lead?.city, user?.name])
-
   // [Enviar]: abre a mesma janela "Conferir mensagem"; o envio leva o cadence_attempt_id do passo da vez
   const handleAvulsaSend = () => {
     if (!lead || !leadCadence || leadCadence.lead_id !== lead.id || !leadCadence.current_attempt_id) return
-    const v = avulsaStepView(leadCadence, fillAvulsaVars)
+    const v = avulsaStepView(leadCadence, fillLeadVars)
     if (!v || !v.actions.includes('enviar')) return
     openReview({ leadId: lead.id, kind: 'mensagem', text: v.text, questionKey: null, attemptId: leadCadence.current_attempt_id, avulsa: true }, avulsaReviewPos(leadCadence))
   }
@@ -2215,13 +2220,14 @@ export default function Chat() {
                         {leadCadence.status === 'completed' ? (
                           <div style={{ fontSize: 11, color: '#34C759', display: 'flex', alignItems: 'center', gap: 3, marginTop: 4 }}><Check size={10} /> Concluida</div>
                         ) : (() => {
-                          const v = avulsaStepView(leadCadence, fillAvulsaVars)
+                          const v = avulsaStepView(leadCadence, fillLeadVars)
                           if (!v) return null
                           const target = { leadId: lead.id, lcId: leadCadence.id, attemptId: leadCadence.current_attempt_id }
                           const label = avulsaStepLabel(leadCadence)
                           return (
                             <>
                               <div style={{ fontSize: 11, color: '#FFB300', marginTop: 2 }}>{label}</div>
+                              {v.title && <div style={{ fontSize: 11, color: 'var(--text-primary)', marginTop: 4, fontWeight: 600 }}>{v.title}</div>}
                               {v.text ? (
                                 <div style={{ marginTop: 6, padding: '8px 10px', fontSize: 11, lineHeight: 1.5, color: 'var(--text-primary)', whiteSpace: 'pre-wrap', background: 'rgba(255,179,0,0.05)', border: '1px solid rgba(255,179,0,0.2)', borderRadius: 6, maxHeight: 140, overflowY: 'auto' }}>{v.text}</div>
                               ) : (
