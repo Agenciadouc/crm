@@ -8,7 +8,7 @@ export const ATENDIMENTO_BLOCKS = [
   { id: 'etapa', label: 'Etapa do funil', visible: true },
   { id: 'contato', label: 'Dados do contato', visible: false },
   { id: 'tags', label: 'Tags', visible: true },
-  { id: 'proximo_passo', label: 'Próximo passo', visible: true },
+  { id: 'proximo_passo', label: 'Cadência da etapa', visible: true },
   { id: 'avulsa', label: 'Cadência avulsa', visible: true },
   { id: 'tarefas', label: 'Tarefas', visible: true },
   { id: 'vendas', label: 'Vendas', visible: true },

@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   reviewPosition, reviewTitle, reviewFromPendingAsk, reviewSendKeys, canSendReview,
-  boxKeysAfterReviewSend, offerRecognition, leadTaskRows, attendantView, sectionTitle,
+  boxKeysAfterReviewSend, offerRecognition, leadTaskRows, manualTaskRows, attendantView, sectionTitle,
 } from '../src/lib/atendimentoPanel.js'
 
 const data = {
@@ -90,6 +90,20 @@ test('tarefas do lead: so do lead aberto, em ordem de prazo, atrasada marcada', 
   assert.equal(rows[1].desc.length, 103)
   assert.ok(rows[1].desc.endsWith('...'))
   assert.deepEqual(leadTaskRows(null, 7, now), [])
+})
+
+test('tarefas do Chat: so as manuais (passo de cadencia ja aparece no bloco Cadencia)', () => {
+  const now = Date.parse('2026-09-28T12:00:00Z')
+  const tasks = [
+    { type: 'cadence', lead_cadence_id: 3, lead_id: 7, cadence_name: 'teste', attempt_position: 0, total_attempts: 2, due_datetime: '2026-09-20T12:00:00Z' },
+    { type: 'standalone', id: 1, lead_id: 7, title: 'Ligar amanha', due_datetime: '2026-09-30 12:00:00' },
+    { type: 'standalone', id: 2, lead_id: 8, title: 'De outro lead', due_datetime: '2026-09-29 12:00:00' },
+    { type: 'standalone', id: 4, lead_id: 7, title: 'Mandar proposta', due_datetime: '2026-09-29 12:00:00' },
+  ]
+  const rows = manualTaskRows(tasks, 7, now)
+  assert.deepEqual(rows.map(r => r.key), ['s-4', 's-1'])
+  assert.ok(rows.every(r => !r.isCadence))
+  assert.deepEqual(manualTaskRows(null, 7, now), [])
 })
 
 test('atendente: vendedor ve quem atende; gestor troca', () => {

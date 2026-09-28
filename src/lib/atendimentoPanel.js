@@ -73,6 +73,11 @@ export function leadTaskRows(tasks, leadId, nowMs = Date.now()) {
     .sort((a, b) => (a.due.getTime() || 0) - (b.due.getTime() || 0))
 }
 
+// Tarefas do Chat: so as manuais. O passo de cadencia (etapa ou avulsa) ja aparece no bloco Cadencia.
+export function manualTaskRows(tasks, leadId, nowMs = Date.now()) {
+  return leadTaskRows((tasks || []).filter(t => t.type !== 'cadence'), leadId, nowMs)
+}
+
 // Quem atende o lead: vendedor so ve o nome; gerente/admin troca (mesma permissao da aba Info de antes)
 export function attendantView({ role, attendantId, attendants, fallbackName }) {
   const found = attendantId != null ? (attendants || []).find(a => a.id === attendantId) : null

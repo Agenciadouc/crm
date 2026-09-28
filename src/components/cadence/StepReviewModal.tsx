@@ -7,6 +7,7 @@ import { canSendReview } from '../../lib/atendimentoPanel.js'
 interface Props {
   title: string
   initialText: string
+  placeholder?: string // mensagem sem texto pronto: a janela abre vazia com este exemplo
   leadName: string
   instanceName: string | null // instancia que o envio do Chat vai usar agora
   noInstanceMessage: string // aviso quando nao ha instancia escolhida
@@ -16,7 +17,7 @@ interface Props {
   onSend: (text: string) => void
 }
 
-export default function StepReviewModal({ title, initialText, leadName, instanceName, noInstanceMessage, sending, error, onCancel, onSend }: Props) {
+export default function StepReviewModal({ title, initialText, placeholder, leadName, instanceName, noInstanceMessage, sending, error, onCancel, onSend }: Props) {
   const [text, setText] = useState(initialText)
   const canSend = canSendReview({ text, hasInstance: !!instanceName, sending })
 
@@ -50,7 +51,7 @@ export default function StepReviewModal({ title, initialText, leadName, instance
           rows={7}
           autoFocus
           disabled={sending}
-          placeholder="ex.: Oi Ana, para quando é o seu evento?"
+          placeholder={placeholder || 'ex.: Oi Ana, para quando é o seu evento?'}
           style={{ marginTop: 10, width: '100%', fontSize: 13, resize: 'vertical', minHeight: 130, lineHeight: 1.5, fontFamily: 'inherit', whiteSpace: 'pre-wrap' }}
         />
         <div style={{ marginTop: 8, fontSize: 12, display: 'flex', alignItems: 'center', gap: 6, color: instanceName ? 'var(--text-secondary)' : '#FBBC04' }}>

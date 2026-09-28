@@ -36,8 +36,11 @@ import { fetchLeadStageCadence, markLeadStepDone } from '../lib/cadenceApi'
 import { avulsaStepLabel, avulsaStepView, avulsaReviewPos, telHref } from '../lib/avulsaStep.js'
 import {
   reviewPosition, reviewTitle, reviewFromPendingAsk, reviewSendKeys, boxKeysAfterReviewSend, offerRecognition,
-  leadTaskRows, attendantView, sectionTitle, type StepReview, type ReviewPos,
+  manualTaskRows, attendantView, sectionTitle, type StepReview, type ReviewPos,
 } from '../lib/atendimentoPanel.js'
+import { cardHeader, avulsaCardActions, cadenceTitleIds, NO_TEXT_HINT } from '../lib/cadenceCard.js'
+import { stepTypeLabel } from '../lib/nextStep.js'
+import { PANEL_CARD, CADENCE_CARD, PRIMARY_BTN, HEAD_BTN, LinkButton, PanelTitle } from '../components/atendimento/PanelParts'
 import StageGateModal from '../components/roteiro/StageGateModal'
 import RecognizedQuestionBar from '../components/roteiro/RecognizedQuestionBar'
 import { confirmAsk } from '../lib/roteiroApi'
@@ -233,7 +236,8 @@ export default function Chat() {
   const [taskTime, setTaskTime] = useState('')
   const [creatingTask, setCreatingTask] = useState(false)
   // Cadencia avulsa: janela do roteiro da ligacao (guarda o lead e o passo) e [Feito]/[Pular] em andamento
-  const [callModal, setCallModal] = useState<{ leadId: number; lcId: number; attemptId: number | null; label: string; text: string } | null>(null)
+  // source: 'avulsa' (passo da avulsa) ou 'etapa' (passo ligacao da cadencia da etapa)
+  const [callModal, setCallModal] = useState<{ source: 'avulsa' | 'etapa'; leadId: number; lcId: number; attemptId: number | null; label: string; text: string } | null>(null)
   const [avulsaBusy, setAvulsaBusy] = useState(false)
   // "Arrumar" a aba Atendimento: layouts salvos (conta e meu), modo arrumar aberto
   const [savedLayouts, setSavedLayouts] = useState<SavedLayouts | null>(null)
@@ -556,8 +560,9 @@ export default function Chat() {
     const text = r.kind === 'mensagem'
       ? fillLeadVars(r.text)
       : r.text
-    // Passo sem texto: nao abre (e nenhum attempt_id fica pendurado)
-    if (!text.trim()) return
+    // Pergunta sem texto: nao abre. Mensagem sem texto pronto abre VAZIA (o vendedor escreve;
+    // [Enviar agora] so liga com texto, e [Cancelar] nao deixa attempt_id pendurado)
+    if (r.kind === 'pergunta' && !text.trim()) return
     openReview({ leadId: lead.id, kind: r.kind, text, questionKey: r.kind === 'pergunta' ? r.questionKey : null, attemptId: r.attemptId }, r.pos)
   }, [lead, fillLeadVars, openReview])
 
@@ -1015,7 +1020,8 @@ export default function Chat() {
           return
         }
       }
-      const { sameLead } = await deliverText(r.leadId, text, override, keys.askKey, keys.stepKey)
+      const finalText = r.kind === 'mensagem' ? fillLeadVars(text) : text
+      const { sameLead } = await deliverText(r.leadId, finalText, override, keys.askKey, keys.stepKey)
       if (sameLead) {
         // A caixa perde a chave igual a que acabou de ir (senao a proxima mensagem contaria de novo)
         setRoteiroAskKey(k => boxKeysAfterReviewSend({ askKey: k, stepKey: null }, keys).askKey)
@@ -1318,6 +1324,24 @@ export default function Chat() {
     }
   }
 
+  // [Feito] da janela do roteiro quando o passo e da cadencia da etapa: mesmo passo exato (409 se mudou)
+  const handleStageCallDone = async (target: { leadId: number; attemptId: number | null }) => {
+    if (!accountId || avulsaBusy || !target.attemptId || selectedLeadIdRef.current !== target.leadId) return
+    const { leadId } = target
+    setAvulsaBusy(true)
+    try {
+      await markLeadStepDone(leadId, target.attemptId, accountId, 'feito')
+      if (selectedLeadIdRef.current === leadId) setCallModal(null)
+    } catch (e: any) {
+      if (selectedLeadIdRef.current === leadId) {
+        if (e?.status === 409) setCallModal(null)
+        setNotice({ kind: 'error', title: e?.status === 409 ? 'O passo mudou' : 'Não deu para concluir o passo', message: e?.message || 'Erro desconhecido' })
+      }
+    } finally {
+      if (selectedLeadIdRef.current === leadId) { setAvulsaBusy(false); setNextStepReload(n => n + 1) }
+    }
+  }
+
   const handleAssignFollowUp = async (followUpId: number) => {
     if (!lead || !accountId) return
     try {
@@ -1425,12 +1449,13 @@ export default function Chat() {
   const sectionHeadStyle: React.CSSProperties = { fontSize: 10, color: '#9B96B0', textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: 3, marginBottom: 4 }
   // Cartao "Informacoes" da aba Info = bloco "Dados do contato" da Atendimento (mesmo estado e mesma edicao).
   // So uma aba aparece por vez, entao o estado de edicao compartilhado nao aparece duas vezes.
-  const renderContatoCard = (lead: Lead) => (
+  const renderContatoCard = (lead: Lead, help?: React.ReactNode) => (
     <div className="card" style={{ padding: 12, marginBottom: 12 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: infoCollapsed ? 0 : 8 }}>
         <div onClick={() => { if (!editing) { setInfoCollapsed(p => { const v = !p; localStorage.setItem('chat_info_collapsed', v ? '1' : '0'); return v }) } }} style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: editing ? 'default' : 'pointer', flex: 1 }}>
           {!editing && (infoCollapsed ? <ChevronDown size={12} style={{ color: '#9B96B0' }} /> : <ChevronUp size={12} style={{ color: '#9B96B0' }} />)}
           <div style={{ fontSize: 10, color: '#9B96B0', textTransform: 'uppercase' }}>Informacoes</div>
+          {help && <HelpTip title="Dados do contato">{help}</HelpTip>}
         </div>
         {!editing ? (
           <button className="btn btn-secondary btn-sm" onClick={() => { setInfoCollapsed(false); setEditing(true) }} style={{ padding: '2px 6px', fontSize: 10 }}><Edit3 size={10} /></button>
@@ -1473,12 +1498,13 @@ export default function Chat() {
     </div>
   )
   // Cartao "Observacoes" da aba Info = bloco "observacoes" da Atendimento.
-  const renderObservacoesCard = (lead: Lead) => (
+  const renderObservacoesCard = (lead: Lead, help?: React.ReactNode) => (
     <div className="card" style={{ padding: 12, marginBottom: 12 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: notesCollapsed ? 0 : 6 }}>
         <div onClick={() => { if (!editingNotes) { setNotesCollapsed(p => { const v = !p; localStorage.setItem('chat_notes_collapsed', v ? '1' : '0'); return v }) } }} style={{ fontSize: 10, color: '#9B96B0', textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: 3, cursor: editingNotes ? 'default' : 'pointer', flex: 1 }}>
           {!editingNotes && (notesCollapsed ? <ChevronDown size={12} style={{ color: '#9B96B0' }} /> : <ChevronUp size={12} style={{ color: '#9B96B0' }} />)}
           <FileText size={10} /> Observacoes
+          {help && <HelpTip title="Observações">{help}</HelpTip>}
         </div>
         {!editingNotes ? (
           <button className="btn btn-secondary btn-sm" onClick={() => { setNotesCollapsed(false); setNotesDraft(lead.notes || ''); setEditingNotes(true) }} style={{ padding: '2px 6px' }}><Edit3 size={10} /></button>
@@ -2059,6 +2085,14 @@ export default function Chat() {
                 }
                 // Cada bloco da aba (ids estaveis de panelLayout.js). A ordem e o que aparece vem do "Arrumar"
                 // (vendedor > conta > fabrica); o padrao de fabrica e a aba de sempre.
+                const cadTitles = cadenceTitleIds(visibleIds(atendimentoLayout.layout))
+                const cadenceTitle = (id: AtendimentoBlockId) => cadTitles.includes(id) && (
+                  <PanelTitle
+                    icon={<ListOrdered size={10} />}
+                    label="Cadência"
+                    help={<>O que fazer agora com este cliente. Em cima, a cadência da etapa (muda quando ele muda de etapa); embaixo, a cadência avulsa que você aplicou só para ele. Cada cartão tem um botão principal. Ex.: "Enviar pergunta" (Para quando é o evento?), depois "Enviar mensagem" com o catálogo. Pular passa para o próximo passo sem enviar nada.</>}
+                  />
+                )
                 const blocks: Record<AtendimentoBlockId, () => React.ReactNode> = {
                   score: () => (<>
                   {/* 1. Termometro em uma linha (clique expande) */}
@@ -2069,11 +2103,8 @@ export default function Chat() {
                   {(() => {
                     const av = attendantView({ role: user?.role, attendantId: lead.attendant_id ?? null, attendants, fallbackName: lead.attendant_name })
                     return (
-                      <div style={{ marginBottom: 10 }}>
-                        <div style={sectionHeadStyle}>
-                          <User size={10} /> Atendente
-                          <HelpTip title="Atendente">Quem está cuidando deste cliente agora. Ex.: "Ana" atende; o gerente pode passar para "Bruno" aqui.</HelpTip>
-                        </div>
+                      <div className="card" style={PANEL_CARD}>
+                        <PanelTitle icon={<User size={10} />} label="Atendente" help={<>Quem está cuidando deste cliente agora. Ex.: "Ana" atende; o gerente pode passar para "Bruno" aqui.</>} />
                         {av.canChange ? (
                           <select className="select" aria-label="Atendente do lead" style={{ width: '100%' }} value={lead.attendant_id || ''} onChange={e => handleAssign(e.target.value ? +e.target.value : null)}>
                             <option value="">Sem atendente</option>
@@ -2088,11 +2119,8 @@ export default function Chat() {
                   </>),
                   etapa: () => (<>
                   {/* 3. Etapa do funil: seletor grande; passa pela trava (Falta saber) e pela venda (handleStageChange) */}
-                  <div style={{ marginBottom: 12 }}>
-                    <div style={sectionHeadStyle}>
-                      <ListOrdered size={10} /> Etapa do funil
-                      <HelpTip title="Etapa do funil">Em que ponto da venda o cliente está. Ex.: de "Novo lead" para "Em atendimento" quando ele respondeu. Se faltar uma pergunta obrigatória, abre a janela "Falta saber".</HelpTip>
-                    </div>
+                  <div className="card" style={PANEL_CARD}>
+                    <PanelTitle icon={<ListOrdered size={10} />} label="Etapa do funil" help={<>Em que ponto da venda o cliente está. Ex.: de "Novo lead" para "Em atendimento" quando ele respondeu. Se faltar uma pergunta obrigatória, abre a janela "Falta saber".</>} />
                     <select
                       className="select"
                       aria-label="Etapa do funil"
@@ -2105,18 +2133,19 @@ export default function Chat() {
                   </div>
                   </>),
                   // Dados do contato e Observacoes: o mesmo cartao da aba Info (mesma edicao e permissoes)
-                  contato: () => renderContatoCard(lead),
+                  contato: () => renderContatoCard(lead, <>Telefone, e-mail, empresa e cidade do cliente. Clique no lápis para editar. Ex.: corrija o telefone para (11) 98888-7777.</>),
                   tags: () => (<>
                   {/* 4. Tags do lead (veio da aba Info) */}
-                  <div className="card" style={{ padding: 12, marginBottom: 12 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: tagsCollapsed ? 0 : 6 }}>
-                      <div onClick={() => setTagsCollapsed(p => { const v = !p; localStorage.setItem('chat_tags_collapsed', v ? '1' : '0'); return v })} style={{ fontSize: 10, color: '#9B96B0', textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: 3, cursor: 'pointer', flex: 1 }}>
-                        {tagsCollapsed ? <ChevronDown size={12} style={{ color: '#9B96B0' }} /> : <ChevronUp size={12} style={{ color: '#9B96B0' }} />}
-                        <TagIcon size={10} /> Tags
-                        <HelpTip title="Tags">Etiquetas para achar e filtrar o cliente. Clique numa tag para tirar. Ex.: "Casamento", "Indicação".</HelpTip>
-                      </div>
+                  <div className="card" style={PANEL_CARD}>
+                    <PanelTitle
+                      icon={<>{tagsCollapsed ? <ChevronDown size={12} style={{ color: '#9B96B0' }} /> : <ChevronUp size={12} style={{ color: '#9B96B0' }} />}<TagIcon size={10} /></>}
+                      label="Tags"
+                      help={<>Etiquetas para achar e filtrar o cliente. Clique numa tag para tirar. Ex.: "Casamento", "Indicação".</>}
+                      onClick={() => setTagsCollapsed(p => { const v = !p; localStorage.setItem('chat_tags_collapsed', v ? '1' : '0'); return v })}
+                      style={{ marginBottom: tagsCollapsed ? 0 : 8 }}
+                      right={
                       <div style={{ position: 'relative' }}>
-                        <button className="btn btn-secondary btn-sm" onClick={() => { setTagsCollapsed(false); setShowTagMenu(!showTagMenu) }} style={{ padding: '2px 6px' }} title="Colocar tag"><Plus size={10} /> tag</button>
+                        <button className="btn btn-secondary btn-sm" onClick={() => { setTagsCollapsed(false); setShowTagMenu(!showTagMenu) }} style={HEAD_BTN} title="Colocar tag"><Plus size={10} /> tag</button>
                         {showTagMenu && (
                           <div style={{ position: 'absolute', right: 0, top: '100%', marginTop: 4, background: 'var(--bg-card)', border: '1px solid var(--border-medium)', borderRadius: 8, padding: 6, zIndex: 50, minWidth: 200 }}>
                             {availableTags.length > 0 && (
@@ -2137,7 +2166,8 @@ export default function Chat() {
                           </div>
                         )}
                       </div>
-                    </div>
+                      }
+                    />
                     {!tagsCollapsed && (
                       <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                         {lead.tags?.map(t => (
@@ -2151,7 +2181,8 @@ export default function Chat() {
                   </div>
                   </>),
                   proximo_passo: () => (<>
-                  {/* 5. Proximo passo da cadencia da etapa: [Perguntar]/[Enviar] abrem a janela Conferir mensagem */}
+                  {/* 5. Cadencia da etapa: [Enviar pergunta]/[Enviar mensagem] abrem a janela Conferir mensagem */}
+                  {cadenceTitle('proximo_passo')}
                   <NextStepCard
                     key={`cad-${lead.id}`}
                     leadId={lead.id}
@@ -2160,22 +2191,20 @@ export default function Chat() {
                     onAsk={handleRoteiroAsk}
                     onSendStep={handleStepSend}
                     onReview={handleReviewStep}
+                    onCall={c => setCallModal({ source: 'etapa', leadId: lead.id, lcId: 0, attemptId: c.attemptId, label: c.pos ? `Passo ${c.pos.n} de ${c.pos.m} · Ligação` : 'Ligação', text: c.text })}
                     reloadSignal={nextStepReload}
                     canManage={user?.role === 'gerente' || user?.role === 'super_admin'}
                   />
                   </>),
                   avulsa: () => (<>
-                  {/* 5b. Cadencia avulsa do lead (veio da aba Info, com [Feito]/avancar como antes) */}
-                  <div className="card" style={{ padding: 12, marginBottom: 12 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                      <div style={{ fontSize: 10, color: '#9B96B0', textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: 3, flex: 1 }}>
-                        <ListOrdered size={10} /> Cadência avulsa
-                        <HelpTip title="Cadência avulsa">Passos extras que você escolheu só para este cliente, fora da cadência da etapa. Ex.: "Pós-venda": passo 1 mandar mensagem (clique em Enviar, confira o texto e envie), passo 2 ligar (Ver roteiro e concluir). Pular passa para o próximo passo sem enviar nada.</HelpTip>
-                      </div>
-                      <div style={{ position: 'relative' }}>
-                        <button className="btn btn-secondary btn-sm" onClick={() => setShowCadenceMenu(!showCadenceMenu)} style={{ padding: '2px 8px', fontSize: 10 }}>{leadCadence ? 'Trocar' : 'Atribuir'}</button>
+                  {/* 5b. Cadencia avulsa do lead: mesmo cartao da etapa (um botao principal; Pular, Editar, Trocar e Remover como link) */}
+                  {cadenceTitle('avulsa')}
+                  {(() => {
+                    const menuAnchor = (trigger: React.ReactNode) => (
+                      <span style={{ position: 'relative', display: 'inline-block' }}>
+                        {trigger}
                         {showCadenceMenu && (
-                          <div style={{ position: 'absolute', right: 0, top: '100%', marginTop: 4, background: 'var(--bg-card)', border: '1px solid var(--border-medium)', borderRadius: 8, padding: 4, zIndex: 50, minWidth: 220, maxHeight: 320, overflowY: 'auto' }}>
+                          <div style={{ position: 'absolute', left: 0, top: '100%', marginTop: 4, background: 'var(--bg-card)', border: '1px solid var(--border-medium)', borderRadius: 8, padding: 4, zIndex: 50, minWidth: 220, maxHeight: 320, overflowY: 'auto' }}>
                             {cadences.length === 0 && globalCadences.length === 0 && <div style={{ padding: 8, fontSize: 11, color: 'var(--text-muted)' }}>Nenhuma cadência. Crie em Cadências e Follow-ups (aba Manuais)</div>}
                             {cadences.length > 0 && (
                               <>
@@ -2202,75 +2231,91 @@ export default function Chat() {
                             )}
                           </div>
                         )}
-                      </div>
-                    </div>
-                    {(leadCadence ? (
-                      <>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                          <div style={{ fontSize: 12, fontWeight: 600 }}>{leadCadence.cadence_name}</div>
-                          <div style={{ display: 'flex', gap: 3 }}>
-                            <button className="btn btn-secondary btn-sm" style={{ padding: '2px 6px', fontSize: 9 }} onClick={() => { const base = import.meta.env.BASE_URL.replace(/\/$/, ''); window.open(`${base}${automationUrl('manuais')}`, '_blank') }}>Editar</button>
-                            <button className="btn btn-danger btn-sm" style={{ padding: '2px 6px', fontSize: 9 }} onClick={async () => {
-                              if (!accountId || !confirm('Remover cadencia deste lead?')) return
-                              await removeLeadCadence(leadCadence.id, accountId)
-                              loadLead()
-                            }}>Remover</button>
-                          </div>
+                      </span>
+                    )
+                    if (!leadCadence) {
+                      return (
+                        <div style={{ marginBottom: 12 }}>
+                          {menuAnchor(<LinkButton onClick={() => setShowCadenceMenu(!showCadenceMenu)} title='Ex.: escolha "Pós-venda" para mandar mensagens extras só para este cliente'><Plus size={10} style={{ verticalAlign: -1 }} /> Aplicar cadência avulsa</LinkButton>)}
                         </div>
-                        {leadCadence.status === 'completed' ? (
-                          <div style={{ fontSize: 11, color: '#34C759', display: 'flex', alignItems: 'center', gap: 3, marginTop: 4 }}><Check size={10} /> Concluida</div>
-                        ) : (() => {
-                          const v = avulsaStepView(leadCadence, fillLeadVars)
-                          if (!v) return null
-                          const target = { leadId: lead.id, lcId: leadCadence.id, attemptId: leadCadence.current_attempt_id }
-                          const label = avulsaStepLabel(leadCadence)
-                          return (
-                            <>
-                              <div style={{ fontSize: 11, color: '#FFB300', marginTop: 2 }}>{label}</div>
-                              {v.title && <div style={{ fontSize: 11, color: 'var(--text-primary)', marginTop: 4, fontWeight: 600 }}>{v.title}</div>}
-                              {v.text ? (
-                                <div style={{ marginTop: 6, padding: '8px 10px', fontSize: 11, lineHeight: 1.5, color: 'var(--text-primary)', whiteSpace: 'pre-wrap', background: 'rgba(255,179,0,0.05)', border: '1px solid rgba(255,179,0,0.2)', borderRadius: 6, maxHeight: 140, overflowY: 'auto' }}>{v.text}</div>
-                              ) : (
-                                <div style={{ marginTop: 6, fontSize: 10, color: '#6B6580' }}>Passo sem texto. Ex.: faça o que combinou e clique em Feito.</div>
+                      )
+                    }
+                    const completed = leadCadence.status === 'completed'
+                    const total = leadCadence.total_attempts ?? 0
+                    const h = cardHeader('avulsa', leadCadence.cadence_name, completed ? total : (leadCadence.attempt_position ?? 0) + 1, total)
+                    const v = completed ? null : avulsaStepView(leadCadence, fillLeadVars)
+                    const target = { leadId: lead.id, lcId: leadCadence.id, attemptId: leadCadence.current_attempt_id }
+                    const label = avulsaStepLabel(leadCadence)
+                    const { primary, secondary } = avulsaCardActions(v)
+                    const runAvulsa = (id: string) => {
+                      if (id === 'enviar') handleAvulsaSend()
+                      else if (id === 'roteiro' && v) setCallModal({ source: 'avulsa', ...target, label, text: v.text })
+                      else if (id === 'feito') handleAvulsaStep('feito', target)
+                      else if (id === 'pular') handleAvulsaStep('pulado', target)
+                    }
+                    const primaryIcon = primary?.id === 'enviar' ? <Send size={11} /> : primary?.id === 'roteiro' ? <Phone size={11} /> : <Check size={11} />
+                    return (
+                      <div className="card" style={CADENCE_CARD}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <span style={{ flex: 1, minWidth: 0, fontSize: 12, fontWeight: 700, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{h.title}</span>
+                          {h.count && <span title={`Passo da vez na cadência avulsa (${h.count}). Ex.: "2 de 2" = último passo.`} style={{ fontSize: 11, fontWeight: 600, color: completed ? 'var(--positive)' : 'var(--text-muted)' }}>{h.count}</span>}
+                        </div>
+                        <div style={{ display: 'flex', gap: 10, marginTop: 2, marginBottom: 6 }}>
+                          <LinkButton onClick={() => { const base = import.meta.env.BASE_URL.replace(/\/$/, ''); window.open(`${base}${automationUrl('manuais')}`, '_blank') }} title="Abre a tela de cadências numa nova aba">Editar</LinkButton>
+                          {menuAnchor(<LinkButton onClick={() => setShowCadenceMenu(!showCadenceMenu)} title="Escolher outra cadência avulsa para este cliente">Trocar</LinkButton>)}
+                          <LinkButton danger onClick={async () => {
+                            if (!accountId || !confirm('Remover cadencia deste lead?')) return
+                            await removeLeadCadence(leadCadence.id, accountId)
+                            loadLead()
+                          }}>Remover</LinkButton>
+                        </div>
+                        {completed || !v ? (
+                          <div style={{ fontSize: 11, color: '#34C759', display: 'flex', alignItems: 'center', gap: 3 }}><Check size={10} /> Concluida</div>
+                        ) : (
+                          <>
+                            <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--accent)', textTransform: 'uppercase', marginBottom: 4 }}>{leadCadence.action_type ? stepTypeLabel(leadCadence.action_type) : 'Passo'}</div>
+                            {v.title && <div style={{ fontSize: 12, color: 'var(--text-primary)', fontWeight: 600, marginBottom: 2 }}>{v.title}</div>}
+                            {v.text ? (
+                              <div style={{ fontSize: 13, lineHeight: 1.4, color: 'var(--text-primary)', whiteSpace: 'pre-wrap', maxHeight: 140, overflowY: 'auto' }}>{v.text}</div>
+                            ) : v.kind === 'mensagem' ? (
+                              <div style={{ fontSize: 12, color: 'var(--text-muted)', fontStyle: 'italic' }}>{NO_TEXT_HINT}</div>
+                            ) : null}
+                            {leadCadence.attempt_instructions && leadCadence.attempt_instructions.trim() !== v.text && leadCadence.attempt_instructions.trim() !== (v.title || '') && (
+                              <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 2, fontStyle: 'italic' }}>{leadCadence.attempt_instructions}</div>
+                            )}
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 8, flexWrap: 'wrap' }}>
+                              {primary && (
+                                <button className="btn btn-primary btn-sm" style={PRIMARY_BTN} disabled={avulsaBusy} onClick={() => runAvulsa(primary.id)} title={primary.id === 'enviar' ? 'Abre a janela para conferir o texto antes de enviar' : undefined}>
+                                  {primaryIcon} {primary.label}
+                                </button>
                               )}
-                              {leadCadence.attempt_instructions && leadCadence.attempt_instructions.trim() !== v.text && (
-                                <div style={{ fontSize: 10, color: '#9B96B0', marginTop: 4, fontStyle: 'italic' }}>{leadCadence.attempt_instructions}</div>
-                              )}
-                              <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
-                                {v.actions.includes('enviar') && (
-                                  <button className="btn btn-primary btn-sm" style={{ flex: 1, fontSize: 11 }} onClick={handleAvulsaSend} disabled={avulsaBusy} title="Abre a janela para conferir o texto antes de enviar"><Send size={10} /> Enviar</button>
-                                )}
-                                {v.actions.includes('roteiro') && (
-                                  <button className="btn btn-primary btn-sm" style={{ flex: 1, fontSize: 11 }} disabled={avulsaBusy} onClick={() => setCallModal({ ...target, label, text: v.text })}><Phone size={10} /> Ver roteiro e concluir</button>
-                                )}
-                                {v.actions.includes('feito') && (
-                                  <button className="btn btn-primary btn-sm" style={{ flex: 1, fontSize: 11 }} disabled={avulsaBusy} onClick={() => handleAvulsaStep('feito', target)}><Check size={10} /> Feito</button>
-                                )}
-                                <button className="btn btn-secondary btn-sm" style={{ fontSize: 11 }} disabled={avulsaBusy} onClick={() => handleAvulsaStep('pulado', target)} title="Passa para o próximo passo sem enviar nada"><ChevronRight size={10} /> Pular</button>
-                              </div>
-                            </>
-                          )
-                        })()}
-                      </>
-                    ) : (
-                      <div style={{ fontSize: 11, color: '#6B6580' }}>Nenhuma cadência avulsa. Ex.: clique em Atribuir e escolha "Pós-venda"</div>
-                    ))}
-                  </div>
+                              <span style={{ flex: 1 }} />
+                              {secondary.map(a => (
+                                <LinkButton key={a.id} disabled={avulsaBusy} onClick={() => runAvulsa(a.id)} title={a.id === 'pular' ? 'Passa para o próximo passo sem enviar nada' : undefined}>{a.label}</LinkButton>
+                              ))}
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    )
+                  })()}
                   </>),
                   tarefas: () => (<>
-                  {/* 6. Tarefas pendentes do lead (avulsas + passo de cadencia que virou tarefa) + [+ tarefa] */}
+                  {/* 6. Tarefas manuais do lead + [+ tarefa]. Passo de cadencia (etapa ou avulsa) fica no bloco Cadencia */}
                   {(() => {
-                    const rows = leadTaskRows(leadTasks, lead.id)
+                    const rows = manualTaskRows(leadTasks, lead.id)
                     return (
-                      <div className="card" style={{ padding: 12, marginBottom: 12 }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 3, fontSize: 10, color: '#9B96B0', textTransform: 'uppercase', marginBottom: 8 }}>
-                          <ListTodo size={10} /> {sectionTitle('Tarefas', rows.length)}
-                          <HelpTip title="Tarefas">O que falta fazer com este cliente, com prazo. Vermelho = atrasada. Ex.: "Ligar amanhã às 10h para confirmar a data".</HelpTip>
-                          <span style={{ flex: 1 }} />
-                          <button className="btn btn-secondary btn-sm" onClick={() => setShowTaskForm(v => !v)} aria-expanded={showTaskForm} style={{ padding: '2px 6px', fontSize: 10, textTransform: 'none' }} title="Criar tarefa para este lead">
+                      <div className="card" style={PANEL_CARD}>
+                        <PanelTitle
+                          icon={<ListTodo size={10} />}
+                          label={sectionTitle('Tarefas', rows.length)}
+                          help={<>Tarefas que você criou para este cliente, com prazo. Vermelho = atrasada. Os passos das cadências ficam no bloco Cadência. Ex.: "Ligar amanhã às 10h para confirmar a data".</>}
+                          right={
+                          <button className="btn btn-secondary btn-sm" onClick={() => setShowTaskForm(v => !v)} aria-expanded={showTaskForm} style={HEAD_BTN} title="Criar tarefa para este lead">
                             {showTaskForm ? <X size={10} /> : <Plus size={10} />} tarefa
                           </button>
-                        </div>
+                          }
+                        />
                         {showTaskForm && (
                           <div style={{ padding: 8, marginBottom: 8, borderRadius: 6, background: 'var(--bg-hover)', border: '1px solid var(--border-subtle)' }}>
                             <input className="input" value={taskTitle} onChange={e => setTaskTitle(e.target.value)} placeholder="Ex: Ligar para o paciente" style={{ fontSize: 11, marginBottom: 6 }} />
@@ -2315,56 +2360,31 @@ export default function Chat() {
                           <div style={{ fontSize: 10, color: '#6B6580' }}>Nenhuma tarefa pendente. Ex.: + tarefa "Ligar em 30 minutos"</div>
                         ) : (
                           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                            {rows.map(({ key, isCadence, title, desc, due, overdue, task: t }) => {
-                              const accent = isCadence ? '#FFB300' : '#9B59B6'
-                              return (
-                                <div key={key} style={{ padding: '8px 10px', background: overdue ? 'rgba(255,107,107,0.06)' : `${accent}10`, border: `1px solid ${overdue ? 'rgba(255,107,107,0.2)' : `${accent}30`}`, borderLeft: `3px solid ${accent}`, borderRadius: 6 }}>
-                                  <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 2 }}>
-                                    <span style={{ fontSize: 9, padding: '1px 5px', borderRadius: 3, background: `${accent}25`, color: accent, fontWeight: 700, textTransform: 'uppercase' }}>
-                                      {isCadence ? 'Cadencia' : 'Avulsa'}
-                                    </span>
-                                    <div style={{ fontSize: 12, fontWeight: 600, flex: 1 }}>{title}</div>
-                                  </div>
-                                  {desc && <div style={{ fontSize: 11, color: '#9B96B0', marginBottom: 4 }}>{desc}</div>}
-                                  <div style={{ fontSize: 10, color: overdue ? '#FF6B6B' : '#9B96B0', display: 'flex', alignItems: 'center', gap: 3, marginBottom: 6 }}>
-                                    <Clock size={9} /> {due.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
-                                    {overdue && <span> · atrasada</span>}
-                                    {!isCadence && t.assigned_name && <span> · {t.assigned_name}</span>}
-                                    {isCadence && t.action_type && <span> · {t.action_type}</span>}
-                                  </div>
-                                  <div style={{ display: 'flex', gap: 4 }}>
-                                    <button className="btn btn-primary btn-sm" onClick={async () => {
-                                      if (!accountId || !lead) return
-                                      try {
-                                        if (isCadence) await completeTask(t.lead_cadence_id, accountId)
-                                        else await completeStandaloneTask(t.id, accountId)
-                                        fetchLeadTasks(lead.id, accountId).then(setLeadTasks)
-                                      } catch (e: any) { setNotice({ kind: 'error', title: 'Erro ao concluir', message: e.message }) }
-                                    }} style={{ fontSize: 10, padding: '3px 8px', background: '#34C759', borderColor: '#34C759', flex: 1 }}>
-                                      <Check size={10} /> Concluir
-                                    </button>
-                                    {isCadence ? (
-                                      <button className="btn btn-secondary btn-sm" onClick={async () => {
-                                        if (!accountId || !lead) return
-                                        if (!confirm('Pular esta etapa da cadencia?')) return
-                                        try { await skipTask(t.lead_cadence_id, accountId); fetchLeadTasks(lead.id, accountId).then(setLeadTasks) } catch (e: any) { setNotice({ kind: 'error', title: 'Erro ao pular', message: e.message }) }
-                                      }} style={{ fontSize: 10, padding: '3px 8px' }} title="Pular etapa">
-                                        <ChevronRight size={10} />
-                                      </button>
-                                    ) : (
-                                      <>
-                                        <button className="btn btn-secondary btn-sm" onClick={() => setEditingTask(t)} style={{ fontSize: 10, padding: '3px 8px' }} title="Editar">
-                                          <Edit3 size={10} />
-                                        </button>
-                                        <button className="btn btn-secondary btn-sm" onClick={async () => { if (!accountId || !lead) return; if (!confirm('Excluir tarefa?')) return; await deleteStandaloneTask(t.id, accountId); fetchLeadTasks(lead.id, accountId).then(setLeadTasks) }} style={{ fontSize: 10, padding: '3px 8px', color: '#FF6B6B' }} title="Excluir">
-                                          <Trash2 size={10} />
-                                        </button>
-                                      </>
-                                    )}
-                                  </div>
+                            {rows.map(({ key, title, desc, due, overdue, task: t }) => (
+                              <div key={key} style={{ padding: '8px 10px', background: overdue ? 'rgba(255,107,107,0.06)' : 'var(--bg-hover)', border: `1px solid ${overdue ? 'rgba(255,107,107,0.2)' : 'var(--border-subtle)'}`, borderRadius: 6 }}>
+                                <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 2 }}>{title}</div>
+                                {desc && <div style={{ fontSize: 11, color: '#9B96B0', marginBottom: 4 }}>{desc}</div>}
+                                <div style={{ fontSize: 10, color: overdue ? '#FF6B6B' : '#9B96B0', display: 'flex', alignItems: 'center', gap: 3, marginBottom: 6 }}>
+                                  <Clock size={9} /> {due.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                                  {overdue && <span> · atrasada</span>}
+                                  {t.assigned_name && <span> · {t.assigned_name}</span>}
                                 </div>
-                              )
-                            })}
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                                  <button className="btn btn-primary btn-sm" style={PRIMARY_BTN} onClick={async () => {
+                                    if (!accountId || !lead) return
+                                    try {
+                                      await completeStandaloneTask(t.id, accountId)
+                                      fetchLeadTasks(lead.id, accountId).then(setLeadTasks)
+                                    } catch (e: any) { setNotice({ kind: 'error', title: 'Erro ao concluir', message: e.message }) }
+                                  }}>
+                                    <Check size={11} /> Concluir
+                                  </button>
+                                  <span style={{ flex: 1 }} />
+                                  <LinkButton onClick={() => setEditingTask(t)} title="Mudar título ou prazo">Editar</LinkButton>
+                                  <LinkButton danger onClick={async () => { if (!accountId || !lead) return; if (!confirm('Excluir tarefa?')) return; await deleteStandaloneTask(t.id, accountId); fetchLeadTasks(lead.id, accountId).then(setLeadTasks) }}>Excluir</LinkButton>
+                                </div>
+                              </div>
+                            ))}
                           </div>
                         )}
                       </div>
@@ -2373,14 +2393,13 @@ export default function Chat() {
                   </>),
                   vendas: () => (<>
                   {/* 7. Vendas do lead — total + lista + [+ venda] (veio da aba Info) */}
-                  <div className="card" style={{ padding: 12, marginBottom: 12 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                      <div style={{ fontSize: 10, color: '#9B96B0', textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: 3 }}>
-                        <DollarSign size={10} style={{ color: '#34C759' }} /> {sectionTitle('Vendas', sales.length)}
-                        <HelpTip title="Vendas">Cada compra deste cliente, com valor e data. O total entra no painel Funil &amp; ROI. Ex.: fechou o pacote de R$ 1.500 hoje, clique em + venda.</HelpTip>
-                      </div>
-                      <button className="btn btn-secondary btn-sm" onClick={openSaleModalStandalone} style={{ padding: '2px 6px' }} title="Registrar nova venda"><Plus size={10} /> venda</button>
-                    </div>
+                  <div className="card" style={PANEL_CARD}>
+                    <PanelTitle
+                      icon={<DollarSign size={10} />}
+                      label={sectionTitle('Vendas', sales.length)}
+                      help={<>Cada compra deste cliente, com valor e data. O total entra no painel Funil &amp; ROI. Ex.: fechou o pacote de R$ 1.500 hoje, clique em + venda.</>}
+                      right={<button className="btn btn-secondary btn-sm" onClick={openSaleModalStandalone} style={HEAD_BTN} title="Registrar nova venda"><Plus size={10} /> venda</button>}
+                    />
                     {salesTotal > 0 && (
                       <div style={{ fontSize: 15, fontWeight: 700, color: '#34C759', marginBottom: 8 }}>
                         R$ {salesTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
@@ -2418,7 +2437,7 @@ export default function Chat() {
                     )}
                   </div>
                   </>),
-                  observacoes: () => renderObservacoesCard(lead),
+                  observacoes: () => renderObservacoesCard(lead, <>Anotações livres sobre o cliente, que toda a equipe vê. Ex.: "Prefere contato depois das 18h".</>),
                 }
                 return (
                   <>
@@ -2595,7 +2614,7 @@ export default function Chat() {
       {editingTask && lead && accountId && (
         <EditTaskModal task={editingTask} onClose={() => setEditingTask(null)} onSaved={() => { fetchLeadTasks(lead.id, accountId).then(setLeadTasks); setEditingTask(null) }} />
       )}
-      {/* Roteiro da ligacao da cadencia avulsa: [Feito] conclui o passo (so para o lead aberto) */}
+      {/* Roteiro da ligacao (cadencia da etapa ou avulsa): [Feito] conclui o passo (so para o lead aberto) */}
       {callModal && lead && lead.id === callModal.leadId && (() => {
         const tel = telHref(lead.phone)
         return (
@@ -2612,7 +2631,9 @@ export default function Chat() {
               </div>
               <div className="modal-actions">
                 <button className="btn btn-secondary" onClick={() => setCallModal(null)} disabled={avulsaBusy}>Cancelar</button>
-                <button className="btn btn-primary" disabled={avulsaBusy} onClick={() => handleAvulsaStep('feito', { leadId: callModal.leadId, lcId: callModal.lcId, attemptId: callModal.attemptId })}>
+                <button className="btn btn-primary" disabled={avulsaBusy} onClick={() => callModal.source === 'etapa'
+                  ? handleStageCallDone({ leadId: callModal.leadId, attemptId: callModal.attemptId })
+                  : handleAvulsaStep('feito', { leadId: callModal.leadId, lcId: callModal.lcId, attemptId: callModal.attemptId })}>
                   <Check size={14} /> {avulsaBusy ? 'Salvando...' : 'Feito'}
                 </button>
               </div>
@@ -2627,6 +2648,7 @@ export default function Chat() {
           key={review.id}
           title={reviewTitle(review.kind, review.pos)}
           initialText={review.text}
+          placeholder={review.kind === 'mensagem' ? 'Escreva a mensagem (ex.: Oi {{primeiro_nome}}, tudo bem? ...)' : undefined}
           leadName={lead.name || lead.phone || 'o cliente'}
           instanceName={resolvedSendInstance ? resolvedSendInstance.instance_name : null}
           noInstanceMessage={instances.some(i => i.status === 'connected')

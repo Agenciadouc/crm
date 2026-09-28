@@ -21,14 +21,14 @@ test('passo mensagem: mostra o texto com as variaveis e tem [Enviar] + [Pular]',
   assert.deepEqual(w.actions, ['enviar', 'pular'])
 })
 
-test('passo mensagem sem texto: sem [Enviar], com [Feito]; mostra a descricao', () => {
+test('passo mensagem sem texto: continua com [Enviar] (a janela abre vazia) + [Pular]; descricao vira titulo', () => {
   assert.deepEqual(
     avulsaStepView({ action_type: 'mensagem', attempt_message: '   ', attempt_description: 'Mandar o catálogo' }, fill),
-    { kind: 'mensagem', text: 'Mandar o catálogo', actions: ['feito', 'pular'] },
+    { kind: 'mensagem', title: 'Mandar o catálogo', text: '', actions: ['enviar', 'pular'] },
   )
   // variavel que some (empresa vazia) tambem conta como vazio
-  assert.deepEqual(avulsaStepView({ action_type: 'mensagem', attempt_message: null }, fill).actions, ['feito', 'pular'])
-  assert.deepEqual(avulsaStepView({ action_type: 'mensagem', attempt_message: '{{x}}' }, () => '').actions, ['feito', 'pular'])
+  assert.deepEqual(avulsaStepView({ action_type: 'mensagem', attempt_message: null }, fill), { kind: 'mensagem', title: '', text: '', actions: ['enviar', 'pular'] })
+  assert.deepEqual(avulsaStepView({ action_type: 'mensagem', attempt_message: '{{x}}' }, () => '').actions, ['enviar', 'pular'])
 })
 
 test('passo ligacao: mostra o roteiro (ou a descricao) e tem [Ver roteiro e concluir] + [Pular]', () => {
@@ -73,6 +73,8 @@ test('passo mensagem com descricao e texto: a descricao vai em cima como titulo'
     avulsaStepView({ action_type: 'mensagem', attempt_message: 'Oi {{primeiro_nome}}!', attempt_description: '  Boas-vindas ' }, fill),
     { kind: 'mensagem', title: 'Boas-vindas', text: 'Oi Ana!', actions: ['enviar', 'pular'] },
   )
-  // sem texto a descricao ja e o texto: nao repete como titulo
-  assert.equal(avulsaStepView({ action_type: 'mensagem', attempt_message: '', attempt_description: 'Boas-vindas' }, fill).title, undefined)
+  // sem texto: a descricao fica so como titulo (o texto vem vazio para o vendedor escrever)
+  const empty = avulsaStepView({ action_type: 'mensagem', attempt_message: '', attempt_description: 'Boas-vindas' }, fill)
+  assert.equal(empty.title, 'Boas-vindas')
+  assert.equal(empty.text, '')
 })

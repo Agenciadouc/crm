@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import {
   Play, Check, CheckCircle2, Hourglass, MessageSquareReply, Bot, User, Pencil, ChevronDown, ChevronUp,
-  Lock, Send, Circle, MessageCircle,
+  Lock, Send, Circle, MessageCircle, Phone,
 } from 'lucide-react'
 import { fetchLeadStageCadence, markLeadStepDone, type LeadStageCadence, type LeadStep } from '../../lib/cadenceApi'
 import { saveLeadAnswer, undoAdvance, type QState, type RoteiroOffscript } from '../../lib/roteiroApi'
@@ -14,6 +14,8 @@ import { useSSE } from '../../context/SSEContext'
 import { AUTOMATION_PATH } from '../../lib/automationTabs.js'
 import { STEP_ICONS } from '../../pages/cadencias/StepRow'
 import { reviewPosition, type ReviewPos } from '../../lib/atendimentoPanel.js'
+import { cardHeader, stageCardActions, NO_TEXT_HINT } from '../../lib/cadenceCard.js'
+import { CADENCE_CARD, PRIMARY_BTN, LinkButton } from '../atendimento/PanelParts'
 import HelpTip from '../HelpTip'
 import AnswerEditor from '../roteiro/AnswerEditor'
 import { AdvanceBanner, DeviationBox, OffscriptBox } from '../roteiro/RoteiroNotices'
@@ -30,13 +32,15 @@ interface Props {
   // Chat: [Perguntar]/[Enviar] abrem a janela "Conferir mensagem" (em vez de por o texto na caixa)
   onReview?: (r: { kind: 'pergunta' | 'mensagem'; text: string; questionKey: string | null; attemptId: number; pos: ReviewPos | null }) => void
   reloadSignal?: number // muda depois de um envio pela janela: recarrega na hora
+  // Chat: [Ver roteiro e ligar] abre a janela do roteiro da ligacao (com [Feito] dentro)
+  onCall?: (r: { attemptId: number; text: string; pos: ReviewPos | null }) => void
 }
 
 const smallBtn = { fontSize: 10, padding: '2px 8px' }
 // Varios avisos seguidos (salvar automatico do gestor, mensagens, IA) viram uma recarga so
 const SSE_RELOAD_DEBOUNCE_MS = 600
 
-export default function NextStepCard({ leadId, accountId, mode, onAsk, onSendStep, canManage, onReview, reloadSignal }: Props) {
+export default function NextStepCard({ leadId, accountId, mode, onAsk, onSendStep, canManage, onReview, reloadSignal, onCall }: Props) {
   const [data, setData] = useState<LeadStageCadence | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(false)
@@ -185,7 +189,29 @@ export default function NextStepCard({ leadId, accountId, mode, onAsk, onSendSte
     </div>
   )
 
-  const box = (children: ReactNode, right?: ReactNode) => (
+  // Chat: cartao "Etapa · <nome>" com "N de M" a direita (mesma estrutura do cartao da avulsa)
+  const chatBox = (children: ReactNode) => {
+    const h = cardHeader('etapa', data?.stage?.name, data?.done_count, data?.total)
+    const allOk = !!data && !!data.total && data.done_count === data.total
+    return (
+      <div className="card" style={CADENCE_CARD}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+          <span style={{ flex: 1, minWidth: 0, fontSize: 12, fontWeight: 700, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{h.title}</span>
+          {h.count && (
+            <span
+              title={`${data?.done_count} de ${data?.total} passos desta etapa já feitos (pergunta com resposta, mensagem enviada ou marcada Feito).`}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 11, fontWeight: 600, color: allOk ? 'var(--positive)' : 'var(--text-muted)' }}
+            >
+              {h.count} {allOk && <Check size={10} />}
+            </span>
+          )}
+        </div>
+        {children}
+      </div>
+    )
+  }
+
+  const box = (children: ReactNode, right?: ReactNode) => mode === 'chat' ? chatBox(children) : (
     <div style={{ marginBottom: 12, padding: 10, borderRadius: 8, background: 'var(--bg-hover)', border: '1px solid var(--border-subtle)' }}>
       {header(right)}
       {children}
@@ -196,7 +222,10 @@ export default function NextStepCard({ leadId, accountId, mode, onAsk, onSendSte
   if (error && !data) {
     return box(
       <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-        Não deu para carregar o próximo passo. <button type="button" className="btn btn-secondary btn-sm" style={{ ...smallBtn, marginLeft: 4 }} onClick={() => load()}>Tentar de novo</button>
+        Não deu para carregar o próximo passo.{' '}
+        {mode === 'chat'
+          ? <LinkButton onClick={() => load()}>Tentar de novo</LinkButton>
+          : <button type="button" className="btn btn-secondary btn-sm" style={{ ...smallBtn, marginLeft: 4 }} onClick={() => load()}>Tentar de novo</button>}
       </div>,
     )
   }
@@ -346,6 +375,66 @@ export default function NextStepCard({ leadId, accountId, mode, onAsk, onSendSte
     )
   }
 
+  // Chat: passo da vez no mesmo formato do cartao da avulsa (tipo, texto, UM botao laranja e links)
+  const chatStep = (step: LeadStep) => {
+    const { primary, secondary } = stageCardActions(step)
+    const isBusy = busy === step.attempt_id
+    const isMsg = step.action_type === 'mensagem' || step.action_type === 'whatsapp'
+    const sendText = stepSendText(step)
+    const pos = () => reviewPosition(data, { attemptId: step.attempt_id })
+    const run = (id: string) => {
+      if (id === 'perguntar' && step.question) {
+        if (onReview) onReview({ kind: 'pergunta', text: step.question.text_for_lead, questionKey: step.question_key, attemptId: step.attempt_id, pos: pos() })
+        else onAsk(step.question.text_for_lead, step.question_key)
+      } else if (id === 'ja_sei') openEditor(step)
+      // Sem texto pronto a janela abre vazia para o vendedor escrever
+      else if (id === 'enviar') {
+        if (onReview) onReview({ kind: 'mensagem', text: sendText, questionKey: null, attemptId: step.attempt_id, pos: pos() })
+        else onSendStep(sendText, step.attempt_id)
+      } else if (id === 'feito') handleDone(step)
+      else if (id === 'ligar') {
+        if (onCall) onCall({ attemptId: step.attempt_id, text: step.call_script || step.description || step.instructions || '', pos: pos() })
+        else setScriptOpen(v => (v === step.attempt_id ? null : step.attempt_id))
+      }
+    }
+    const title = stepTitle(step)
+    const primaryIcon = primary?.id === 'perguntar' || primary?.id === 'enviar' ? <Send size={11} /> : primary?.id === 'ligar' ? <Phone size={11} /> : <Check size={11} />
+    return (
+      <div>
+        <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--accent)', textTransform: 'uppercase', marginBottom: 4 }}>{typeLine(step)}</div>
+        {isMsg && !sendText
+          ? <div style={{ fontSize: 12, color: 'var(--text-muted)', fontStyle: 'italic' }}>{NO_TEXT_HINT}</div>
+          : <div style={{ fontSize: 13, color: 'var(--text-primary)', lineHeight: 1.4, whiteSpace: 'pre-wrap', maxHeight: 140, overflowY: 'auto' }}>{title}</div>}
+        {step.instructions && step.action_type !== 'pergunta' && step.instructions !== title && (
+          <div style={{ fontSize: 10, color: 'var(--text-muted)', fontStyle: 'italic', marginTop: 2 }}>{step.instructions}</div>
+        )}
+        {waitLine(step)}
+        {!onCall && scriptOpen === step.attempt_id && step.call_script && (
+          <div style={{ marginTop: 4, fontSize: 11, color: 'var(--text-secondary)', whiteSpace: 'pre-wrap', lineHeight: 1.45 }}>{step.call_script}</div>
+        )}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 8, flexWrap: 'wrap' }}>
+          {primary && (
+            <button
+              type="button" className="btn btn-primary btn-sm" style={PRIMARY_BTN}
+              disabled={primary.id === 'feito' && isBusy}
+              onClick={() => run(primary.id)}
+              title={primary.id === 'perguntar' || primary.id === 'enviar' ? 'Abre a janela para conferir o texto antes de enviar' : undefined}
+            >
+              {primaryIcon} {primary.id === 'feito' && isBusy ? 'Salvando...' : primary.label}
+            </button>
+          )}
+          <span style={{ flex: 1 }} />
+          {secondary.map(a => (
+            <LinkButton key={a.id} onClick={() => run(a.id)} disabled={a.id === 'feito' && isBusy} title={a.id === 'feito' ? 'Já fez por outro caminho? Marca o passo sem enviar nada' : undefined}>
+              {a.id === 'feito' && isBusy ? 'Salvando...' : a.label}
+            </LinkButton>
+          ))}
+        </div>
+        {editor(step)}
+      </div>
+    )
+  }
+
   const originLine = (step: LeadStep) => {
     const origin = doneOrigin(step)
     if (origin === 'ia') return <><Bot size={10} aria-label="Respondida pela IA" /> IA</>
@@ -430,10 +519,10 @@ export default function NextStepCard({ leadId, accountId, mode, onAsk, onSendSte
     <>
       {notices}
       {fresh.length > 0 && <div style={{ marginBottom: 6 }}>{fresh.map(doneRow)}</div>}
-      {next ? nextCard(next) : allDone}
-      {after1 && <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 6, lineHeight: 1.4 }}>{after1}</div>}
+      {next ? chatStep(next) : allDone}
+      {after1 && <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 8, lineHeight: 1.4 }}>{after1}</div>}
       {done.length > 0 && (
-        <div>
+        <div style={{ marginTop: 6 }}>
           <button
             type="button"
             onClick={() => setShowDone(v => !v)}

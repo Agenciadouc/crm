@@ -17,5 +17,6 @@ export function boxKeysAfterReviewSend(
 export function offerRecognition(askKey: string | null, result: { recognized_question?: unknown; message?: { id?: number } | null } | null | undefined): boolean
 export interface LeadTaskRow { key: string; isCadence: boolean; title: string; desc: string; due: Date; overdue: boolean; task: any }
 export function leadTaskRows(tasks: any[] | null | undefined, leadId: number, nowMs?: number): LeadTaskRow[]
+export function manualTaskRows(tasks: any[] | null | undefined, leadId: number, nowMs?: number): LeadTaskRow[]
 export function attendantView(opts: { role: string | undefined; attendantId: number | null | undefined; attendants: Array<{ id: number; name: string }>; fallbackName?: string | null }): { canChange: boolean; name: string }
 export function sectionTitle(label: string, n: number): string
