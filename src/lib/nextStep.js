@@ -34,7 +34,7 @@ export function afterLine(after) {
 export function nextActions(step) {
   if (!step) return []
   if (step.action_type === 'pergunta') return step.state === 'aguardando' ? ['ja_sei'] : ['perguntar', 'ja_sei']
-  if (step.action_type === 'mensagem' || step.action_type === 'whatsapp') return ['enviar', 'feito']
+  if (step.action_type === 'mensagem' || step.action_type === 'whatsapp') return stepSendText(step) ? ['enviar', 'feito'] : ['feito']
   return ['feito']
 }
 
@@ -57,4 +57,42 @@ export function doneOrigin(step) {
 export function deviationLine(deviation) {
   const subject = String((deviation && deviation.triggers) || '').split(',')[0].trim()
   return subject ? `Ele perguntou de ${subject}` : 'Ele saiu do roteiro'
+}
+
+// Texto que o [Enviar] do passo mensagem poe na caixa (vazio = passo sem texto: sem [Enviar])
+export function stepSendText(step) {
+  if (!step) return ''
+  const msg = String(step.auto_message || '').trim()
+  return msg || String(step.description || '').trim()
+}
+
+// cadence:updated leva account_id; tela de admin recebe o aviso de todas as contas.
+// Aviso sem conta (formato antigo) recarrega.
+export function cadenceEventForAccount(data, accountId) {
+  if (!data || data.account_id == null) return true
+  return Number(data.account_id) === Number(accountId)
+}
+
+// Uma recarga silenciosa para varios avisos seguidos (um timer so para todos os eventos).
+// doneBefore: retrato dos passos feitos ANTES do 1o aviso da IA (fica o primeiro).
+export function createReloadDebouncer({ delayMs = 600, run, setTimer = setTimeout, clearTimer = clearTimeout }) {
+  let timer = null
+  let pendingDone
+  return {
+    schedule(doneBefore) {
+      if (doneBefore && !pendingDone) pendingDone = doneBefore
+      if (timer) clearTimer(timer)
+      timer = setTimer(() => {
+        timer = null
+        const d = pendingDone
+        pendingDone = undefined
+        run(d)
+      }, delayMs)
+    },
+    cancel() {
+      if (timer) clearTimer(timer)
+      timer = null
+      pendingDone = undefined
+    },
+  }
 }

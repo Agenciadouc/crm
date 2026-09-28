@@ -6,7 +6,10 @@ import {
 } from 'lucide-react'
 import { fetchLeadStageCadence, markLeadStepDone, type LeadStageCadence, type LeadStep } from '../../lib/cadenceApi'
 import { saveLeadAnswer, undoAdvance, type QState, type RoteiroOffscript } from '../../lib/roteiroApi'
-import { splitSteps, stepTitle, stepTypeLabel, afterLine, nextActions, doneText, doneOrigin, deviationLine } from '../../lib/nextStep.js'
+import {
+  splitSteps, stepTitle, stepTypeLabel, afterLine, nextActions, doneText, doneOrigin, deviationLine,
+  stepSendText, cadenceEventForAccount, createReloadDebouncer,
+} from '../../lib/nextStep.js'
 import { useSSE } from '../../context/SSEContext'
 import { AUTOMATION_PATH } from '../../lib/automationTabs.js'
 import { STEP_ICONS } from '../../pages/cadencias/StepRow'
@@ -26,8 +29,8 @@ interface Props {
 }
 
 const smallBtn = { fontSize: 10, padding: '2px 8px' }
-// Varios avisos seguidos do gestor (salvar automatico) viram uma recarga so
-const CADENCE_SSE_DEBOUNCE_MS = 600
+// Varios avisos seguidos (salvar automatico do gestor, mensagens, IA) viram uma recarga so
+const SSE_RELOAD_DEBOUNCE_MS = 600
 
 export default function NextStepCard({ leadId, accountId, mode, onAsk, onSendStep, canManage }: Props) {
   const [data, setData] = useState<LeadStageCadence | null>(null)
@@ -51,7 +54,6 @@ export default function NextStepCard({ leadId, accountId, mode, onAsk, onSendSte
   // Lead aberto agora: resposta atrasada de outro lead e descartada
   const leadRef = useRef(leadId)
   leadRef.current = leadId
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const load = useCallback((silent = false, doneBefore?: Set<number>) => {
     const my = ++tokenRef.current
@@ -71,34 +73,45 @@ export default function NextStepCard({ leadId, accountId, mode, onAsk, onSendSte
       .finally(() => { if (current()) setLoading(false) })
   }, [leadId, accountId])
 
+  // Todas as recargas silenciosas passam por um timer so (600 ms): varios avisos = uma busca
+  const loadRef = useRef(load)
+  loadRef.current = load
+  const reloaderRef = useRef<ReturnType<typeof createReloadDebouncer> | null>(null)
+  if (!reloaderRef.current) {
+    reloaderRef.current = createReloadDebouncer({ delayMs: SSE_RELOAD_DEBOUNCE_MS, run: doneBefore => loadRef.current(true, doneBefore) })
+  }
+  const reloadSoon = useCallback((doneBefore?: Set<number>) => reloaderRef.current!.schedule(doneBefore), [])
+  // Acao do vendedor: recarrega na hora (e descarta a recarga que estava esperando)
+  const reloadNow = useCallback(() => { reloaderRef.current!.cancel(); load(true) }, [load])
+
   useEffect(() => { load() }, [load])
-  // Troca de lead: limpa avisos e edicao do lead anterior
+  // Troca de lead: limpa avisos, edicao e recarga pendente do lead anterior
   useEffect(() => {
+    reloaderRef.current!.cancel()
     setEditing(null); setAdvanced(null); setOffscript(null); setSaveError(null); setActionMsg(null); setScriptOpen(null); setAiFresh([])
   }, [leadId])
-  useEffect(() => () => { if (debounceRef.current) clearTimeout(debounceRef.current) }, [])
+  useEffect(() => () => reloaderRef.current!.cancel(), [])
 
   // Resposta salva por outra tela / passo feito pelo Chat (lead:cadence) ou por Tarefas (task:updated)
-  useSSE('lead:cadence', useCallback((d: any) => { if (Number(d?.lead_id) === leadId) load(true) }, [leadId, load]))
+  useSSE('lead:cadence', useCallback((d: any) => { if (Number(d?.lead_id) === leadId) reloadSoon() }, [leadId, reloadSoon]))
   useSSE('task:updated', useCallback((d: any) => {
     const lcId = dataRef.current?.lead_cadence?.id
-    if (lcId && Number(d?.lead_cadence_id) === lcId) load(true)
-  }, [load]))
-  useSSE('lead:updated', useCallback((d: any) => { if (d?.bulk || Number(d?.id ?? d?.lead_id) === leadId) load(true) }, [leadId, load]))
-  useSSE('lead:message', useCallback((d: any) => { if (Number(d?.leadId ?? d?.lead_id) === leadId) load(true) }, [leadId, load]))
+    if (lcId && Number(d?.lead_cadence_id) === lcId) reloadSoon()
+  }, [reloadSoon]))
+  useSSE('lead:updated', useCallback((d: any) => { if (d?.bulk || Number(d?.id ?? d?.lead_id) === leadId) reloadSoon() }, [leadId, reloadSoon]))
+  useSSE('lead:message', useCallback((d: any) => { if (Number(d?.leadId ?? d?.lead_id) === leadId) reloadSoon() }, [leadId, reloadSoon]))
   useSSE('lead:roteiro', useCallback((d: any) => {
     if (Number(d?.lead_id) !== leadId) return
     if (d?.offscript && d.offscript.question) setOffscript(d.offscript)
     // A IA completou a etapa e o lead avancou: faixa com Desfazer (spec 4.4)
     if (d?.advanced && d.advanced.to_name) setAdvanced({ toName: d.advanced.to_name, fromName: fromStageName(d.advanced.from) })
     const prev = dataRef.current
-    load(true, new Set(prev ? prev.steps.filter(s => s.state === 'feito').map(s => s.attempt_id) : []))
-  }, [leadId, load]))
-  // Gestor mudou a cadencia ({cadence_id, stage_id}) ou os desvios ({funnel_id}): recarrega
-  useSSE('cadence:updated', useCallback(() => {
-    if (debounceRef.current) clearTimeout(debounceRef.current)
-    debounceRef.current = setTimeout(() => load(true), CADENCE_SSE_DEBOUNCE_MS)
-  }, [load]))
+    reloadSoon(new Set(prev ? prev.steps.filter(s => s.state === 'feito').map(s => s.attempt_id) : []))
+  }, [leadId, reloadSoon]))
+  // Gestor mudou a cadencia ({cadence_id, stage_id}) ou os desvios ({funnel_id}) DESTA conta: recarrega
+  useSSE('cadence:updated', useCallback((d: any) => {
+    if (cadenceEventForAccount(d, accountId)) reloadSoon()
+  }, [accountId, reloadSoon]))
 
   function fromStageName(from: number | null | undefined) {
     const st = dataRef.current?.stage
@@ -108,7 +121,7 @@ export default function NextStepCard({ leadId, accountId, mode, onAsk, onSendSte
   // Passo que mudou por baixo (409) ou outro erro: mostra o texto do servidor e recarrega
   const failAction = (e: any, fallback: string) => {
     setActionMsg(e?.message || fallback)
-    load(true)
+    reloadNow()
   }
 
   const handleDone = async (step: LeadStep) => {
@@ -117,7 +130,7 @@ export default function NextStepCard({ leadId, accountId, mode, onAsk, onSendSte
     try {
       const r = await markLeadStepDone(leadId, step.attempt_id, accountId)
       // A resposta ja e o estado novo: descarta recarga silenciosa que estiver no ar
-      if (leadRef.current === leadId) { tokenRef.current++; setData(r); setError(false) }
+      if (leadRef.current === leadId) { reloaderRef.current!.cancel(); tokenRef.current++; setData(r); setError(false) }
     } catch (e: any) {
       if (leadRef.current === leadId) failAction(e, 'Não deu para marcar como feito.')
     } finally { setBusy(null) }
@@ -132,7 +145,7 @@ export default function NextStepCard({ leadId, accountId, mode, onAsk, onSendSte
       if (leadRef.current !== leadId) return
       setEditing(null)
       if (r.advanced) setAdvanced({ toName: r.advanced.to_name, fromName })
-      load(true)
+      reloadNow()
     } catch (e: any) {
       if (leadRef.current === leadId) setSaveError(e?.message || 'Não deu para salvar a resposta.')
     } finally { setSaving(false) }
@@ -143,7 +156,7 @@ export default function NextStepCard({ leadId, accountId, mode, onAsk, onSendSte
     try {
       await undoAdvance(leadId, accountId)
       setAdvanced(null)
-      load(true)
+      reloadNow()
     } catch (e: any) {
       setActionMsg(e?.message || 'Não deu para desfazer.')
       setAdvanced(null)
@@ -295,7 +308,7 @@ export default function NextStepCard({ leadId, accountId, mode, onAsk, onSendSte
             <button type="button" className="btn btn-secondary btn-sm" style={smallBtn} onClick={() => openEditor(step)}>Já sei a resposta</button>
           )}
           {actions.includes('enviar') && (
-            <button type="button" className="btn btn-primary btn-sm" style={smallBtn} onClick={() => onSendStep(step.auto_message || step.description || '', step.attempt_id)} title="Colocar a mensagem na caixa para você revisar e enviar">
+            <button type="button" className="btn btn-primary btn-sm" style={smallBtn} onClick={() => onSendStep(stepSendText(step), step.attempt_id)} title="Colocar a mensagem na caixa para você revisar e enviar">
               <Send size={10} /> Enviar
             </button>
           )}

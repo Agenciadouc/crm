@@ -24,6 +24,8 @@ interface Props {
   mode: 'chat' | 'full'
   onAsk: (text: string, questionKey: string | null) => void
   canForce?: boolean
+  // false = avisos (avanço, desvio, fora do roteiro) ficam so no cartao da cadencia ao lado (ficha)
+  showNotices?: boolean
 }
 
 const REQUIRED_COLOR = 'var(--negative)'
@@ -53,7 +55,7 @@ function answerText(q: QState) {
 
 const smallBtn = { fontSize: 10, padding: '2px 8px' }
 
-export default function RoteiroCard({ leadId, accountId, mode, onAsk, canForce }: Props) {
+export default function RoteiroCard({ leadId, accountId, mode, onAsk, canForce, showNotices = true }: Props) {
   const [data, setData] = useState<LeadRoteiro | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(false)
@@ -90,13 +92,14 @@ export default function RoteiroCard({ leadId, accountId, mode, onAsk, canForce }
   useSSE('lead:updated', useCallback((d: any) => { if (d?.bulk || Number(d?.id ?? d?.lead_id) === leadId) load(true) }, [leadId, load]))
   useSSE('lead:roteiro', useCallback((d: any) => {
     if (Number(d?.lead_id) !== leadId) return
-    if (d?.offscript && d.offscript.question) setOffscript(d.offscript)
+    // showNotices=false (ficha): o cartao da cadencia ao lado ja mostra esses avisos da IA
+    if (showNotices && d?.offscript && d.offscript.question) setOffscript(d.offscript)
     // A IA completou a etapa e o lead avancou: mesmo banner com Desfazer (spec 4.4)
-    if (d?.advanced && d.advanced.to_name) {
+    if (showNotices && d?.advanced && d.advanced.to_name) {
       setAdvanced({ toName: d.advanced.to_name, fromName: stageName(dataRef.current, d.advanced.from) })
     }
     load(true)
-  }, [leadId, load]))
+  }, [leadId, load, showNotices]))
   // Mensagem nova muda "aguardando resposta" e o desvio detectado pela palavra-gatilho
   useSSE('lead:message', useCallback((d: any) => { if (Number(d?.leadId ?? d?.lead_id) === leadId) load(true) }, [leadId, load]))
 
@@ -263,7 +266,7 @@ export default function RoteiroCard({ leadId, accountId, mode, onAsk, canForce }
     <AdvanceBanner toName={advanced.toName} fromName={advanced.fromName} undoing={undoing} onUndo={handleUndo} />
   )
 
-  const deviationBox = data.deviation && (
+  const deviationBox = showNotices && data.deviation && (
     <DeviationBox deviation={data.deviation} onUse={text => onAsk(text, null)} />
   )
 

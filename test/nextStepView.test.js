@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { splitSteps, stepTitle, afterLine, nextActions, doneText, doneOrigin, deviationLine } from '../src/lib/nextStep.js'
+import { splitSteps, stepTitle, afterLine, nextActions, doneText, doneOrigin, deviationLine, stepSendText, cadenceEventForAccount, createReloadDebouncer } from '../src/lib/nextStep.js'
 
 const q = (over = {}) => ({ text_for_lead: 'Para quando é o seu evento, Ana?', kind: 'options', answer: null, last_ask: null, ...over })
 const data = {
@@ -29,8 +29,8 @@ test('titulo, linha do depois e botoes por tipo', () => {
   assert.equal(afterLine([]), '')
   assert.deepEqual(nextActions({ action_type: 'pergunta', state: 'pendente' }), ['perguntar', 'ja_sei'])
   assert.deepEqual(nextActions({ action_type: 'pergunta', state: 'aguardando' }), ['ja_sei'])
-  assert.deepEqual(nextActions({ action_type: 'mensagem', state: 'pendente' }), ['enviar', 'feito'])
-  assert.deepEqual(nextActions({ action_type: 'whatsapp', state: 'pendente' }), ['enviar', 'feito'])
+  assert.deepEqual(nextActions({ action_type: 'mensagem', state: 'pendente', auto_message: 'Oi {nome}' }), ['enviar', 'feito'])
+  assert.deepEqual(nextActions({ action_type: 'whatsapp', state: 'pendente', description: 'Lembrete' }), ['enviar', 'feito'])
   assert.deepEqual(nextActions({ action_type: 'visita', state: 'pendente' }), ['feito'])
 })
 
@@ -73,4 +73,51 @@ test('origem do vendedor e pergunta sem resposta', () => {
   assert.equal(nextActions(null).length, 0)
   assert.equal(deviationLine(null), 'Ele saiu do roteiro')
   assert.equal(stepTitle({ action_type: 'pergunta', question: null, description: null }), 'Pergunta')
+})
+
+test('passo mensagem sem texto: sem [Enviar] (so Feito) e texto de envio vazio', () => {
+  assert.equal(stepSendText({ action_type: 'mensagem', auto_message: '  ', description: 'Catálogo' }), 'Catálogo')
+  assert.equal(stepSendText({ action_type: 'mensagem', auto_message: 'Oi {nome}' }), 'Oi {nome}')
+  assert.equal(stepSendText({ action_type: 'mensagem', auto_message: null, description: '   ' }), '')
+  assert.deepEqual(nextActions({ action_type: 'mensagem', state: 'pendente', auto_message: '', description: null }), ['feito'])
+  assert.deepEqual(nextActions({ action_type: 'whatsapp', state: 'pendente' }), ['feito'])
+})
+
+test('aviso cadence:updated de outra conta e ignorado (admin recebe todas as contas)', () => {
+  assert.equal(cadenceEventForAccount({ account_id: 2, cadence_id: 9 }, 1), false)
+  assert.equal(cadenceEventForAccount({ account_id: 1, cadence_id: 9 }, 1), true)
+  assert.equal(cadenceEventForAccount({ account_id: '1', funnel_id: 3 }, 1), true)
+  assert.equal(cadenceEventForAccount({ cadence_id: 9 }, 1), true) // formato antigo: recarrega
+  assert.equal(cadenceEventForAccount(null, 1), true)
+})
+
+test('recarga silenciosa: varios avisos seguidos viram uma so; guarda o 1o retrato dos feitos', () => {
+  const timers = []
+  const runs = []
+  const d = createReloadDebouncer({
+    delayMs: 600,
+    run: doneBefore => runs.push(doneBefore),
+    setTimer: (fn, ms) => { const t = { ms, cleared: false }; t.fn = () => { t.cleared = true; fn() }; timers.push(t); return t },
+    clearTimer: t => { if (t) t.cleared = true },
+  })
+  d.schedule()
+  d.schedule(new Set([1]))
+  d.schedule(new Set([1, 2]))
+  d.schedule()
+  const live = timers.filter(t => !t.cleared)
+  assert.equal(live.length, 1)
+  assert.equal(live[0].ms, 600)
+  live[0].fn()
+  assert.equal(runs.length, 1)
+  assert.deepEqual([...runs[0]], [1]) // retrato de antes do 1o aviso de IA
+  // depois de rodar comeca do zero
+  d.schedule()
+  timers.filter(t => !t.cleared).pop().fn()
+  assert.equal(runs.length, 2)
+  assert.equal(runs[1], undefined)
+  // cancelar (troca de lead / sair da tela) nao roda
+  d.schedule()
+  d.cancel()
+  assert.equal(timers.filter(t => !t.cleared).length, 0)
+  assert.equal(runs.length, 2)
 })

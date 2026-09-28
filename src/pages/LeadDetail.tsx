@@ -152,15 +152,18 @@ export default function LeadDetail() {
     loadLead()
   }
   // [Perguntar agora]/[Perguntar] na ficha: abre o Chat do lead com a pergunta na caixa
-  const askInChat = (text: string, questionKey: string | null) => {
+  const askInChat = (text: string, questionKey: string | null, attemptId: number | null = null) => {
     if (!lead) return
-    navigate(`/chat?lead_id=${lead.id}`, { state: { roteiroAsk: { text, questionKey } } })
+    navigate(`/chat?lead_id=${lead.id}`, { state: { roteiroAsk: { text, questionKey, attemptId } } })
   }
   const canForce = user?.role === 'gerente' || user?.role === 'super_admin'
-  // [Enviar] do passo mensagem na ficha: abre o Chat com o texto (variaveis ja trocadas) na caixa
-  const sendStepInChat = (text: string) => {
+  // [Enviar] do passo mensagem na ficha: abre o Chat com o texto (variaveis ja trocadas) na caixa;
+  // o attemptId vai junto, entao enviar pelo Chat marca o passo como feito
+  const sendStepInChat = (text: string, attemptId: number) => {
     if (!lead) return
-    askInChat(applyMessageVars(text, { leadName: lead.name, leadEmpresa: lead.empresa, leadCity: lead.city, attendantName: user?.name }), null)
+    const filled = applyMessageVars(text, { leadName: lead.name, leadEmpresa: lead.empresa, leadCity: lead.city, attendantName: user?.name })
+    if (!filled.trim()) return
+    askInChat(filled, null, attemptId)
   }
   const confirmSaleValue = async () => {
     if (!saleModal || !accountId) return
@@ -567,7 +570,7 @@ export default function LeadDetail() {
           {activeTab === 'qualification' && accountId && (
             <div className="card" style={{ minHeight: 400 }}>
               <NextStepCard key={`cad-${lead.id}`} leadId={lead.id} accountId={accountId} mode="full" onAsk={askInChat} onSendStep={sendStepInChat} canManage={canForce} />
-              <RoteiroCard key={`roteiro-${lead.id}`} leadId={lead.id} accountId={accountId} mode="full" onAsk={askInChat} canForce={canForce} />
+              <RoteiroCard key={`roteiro-${lead.id}`} leadId={lead.id} accountId={accountId} mode="full" onAsk={askInChat} canForce={canForce} showNotices={false} />
             </div>
           )}
 

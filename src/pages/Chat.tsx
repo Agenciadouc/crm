@@ -112,8 +112,9 @@ export default function Chat() {
     // location.key: clicar de novo no mesmo aviso reabre mesmo com a mesma URL.
     if (id) selectLead(id)
     // [Perguntar agora] da ficha/Pipeline: a pergunta chega pronta para a caixa de mensagem
-    const ask = (location.state as { roteiroAsk?: { text: string; questionKey: string | null } } | null)?.roteiroAsk
-    if (id && ask?.text) setPendingRoteiroAsk({ leadId: id, text: ask.text, questionKey: ask.questionKey ?? null })
+    // [Enviar] do passo mensagem na ficha: vem com attemptId (o envio marca o passo como feito)
+    const ask = (location.state as { roteiroAsk?: { text: string; questionKey: string | null; attemptId?: number | null } } | null)?.roteiroAsk
+    if (id && ask?.text) setPendingRoteiroAsk({ leadId: id, text: ask.text, questionKey: ask.questionKey ?? null, attemptId: ask.attemptId ?? null })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.key])
   // Quando vai pra Atendimento/Info via bottom nav, sincroniza com a rightTab interna
@@ -158,7 +159,7 @@ export default function Chat() {
   // Cadencia da etapa: passo mensagem posto na caixa pelo [Enviar] (vai no envio como cadence_attempt_id)
   const [cadenceStepKey, setCadenceStepKey] = useState<number | null>(null)
   // Pergunta vinda de outra tela: aplicada quando a conversa desse lead abrir
-  const [pendingRoteiroAsk, setPendingRoteiroAsk] = useState<{ leadId: number; text: string; questionKey: string | null } | null>(null)
+  const [pendingRoteiroAsk, setPendingRoteiroAsk] = useState<{ leadId: number; text: string; questionKey: string | null; attemptId: number | null } | null>(null)
   // "Voce perguntou X?" depois de enviar uma mensagem digitada
   const [recognized, setRecognized] = useState<{ leadId: number; messageId: number; question: { question_key: string; text: string } } | null>(null)
   const [confirmingAsk, setConfirmingAsk] = useState(false)
@@ -488,12 +489,15 @@ export default function Chat() {
   // [Enviar] do passo mensagem da cadencia da etapa: texto com as variaveis na caixa para revisar;
   // o envio leva o cadence_attempt_id e o passo fica feito
   const handleStepSend = useCallback((text: string, attemptId: number) => {
-    handleRoteiroAsk(applyMessageVars(text, {
+    const filled = applyMessageVars(text, {
       leadName: lead?.name,
       leadEmpresa: lead?.empresa,
       leadCity: lead?.city,
       attendantName: user?.name,
-    }), null)
+    })
+    // Passo sem texto: nada na caixa e nada de attempt_id (senao iria na proxima mensagem digitada)
+    if (!filled.trim()) return
+    handleRoteiroAsk(filled, null)
     setCadenceStepKey(attemptId)
   }, [handleRoteiroAsk, lead?.name, lead?.empresa, lead?.city, user?.name])
 
@@ -501,6 +505,8 @@ export default function Chat() {
   useEffect(() => {
     if (!pendingRoteiroAsk || !lead || lead.id !== pendingRoteiroAsk.leadId) return
     handleRoteiroAsk(pendingRoteiroAsk.text, pendingRoteiroAsk.questionKey)
+    // texto ja chega com as variaveis trocadas (a ficha troca antes de abrir o Chat)
+    if (pendingRoteiroAsk.attemptId && pendingRoteiroAsk.text.trim()) setCadenceStepKey(pendingRoteiroAsk.attemptId)
     setPendingRoteiroAsk(null)
   }, [pendingRoteiroAsk, lead, handleRoteiroAsk])
 
