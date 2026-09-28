@@ -17,6 +17,14 @@ export function stageChipLabel(stage) {
   return [stage.name, plural(steps, 'passo', 'passos'), questions ? plural(questions, 'pergunta', 'perguntas') : null].filter(Boolean).join(' · ')
 }
 
+// Porque dos numeros do chip (regra "todo numero com o porque")
+export function stageChipTitle(stage) {
+  const { steps, questions } = stage.summary || { steps: 0, questions: 0 }
+  if (!steps) return 'Nenhum passo ainda. Clique para montar a cadência desta etapa.'
+  const q = !questions ? 'nenhum é pergunta do roteiro' : questions === 1 ? '1 é pergunta do roteiro' : `${questions} são perguntas do roteiro`
+  return `${plural(steps, 'passo que o vendedor segue', 'passos que o vendedor segue')} nesta etapa, na ordem; ${q}.`
+}
+
 // Resumo do chip depois de salvar um passo (sem recarregar a tela toda)
 export function stageSummary(cadence) {
   const attempts = (cadence && cadence.attempts) || []
@@ -111,8 +119,13 @@ const orNull = v => (typeof v === 'string' && v.trim() ? v.trim() : null)
 // Monta o PATCH do passo; pergunta so vai quando esta valida (senao o servidor recusaria
 // e o gestor veria "Nao salvou" a cada tecla). option_key das opcoes que ja existiam vai
 // sempre junto, para as respostas antigas continuarem casando.
+const DAY_REASON = 'Coloque o dia: 0 ou mais (ex.: 0 = no mesmo dia).'
+
 export function stepPatchFor(type, form) {
-  const delay = Math.max(0, parseInt(form.delay_days, 10) || 0)
+  // Dia vazio nao vira 0 escondido: so salva quando o campo tem um numero inteiro >= 0
+  const dayText = String(form.delay_days == null ? '' : form.delay_days).trim()
+  if (!/^\d+$/.test(dayText)) return { ok: false, reason: DAY_REASON }
+  const delay = parseInt(dayText, 10)
   if (type === 'pergunta') {
     const text = String(form.text || '').trim()
     if (!text) return { ok: false, reason: 'Escreva a pergunta.' }

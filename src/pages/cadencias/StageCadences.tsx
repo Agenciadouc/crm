@@ -7,12 +7,12 @@ import HelpTip from '../../components/HelpTip'
 import ConfirmDialog from '../../components/ConfirmDialog'
 import { fetchFunnels, type Funnel } from '../../lib/api'
 import {
-  fetchStageView, fetchStepMetrics, reorderCadenceSteps, deleteCadenceStep, applySuggestionLive,
+  fetchStageView, fetchStepMetrics, createStageCadence, reorderCadenceSteps, deleteCadenceStep, applySuggestionLive,
   type StageView, type StageCadence, type StepMetric, type StepType, type CadenceStep,
 } from '../../lib/cadenceApi'
 import { fetchSuggestions, fetchRoteiroSettings, suggestionAction, type RoteiroSuggestions, type RoteiroSettings } from '../../lib/roteiroApi'
 import {
-  stageChipLabel, stageFromSearch, stageSummary, moveStep, dropStep, suggestionsForStep, testForStep,
+  stageChipLabel, stageChipTitle, stageFromSearch, stageSummary, moveStep, dropStep, suggestionsForStep, testForStep,
   stageSuggestions, deviationSuggestions, sseTouchesView,
 } from '../../lib/stageCadence.js'
 import { suggestionWhy } from '../../lib/roteiroManager.js'
@@ -115,7 +115,25 @@ export default function StageCadences() {
     setSelected('novo')
     setPanelKey(`n${Date.now()}`)
   }
-  const closePanel = () => { setSelected(null); setNewStep(null) }
+  const closePanel = () => { setSelected(null); setNewStep(null); setPanelKey('') }
+  const panelKeyRef = useRef(panelKey)
+  panelKeyRef.current = panelKey
+
+  // Criacao da cadencia da etapa dividida entre paineis: dois passos novos numa etapa vazia
+  // esperam a mesma criacao (sem 409 "Esta etapa ja tem cadencia."). Fica no mapa depois de
+  // criada, ate a tela receber a cadencia; so sai do mapa se falhar.
+  const creating = useRef(new Map<number, Promise<StageCadence>>())
+  const ensureCadenceFor = (sid: number) => (): Promise<StageCadence> => {
+    const st = viewRef.current?.stages.find(s => s.id === sid)
+    if (st?.cadence) return Promise.resolve(st.cadence)
+    let p = creating.current.get(sid)
+    if (!p) {
+      p = createStageCadence(sid, accountId as number).then(c => { putCadence(c); return c })
+      p.catch(() => creating.current.delete(sid))
+      creating.current.set(sid, p)
+    }
+    return p
+  }
 
   const reorder = async (ids: number[]) => {
     if (!cadence || !accountId) return
@@ -163,6 +181,9 @@ export default function StageCadences() {
 
   const panelStep: CadenceStep | NewStep | null = selected === 'novo' ? newStep : (typeof selected === 'number' ? steps.find(a => a.id === selected) || null : null)
   const showList = steps.length > 0 || selected === 'novo'
+  // Callbacks presos ao painel aberto: resposta atrasada de um painel antigo nao mexe na selecao
+  const myKey = panelKey
+  const stepNo = selected === 'novo' ? steps.length + 1 : steps.findIndex(a => a.id === selected) + 1
 
   return (
     <div style={{ display: 'grid', gap: 14 }}>
@@ -211,7 +232,7 @@ export default function StageCadences() {
                   style={{ fontSize: 12, padding: '5px 12px', borderRadius: 'var(--radius-full)', cursor: s.is_terminal ? 'not-allowed' : 'pointer',
                     border: `1px solid ${active ? 'var(--accent)' : 'var(--border-subtle)'}`, background: active ? 'var(--accent)' : 'transparent',
                     color: active ? '#000' : s.is_terminal ? 'var(--text-subtle)' : 'var(--text-secondary)', fontWeight: active ? 600 : 400, opacity: s.is_terminal ? 0.6 : 1 }}>
-                  {s.is_terminal ? s.name : stageChipLabel(s)}
+                  <span title={s.is_terminal ? undefined : stageChipTitle(s)}>{s.is_terminal ? s.name : stageChipLabel(s)}</span>
                 </button>
               )
             })}
@@ -263,8 +284,15 @@ export default function StageCadences() {
               {panelStep && (
                 <div style={{ flex: '1 1 320px', minWidth: 0 }}>
                   <StepPanel key={panelKey} accountId={accountId} stageId={stage.id} cadenceId={cadence?.id ?? null} step={panelStep}
-                    onSaved={r => { putCadence(r.cadence); setSelected(sel => sel === 'novo' ? r.step_id : sel); setNewStep(null) }}
+                    onSaved={r => {
+                      putCadence(r.cadence)
+                      if (panelKeyRef.current !== myKey) return
+                      setSelected(sel => sel === 'novo' ? r.step_id : sel)
+                      setNewStep(null)
+                    }}
                     onCreatedCadence={c => putCadence(c)}
+                    ensureCadence={ensureCadenceFor(stage.id)}
+                    onBackgroundError={() => setError(`Não salvou a última mudança do passo ${stepNo}. Abra o passo e tente de novo.`)}
                     onDeleted={c => { putCadence(c); closePanel() }}
                     onClose={closePanel}>
                     {panelStep.id != null && (

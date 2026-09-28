@@ -21,6 +21,10 @@ export interface StepPanelProps {
   step: CadenceStep | NewStep // id null = passo novo
   onSaved: (r: StepSaveResult) => void // devolve a cadencia inteira atualizada
   onCreatedCadence: (cadence: StageCadence) => void
+  // Cria (ou devolve) a cadencia da etapa; a pagina divide a mesma criacao entre paineis (sem 409)
+  ensureCadence?: () => Promise<StageCadence>
+  // Envio feito depois de sair do passo falhou: a pagina avisa
+  onBackgroundError?: () => void
   onDeleted: (cadence: StageCadence) => void
   onClose?: () => void
   children?: ReactNode // StepInsights embaixo
@@ -48,7 +52,7 @@ const errMsg = (e: unknown) => (e instanceof Error ? e.message : 'Erro ao salvar
 
 // Painel de um passo com salvar automatico. Montado com key por passo aberto: o texto local
 // nao e trocado por recargas da lista (SSE), e o passo novo continua no mesmo painel depois de criado.
-export default function StepPanel({ accountId, stageId, cadenceId, step, onSaved, onCreatedCadence, onDeleted, onClose, children }: StepPanelProps) {
+export default function StepPanel({ accountId, stageId, cadenceId, step, onSaved, onCreatedCadence, ensureCadence, onBackgroundError, onDeleted, onClose, children }: StepPanelProps) {
   const type = step.action_type
   const [form, setForm] = useState<StepForm>(() => formFromStep(step as Partial<CadenceStep>))
   const [status, setStatus] = useState<SaveStatus>('idle')
@@ -60,19 +64,23 @@ export default function StepPanel({ accountId, stageId, cadenceId, step, onSaved
   const [stepId, setStepId] = useState<number | null>(step.id)
   const stepIdRef = useRef<number | null>(step.id)
   const cadenceIdRef = useRef<number | null>(cadenceId)
-  const cb = useRef({ onSaved, onCreatedCadence })
-  cb.current = { onSaved, onCreatedCadence }
+  const cb = useRef({ onSaved, onCreatedCadence, ensureCadence, onBackgroundError })
+  cb.current = { onSaved, onCreatedCadence, ensureCadence, onBackgroundError }
+  const mounted = useRef(true)
 
   useEffect(() => { if (cadenceId != null) cadenceIdRef.current = cadenceId }, [cadenceId])
 
   // Uma fila por painel: nunca dois envios juntos, o ultimo texto vence.
   const [queue] = useState(() => createSaveQueue<StepPatch>({
-    onStatus: setStatus,
+    onStatus: s => {
+      setStatus(s)
+      if (s === 'erro' && !mounted.current) cb.current.onBackgroundError?.()
+    },
     save: async patch => {
       setSaveError(null)
       try {
         if (cadenceIdRef.current == null) {
-          const cad = await createStageCadence(stageId, accountId)
+          const cad = await (cb.current.ensureCadence ? cb.current.ensureCadence() : createStageCadence(stageId, accountId))
           cadenceIdRef.current = cad.id
           cb.current.onCreatedCadence(cad)
         }
@@ -90,8 +98,11 @@ export default function StepPanel({ accountId, stageId, cadenceId, step, onSaved
       }
     },
   }))
-  // Saiu do passo com mudanca pendente: manda na hora
-  useEffect(() => () => { queue.flush() }, [queue])
+  // Saiu do passo: manda na hora o que falta, inclusive o texto que deu erro (retry, nao flush)
+  useEffect(() => {
+    mounted.current = true
+    return () => { mounted.current = false; queue.retry() }
+  }, [queue])
 
   const change = (patch: Partial<StepForm>) => {
     const next = { ...form, ...patch }
@@ -130,7 +141,9 @@ export default function StepPanel({ accountId, stageId, cadenceId, step, onSaved
           {Icon && <Icon size={14} />} {stepId == null ? `Novo passo: ${stepLabel(type)}` : stepLabel(type)}
         </strong>
         <span style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-          <SaveStatusText status={status} error={saveError} onRetry={() => { queue.retry() }} />
+          {hint
+            ? <span style={{ fontSize: 12, color: 'var(--warning)' }}>Não salvo</span>
+            : <SaveStatusText status={status} error={saveError} onRetry={() => { queue.retry() }} />}
           {onClose && (
             <button type="button" className="btn btn-secondary btn-sm btn-icon" aria-label="Fechar passo" title="Fechar" onClick={onClose}><X size={12} /></button>
           )}

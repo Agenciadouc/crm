@@ -4,6 +4,7 @@ import type { RoteiroSuggestion, RoteiroTest } from './roteiroApi'
 export const STEP_TYPES: { value: StepType; label: string }[]
 export function stepLabel(type: string): string
 export function stageChipLabel(stage: Pick<StageViewStage, 'name' | 'summary'>): string
+export function stageChipTitle(stage: Pick<StageViewStage, 'summary'>): string
 export function stageSummary(cadence: { attempts: { action_type: string }[] } | null | undefined): { steps: number; questions: number }
 export function stepShortText(step: Partial<CadenceStep> & { action_type: string }, max?: number): string
 export function stepDayText(step: { schedule_mode?: string; delay_days?: number; delay_minutes?: number }): string

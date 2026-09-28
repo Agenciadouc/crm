@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import {
   stageChipLabel, stepShortText, stepDayText, metricBadge, metricWhy, moveStep, dropStep, formFromStep, stepPatchFor,
   createSaveQueue, saveStatusLabel, readyDeviations, suggestionsForStep, stageSuggestions, testForStep, stageFromSearch,
-  stageSummary, sseTouchesView, deviationSuggestions,
+  stageSummary, sseTouchesView, deviationSuggestions, stageChipTitle,
 } from '../src/lib/stageCadence.js'
 
 function fakeTimers() {
@@ -208,4 +208,40 @@ test('aviso cadence:updated: aceita os dois formatos e so recarrega o que e da t
   assert.equal(sseTouchesView({ funnel_id: '5' }, 5, stageIds), true)
   assert.equal(sseTouchesView(null, 5, stageIds), false)
   assert.equal(sseTouchesView({}, 5, stageIds), false)
+})
+
+test('fila de salvamento: tentar de novo ao sair do passo reenvia o texto que falhou', async () => {
+  const t = fakeTimers(); const sent = []; const st = []
+  let fail = true
+  const q = createSaveQueue({ save: p => { sent.push(p); return fail ? Promise.reject(new Error('rede')) : Promise.resolve() }, onStatus: s => st.push(s), ...t })
+  q.push('texto final'); t.fire(); await tick(); await tick()
+  assert.equal(st[st.length - 1], 'erro')
+  // flush sozinho nao reenvia (e por isso a saida do passo usa retry)
+  await q.flush()
+  assert.deepEqual(sent, ['texto final'])
+  fail = false
+  await q.retry()
+  assert.deepEqual(sent, ['texto final', 'texto final'])
+  assert.equal(st[st.length - 1], 'salvo')
+  // falhou de novo ao sair: status volta a ser erro (a tela avisa)
+  fail = true
+  q.push('outro'); await q.retry()
+  assert.deepEqual(sent, ['texto final', 'texto final', 'outro'])
+  assert.equal(st[st.length - 1], 'erro')
+})
+
+test('campo Dia vazio ou invalido nao salva', () => {
+  const form = formFromStep({ action_type: 'mensagem', auto_message: 'Oi', delay_days: 2 })
+  const reason = 'Coloque o dia: 0 ou mais (ex.: 0 = no mesmo dia).'
+  assert.deepEqual(stepPatchFor('mensagem', { ...form, delay_days: '' }), { ok: false, reason })
+  assert.deepEqual(stepPatchFor('ligacao', { ...form, delay_days: '-1' }), { ok: false, reason })
+  assert.deepEqual(stepPatchFor('pergunta', { ...formFromStep({ action_type: 'pergunta', question: { text: 'Quando?', kind: 'text', required: false, bant: null, ai_hint: null, options: [] } }), delay_days: '1.5' }), { ok: false, reason })
+  assert.deepEqual(stepPatchFor('mensagem', { ...form, delay_days: '3' }), { ok: true, patch: { auto_message: 'Oi', delay_days: 3 } })
+})
+
+test('porque dos numeros do chip', () => {
+  assert.equal(stageChipTitle({ summary: { steps: 4, questions: 2 } }), '4 passos que o vendedor segue nesta etapa, na ordem; 2 são perguntas do roteiro.')
+  assert.equal(stageChipTitle({ summary: { steps: 1, questions: 0 } }), '1 passo que o vendedor segue nesta etapa, na ordem; nenhum é pergunta do roteiro.')
+  assert.equal(stageChipTitle({ summary: { steps: 1, questions: 1 } }), '1 passo que o vendedor segue nesta etapa, na ordem; 1 é pergunta do roteiro.')
+  assert.equal(stageChipTitle({ summary: { steps: 0, questions: 0 } }), 'Nenhum passo ainda. Clique para montar a cadência desta etapa.')
 })

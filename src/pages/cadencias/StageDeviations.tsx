@@ -79,7 +79,7 @@ export default function StageDeviations({ accountId, funnelId, deviations, quest
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
         <button type="button" onClick={() => setOpen(o => !o)} aria-expanded={open}
           style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: 'var(--text-primary)', fontSize: 14, fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-          {open ? <ChevronUp size={14} /> : <ChevronDown size={14} />} Se o cliente perguntar… <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>({ready})</span>
+          {open ? <ChevronUp size={14} /> : <ChevronDown size={14} />} Se o cliente perguntar… <span style={{ color: 'var(--text-muted)', fontWeight: 400 }} title={`${ready} ${ready === 1 ? 'desvio completo' : 'desvios completos'} (com palavras e resposta) neste funil. Só os completos são salvos; os incompletos não contam.`}>({ready})</span>
         </button>
         <HelpTip title="Se o cliente perguntar…">Respostas prontas para quando o cliente sai do roteiro. Ex.: se ele perguntar "quanto custa?", o vendedor vê a sugestão "Depende do número de convidados; me conta quantos são?" e volta para a pergunta do roteiro.</HelpTip>
         {suggestions.length > 0 && !open && <span style={{ fontSize: 12, color: 'var(--accent)' }}>A IA sugere um desvio novo</span>}
