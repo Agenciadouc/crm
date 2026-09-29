@@ -64,10 +64,22 @@ router.get('/funnel/:slug/:month', requireCoreSecret, (req, res) => {
     const roas = investment > 0 ? estimatedRevenue / investment : null
     const targetProgress = target > 0 ? (cascade.won / target) * 100 : null
 
+    // Etapas individuais do funil default (todos os leads ativos, nao filtra por mes
+    // — o funil visual mostra o estado atual, nao o do mes)
+    const stages_raw = db.prepare(`
+      SELECT fs.id, fs.name, fs.color, fs.position, fs.is_conversion, COUNT(l.id) as count
+      FROM funnel_stages fs
+      JOIN funnels f ON fs.funnel_id = f.id
+      LEFT JOIN leads l ON l.stage_id = fs.id AND l.is_active = 1 AND l.is_archived = 0 AND l.is_blocked = 0
+      WHERE f.account_id = ? AND f.is_default = 1
+      GROUP BY fs.id ORDER BY fs.position
+    `).all(account.id)
+
     res.json({
       account: { id: account.id, slug: account.slug, name: account.name },
       month,
       cascade,
+      stages_raw,
       config: cfg,
       calc: {
         cpl, cac, roas,
