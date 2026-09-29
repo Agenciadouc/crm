@@ -1144,6 +1144,10 @@ addColumnIfNotExists('contracts', 'imagens_por_mes', 'INTEGER NOT NULL DEFAULT 0
 addColumnIfNotExists('contracts', 'approved_at', 'TEXT')
 addColumnIfNotExists('contracts', 'approved_by', 'INTEGER REFERENCES users(id) ON DELETE SET NULL')
 addColumnIfNotExists('contracts', 'account_id', 'INTEGER REFERENCES accounts(id) ON DELETE SET NULL')
+// HTML editado manualmente (sobrescreve render do template). NULL = usa template original.
+addColumnIfNotExists('contracts', 'custom_html', 'TEXT')
+addColumnIfNotExists('contracts', 'custom_html_updated_at', 'TEXT')
+addColumnIfNotExists('contracts', 'custom_html_updated_by', 'INTEGER REFERENCES users(id) ON DELETE SET NULL')
 addColumnIfNotExists('contracts', 'approved_email', 'TEXT')
 // Contracts v3: integracao com HUB ao aprovar
 addColumnIfNotExists('contracts', 'hub_client_id', 'INTEGER')

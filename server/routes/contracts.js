@@ -143,12 +143,48 @@ router.get('/:id/html', (req, res) => {
   const contract = db.prepare('SELECT * FROM contracts WHERE id = ?').get(req.params.id)
   if (!contract) return res.status(404).send('<h1>Contrato nao encontrado</h1>')
   try {
-    const html = renderTemplate(contract)
+    // Se ha custom_html salvo (edicao manual), usa ele. Senao renderiza template.
+    // ?original=1 forca template ignorando custom_html (usado no editor pra ver o original)
+    const forceOriginal = req.query.original === '1'
+    const useCustom = !forceOriginal && contract.custom_html && contract.custom_html.trim()
+    const html = useCustom ? contract.custom_html : renderTemplate(contract)
     res.set('Content-Type', 'text/html; charset=utf-8').send(html)
   } catch (err) {
     console.error('[Contracts] Render error:', err.message)
     res.status(500).send('<h1>Erro ao renderizar contrato</h1>')
   }
+})
+
+// PUT /:id/html — salva HTML editado manualmente. Trava se contrato ja aprovado.
+router.put('/:id/html', (req, res) => {
+  const contract = db.prepare('SELECT * FROM contracts WHERE id = ?').get(req.params.id)
+  if (!contract) return res.status(404).json({ error: 'Contrato nao encontrado' })
+  if (contract.approved_at) return res.status(403).json({ error: 'Contrato aprovado nao pode mais ser editado' })
+
+  const html = String(req.body?.html || '').trim()
+  if (!html) return res.status(400).json({ error: 'html vazio' })
+  if (html.length > 500000) return res.status(400).json({ error: 'html muito grande (max 500KB)' })
+
+  db.prepare(`
+    UPDATE contracts SET custom_html = ?, custom_html_updated_at = datetime('now'), custom_html_updated_by = ?
+    WHERE id = ?
+  `).run(html, req.user.id, contract.id)
+
+  res.json({ ok: true, updated_at: new Date().toISOString() })
+})
+
+// DELETE /:id/html — reseta ao template original (limpa custom_html). Trava se aprovado.
+router.delete('/:id/html', (req, res) => {
+  const contract = db.prepare('SELECT * FROM contracts WHERE id = ?').get(req.params.id)
+  if (!contract) return res.status(404).json({ error: 'Contrato nao encontrado' })
+  if (contract.approved_at) return res.status(403).json({ error: 'Contrato aprovado nao pode mais ser editado' })
+
+  db.prepare(`
+    UPDATE contracts SET custom_html = NULL, custom_html_updated_at = NULL, custom_html_updated_by = NULL
+    WHERE id = ?
+  `).run(contract.id)
+
+  res.json({ ok: true, reset: true })
 })
 
 function calcFatBase(b) {
