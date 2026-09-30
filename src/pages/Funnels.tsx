@@ -37,7 +37,9 @@ export default function Funnels() {
   const startEdit = (f: Funnel) => { setEditing(f); setEditStages(f.stages.map(s => ({ ...s }))) }
 
   const addStage = () => { setEditStages(prev => [...prev, { name: '', color: DEFAULT_COLORS[prev.length % DEFAULT_COLORS.length], is_conversion: 0, is_terminal: 0, auto_keywords: null }]) }
-  const removeStage = (i: number) => { setEditStages(prev => prev.filter((_, idx) => idx !== i)) }
+  // Etapas do sistema (ex.: as 6 do funil Recompra) nao podem ser apagadas pela UI — o servidor
+  // ja devolve 409 se a tentativa passar, mas aqui a gente nem deixa tentar (spec §12).
+  const removeStage = (i: number) => { setEditStages(prev => prev[i]?.system_key ? prev : prev.filter((_, idx) => idx !== i)) }
   const updateStage = (i: number, field: string, value: any) => { setEditStages(prev => prev.map((s, idx) => idx === i ? { ...s, [field]: value } : s)) }
 
   const [savingStages, setSavingStages] = useState(false)
@@ -146,7 +148,13 @@ export default function Funnels() {
                     <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, whiteSpace: 'nowrap', cursor: 'pointer' }}>
                       <input type="checkbox" checked={!!s.is_terminal} onChange={e => updateStage(i, 'is_terminal', e.target.checked ? 1 : 0)} /> Final
                     </label>
-                    <button className="btn btn-danger btn-sm btn-icon" onClick={() => removeStage(i)}><Trash2 size={12} /></button>
+                    {s.system_key ? (
+                      <span className="stage-badge" title="Etapa usada pela recompra — não pode ser apagada, só renomeada ou recolorida" style={{ fontSize: 10, whiteSpace: 'nowrap' }}>
+                        usada pela recompra
+                      </span>
+                    ) : (
+                      <button className="btn btn-danger btn-sm btn-icon" onClick={() => removeStage(i)}><Trash2 size={12} /></button>
+                    )}
                   </div>
                   <div style={{ display: 'flex', gap: 6, alignItems: 'center', paddingLeft: 22 }}>
                     <span style={{ fontSize: 10, color: '#9B96B0', minWidth: 90 }}>Evento Meta:</span>

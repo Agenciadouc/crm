@@ -11,10 +11,32 @@ import ScoreBadge from '../components/score/ScoreBadge'
 import { geoParams } from '../lib/geoFilter.js'
 import { scoreParams, isScoreFilterActive, EMPTY_SCORE_FILTER } from '../lib/scoreFilter.js'
 import { useSSE } from '../context/SSEContext'
-import { fetchFunnels, fetchLeads, fetchTags, fetchUsers, moveLeadStage, RoteiroGateError, type RoteiroPendingQuestion, fetchPipelineMetrics, archiveLead, type Funnel, type Lead, type PipelineMetric, type Tag, type User as ApiUser } from '../lib/api'
+import { fetchFunnels, fetchLeads, fetchTags, fetchUsers, moveLeadStage, RoteiroGateError, UseOutcomeError, fetchCustomerCard, type RoteiroPendingQuestion, fetchPipelineMetrics, archiveLead, type Funnel, type Lead, type PipelineMetric, type Tag, type User as ApiUser } from '../lib/api'
 import { Phone, MessageCircle, User, Clock, ChevronDown, ChevronRight, ArrowRight, Smartphone, Archive } from 'lucide-react'
 import { parseSqlDate } from '../lib/dates'
 import SaleModal from '../components/SaleModal'
+import OutcomeModal from '../components/OutcomeModal'
+
+// Funil escolhido no Pipeline fica salvo por conta (spec LTV/Recompra §6/§12) — troca de conta
+// nao "vaza" a escolha de outra conta, e o navegador lembra da ultima vez (mesmo padrao do
+// useCityFilter). localStorage pode lancar em aba anonima/storage desabilitado — nunca deixa quebrar a tela.
+const funnelStorageKey = (accountId: number) => `pipeline:funnel:${accountId}`
+function useFunnelId(accountId: number | null | undefined): [number | null, (id: number) => void] {
+  const [funnelId, setFunnelIdState] = useState<number | null>(null)
+  useEffect(() => {
+    if (!accountId) { setFunnelIdState(null); return }
+    try {
+      const raw = localStorage.getItem(funnelStorageKey(accountId))
+      setFunnelIdState(raw ? Number(raw) : null)
+    } catch { setFunnelIdState(null) }
+  }, [accountId])
+  const setFunnelId = (id: number) => {
+    setFunnelIdState(id)
+    if (!accountId) return
+    try { localStorage.setItem(funnelStorageKey(accountId), String(id)) } catch {}
+  }
+  return [funnelId, setFunnelId]
+}
 
 function timeAgo(dateStr: string) {
   // parseSqlDate interpreta UTC (backend grava sem timezone)
@@ -40,6 +62,7 @@ export default function Pipeline() {
   const navigate = useNavigate()
   const { accountId, accounts } = useAccount()
   const isMobile = useIsMobile()
+  const [funnelId, setFunnelId] = useFunnelId(accountId)
   const [funnel, setFunnel] = useState<Funnel | null>(null)
   const [funnels, setFunnels] = useState<Funnel[]>([])
   const [leads, setLeads] = useState<Lead[]>([])
@@ -51,6 +74,8 @@ export default function Pipeline() {
   // Modal de valor: aparece quando lead move pra stage is_conversion=1
   const [saleModal, setSaleModal] = useState<{ leadId: number; stageId: number; leadName: string; stageName: string } | null>(null)
   // Janela "Falta saber": o cartao volta para a etapa de origem e o modal mostra o que falta
+  // Janela de desfecho de recompra (Task 12, spec §6.3): "Não comprou agora" / "Não quer mais"
+  const [outcomeModal, setOutcomeModal] = useState<{ leadId: number; stageId: number; outcome: 'nao_agora' | 'nao_quer'; leadName: string; reasons: { id: number; label: string }[]; defaultDays: number } | null>(null)
   const { user } = useAuth()
   const canForce = user?.role === 'gerente' || user?.role === 'super_admin'
   const [stageGate, setStageGate] = useState<{ leadId: number; toStage: { id: number; name: string }; pending: RoteiroPendingQuestion[] } | null>(null)
@@ -71,8 +96,11 @@ export default function Pipeline() {
     try {
       const f = await fetchFunnels(accountId)
       setFunnels(f)
-      const active = f.find(x => x.is_default) || f[0]
+      // Funil escolhido pelo usuario (persistido por conta) — cai pro padrao se ainda nao
+      // escolheu, ou se o funil salvo sumiu (ex.: desativado).
+      const active = (funnelId && f.find(x => x.id === funnelId)) || f.find(x => x.is_default) || f[0] || null
       setFunnel(active || null)
+      if (active && active.id !== funnelId) setFunnelId(active.id)
       if (active) {
         const [data, m] = await Promise.all([
           fetchLeads(accountId, { funnel_id: active.id, limit: 500, ...geoParams(cityFilter), ...scoreParams(scoreFilter) }),
@@ -88,7 +116,7 @@ export default function Pipeline() {
       }
     } catch {}
     setLoading(false)
-  }, [accountId, isMobile, cityFilter, scoreFilter])
+  }, [accountId, isMobile, cityFilter, scoreFilter, funnelId])
 
   useEffect(() => { loadData() }, [loadData])
   useEffect(() => { if (accountId) fetchTags(accountId).then(setTags).catch(() => {}) }, [accountId])
@@ -149,7 +177,33 @@ export default function Pipeline() {
         setStageGate({ leadId, toStage: { id: stageId, name: target?.name || 'a próxima etapa' }, pending: e.pending })
         return
       }
+      if (e instanceof UseOutcomeError) {
+        // Caminho defensivo: o servidor recusou o move direto pra uma etapa de desfecho da
+        // recompra por algum caminho que tryMoveWithSaleCheck nao cobriu — reverte o cartao e
+        // abre a mesma janela de desfecho.
+        if (fromStageId != null) setLeads(prev => prev.map(l => l.id === leadId ? { ...l, stage_id: fromStageId } : l))
+        await openOutcomeModal(leadId, stageId)
+        return
+      }
       loadData()
+    }
+  }
+  // Busca motivos/lembrete do cartao do cliente e abre a janela de desfecho (nao_agora/nao_quer)
+  const openOutcomeModal = async (leadId: number, stageId: number) => {
+    const target = (funnel?.stages || []).find(s => s.id === stageId)
+    const outcome = target?.system_key === 'nao_agora' || target?.system_key === 'nao_quer' ? target.system_key : null
+    if (!outcome || !accountId) return
+    const lead = leads.find(l => l.id === leadId)
+    try {
+      const card = await fetchCustomerCard(leadId, accountId)
+      setOutcomeModal({
+        leadId, stageId, outcome,
+        leadName: lead?.name || 'Lead',
+        reasons: card.reasons[outcome] || [],
+        defaultDays: card.cycle?.remind_days ?? 30,
+      })
+    } catch {
+      // Nao conseguiu buscar motivos — nao move o card (evita perder o motivo obrigatorio)
     }
   }
   // [Perguntar agora]: abre o Chat do lead com a pergunta na caixa
@@ -164,6 +218,12 @@ export default function Pipeline() {
     const lead = leads.find(l => l.id === leadId)
     if (!lead || lead.stage_id === stageId) return
     const targetStage = (funnel?.stages || []).find(s => s.id === stageId)
+    // Etapa de desfecho da recompra (nao_agora/nao_quer, spec §6.3) — nao move na hora, abre a
+    // janela de motivo primeiro. So um successful outcome (ou cancelar) decide o que acontece com o card.
+    if (targetStage?.system_key === 'nao_agora' || targetStage?.system_key === 'nao_quer') {
+      openOutcomeModal(leadId, stageId)
+      return
+    }
     const isConversion = !!(targetStage && targetStage.is_conversion)
     const alreadyHasValue = !!((lead as any).value_estimated && Number((lead as any).value_estimated) > 0)
     if (isConversion && !alreadyHasValue) {
@@ -289,6 +349,20 @@ export default function Pipeline() {
 
         {gateModal}
 
+        {outcomeModal && accountId && (
+          <OutcomeModal
+            open
+            outcome={outcomeModal.outcome}
+            leadId={outcomeModal.leadId}
+            accountId={accountId}
+            leadName={outcomeModal.leadName}
+            reasons={outcomeModal.reasons}
+            defaultDays={outcomeModal.defaultDays}
+            onClose={() => setOutcomeModal(null)}
+            onDone={() => loadData()}
+          />
+        )}
+
         {/* Move lead modal */}
         {moveLeadId && (
           <div className="modal-overlay" onClick={() => setMoveLeadId(null)}>
@@ -325,8 +399,8 @@ export default function Pipeline() {
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
           {funnels.length > 1 && (
-            <select className="select" style={{ width: 180 }} value={funnel.id} onChange={e => { const f = funnels.find(x => x.id === +e.target.value); if (f) setFunnel(f) }}>
-              {funnels.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
+            <select className="select" style={{ width: 180 }} value={funnel.id} onChange={e => setFunnelId(+e.target.value)}>
+              {funnels.map(f => <option key={f.id} value={f.id}>{f.kind === 'recompra' ? '🔁 Recompra' : f.name}</option>)}
             </select>
           )}
           <FilterDropdown
@@ -444,6 +518,20 @@ export default function Pipeline() {
           note={<>Movendo <strong style={{ color: 'var(--text-primary)' }}>{saleModal.leadName}</strong> pra <strong style={{ color: '#34C759' }}>{saleModal.stageName}</strong>.</>}
           onClose={() => setSaleModal(null)}
           onSaved={handleSaleSaved}
+        />
+      )}
+
+      {outcomeModal && accountId && (
+        <OutcomeModal
+          open
+          outcome={outcomeModal.outcome}
+          leadId={outcomeModal.leadId}
+          accountId={accountId}
+          leadName={outcomeModal.leadName}
+          reasons={outcomeModal.reasons}
+          defaultDays={outcomeModal.defaultDays}
+          onClose={() => setOutcomeModal(null)}
+          onDone={() => loadData()}
         />
       )}
 

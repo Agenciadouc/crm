@@ -217,7 +217,8 @@ export default function SettingsPage() {
         <div className="section-title"><RotateCw size={12} style={{ marginRight: 6 }} /> Distribuicao de Leads (Roleta)</div>
         <p style={{ fontSize: 12, color: '#9B96B0', marginBottom: 16 }}>Configure como os leads sao distribuidos automaticamente quando chegam via WhatsApp, formularios ou site.</p>
 
-        {funnels.map(funnel => {
+        {/* Funil Recompra nao tem roleta/distribuicao (nao recebe leads novos) — so funis de vendas */}
+        {funnels.filter(f => (f.kind ?? 'vendas') === 'vendas').map(funnel => {
           const rule = rules.get(funnel.id)
           if (!rule) return null
           return (
