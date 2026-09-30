@@ -4,7 +4,7 @@
 import { pickAnthropicKey } from './anthropicKeyPicker.js'
 
 export const ANALYSIS_SOURCES = ['conversation_analysis', 'coaching_analysis']
-export const ROTEIRO_SOURCES = ['roteiro_extraction', 'roteiro_draft', 'roteiro_learning']
+export const ROTEIRO_SOURCES = ['roteiro_extraction', 'roteiro_draft', 'roteiro_learning', 'repurchase_offer']
 export const DEFAULT_ANALYSIS_LIMIT = 200000
 export const DEFAULT_ROTEIRO_LIMIT = 300000
 
