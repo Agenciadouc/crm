@@ -11,9 +11,10 @@ import ScoreBadge from '../components/score/ScoreBadge'
 import { geoParams } from '../lib/geoFilter.js'
 import { scoreParams, isScoreFilterActive, EMPTY_SCORE_FILTER } from '../lib/scoreFilter.js'
 import { useSSE } from '../context/SSEContext'
-import { fetchFunnels, fetchLeads, fetchTags, fetchUsers, moveLeadStage, RoteiroGateError, type RoteiroPendingQuestion, fetchPipelineMetrics, archiveLead, updateLeadValue, type Funnel, type Lead, type PipelineMetric, type Tag, type User as ApiUser } from '../lib/api'
-import { Phone, MessageCircle, User, Clock, ChevronDown, ChevronRight, ArrowRight, Smartphone, Archive, DollarSign, X } from 'lucide-react'
+import { fetchFunnels, fetchLeads, fetchTags, fetchUsers, moveLeadStage, RoteiroGateError, type RoteiroPendingQuestion, fetchPipelineMetrics, archiveLead, type Funnel, type Lead, type PipelineMetric, type Tag, type User as ApiUser } from '../lib/api'
+import { Phone, MessageCircle, User, Clock, ChevronDown, ChevronRight, ArrowRight, Smartphone, Archive } from 'lucide-react'
 import { parseSqlDate } from '../lib/dates'
+import SaleModal from '../components/SaleModal'
 
 function timeAgo(dateStr: string) {
   // parseSqlDate interpreta UTC (backend grava sem timezone)
@@ -37,7 +38,7 @@ function useIsMobile() {
 
 export default function Pipeline() {
   const navigate = useNavigate()
-  const { accountId } = useAccount()
+  const { accountId, accounts } = useAccount()
   const isMobile = useIsMobile()
   const [funnel, setFunnel] = useState<Funnel | null>(null)
   const [funnels, setFunnels] = useState<Funnel[]>([])
@@ -53,8 +54,6 @@ export default function Pipeline() {
   const { user } = useAuth()
   const canForce = user?.role === 'gerente' || user?.role === 'super_admin'
   const [stageGate, setStageGate] = useState<{ leadId: number; toStage: { id: number; name: string }; pending: RoteiroPendingQuestion[] } | null>(null)
-  const [saleValue, setSaleValue] = useState('')
-  const [saleSaving, setSaleSaving] = useState(false)
   const [tags, setTags] = useState<Tag[]>([])
   const [tagFilter, setTagFilter] = useState<FilterValue[]>([])
   const [users, setUsers] = useState<ApiUser[]>([])
@@ -159,7 +158,8 @@ export default function Pipeline() {
   }
 
   // Checa se o stage destino eh de conversao. Se for E o lead ainda nao tem value_estimated,
-  // abre modal pra pedir o valor da compra antes de mover.
+  // abre a janela de venda antes de mover. O card so muda de coluna depois do onSaved —
+  // fechar sem salvar (Cancelar) deixa o card na coluna de origem.
   const tryMoveWithSaleCheck = (leadId: number, stageId: number) => {
     const lead = leads.find(l => l.id === leadId)
     if (!lead || lead.stage_id === stageId) return
@@ -168,7 +168,6 @@ export default function Pipeline() {
     const alreadyHasValue = !!((lead as any).value_estimated && Number((lead as any).value_estimated) > 0)
     if (isConversion && !alreadyHasValue) {
       setSaleModal({ leadId, stageId, leadName: lead.name || 'Lead', stageName: targetStage!.name })
-      setSaleValue('')
       return
     }
     doMoveLead(leadId, stageId)
@@ -186,32 +185,12 @@ export default function Pipeline() {
     tryMoveWithSaleCheck(leadId, stageId)
   }
 
-  const confirmSaleValue = async () => {
-    if (!saleModal || !accountId) return
-    const numeric = parseFloat(String(saleValue).replace(/\./g, '').replace(',', '.'))
-    if (!Number.isFinite(numeric) || numeric <= 0) return
-    setSaleSaving(true)
-    try {
-      await updateLeadValue(saleModal.leadId, accountId, numeric)
-      // Atualiza local pra refletir no card sem esperar reload
-      setLeads(prev => prev.map(l => l.id === saleModal.leadId ? ({ ...l, value_estimated: numeric } as any) : l))
-      await doMoveLead(saleModal.leadId, saleModal.stageId)
-      setSaleModal(null)
-      setSaleValue('')
-    } catch (e) {
-      // se der erro no valor, ainda move (nao trava o funil por isso)
-      await doMoveLead(saleModal.leadId, saleModal.stageId)
-      setSaleModal(null)
-    } finally {
-      setSaleSaving(false)
-    }
-  }
-
-  const skipSaleValue = async () => {
+  // <SaleModal> ja fez o POST e devolveu o total das vendas do lead — atualiza o card local e
+  // so agora move o lead de fato pra coluna de destino.
+  const handleSaleSaved = async (total: number) => {
     if (!saleModal) return
     const { leadId, stageId } = saleModal
-    setSaleModal(null)
-    setSaleValue('')
+    setLeads(prev => prev.map(l => l.id === leadId ? ({ ...l, value_estimated: total } as any) : l))
     await doMoveLead(leadId, stageId)
   }
 
@@ -227,6 +206,7 @@ export default function Pipeline() {
   if (!funnel) return <div className="empty-state"><h3>Nenhum funil configurado</h3><p>Crie um funil na pagina de Funis.</p></div>
 
   const stages = funnel.stages || []
+  const aiEnabledForAccount = !!accounts.find(a => a.id === accountId)?.ai_agents_enabled
 
   const gateModal = stageGate && accountId && (
     <StageGateModal
@@ -452,57 +432,19 @@ export default function Pipeline() {
         })}
       </div>
 
-      {/* Modal — pergunta valor da compra ao mover pra stage de conversao */}
-      {saleModal && (
-        <div
-          onClick={() => !saleSaving && skipSaleValue()}
-          style={{ position: 'fixed', inset: 0, background: 'rgba(10,10,20,0.72)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999, padding: 16, backdropFilter: 'blur(4px)' }}
-        >
-          <div onClick={e => e.stopPropagation()} style={{ background: '#1a1428', border: '1px solid rgba(255,255,255,0.10)', borderRadius: 14, padding: 24, maxWidth: 460, width: '100%', boxShadow: '0 30px 80px rgba(0,0,0,0.5)' }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <div style={{ width: 36, height: 36, borderRadius: 10, background: 'rgba(52,199,89,0.16)', color: '#34C759', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <DollarSign size={18} />
-                </div>
-                <h2 style={{ margin: 0, fontSize: 17, fontWeight: 700, color: '#F0EDF5' }}>Registrar venda</h2>
-              </div>
-              <button onClick={skipSaleValue} disabled={saleSaving} style={{ background: 'none', border: 'none', color: '#9B96B0', cursor: saleSaving ? 'default' : 'pointer', padding: 4 }}><X size={16} /></button>
-            </div>
-            <p style={{ fontSize: 13, color: '#B8B4C7', margin: '10px 0 18px', lineHeight: 1.5 }}>
-              Movendo <strong style={{ color: '#F0EDF5' }}>{saleModal.leadName}</strong> pra <strong style={{ color: '#34C759' }}>{saleModal.stageName}</strong>.
-              <br />Qual foi o valor da compra?
-            </p>
-            <div style={{ position: 'relative' }}>
-              <span style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)', color: '#9B96B0', fontWeight: 600, fontSize: 14 }}>R$</span>
-              <input
-                autoFocus
-                type="text"
-                inputMode="decimal"
-                className="input"
-                value={saleValue}
-                onChange={e => setSaleValue(e.target.value.replace(/[^\d.,]/g, ''))}
-                onKeyDown={e => { if (e.key === 'Enter' && !saleSaving) confirmSaleValue() }}
-                placeholder="0,00"
-                style={{ paddingLeft: 42, fontSize: 18, fontWeight: 700, letterSpacing: 0.5, width: '100%' }}
-                disabled={saleSaving}
-              />
-            </div>
-            <div style={{ display: 'flex', gap: 8, marginTop: 20, justifyContent: 'flex-end' }}>
-              <button className="btn btn-secondary" onClick={skipSaleValue} disabled={saleSaving} style={{ fontSize: 13 }}>Pular</button>
-              <button
-                className="btn btn-primary"
-                onClick={confirmSaleValue}
-                disabled={saleSaving || !saleValue.trim()}
-                style={{ fontSize: 13, background: '#34C759', borderColor: '#34C759' }}
-              >
-                {saleSaving ? 'Salvando...' : 'Confirmar venda'}
-              </button>
-            </div>
-            <div style={{ fontSize: 11, color: '#6B6580', marginTop: 12, lineHeight: 1.5 }}>
-              O valor entra no painel <strong>Funil &amp; ROI Mensal</strong> como faturamento real desse mês. Se "Pular", o lead move sem valor e o painel usa o ticket médio como estimativa.
-            </div>
-          </div>
-        </div>
+      {/* Janela unica de venda ao mover pra stage de conversao. So move o card de coluna depois
+          do onSaved — fechar sem salvar (Cancelar) deixa o card na coluna de origem. */}
+      {saleModal && accountId && (
+        <SaleModal
+          open
+          leadId={saleModal.leadId}
+          accountId={accountId}
+          leadName={saleModal.leadName}
+          aiEnabled={aiEnabledForAccount}
+          note={<>Movendo <strong style={{ color: 'var(--text-primary)' }}>{saleModal.leadName}</strong> pra <strong style={{ color: '#34C759' }}>{saleModal.stageName}</strong>.</>}
+          onClose={() => setSaleModal(null)}
+          onSaved={handleSaleSaved}
+        />
       )}
 
       {gateModal}

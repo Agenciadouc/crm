@@ -1303,11 +1303,45 @@ export const deleteBriefing = (id: number, accountId: number) =>
 
 export const briefingFromAgent = (agentId: number, accountId: number) =>
   apiFetch<{ briefing_id: number }>(`/api/agent-briefings/from-agent/${agentId}?account_id=${accountId}`, { method: 'POST' })
-// Vendas multiplas por lead
-export interface LeadSale { id: number; lead_id: number; value: number; sale_date: string; notes: string | null; created_by: number | null; created_by_name: string | null; created_at: string }
+// Vendas multiplas por lead (spec LTV/Recompra §5)
+export type SaleKind = 'recompra' | 'unica'
+export const REMIND_DAYS = [7, 15, 30, 45, 60] as const
+export interface LeadSale {
+  id: number; lead_id: number; value: number; sale_date: string; notes: string | null
+  created_by: number | null; created_by_name: string | null; created_at: string
+  product: string | null; sale_kind: SaleKind | null; remind_days: number | null; cross_sell: number; cross_sell_offer: string | null
+}
+export interface NewSaleInput {
+  value: number; sale_date?: string; notes?: string; product?: string
+  sale_kind: SaleKind; remind_days?: number; cross_sell?: boolean; cross_sell_offer?: string
+}
 export const fetchLeadSales = (leadId: number, accountId: number) =>
   apiFetch<{ sales: LeadSale[]; total: number }>(`/api/leads/${leadId}/sales?account_id=${accountId}`)
-export const addLeadSale = (leadId: number, accountId: number, data: { value: number; sale_date?: string; notes?: string }) =>
-  apiFetch<{ sale: LeadSale; total: number }>(`/api/leads/${leadId}/sales?account_id=${accountId}`, { method: 'POST', body: JSON.stringify(data) })
+export const addLeadSale = (leadId: number, accountId: number, input: NewSaleInput) =>
+  apiFetch<{ sale: LeadSale; total: number; cycle_id: number | null; opt_out: boolean }>(`/api/leads/${leadId}/sales?account_id=${accountId}`, { method: 'POST', body: JSON.stringify(input) })
+export const patchLeadSale = (leadId: number, accountId: number, saleId: number, input: Partial<NewSaleInput>) =>
+  apiFetch<{ sale: LeadSale }>(`/api/leads/${leadId}/sales/${saleId}?account_id=${accountId}`, { method: 'PATCH', body: JSON.stringify(input) })
 export const deleteLeadSale = (leadId: number, saleId: number, accountId: number) =>
   apiFetch<{ ok: boolean; total: number }>(`/api/leads/${leadId}/sales/${saleId}?account_id=${accountId}`, { method: 'DELETE' })
+
+// Cartao do cliente (tela Clientes / spec §10) — LTV, curva, selo, ciclo de recompra aberto
+export interface CustomerCardData {
+  ltv: number; purchases: number; lastPurchaseAt: string | null; curve: 'A' | 'B' | 'C' | 'D' | '1a' | null
+  tier: { id: number; name: string; icon: string | null; color: string } | null
+  cycle: {
+    id: number; kind: 'recompra' | 'cruzada'; status: string; remind_at: string; remind_days: number
+    attempt: number; exhausted: number; offer_text: string | null
+    ai_suggestion: { products: string[]; message: string } | null; auto_failed_reason: string | null
+  } | null
+  reasons: { nao_agora: { id: number; label: string }[]; nao_quer: { id: number; label: string }[] }
+  optOut: boolean; maxAttempts: number
+}
+export function fetchCustomerCard(leadId: number, accountId: number) {
+  return apiFetch<CustomerCardData>(`/api/customers/lead/${leadId}?account_id=${accountId}`)
+}
+export function postRepurchaseOutcome(leadId: number, accountId: number, body: { outcome: 'nao_agora' | 'nao_quer'; reason_id: number; next_days?: number }) {
+  return apiFetch<{ cycle: unknown }>(`/api/customers/lead/${leadId}/outcome?account_id=${accountId}`, { method: 'POST', body: JSON.stringify(body) })
+}
+export function undoRepurchaseOptOut(leadId: number, accountId: number) {
+  return apiFetch<{ ok: true }>(`/api/customers/lead/${leadId}/undo-optout?account_id=${accountId}`, { method: 'POST' })
+}

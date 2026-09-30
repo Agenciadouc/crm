@@ -5,7 +5,9 @@ import { useAccount } from '../context/AccountContext'
 import { useSSE } from '../context/SSEContext'
 import {
   fetchWhatsAppInstances, fetchLeads, fetchLead, fetchFunnels, fetchUsers, fetchTags,
-  fetchLeadSales, addLeadSale, deleteLeadSale, type LeadSale,
+  fetchLeadSales, patchLeadSale, deleteLeadSale, type LeadSale,
+  fetchCustomerCard, type CustomerCardData,
+  REMIND_DAYS, type SaleKind,
   sendMessage, sendMessageMedia, updateLead, moveLeadStage, assignLead, addLeadNote, addLeadTag, removeLeadTag,
   fetchLeadCadence, advanceLeadCadence, removeLeadCadence, fetchCadences, assignLeadCadence, createTag,
   fetchAvailableGlobalTemplates, applyGlobalCadenceHere, applyGlobalFollowUpHere,
@@ -41,6 +43,7 @@ import {
 import { cadenceCardActions, cadenceRenderList, stepLine, BOX_PLACEHOLDER } from '../lib/cadenceCard.js'
 import { PANEL_CARD, CADENCE_INNER, CARD_NAME, STEP_LINE, STEP_DESC, PILL_BTN, PRIMARY_BTN, HEAD_BTN, LinkButton, PanelTitle, TextPreview, StepButtons } from '../components/atendimento/PanelParts'
 import StageGateModal from '../components/roteiro/StageGateModal'
+import SaleModal from '../components/SaleModal'
 import RecognizedQuestionBar from '../components/roteiro/RecognizedQuestionBar'
 import { confirmAsk } from '../lib/roteiroApi'
 import { geoParams, leadMatchesGeo } from '../lib/geoFilter.js'
@@ -67,6 +70,13 @@ function timeAgo(dateStr: string) {
   const hrs = Math.floor(mins / 60)
   if (hrs < 24) return `${hrs}h`
   return `${Math.floor(hrs / 24)}d`
+}
+
+// Rotulo do tipo da venda (spec LTV/Recompra §5) — venda antiga (sale_kind null) nao tem rotulo, so o botao "Marcar tipo"
+function saleKindLabel(s: LeadSale): string | null {
+  if (s.sale_kind === 'recompra') return `Recompra em ${s.remind_days} dias`
+  if (s.sale_kind === 'unica') return s.cross_sell ? `Única + oferta em ${s.remind_days} dias` : 'Compra única'
+  return null
 }
 
 export default function Chat() {
@@ -1181,10 +1191,10 @@ export default function Chat() {
   // ─── Vendas (multiple sales por lead) ───
   const [sales, setSales] = useState<LeadSale[]>([])
   const [salesTotal, setSalesTotal] = useState(0)
+  const [customerCard, setCustomerCard] = useState<CustomerCardData | null>(null)
   const [saleModal, setSaleModal] = useState<{ leadId: number; stageId: number | null; leadName: string; stageName: string | null } | null>(null)
-  const [saleValue, setSaleValue] = useState('')
-  const [saleDate, setSaleDate] = useState('')
-  const [saleSaving, setSaleSaving] = useState(false)
+  // Venda antiga sem tipo (sale_kind null): mini-formulario inline pra "Marcar tipo"
+  const [typeForm, setTypeForm] = useState<{ saleId: number; kind: SaleKind; days: number; cross: boolean; offer: string; saving: boolean; error: string | null } | null>(null)
 
   const loadSales = useCallback(async () => {
     if (!lead || !accountId) return
@@ -1195,19 +1205,19 @@ export default function Chat() {
   }, [lead?.id, accountId])
   useEffect(() => { loadSales() }, [loadSales])
 
-  const todayISO = () => {
-    const d = new Date()
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-  }
+  const loadCustomerCard = useCallback(async () => {
+    if (!lead || !accountId) return
+    try { setCustomerCard(await fetchCustomerCard(lead.id, accountId)) } catch {}
+  }, [lead?.id, accountId])
+  useEffect(() => { loadCustomerCard() }, [loadCustomerCard])
+
   const openSaleModalForConversion = (stageId: number, stageName: string) => {
     if (!lead) return
     setSaleModal({ leadId: lead.id, stageId, leadName: lead.name || 'Lead', stageName })
-    setSaleValue(''); setSaleDate(todayISO())
   }
   const openSaleModalStandalone = () => {
     if (!lead) return
     setSaleModal({ leadId: lead.id, stageId: null, leadName: lead.name || 'Lead', stageName: null })
-    setSaleValue(''); setSaleDate(todayISO())
   }
 
   const doMoveStage = async (stageId: number) => {
@@ -1226,25 +1236,31 @@ export default function Chat() {
     loadLead(); loadLeadsList()
   }
 
-  const confirmSaleValue = async () => {
-    if (!saleModal || !accountId) return
-    const numeric = parseFloat(String(saleValue).replace(/\./g, '').replace(',', '.'))
-    if (!Number.isFinite(numeric) || numeric <= 0) return
-    setSaleSaving(true)
-    try {
-      const iso = saleDate ? `${saleDate}T12:00:00` : undefined
-      await addLeadSale(saleModal.leadId, accountId, { value: numeric, sale_date: iso })
-      await loadSales()
-      if (saleModal.stageId != null) await doMoveStage(saleModal.stageId)
-      setSaleModal(null); setSaleValue(''); setSaleDate('')
-    } catch (e: any) {
-      alert('Erro: ' + (e?.message || 'falha ao salvar venda'))
-    } finally { setSaleSaving(false) }
+  // <SaleModal> ja fez o POST; so falta recarregar vendas/cartao do cliente e, se veio de uma
+  // troca de etapa de conversao, mover o lead de fato (so agora — cancelar nao move nada).
+  const handleSaleSaved = async () => {
+    const stageId = saleModal?.stageId
+    await Promise.all([loadSales(), loadCustomerCard()])
+    if (stageId != null) await doMoveStage(stageId)
   }
-  const skipSaleValue = async () => {
-    if (!saleModal) return
-    if (saleModal.stageId != null) await doMoveStage(saleModal.stageId)
-    setSaleModal(null); setSaleValue(''); setSaleDate('')
+
+  const openTypeForm = (s: LeadSale) => setTypeForm({ saleId: s.id, kind: 'recompra', days: 30, cross: false, offer: '', saving: false, error: null })
+  const saveTypeForm = async () => {
+    if (!typeForm || !lead || !accountId) return
+    const needsDays = typeForm.kind === 'recompra' || typeForm.cross
+    setTypeForm(f => f ? { ...f, saving: true, error: null } : f)
+    try {
+      await patchLeadSale(lead.id, accountId, typeForm.saleId, {
+        sale_kind: typeForm.kind,
+        remind_days: needsDays ? typeForm.days : undefined,
+        cross_sell: typeForm.kind === 'unica' ? typeForm.cross : undefined,
+        cross_sell_offer: typeForm.kind === 'unica' && typeForm.cross ? (typeForm.offer.trim() || undefined) : undefined,
+      })
+      setTypeForm(null)
+      await loadSales()
+    } catch (e: any) {
+      setTypeForm(f => f ? { ...f, saving: false, error: e?.message || 'Não foi possível salvar.' } : f)
+    }
   }
   const handleDeleteSale = async (saleId: number) => {
     if (!lead || !accountId) return
@@ -2414,21 +2430,59 @@ export default function Chat() {
                           const dt = new Date(s.sale_date.replace(' ', 'T') + 'Z')
                           const dateStr = dt.toLocaleDateString('pt-BR') + ' ' + dt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
                           const canDelete = user?.role === 'super_admin' || user?.role === 'gerente'
+                          const kindLabel = saleKindLabel(s)
                           return (
-                            <div key={s.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '5px 8px', background: 'rgba(52,199,89,0.06)', border: '1px solid rgba(52,199,89,0.15)', borderRadius: 6 }}>
-                              <div style={{ display: 'flex', flexDirection: 'column', gap: 1, flex: 1, minWidth: 0 }}>
-                                <div style={{ fontSize: 12, fontWeight: 600, color: '#34C759' }}>
-                                  R$ {Number(s.value).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            <div key={s.id} style={{ display: 'flex', flexDirection: 'column', gap: 4, padding: '5px 8px', background: 'rgba(52,199,89,0.06)', border: '1px solid rgba(52,199,89,0.15)', borderRadius: 6 }}>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: 1, flex: 1, minWidth: 0 }}>
+                                  <div style={{ fontSize: 12, fontWeight: 600, color: '#34C759' }}>
+                                    R$ {Number(s.value).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                    {s.product && <span style={{ fontSize: 10, fontWeight: 400, color: '#B8B4C7', marginLeft: 6 }}>{s.product}</span>}
+                                  </div>
+                                  <div style={{ fontSize: 9, color: '#9B96B0', display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
+                                    <Clock size={8} /> {dateStr}
+                                    {s.created_by_name && <span>· {s.created_by_name}</span>}
+                                    {kindLabel && <span>· {kindLabel}</span>}
+                                  </div>
                                 </div>
-                                <div style={{ fontSize: 9, color: '#9B96B0', display: 'flex', alignItems: 'center', gap: 4 }}>
-                                  <Clock size={8} /> {dateStr}
-                                  {s.created_by_name && <span>· {s.created_by_name}</span>}
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                  {s.sale_kind === null && (
+                                    <button className="btn btn-secondary btn-sm" style={{ fontSize: 9, padding: '2px 6px' }} onClick={() => openTypeForm(s)}>Marcar tipo</button>
+                                  )}
+                                  {canDelete && (
+                                    <button onClick={() => handleDeleteSale(s.id)} title="Excluir venda" style={{ background: 'none', border: 'none', color: '#6B6580', cursor: 'pointer', padding: 2, display: 'flex', alignItems: 'center' }}>
+                                      <Trash2 size={10} />
+                                    </button>
+                                  )}
                                 </div>
                               </div>
-                              {canDelete && (
-                                <button onClick={() => handleDeleteSale(s.id)} title="Excluir venda" style={{ background: 'none', border: 'none', color: '#6B6580', cursor: 'pointer', padding: 2, display: 'flex', alignItems: 'center' }}>
-                                  <Trash2 size={10} />
-                                </button>
+                              {typeForm?.saleId === s.id && (
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '6px 4px 2px', borderTop: '1px solid rgba(52,199,89,0.2)' }}>
+                                  <div style={{ display: 'flex', gap: 4 }}>
+                                    <button type="button" className={`btn btn-sm ${typeForm.kind === 'recompra' ? 'btn-primary' : 'btn-secondary'}`} style={{ fontSize: 9, padding: '2px 6px' }} onClick={() => setTypeForm(f => f ? { ...f, kind: 'recompra' } : f)}>Pode recomprar</button>
+                                    <button type="button" className={`btn btn-sm ${typeForm.kind === 'unica' ? 'btn-primary' : 'btn-secondary'}`} style={{ fontSize: 9, padding: '2px 6px' }} onClick={() => setTypeForm(f => f ? { ...f, kind: 'unica' } : f)}>Compra única</button>
+                                  </div>
+                                  {typeForm.kind === 'unica' && (
+                                    <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 9, cursor: 'pointer' }}>
+                                      <input type="checkbox" checked={typeForm.cross} onChange={e => setTypeForm(f => f ? { ...f, cross: e.target.checked } : f)} /> Oferecer produtos relacionados depois
+                                    </label>
+                                  )}
+                                  {(typeForm.kind === 'recompra' || typeForm.cross) && (
+                                    <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                                      {REMIND_DAYS.map(d => (
+                                        <button key={d} type="button" className={`btn btn-sm ${typeForm.days === d ? 'btn-primary' : 'btn-secondary'}`} style={{ fontSize: 9, padding: '2px 6px' }} onClick={() => setTypeForm(f => f ? { ...f, days: d } : f)}>{d}d</button>
+                                      ))}
+                                    </div>
+                                  )}
+                                  {typeForm.kind === 'unica' && typeForm.cross && (
+                                    <input className="input" style={{ fontSize: 10, padding: '4px 6px' }} maxLength={500} value={typeForm.offer} onChange={e => setTypeForm(f => f ? { ...f, offer: e.target.value } : f)} placeholder="O que oferecer" />
+                                  )}
+                                  {typeForm.error && <div style={{ fontSize: 9, color: '#FF6B6B' }}>{typeForm.error}</div>}
+                                  <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                                    <button className="btn btn-secondary btn-sm" style={{ fontSize: 9, padding: '2px 8px' }} onClick={() => setTypeForm(null)} disabled={typeForm.saving}>Cancelar</button>
+                                    <button className="btn btn-primary btn-sm" style={{ fontSize: 9, padding: '2px 8px' }} onClick={saveTypeForm} disabled={typeForm.saving}>{typeForm.saving ? 'Salvando…' : 'Salvar'}</button>
+                                  </div>
+                                </div>
                               )}
                             </div>
                           )
@@ -2864,80 +2918,21 @@ export default function Chat() {
         </div>
       )}
 
-      {/* Modal: registrar venda (ao mover pra stage is_conversion OU via botao "+" na secao Vendas) */}
-      {saleModal && (
-        <div
-          onClick={() => !saleSaving && skipSaleValue()}
-          style={{ position: 'fixed', inset: 0, background: 'rgba(10,10,20,0.72)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999, padding: 16, backdropFilter: 'blur(4px)' }}
-        >
-          <div onClick={e => e.stopPropagation()} style={{ background: '#1a1428', border: '1px solid rgba(255,255,255,0.10)', borderRadius: 14, padding: 24, maxWidth: 460, width: '100%', boxShadow: '0 30px 80px rgba(0,0,0,0.5)' }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <div style={{ width: 36, height: 36, borderRadius: 10, background: 'rgba(52,199,89,0.16)', color: '#34C759', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <DollarSign size={18} />
-                </div>
-                <h2 style={{ margin: 0, fontSize: 17, fontWeight: 700, color: '#F0EDF5' }}>
-                  {saleModal.stageId != null ? 'Registrar venda' : 'Nova venda'}
-                </h2>
-              </div>
-              <button onClick={skipSaleValue} disabled={saleSaving} style={{ background: 'none', border: 'none', color: '#9B96B0', cursor: saleSaving ? 'default' : 'pointer', padding: 4 }}><X size={16} /></button>
-            </div>
-            <p style={{ fontSize: 13, color: '#B8B4C7', margin: '10px 0 18px', lineHeight: 1.5 }}>
-              {saleModal.stageId != null ? (
-                <>Movendo <strong style={{ color: '#F0EDF5' }}>{saleModal.leadName}</strong> pra <strong style={{ color: '#34C759' }}>{saleModal.stageName}</strong>.<br />Qual foi o valor da compra?</>
-              ) : (
-                <>Adicionar nova venda pra <strong style={{ color: '#F0EDF5' }}>{saleModal.leadName}</strong>.</>
-              )}
-            </p>
-            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-              <div style={{ position: 'relative', flex: 2, minWidth: 180 }}>
-                <span style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)', color: '#9B96B0', fontWeight: 600, fontSize: 14 }}>R$</span>
-                <input
-                  autoFocus
-                  type="text"
-                  inputMode="decimal"
-                  className="input"
-                  value={saleValue}
-                  onChange={e => setSaleValue(e.target.value.replace(/[^\d.,]/g, ''))}
-                  onKeyDown={e => { if (e.key === 'Enter' && !saleSaving) confirmSaleValue() }}
-                  placeholder="0,00"
-                  style={{ paddingLeft: 42, fontSize: 18, fontWeight: 700, letterSpacing: 0.5, width: '100%' }}
-                  disabled={saleSaving}
-                />
-              </div>
-              <div style={{ flex: 1, minWidth: 140 }}>
-                <input
-                  type="date"
-                  className="input"
-                  value={saleDate}
-                  onChange={e => setSaleDate(e.target.value)}
-                  placeholder="Data"
-                  style={{ width: '100%', fontSize: 13 }}
-                  disabled={saleSaving}
-                />
-                <div style={{ fontSize: 9, color: '#6B6580', marginTop: 3 }}>Deixe vazio = hoje</div>
-              </div>
-            </div>
-            <div style={{ display: 'flex', gap: 8, marginTop: 20, justifyContent: 'flex-end' }}>
-              <button className="btn btn-secondary" onClick={skipSaleValue} disabled={saleSaving} style={{ fontSize: 13 }}>
-                {saleModal.stageId != null ? 'Pular' : 'Cancelar'}
-              </button>
-              <button
-                className="btn btn-primary"
-                onClick={confirmSaleValue}
-                disabled={saleSaving || !saleValue.trim()}
-                style={{ fontSize: 13, background: '#34C759', borderColor: '#34C759' }}
-              >
-                {saleSaving ? 'Salvando...' : 'Confirmar venda'}
-              </button>
-            </div>
-            {saleModal.stageId != null && (
-              <div style={{ fontSize: 11, color: '#6B6580', marginTop: 12, lineHeight: 1.5 }}>
-                O valor entra no painel <strong>Funil &amp; ROI Mensal</strong>. Se "Pular", o lead move sem valor.
-              </div>
-            )}
-          </div>
-        </div>
+      {/* Janela unica de venda (ao mover pra stage is_conversion OU via botao "+" na secao Vendas).
+          Cancelar so fecha a janela — a troca de etapa so acontece de fato em onSaved. */}
+      {saleModal && accountId && (
+        <SaleModal
+          open
+          leadId={saleModal.leadId}
+          accountId={accountId}
+          leadName={saleModal.leadName}
+          aiEnabled={aiEnabledForAccount}
+          note={saleModal.stageId != null ? (
+            <>Movendo <strong style={{ color: 'var(--text-primary)' }}>{saleModal.leadName}</strong> pra <strong style={{ color: '#34C759' }}>{saleModal.stageName}</strong>.</>
+          ) : undefined}
+          onClose={() => setSaleModal(null)}
+          onSaved={handleSaleSaved}
+        />
       )}
     </div>
   )
