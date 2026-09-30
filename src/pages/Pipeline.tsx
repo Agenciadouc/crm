@@ -349,6 +349,21 @@ export default function Pipeline() {
 
         {gateModal}
 
+        {/* Janela unica de venda ao mover pra stage de conversao (mesma logica do desktop —
+            tryMoveWithSaleCheck tambem seta esse estado a partir de handleMobileMove). */}
+        {saleModal && accountId && (
+          <SaleModal
+            open
+            leadId={saleModal.leadId}
+            accountId={accountId}
+            leadName={saleModal.leadName}
+            aiEnabled={aiEnabledForAccount}
+            note={<>Movendo <strong style={{ color: 'var(--text-primary)' }}>{saleModal.leadName}</strong> pra <strong style={{ color: '#34C759' }}>{saleModal.stageName}</strong>.</>}
+            onClose={() => setSaleModal(null)}
+            onSaved={handleSaleSaved}
+          />
+        )}
+
         {outcomeModal && accountId && (
           <OutcomeModal
             open
