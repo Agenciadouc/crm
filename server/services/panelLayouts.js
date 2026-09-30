@@ -23,7 +23,12 @@ export function applyPanelLayoutSchema(db) {
       FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE,
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     );
-    CREATE UNIQUE INDEX IF NOT EXISTS ux_panel_layouts_owner ON panel_layouts(account_id, COALESCE(user_id, 0), panel);
+    -- 2 indices parciais em vez de COALESCE(user_id, 0) — sintaxe do
+    -- COALESCE em CREATE INDEX exige SQLite 3.9+, e o CLI do CentOS 7 (3.7)
+    -- rejeita e trava o schema todo. Semantica identica: 1 layout compartilhado
+    -- por (account, panel) OR 1 layout por (account, user, panel).
+    CREATE UNIQUE INDEX IF NOT EXISTS ux_panel_layouts_shared ON panel_layouts(account_id, panel) WHERE user_id IS NULL;
+    CREATE UNIQUE INDEX IF NOT EXISTS ux_panel_layouts_user ON panel_layouts(account_id, user_id, panel) WHERE user_id IS NOT NULL;
   `)
 }
 
