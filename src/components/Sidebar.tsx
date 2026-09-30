@@ -108,18 +108,19 @@ export default function Sidebar() {
           <div style={{ padding: '8px 16px', borderBottom: '1px solid var(--border-subtle)' }}>
             <label style={{ fontSize: 10, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 0.5, display: 'block', marginBottom: 4 }}>Visualizando conta</label>
             <select className="select" value={accountId || ''} onChange={e => setAccountId(Number(e.target.value))} style={{ width: '100%', fontSize: 12, padding: '6px 8px' }}>
-              <optgroup label="🟢 Ativas">
-                {accounts.filter(a => a.is_active !== 0).map(a => (
-                  <option key={a.id} value={a.id}>{a.name}</option>
+              {/* Ativas primeiro (ordenadas por nome), inativas depois */}
+              {[...accounts]
+                .sort((a, b) => {
+                  const aa = a.is_active !== 0 ? 0 : 1
+                  const bb = b.is_active !== 0 ? 0 : 1
+                  if (aa !== bb) return aa - bb
+                  return (a.name || '').localeCompare(b.name || '', 'pt-BR')
+                })
+                .map(a => (
+                  <option key={a.id} value={a.id}>
+                    {a.is_active === 0 ? '🔴' : '🟢'} {a.name}
+                  </option>
                 ))}
-              </optgroup>
-              {accounts.some(a => a.is_active === 0) && (
-                <optgroup label="🔴 Inativas">
-                  {accounts.filter(a => a.is_active === 0).map(a => (
-                    <option key={a.id} value={a.id}>{a.name} [INATIVA]</option>
-                  ))}
-                </optgroup>
-              )}
             </select>
           </div>
         )}
