@@ -8,6 +8,7 @@ import { moveLeadToStage } from './stageMove.js'
 import { ensureStageCadence } from './cadence/leadCadence.js'
 import { warnMissingCadenceTable } from './cadence/errors.js'
 import { onInboundSaved } from './roteiro/runtime.js'
+import { isRepurchaseFunnel } from './ltv/funnel.js'
 
 const STATUS_RANK = { sent: 1, delivered: 2, read: 3 }
 
@@ -366,7 +367,7 @@ export function createInboundHandler(deps) {
     // Quando o LEAD responde (nao fromMe) e ja existia (nao eh a 1a msg dele), avanca de "Novo Lead" pra "Em Atendimento"
     // Logica: lead chega -> Novo Lead. Atendente manda quantas msgs quiser -> continua Novo Lead.
     // Lead responde pela 1a vez -> Em Atendimento (engajamento real)
-    if (!isNew && !fromMe) {
+    if (!isNew && !fromMe && !isRepurchaseFunnel(db, lead.funnel_id)) {
       const firstStage = db.prepare('SELECT id FROM funnel_stages WHERE funnel_id = ? ORDER BY position LIMIT 1').get(lead.funnel_id)
       const secondStage = db.prepare('SELECT id FROM funnel_stages WHERE funnel_id = ? ORDER BY position LIMIT 1 OFFSET 1').get(lead.funnel_id)
       if (firstStage && secondStage && lead.stage_id === firstStage.id) {

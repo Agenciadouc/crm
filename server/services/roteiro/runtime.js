@@ -47,7 +47,12 @@ export function buildOnScoreChanged(broadcastSSE) {
 // Hook unico da troca de etapa: CAPI (so aqui, pra nao duplicar), asks, nota e SSE (menos se silent).
 function buildOnMoved({ broadcastSSE, triggerCapiForStageChange }) {
   return ({ db, lead, toStageId, historyId, silent = false }) => {
-    try { triggerCapiForStageChange(lead.id, toStageId, historyId) } catch (e) { console.error('[Roteiro] CAPI:', e.message) }
+    // Recompra (spec 6.2) nao manda CAPI: coluna kind pode nao existir ainda (banco sem LTV) -> trata como funil normal.
+    let isRecompraMove = false
+    try { isRecompraMove = db.prepare('SELECT f.kind FROM funnel_stages s JOIN funnels f ON f.id = s.funnel_id WHERE s.id = ?').get(toStageId)?.kind === 'recompra' } catch {}
+    if (!isRecompraMove) {
+      try { triggerCapiForStageChange(lead.id, toStageId, historyId) } catch (e) { console.error('[Roteiro] CAPI:', e.message) }
+    }
     try {
       markAdvanced(db, { leadId: lead.id })
       const stage = db.prepare('SELECT is_conversion FROM funnel_stages WHERE id = ?').get(toStageId)

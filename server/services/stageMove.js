@@ -63,6 +63,43 @@ export function moveLeadToStage(db, { lead, toStageId, trigger, userId = null, n
   return { moved: true, fromStageId, toStageId, historyId }
 }
 
+// Troca de FUNIL (recompra, spec 6.2): sem trava de roteiro, mesmo historico e mesmos hooks da troca de etapa.
+export function moveLeadToFunnel(db, { lead, toFunnelId, toStageId, trigger, userId = null, notes = null, silent = false }) {
+  const current = db.prepare('SELECT * FROM leads WHERE id = ?').get(lead.id)
+
+  const targetStage = db.prepare('SELECT id FROM funnel_stages WHERE id = ? AND funnel_id = ?').get(toStageId, toFunnelId)
+  if (!targetStage) throw new Error('stage_not_in_funnel')
+
+  if (current.funnel_id === toFunnelId) {
+    return moveLeadToStage(db, { lead: current, toStageId, trigger, userId, notes, gate: false, silent })
+  }
+
+  const fromStageId = current.stage_id
+  let historyId
+  db.transaction(() => {
+    db.prepare("UPDATE leads SET funnel_id = ?, stage_id = ?, updated_at = datetime('now') WHERE id = ?").run(toFunnelId, toStageId, current.id)
+    const info = db.prepare(`
+      INSERT INTO stage_history (lead_id, from_stage_id, to_stage_id, trigger_type, triggered_by, notes)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(current.id, fromStageId, toStageId, trigger, userId, notes)
+    historyId = Number(info.lastInsertRowid)
+  })()
+
+  try {
+    onStageMoved(db, { leadId: current.id, trigger })
+  } catch (e) {
+    if (!warnMissingCadenceTable(e)) console.error('[stageMove] cadencia da troca de funil:', e.message)
+  }
+
+  try {
+    onMovedHook({ db, lead: current, fromStageId, toStageId, historyId, trigger, silent })
+  } catch (e) {
+    console.error('[stageMove] hook:', e.message)
+  }
+
+  return { moved: true, fromStageId, toStageId, historyId }
+}
+
 // Mover em massa (POST /leads/bulk/stage): um a um pela porta unica (trava do roteiro +
 // CAPI/nota pelo hook), sem SSE por lead; no fim UM lead:updated {bulk:true} por conta.
 // accountId null (super_admin sem conta) = qualquer conta. Travados nao movem.

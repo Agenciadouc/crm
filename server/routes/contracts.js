@@ -6,6 +6,7 @@ import { fileURLToPath } from 'url'
 import db, { DEFAULT_EVOLUTION_API_URL, DEFAULT_EVOLUTION_API_KEY } from '../db.js'
 import { requireRole } from '../middleware/auth.js'
 import { createHubClient } from '../services/hubClient.js'
+import { ensureRepurchaseFunnel } from '../services/ltv/funnel.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -367,6 +368,8 @@ router.post('/:id/approve', (req, res, next) => {
     ]
     const stageStmt = db.prepare('INSERT INTO funnel_stages (funnel_id, name, position, color, is_conversion, is_terminal) VALUES (?, ?, ?, ?, ?, ?)')
     for (const s of stages) stageStmt.run(funnelId, s.name, s.position, s.color, s.is_conversion || 0, s.is_terminal || 0)
+
+    ensureRepurchaseFunnel(db, accountId)
 
     // 3. User gerente
     db.prepare(`

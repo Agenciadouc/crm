@@ -7,6 +7,8 @@ import { createLeadIntake } from '../server/services/leadIntake.js'
 import { configureStageMoveHooks } from '../server/services/stageMove.js'
 import { createInboundHandler, detectAdSource } from '../server/services/inboundHandler.js'
 import { isOptedOut } from '../server/services/antiban.js'
+import { applyLtvSchema } from '../server/services/ltv/schema.js'
+import { ensureRepurchaseFunnel, stageIdByKey } from '../server/services/ltv/funnel.js'
 
 const adapter = createEvolutionAdapter({ fetch: async () => { throw new Error('sem rede nos testes') } })
 const tick = () => new Promise(r => setImmediate(r))
@@ -119,6 +121,20 @@ test('lead existente responde: sai de Novo Lead para Em Atendimento com CAPI', (
   assert.equal(row.name, 'Maria Silva')
   const h = db.prepare("SELECT * FROM stage_history WHERE lead_id = ? AND trigger_type = 'webhook'").get(lead.id)
   assert.deepEqual(calls.capi.at(-1), [lead.id, seed.stage2, h.id])
+})
+
+test('lead no funil Recompra não avança sozinho ao responder', () => {
+  const { db, seed, receive } = setup()
+  db.exec('CREATE TABLE IF NOT EXISTS lead_sales (id INTEGER PRIMARY KEY AUTOINCREMENT)')
+  db.exec('CREATE TABLE IF NOT EXISTS standalone_tasks (id INTEGER PRIMARY KEY AUTOINCREMENT)')
+  db.exec("ALTER TABLE funnel_stages ADD COLUMN color TEXT NOT NULL DEFAULT '#FFB300'")
+  applyLtvSchema(db)
+  const f = ensureRepurchaseFunnel(db, seed.account.id)
+  const aguardando = stageIdByKey(db, seed.account.id, 'aguardando')
+  const lead = insertLead(db, { account_id: seed.account.id, funnel_id: f, stage_id: aguardando, phone: '5547991351835', name: '5547991351835', source: 'whatsapp' })
+  receive(P.textConversation)
+  const row = db.prepare('SELECT * FROM leads WHERE id = ?').get(lead.id)
+  assert.equal(row.stage_id, aguardando)
 })
 
 test('roteiro: mensagem do cliente marca o envio de pergunta como respondido; fromMe nao marca', () => {

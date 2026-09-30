@@ -3,6 +3,7 @@ import db, { DEFAULT_EVOLUTION_API_URL, DEFAULT_EVOLUTION_API_KEY } from '../db.
 import { requireRole } from '../middleware/auth.js'
 import { testCapi } from '../services/metaCapi.js'
 import { smokeTest, resolveAnthropicKey } from '../services/anthropicClient.js'
+import { ensureRepurchaseFunnel } from '../services/ltv/funnel.js'
 
 const router = Router()
 
@@ -45,6 +46,8 @@ router.post('/', requireRole('super_admin'), (req, res) => {
   ]
   const stageStmt = db.prepare('INSERT INTO funnel_stages (funnel_id, name, position, color, is_conversion, is_terminal) VALUES (?, ?, ?, ?, ?, ?)')
   for (const s of stages) stageStmt.run(funnelId, s.name, s.position, s.color, s.is_conversion || 0, s.is_terminal || 0)
+
+  ensureRepurchaseFunnel(db, result.lastInsertRowid)
 
   const account = db.prepare('SELECT * FROM accounts WHERE id = ?').get(result.lastInsertRowid)
   res.json({ account })

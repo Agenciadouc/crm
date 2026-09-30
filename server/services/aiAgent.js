@@ -21,6 +21,7 @@ import { resolveSendInstance } from './whatsapp/resolveSendInstance.js'
 import { agentInstanceBlocker, agentServesInstance, numberRole } from './whatsapp/numberRole.js'
 import { resolveCity } from './city.js'
 import { moveLeadToStage } from './stageMove.js'
+import { isRepurchaseFunnel } from './ltv/funnel.js'
 
 // ─── Helpers ──────────────────────────────────────────────────────────
 
@@ -673,7 +674,7 @@ export async function processInboundMessage(lead, msgContent, mediaType, instanc
 
     // 6. Carrega tags e etapas disponiveis (pra tools enum)
     const availableTags = db.prepare('SELECT id, name FROM tags WHERE account_id = ?').all(lead.account_id)
-    const availableStages = db.prepare(`
+    const availableStages = isRepurchaseFunnel(db, lead.funnel_id) ? [] : db.prepare(`
       SELECT s.id, s.name FROM funnel_stages s
       JOIN funnels f ON f.id = s.funnel_id
       WHERE f.account_id = ? AND f.is_default = 1
