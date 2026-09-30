@@ -128,7 +128,7 @@ export const updateFunnelFirstMessage = (funnelId: number, accountId: number, te
   apiFetch(`/api/funnels/${funnelId}?account_id=${accountId}`, { method: 'PUT', body: JSON.stringify({ first_msg_template: template }) })
 
 // Leads
-export interface LeadFilters { stage_id?: number | string; attendant_id?: number | string; instance_id?: number | string; funnel_id?: number; source?: string; city?: string; uf?: string; tag?: number | string; search?: string; date_from?: string; date_to?: string; show_archived?: '1' | 'all'; page?: number; limit?: number; score_bands?: string; score_min?: number; fit?: 'AB'; engagement?: 'high'; sort?: 'score' }
+export interface LeadFilters { stage_id?: number | string; attendant_id?: number | string; instance_id?: number | string; funnel_id?: number; source?: string; city?: string; uf?: string; tag?: number | string; search?: string; date_from?: string; date_to?: string; show_archived?: '1' | 'all'; page?: number; limit?: number; score_bands?: string; score_min?: number; fit?: 'AB'; engagement?: 'high'; sort?: 'score'; curve?: string; tier_id?: number; repurchase_late?: '1' }
 export const fetchLeads = (accountId: number, filters: LeadFilters = {}) => {
   const params = new URLSearchParams({ account_id: String(accountId) })
   Object.entries(filters).forEach(([k, v]) => { if (v !== undefined && v !== '') params.set(k, String(v)) })
@@ -1356,3 +1356,55 @@ export function postRepurchaseOutcome(leadId: number, accountId: number, body: {
 export function undoRepurchaseOptOut(leadId: number, accountId: number) {
   return apiFetch<{ ok: true }>(`/api/customers/lead/${leadId}/undo-optout?account_id=${accountId}`, { method: 'POST' })
 }
+
+// =============================================
+// Tela Clientes (spec LTV/Recompra §10.2/§12) — visao geral, lista, funil de recompra e parados.
+// Filtros combinam geoParams(cityFilter) + customerParams(customerFilter) (curva/selo/atrasado).
+// =============================================
+export interface CustomerOverview {
+  clients: number; ltvAvg: number; ticketAvg: number; purchasesAvg: number; repeatPct: number
+  byCurve: Record<string, { count: number; ltv: number }>
+  byTier: { id: number; name: string; icon: string | null; color: string; count: number; ltv: number }[]
+  repurchase: { medianDays: number | null; markedDays: number | null; cases: number; suggestion: number | null }
+}
+export interface CustomerRow {
+  id: number; name: string | null; phone: string | null; ltv: number; purchases: number
+  last_purchase_at: string | null; curve: 'A' | 'B' | 'C' | 'D' | '1a' | null; tier_id: number | null
+  attendant_id: number | null; attendant_name: string | null
+  tier_name: string | null; tier_icon: string | null; tier_color: string | null
+  cycle_status: 'aguardando' | 'a_contatar' | 'em_conversa' | null; remind_at: string | null
+  attempt: number | null; cycle_kind: 'recompra' | 'cruzada' | null; exhausted: number | null
+}
+export interface CustomerTier { id: number; account_id: number; name: string; icon: string | null; color: string; min_ltv: number }
+export interface RepurchaseReasonCount { id: number; label: string; count: number }
+export interface RepurchaseStats {
+  contacted: number; conversa: number; comprou: number; naoAgora: number; naoQuer: number
+  reasons: { nao_agora: RepurchaseReasonCount[]; nao_quer: RepurchaseReasonCount[] }
+  byAttempt: { '1': number; '2': number; '3': number; '4+': number }
+  byKind: { recompra: { total: number; comprou: number }; cruzada: { total: number; comprou: number } }
+  byAuto: { auto: { total: number; comprou: number }; manual: { total: number; comprou: number } }
+}
+export interface StaleBand { band: '30-60' | '61-90' | '91-180' | '181+'; curve: string | null; tierId: number | null; count: number; ltv: number; leadIds: number[] }
+export interface StaleCustomerRow { id: number; name: string | null; ltv: number; purchases: number; curve: string | null; tier_id: number | null; last_purchase_at: string | null }
+export interface StaleStats {
+  late: { count: number; value: number; rows: StaleCustomerRow[] }
+  bands: StaleBand[]
+}
+
+function customerQuery(accountId: number, params: Record<string, any> = {}) {
+  const q = new URLSearchParams({ account_id: String(accountId) })
+  Object.entries(params).forEach(([k, v]) => { if (v !== undefined && v !== null && v !== '') q.set(k, String(v)) })
+  return q
+}
+export const fetchCustomersOverview = (accountId: number, params: Record<string, any> = {}) =>
+  apiFetch<CustomerOverview>(`/api/customers/overview?${customerQuery(accountId, params)}`)
+export const fetchCustomersList = (accountId: number, params: Record<string, any> = {}) =>
+  apiFetch<{ rows: CustomerRow[]; total: number }>(`/api/customers/list?${customerQuery(accountId, params)}`)
+export const fetchRepurchaseStats = (accountId: number, params: Record<string, any> = {}) =>
+  apiFetch<RepurchaseStats>(`/api/customers/repurchase?${customerQuery(accountId, params)}`)
+export const fetchStaleStats = (accountId: number, params: Record<string, any> = {}) =>
+  apiFetch<StaleStats>(`/api/customers/stale?${customerQuery(accountId, params)}`)
+export const createStaleTasks = (accountId: number, leadIds: number[]) =>
+  apiFetch<{ created: number }>(`/api/customers/stale/tasks?account_id=${accountId}`, { method: 'POST', body: JSON.stringify({ lead_ids: leadIds }) })
+export const fetchTiers = (accountId: number) =>
+  apiFetch<{ tiers: CustomerTier[] }>(`/api/customers/tiers?account_id=${accountId}`).then(d => d.tiers)

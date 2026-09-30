@@ -10,6 +10,7 @@ import HelpTip from '../components/HelpTip'
 import ScoreBadge from '../components/score/ScoreBadge'
 import { geoParams } from '../lib/geoFilter.js'
 import { scoreParams, isScoreFilterActive, EMPTY_SCORE_FILTER } from '../lib/scoreFilter.js'
+import { useCustomerFilter, customerParams, isCustomerFilterActive, EMPTY_CUSTOMER_FILTER } from '../lib/customerFilter.js'
 import { SCORE_HELP_TEXT } from '../lib/score'
 import { bulkMoveSummary } from '../lib/roteiroView.js'
 import {
@@ -50,6 +51,7 @@ export default function Leads() {
   const [tagFilter, setTagFilter] = useState('')
   const [cityFilter, setCityFilter] = useCityFilter(accountId)
   const [scoreFilter, setScoreFilter] = useScoreFilter(accountId)
+  const [customerFilter, setCustomerFilter] = useCustomerFilter(accountId)
   // Clique no cabecalho "Termometro": mais quente primeiro (sort=score)
   const [sortScore, setSortScore] = useState(false)
   const [sourceOptions, setSourceOptions] = useState<{ value: string; count: number }[]>([])
@@ -85,6 +87,7 @@ export default function Leads() {
       tag: tagFilter ? +tagFilter : undefined,
       ...geoParams(cityFilter),
       ...scoreParams(scoreFilter),
+      ...customerParams(customerFilter),
       sort: sortScore ? 'score' : undefined,
       show_archived: showArchived ? '1' : undefined,
       page, limit: 30,
@@ -94,7 +97,7 @@ export default function Leads() {
       .finally(() => setLoading(false))
   }
 
-  useEffect(loadLeads, [accountId, search, stageFilter, sourceFilter, attendantFilter, dateFrom, dateTo, tagFilter, cityFilter, scoreFilter, sortScore, showArchived, page])
+  useEffect(loadLeads, [accountId, search, stageFilter, sourceFilter, attendantFilter, dateFrom, dateTo, tagFilter, cityFilter, scoreFilter, customerFilter, sortScore, showArchived, page])
 
   const loadArchivedCount = useCallback(() => {
     if (!accountId) return
@@ -175,7 +178,7 @@ export default function Leads() {
             const token = localStorage.getItem('dros_crm_token')
             // CSV sai com o mesmo local, termometro e ordem da lista
             const q = new URLSearchParams({ account_id: String(accountId) })
-            Object.entries({ ...geoParams(cityFilter), ...scoreParams(scoreFilter), ...(sortScore ? { sort: 'score' } : {}) })
+            Object.entries({ ...geoParams(cityFilter), ...scoreParams(scoreFilter), ...customerParams(customerFilter), ...(sortScore ? { sort: 'score' } : {}) })
               .forEach(([k, v]) => { if (v !== undefined && v !== '') q.set(k, String(v)) })
             const res = await fetch(`${import.meta.env.BASE_URL.replace(/\/$/, '')}/api/leads/export?${q}`, { headers: { Authorization: `Bearer ${token}` } })
             const blob = await res.blob()
@@ -222,14 +225,15 @@ export default function Leads() {
           accountId={accountId}
           city={cityFilter} onCityChange={c => { setCityFilter(c); setPage(1) }}
           score={scoreFilter} onScoreChange={f => { setScoreFilter(f); setPage(1) }}
+          customer={customerFilter} onCustomerChange={f => { setCustomerFilter(f); setPage(1) }}
         />
       </div>
       <div className="filter-bar" style={{ marginTop: -8 }}>
         <input className="input" type="date" value={dateFrom} onChange={e => { setDateFrom(e.target.value); setPage(1) }} style={{ width: 160 }} />
         <span style={{ color: '#6B6580', fontSize: 12 }}>ate</span>
         <input className="input" type="date" value={dateTo} onChange={e => { setDateTo(e.target.value); setPage(1) }} style={{ width: 160 }} />
-        {(dateFrom || dateTo || search || stageFilter || sourceFilter || attendantFilter || tagFilter || cityFilter || isScoreFilterActive(scoreFilter)) && (
-          <button className="btn btn-secondary btn-sm" onClick={() => { setSearch(''); setStageFilter(''); setSourceFilter(''); setAttendantFilter(''); setDateFrom(''); setDateTo(''); setTagFilter(''); setCityFilter(''); setScoreFilter({ ...EMPTY_SCORE_FILTER, bands: [] }); setPage(1) }}>Limpar filtros</button>
+        {(dateFrom || dateTo || search || stageFilter || sourceFilter || attendantFilter || tagFilter || cityFilter || isScoreFilterActive(scoreFilter) || isCustomerFilterActive(customerFilter)) && (
+          <button className="btn btn-secondary btn-sm" onClick={() => { setSearch(''); setStageFilter(''); setSourceFilter(''); setAttendantFilter(''); setDateFrom(''); setDateTo(''); setTagFilter(''); setCityFilter(''); setScoreFilter({ ...EMPTY_SCORE_FILTER, bands: [] }); setCustomerFilter({ ...EMPTY_CUSTOMER_FILTER }); setPage(1) }}>Limpar filtros</button>
         )}
       </div>
 

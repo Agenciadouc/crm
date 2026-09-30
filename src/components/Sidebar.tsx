@@ -9,7 +9,7 @@ import { AUTOMATION_PATH } from '../lib/automationTabs'
 import {
   LayoutDashboard, Kanban, Users, MessageCircle, UserCog, GitBranch,
   Plug, Settings, Building2, LogOut, UsersRound, Menu, X,
-  ListOrdered, MessageSquarePlus, Rocket, ListTodo, ExternalLink, Tag as TagIcon, FileText, FileSignature, ArrowRightLeft, Bot, Sun, Moon, BarChart3, Layers, TrendingUp,
+  ListOrdered, MessageSquarePlus, Rocket, ListTodo, ExternalLink, Tag as TagIcon, FileText, FileSignature, ArrowRightLeft, Bot, Sun, Moon, BarChart3, Layers, TrendingUp, Crown,
 } from 'lucide-react'
 
 function getInitials(name: string): string {
@@ -189,6 +189,9 @@ export default function Sidebar() {
           </NavLink>
           <NavLink to="/leads" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`} onClick={closeMobile}>
             <Users size={16} /> Leads
+          </NavLink>
+          <NavLink to="/clientes" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`} onClick={closeMobile}>
+            <Crown size={16} /> Clientes
           </NavLink>
           <NavLink to="/transferencias" className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`} onClick={closeMobile}>
             <ArrowRightLeft size={16} /> Transferencias

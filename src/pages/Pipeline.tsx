@@ -10,6 +10,7 @@ import MoreFilters, { useScoreFilter } from '../components/MoreFilters'
 import ScoreBadge from '../components/score/ScoreBadge'
 import { geoParams } from '../lib/geoFilter.js'
 import { scoreParams, isScoreFilterActive, EMPTY_SCORE_FILTER } from '../lib/scoreFilter.js'
+import { useCustomerFilter, customerParams, isCustomerFilterActive, EMPTY_CUSTOMER_FILTER } from '../lib/customerFilter.js'
 import { useSSE } from '../context/SSEContext'
 import { fetchFunnels, fetchLeads, fetchTags, fetchUsers, moveLeadStage, RoteiroGateError, UseOutcomeError, fetchCustomerCard, type RoteiroPendingQuestion, fetchPipelineMetrics, archiveLead, type Funnel, type Lead, type PipelineMetric, type Tag, type User as ApiUser } from '../lib/api'
 import { Phone, MessageCircle, User, Clock, ChevronDown, ChevronRight, ArrowRight, Smartphone, Archive } from 'lucide-react'
@@ -87,6 +88,7 @@ export default function Pipeline() {
   const [dateTo, setDateTo] = useState('')
   const [cityFilter, setCityFilter] = useCityFilter(accountId)
   const [scoreFilter, setScoreFilter] = useScoreFilter(accountId)
+  const [customerFilter, setCustomerFilter] = useCustomerFilter(accountId)
   const [expandedColumns, setExpandedColumns] = useState<Set<number>>(new Set())
   const CARDS_LIMIT = 5
 
@@ -103,7 +105,7 @@ export default function Pipeline() {
       if (active && active.id !== funnelId) setFunnelId(active.id)
       if (active) {
         const [data, m] = await Promise.all([
-          fetchLeads(accountId, { funnel_id: active.id, limit: 500, ...geoParams(cityFilter), ...scoreParams(scoreFilter) }),
+          fetchLeads(accountId, { funnel_id: active.id, limit: 500, ...geoParams(cityFilter), ...scoreParams(scoreFilter), ...customerParams(customerFilter) }),
           fetchPipelineMetrics(accountId, active.id, cityFilter).catch(() => ({ metrics: [], totalLeads: 0 })),
         ])
         setLeads(data.leads)
@@ -116,7 +118,7 @@ export default function Pipeline() {
       }
     } catch {}
     setLoading(false)
-  }, [accountId, isMobile, cityFilter, scoreFilter, funnelId])
+  }, [accountId, isMobile, cityFilter, scoreFilter, customerFilter, funnelId])
 
   useEffect(() => { loadData() }, [loadData])
   useEffect(() => { if (accountId) fetchTags(accountId).then(setTags).catch(() => {}) }, [accountId])
@@ -440,9 +442,9 @@ export default function Pipeline() {
           />
           <input type="date" className="input" style={{ width: 140 }} value={dateFrom} onChange={e => setDateFrom(e.target.value)} title="Data inicial (criacao)" />
           <input type="date" className="input" style={{ width: 140 }} value={dateTo} onChange={e => setDateTo(e.target.value)} title="Data final (criacao)" />
-          <MoreFilters accountId={accountId} city={cityFilter} onCityChange={setCityFilter} score={scoreFilter} onScoreChange={setScoreFilter} />
-          {(tagFilter.length > 0 || attendantFilter.length > 0 || dateFrom || dateTo || cityFilter || isScoreFilterActive(scoreFilter)) && (
-            <button className="btn btn-secondary btn-sm" onClick={() => { setTagFilter([]); setAttendantFilter([]); setDateFrom(''); setDateTo(''); setCityFilter(''); setScoreFilter({ ...EMPTY_SCORE_FILTER, bands: [] }) }}>
+          <MoreFilters accountId={accountId} city={cityFilter} onCityChange={setCityFilter} score={scoreFilter} onScoreChange={setScoreFilter} customer={customerFilter} onCustomerChange={setCustomerFilter} />
+          {(tagFilter.length > 0 || attendantFilter.length > 0 || dateFrom || dateTo || cityFilter || isScoreFilterActive(scoreFilter) || isCustomerFilterActive(customerFilter)) && (
+            <button className="btn btn-secondary btn-sm" onClick={() => { setTagFilter([]); setAttendantFilter([]); setDateFrom(''); setDateTo(''); setCityFilter(''); setScoreFilter({ ...EMPTY_SCORE_FILTER, bands: [] }); setCustomerFilter({ ...EMPTY_CUSTOMER_FILTER }) }}>
               Limpar filtros
             </button>
           )}

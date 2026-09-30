@@ -15,6 +15,7 @@ import Projecao from './pages/Projecao'
 import AttendantAnalytics from './pages/AttendantAnalytics'
 import Pipeline from './pages/Pipeline'
 import Leads from './pages/Leads'
+import Clientes from './pages/Clientes'
 import LeadDetail from './pages/LeadDetail'
 import Chat from './pages/Chat'
 import Tasks from './pages/Tasks'
@@ -140,6 +141,7 @@ function AppRoutes() {
           <Route path="/tasks" element={<Tasks />} />
           <Route path="/leads" element={<Leads />} />
           <Route path="/leads/:id" element={<LeadDetail />} />
+          <Route path="/clientes" element={<Clientes />} />
           <Route path="/transferencias" element={<TransferRequests />} />
 
           <Route path="*" element={<Navigate to={homeRoute} />} />
