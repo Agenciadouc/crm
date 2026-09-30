@@ -108,7 +108,18 @@ export default function Sidebar() {
           <div style={{ padding: '8px 16px', borderBottom: '1px solid var(--border-subtle)' }}>
             <label style={{ fontSize: 10, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 0.5, display: 'block', marginBottom: 4 }}>Visualizando conta</label>
             <select className="select" value={accountId || ''} onChange={e => setAccountId(Number(e.target.value))} style={{ width: '100%', fontSize: 12, padding: '6px 8px' }}>
-              {accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+              <optgroup label="🟢 Ativas">
+                {accounts.filter(a => a.is_active !== 0).map(a => (
+                  <option key={a.id} value={a.id}>{a.name}</option>
+                ))}
+              </optgroup>
+              {accounts.some(a => a.is_active === 0) && (
+                <optgroup label="🔴 Inativas">
+                  {accounts.filter(a => a.is_active === 0).map(a => (
+                    <option key={a.id} value={a.id}>{a.name} [INATIVA]</option>
+                  ))}
+                </optgroup>
+              )}
             </select>
           </div>
         )}

@@ -6,6 +6,9 @@ export type { WhatsAppProviderId }
 const getToken = () => localStorage.getItem('dros_crm_token')
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, '')
 
+// Flag pra evitar disparar o alert de conta inativa varias vezes em concorrencia
+let inactiveShown = false
+
 export async function apiFetch<T = any>(path: string, opts: RequestInit = {}): Promise<T> {
   const url = path.startsWith('/api') ? `${BASE}${path}` : path
   const res = await fetch(url, {
@@ -13,6 +16,20 @@ export async function apiFetch<T = any>(path: string, opts: RequestInit = {}): P
     headers: { Authorization: `Bearer ${getToken()}`, 'Content-Type': 'application/json', ...opts.headers },
   })
   if (res.status === 401) { localStorage.removeItem('dros_crm_token'); window.location.href = `${BASE}/login`; throw new Error('Unauthorized') }
+  // 403 com error='account_inactive' → conta foi desativada durante sessao ativa.
+  // Mostra alert amigavel + logout forcado. Flag evita empilhar alerts em concorrencia.
+  if (res.status === 403) {
+    const errBody = await res.clone().json().catch(() => ({}))
+    if (errBody?.error === 'account_inactive') {
+      if (!inactiveShown) {
+        inactiveShown = true
+        alert(errBody.message || 'Sua conta esta desativada. Fale com a Dros pra reativar.')
+        localStorage.removeItem('dros_crm_token')
+        window.location.href = `${BASE}/login`
+      }
+      throw new Error('account_inactive')
+    }
+  }
   if (!res.ok) {
     const err = await res.json().catch(() => ({}))
     // status e code vao junto no erro (ex.: 503 code 'ai_off') sem mudar a mensagem
