@@ -28,6 +28,18 @@ router.post('/login', rateLimit, (req, res) => {
     return res.status(401).json({ error: 'Credenciais invalidas' })
   }
 
+  // Bloqueia login se a conta do user estiver desativada (super_admin sem
+  // account_id continua entrando sempre).
+  if (user.account_id) {
+    const acc = db.prepare('SELECT is_active, name FROM accounts WHERE id = ?').get(user.account_id)
+    if (!acc || acc.is_active !== 1) {
+      return res.status(403).json({
+        error: 'account_inactive',
+        message: 'Sua conta esta desativada. Fale com a Dros pra reativar.',
+      })
+    }
+  }
+
   const token = jwt.sign(
     { id: user.id, email: user.email, name: user.name, role: user.role, account_id: user.account_id },
     JWT_SECRET,
