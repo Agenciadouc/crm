@@ -10,6 +10,7 @@ import { warnMissingCadenceTable } from '../cadence/errors.js'
 import { recordStepSend } from '../cadence/metrics.js'
 import { recognizeQuestion } from './recognize.js'
 import { createExtractQueue, extractAnswers, EXTRACT_DELAY_MS } from './aiExtract.js'
+import { onMessageExchanged } from '../ltv/cycles.js'
 
 const DEFAULT_REPLY_WINDOW_H = 24
 
@@ -104,6 +105,7 @@ export function onInboundSaved({ db, account, lead, message }) {
   markReplied(db, { leadId: lead.id, windowHours })
   scheduleFn(lead.id)
   enqueueAiExtract({ db, account, lead, message })
+  try { onMessageExchanged(db, { leadId: lead.id }) } catch (e) { console.error('[Recompra] conversa:', e.message) }
 }
 
 // Mensagem enviada ao lead: nota e fecha o aviso "lead quente sem resposta".
@@ -113,6 +115,7 @@ export function onOutboundSaved({ db, lead }) {
     WHERE lead_id = ? AND type = 'lead_quente_sem_resposta' AND status = 'open'
   `).run(lead.id)
   scheduleFn(lead.id)
+  try { onMessageExchanged(db, { leadId: lead.id }) } catch (e) { console.error('[Recompra] conversa:', e.message) }
 }
 
 // Envio pelo Chat: com attemptId (botao [Enviar] do passo mensagem) registra o envio do passo;

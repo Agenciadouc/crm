@@ -18,6 +18,8 @@ import { UF_NAMES } from '../services/geo.js'
 import { scoreWhere, scoreOrder } from '../services/leadScore/filters.js'
 import { recalcLeadScore } from '../services/leadScore/recalc.js'
 import { BAND_LABEL } from '../services/leadScore/compute.js'
+import { registerSale, patchSale, deleteSale, outcomeStageBlocked } from '../services/ltv/sales.js'
+import { repurchaseAiFor } from '../services/ltv/aiRuntime.js'
 
 const router = Router()
 
@@ -634,6 +636,10 @@ router.put('/:id/stage', (req, res) => {
   if (!lead) return res.status(404).json({ error: 'Lead nao encontrado' })
   if (req.accountId && lead.account_id !== req.accountId) return res.status(404).json({ error: 'Lead nao encontrado' })
 
+  if (outcomeStageBlocked(db, Number(stage_id))) {
+    return res.status(409).json({ error: 'Use a janela de desfecho para informar o motivo.', code: 'use_outcome' })
+  }
+
   // "Avancar mesmo assim" (trava do roteiro) exige motivo e so gestor/admin pode
   const decision = resolveManualMove({ role: req.user.role, forceReason: force_reason })
   if (!decision.ok) return res.status(decision.status).json({ error: decision.error })
@@ -677,31 +683,34 @@ router.get('/:id/sales', (req, res) => {
   res.json({ sales, total })
 })
 
-// POST /:id/sales — registra nova venda. Body: { value, sale_date?, notes? }
+// POST /:id/sales — registra nova venda. Body: { value, sale_date?, notes?, sale_kind?, remind_days?, product?, cross_sell?, cross_sell_offer? }
 // Tambem atualiza leads.value_estimated = SUM(sales) pra manter compat com dashboard
-router.post('/:id/sales', (req, res) => {
-  const lead = db.prepare('SELECT id, account_id FROM leads WHERE id = ?').get(req.params.id)
+router.post('/:id/sales', async (req, res) => {
+  const lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(req.params.id)
   if (!lead) return res.status(404).json({ error: 'Lead nao encontrado' })
   if (req.user.role !== 'super_admin' && lead.account_id !== req.accountId) return res.status(403).json({ error: 'Sem permissao' })
-  const value = parseFloat(req.body?.value)
-  if (!Number.isFinite(value) || value <= 0) return res.status(400).json({ error: 'valor invalido (deve ser > 0)' })
-  const saleDate = req.body?.sale_date ? String(req.body.sale_date).slice(0, 19).replace('T', ' ') : null
-  const notes = req.body?.notes ? String(req.body.notes).slice(0, 500) : null
-  const insertRes = db.prepare(`
-    INSERT INTO lead_sales (account_id, lead_id, value, sale_date, notes, created_by)
-    VALUES (?, ?, ?, COALESCE(?, datetime('now')), ?, ?)
-  `).run(lead.account_id, lead.id, value, saleDate, notes, req.user.id)
-  // Sincroniza leads.value_estimated com a SOMA das vendas (fallback pro Pipeline atual)
-  const totalRow = db.prepare('SELECT COALESCE(SUM(value), 0) as t FROM lead_sales WHERE lead_id = ?').get(lead.id)
-  db.prepare("UPDATE leads SET value_estimated = ?, updated_at = datetime('now') WHERE id = ?").run(totalRow.t, lead.id)
-  const sale = db.prepare(`
-    SELECT s.*, u.name as created_by_name FROM lead_sales s LEFT JOIN users u ON u.id = s.created_by WHERE s.id = ?
-  `).get(insertRes.lastInsertRowid)
-  const total = totalRow.t
-  // Roteiro/termometro: venda marca os envios de pergunta como "comprou" e recalcula a nota
-  try { markBought(db, { leadId: lead.id }); scheduleScore(lead.id) } catch (e) { console.error('[Roteiro] venda:', e.message) }
-  try { broadcastSSE(lead.account_id, 'lead:updated', { id: lead.id, value_estimated: total }) } catch {}
-  res.json({ sale, total })
+  try {
+    const r = await registerSale(db, { lead, body: req.body || {}, userId: req.user.id, ai: repurchaseAiFor(db, lead.account_id) })
+    if (!r.ok) return res.status(r.status).json({ error: r.error })
+    try { markBought(db, { leadId: lead.id }); scheduleScore(lead.id) } catch (e) { console.error('[Roteiro] venda:', e.message) }
+    try { broadcastSSE(lead.account_id, 'lead:updated', { id: lead.id, value_estimated: r.total }) } catch {}
+    try { broadcastSSE(lead.account_id, 'customers:updated', { lead_id: lead.id }) } catch {}
+    res.json({ sale: r.sale, total: r.total, cycle_id: r.cycleId, opt_out: r.optOut })
+  } catch (e) {
+    console.error('[Vendas] registrar:', e.message)
+    res.status(500).json({ error: 'Erro ao registrar a venda' })
+  }
+})
+
+// PATCH /:id/sales/:saleId — produto e/ou tipo (venda antiga sem tipo)
+router.patch('/:id/sales/:saleId', async (req, res) => {
+  const lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(req.params.id)
+  if (!lead) return res.status(404).json({ error: 'Lead nao encontrado' })
+  if (req.user.role !== 'super_admin' && lead.account_id !== req.accountId) return res.status(403).json({ error: 'Sem permissao' })
+  const r = await patchSale(db, { lead, saleId: Number(req.params.saleId), body: req.body || {}, userId: req.user.id, ai: repurchaseAiFor(db, lead.account_id) })
+  if (!r.ok) return res.status(r.status).json({ error: r.error })
+  try { broadcastSSE(lead.account_id, 'lead:updated', { id: lead.id }) } catch {}
+  res.json({ sale: r.sale })
 })
 
 // DELETE /:id/sales/:saleId — remove venda (super_admin ou gerente)
@@ -709,11 +718,9 @@ router.delete('/:id/sales/:saleId', requireRole('super_admin', 'gerente'), (req,
   const lead = db.prepare('SELECT id, account_id FROM leads WHERE id = ?').get(req.params.id)
   if (!lead) return res.status(404).json({ error: 'Lead nao encontrado' })
   if (req.user.role !== 'super_admin' && lead.account_id !== req.accountId) return res.status(403).json({ error: 'Sem permissao' })
-  db.prepare('DELETE FROM lead_sales WHERE id = ? AND lead_id = ?').run(req.params.saleId, lead.id)
-  const totalRow = db.prepare('SELECT COALESCE(SUM(value), 0) as t FROM lead_sales WHERE lead_id = ?').get(lead.id)
-  db.prepare("UPDATE leads SET value_estimated = ?, updated_at = datetime('now') WHERE id = ?").run(totalRow.t, lead.id)
-  try { broadcastSSE(lead.account_id, 'lead:updated', { id: lead.id, value_estimated: totalRow.t }) } catch {}
-  res.json({ ok: true, total: totalRow.t })
+  const r = deleteSale(db, { lead, saleId: req.params.saleId })
+  try { broadcastSSE(lead.account_id, 'lead:updated', { id: lead.id, value_estimated: r.total }) } catch {}
+  res.json({ ok: true, total: r.total })
 })
 
 // Archive lead — hides from pipeline/chat; messages still stored but don't broadcast
