@@ -84,24 +84,38 @@ export function createCustomersRouter(db, { aiFor = () => null, broadcast = () =
   router.get('/settings', (req, res) => res.json(settingsOf(req.accountId)))
   router.put('/settings', managerOnly, (req, res) => {
     const b = req.body || {}
+    // Valida TUDO antes de escrever qualquer coisa — uma falha em qualquer campo nao pode
+    // deixar escrita parcial (ex.: curva gravada e maxAttempts invalido devolvendo 400).
+    let curve = null
     if (b.curve) {
-      const c = { a: Number(b.curve.a), b: Number(b.curve.b), c: Number(b.curve.c) }
-      const v = validateCurve(c); if (!v.ok) return res.status(400).json({ error: v.error })
-      db.prepare('UPDATE accounts SET curve_a_days = ?, curve_b_days = ?, curve_c_days = ? WHERE id = ?').run(c.a, c.b, c.c, req.accountId)
-      recalcAccountCustomers(db, req.accountId, { now: now() })
+      curve = { a: Number(b.curve.a), b: Number(b.curve.b), c: Number(b.curve.c) }
+      const v = validateCurve(curve)
+      if (!v.ok) return res.status(400).json({ error: v.error })
     }
+    let maxAttempts = null
     if (b.maxAttempts !== undefined) {
-      const n = Number(b.maxAttempts)
-      if (!Number.isInteger(n) || n < 1 || n > 20) return res.status(400).json({ error: 'Tentativas: de 1 a 20.' })
-      db.prepare('UPDATE accounts SET repurchase_max_attempts = ? WHERE id = ?').run(n, req.accountId)
+      maxAttempts = Number(b.maxAttempts)
+      if (!Number.isInteger(maxAttempts) || maxAttempts < 1 || maxAttempts > 20) return res.status(400).json({ error: 'Tentativas: de 1 a 20.' })
     }
-    if (b.autoSend !== undefined) {
-      if (b.autoSend) {
-        const av = autoSendAvailability(db, req.accountId, { ai: aiFor(req.accountId) })
-        if (!av.ok) return res.status(409).json({ error: av.reason === 'no_ai' ? 'Ligue a IA da conta para usar lembretes automáticos.' : 'Conecte um número de disparo (UzAPI ou Oficial) para usar lembretes automáticos.', reason: av.reason })
+    if (b.autoSend !== undefined && b.autoSend) {
+      const av = autoSendAvailability(db, req.accountId, { ai: aiFor(req.accountId) })
+      if (!av.ok) return res.status(409).json({ error: av.reason === 'no_ai' ? 'Ligue a IA da conta para usar lembretes automáticos.' : 'Conecte um número de disparo (UzAPI ou Oficial) para usar lembretes automáticos.', reason: av.reason })
+    }
+
+    // Tudo validado: agora escreve tudo numa unica transacao (tudo ou nada).
+    db.transaction(() => {
+      if (curve) {
+        db.prepare('UPDATE accounts SET curve_a_days = ?, curve_b_days = ?, curve_c_days = ? WHERE id = ?').run(curve.a, curve.b, curve.c, req.accountId)
+        recalcAccountCustomers(db, req.accountId, { now: now() })
       }
-      db.prepare('UPDATE accounts SET repurchase_auto_send = ? WHERE id = ?').run(b.autoSend ? 1 : 0, req.accountId)
-    }
+      if (maxAttempts !== null) {
+        db.prepare('UPDATE accounts SET repurchase_max_attempts = ? WHERE id = ?').run(maxAttempts, req.accountId)
+      }
+      if (b.autoSend !== undefined) {
+        db.prepare('UPDATE accounts SET repurchase_auto_send = ? WHERE id = ?').run(b.autoSend ? 1 : 0, req.accountId)
+      }
+    })()
+
     changed(req.accountId)
     res.json(settingsOf(req.accountId))
   })

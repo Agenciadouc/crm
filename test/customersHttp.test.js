@@ -64,6 +64,25 @@ test('configurações: atendente 403; gestor valida curva e recalcula', async ()
   })
 })
 
+// Regressao: falha de validacao em QUALQUER campo do PUT /settings nao pode deixar escrita parcial
+// (ex.: curva valida gravada silenciosamente enquanto maxAttempts invalido devolve 400 pro cliente).
+test('configurações: falha em 1 campo não grava nenhum dos campos da mesma requisição', async () => {
+  const { db, s } = setup()
+  await withServer(mount(db), async ({ base }) => {
+    const ger = token({ id: s.gerenteId, role: 'gerente', accountId: s.accountId })
+    const before = await peca(base, { path: `/api/customers/settings?account_id=${s.accountId}`, jwtToken: ger })
+    assert.equal(before.status, 200)
+
+    // Curva valida + maxAttempts invalido na MESMA requisicao
+    const r = await peca(base, { method: 'PUT', path: `/api/customers/settings?account_id=${s.accountId}`, jwtToken: ger, body: { curve: { a: 10, b: 20, c: 30 }, maxAttempts: 999 } })
+    assert.equal(r.status, 400)
+
+    const after = await peca(base, { path: `/api/customers/settings?account_id=${s.accountId}`, jwtToken: ger })
+    assert.deepEqual(after.body.curve, before.body.curve) // curva NAO deve ter mudado
+    assert.equal(after.body.maxAttempts, before.body.maxAttempts)
+  })
+})
+
 test('selos: criar recalcula o selo dos clientes', async () => {
   const { db, s, other } = setup()
   await withServer(mount(db), async ({ base }) => {
