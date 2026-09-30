@@ -1,5 +1,5 @@
 export type AtendimentoBlockId =
-  | 'score' | 'atendente' | 'etapa' | 'contato' | 'tags' | 'proximo_passo' | 'avulsa' | 'tarefas' | 'vendas' | 'observacoes'
+  | 'score' | 'atendente' | 'etapa' | 'contato' | 'tags' | 'proximo_passo' | 'avulsa' | 'tarefas' | 'vendas' | 'cliente' | 'observacoes'
 export interface PanelBlock { id: AtendimentoBlockId; visible: boolean }
 export interface SavedLayouts { account: PanelBlock[] | null; user: PanelBlock[] | null }
 export type LayoutSource = 'user' | 'account' | 'factory'

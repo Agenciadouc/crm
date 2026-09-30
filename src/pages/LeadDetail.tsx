@@ -23,6 +23,7 @@ import NextStepCard from '../components/cadence/NextStepCard'
 import { applyMessageVars } from '../lib/messageVars'
 import StageGateModal from '../components/roteiro/StageGateModal'
 import SaleModal from '../components/SaleModal'
+import CustomerCard from '../components/CustomerCard'
 import { parseSqlDate } from '../lib/dates'
 
 // Rotulo do tipo da venda (spec LTV/Recompra §5) — venda antiga (sale_kind null) nao tem rotulo, so o botao "Marcar tipo"
@@ -485,6 +486,9 @@ export default function LeadDetail() {
               </div>
             )}
           </div>
+
+          {/* Cliente: LTV, curva, selo e ciclo de recompra (spec LTV/Recompra §10) */}
+          {accountId && <CustomerCard key={`cliente-${lead.id}`} leadId={lead.id} accountId={accountId} leadName={lead.name} />}
 
           {/* Tags */}
           <div className="card" style={{ marginBottom: 16 }}>

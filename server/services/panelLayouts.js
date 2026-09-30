@@ -4,7 +4,7 @@
 // (test/panelLayout.test.js confere que sao iguais).
 
 export const PANEL_BLOCKS = {
-  atendimento: ['score', 'atendente', 'etapa', 'contato', 'tags', 'proximo_passo', 'avulsa', 'tarefas', 'vendas', 'observacoes'],
+  atendimento: ['score', 'atendente', 'etapa', 'contato', 'tags', 'proximo_passo', 'avulsa', 'tarefas', 'vendas', 'cliente', 'observacoes'],
 }
 
 export class PanelLayoutError extends Error {

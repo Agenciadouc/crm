@@ -44,6 +44,7 @@ import { cadenceCardActions, cadenceRenderList, stepLine, BOX_PLACEHOLDER } from
 import { PANEL_CARD, CADENCE_INNER, CARD_NAME, STEP_LINE, STEP_DESC, PILL_BTN, PRIMARY_BTN, HEAD_BTN, LinkButton, PanelTitle, TextPreview, StepButtons } from '../components/atendimento/PanelParts'
 import StageGateModal from '../components/roteiro/StageGateModal'
 import SaleModal from '../components/SaleModal'
+import CustomerCard from '../components/CustomerCard'
 import RecognizedQuestionBar from '../components/roteiro/RecognizedQuestionBar'
 import { confirmAsk } from '../lib/roteiroApi'
 import { geoParams, leadMatchesGeo } from '../lib/geoFilter.js'
@@ -2490,6 +2491,16 @@ export default function Chat() {
                       </div>
                     )}
                   </div>
+                  </>),
+                  cliente: () => (<>
+                  {/* 8. Cliente: LTV, curva, selo e ciclo de recompra (spec LTV/Recompra §10) */}
+                  <CustomerCard
+                    key={`cliente-${lead.id}`}
+                    leadId={lead.id}
+                    accountId={accountId}
+                    leadName={lead.name}
+                    onOpenReview={text => openReview({ leadId: lead.id, kind: 'mensagem', text, questionKey: null, attemptId: null }, null)}
+                  />
                   </>),
                   observacoes: () => renderObservacoesCard(lead, <>Anotações livres sobre o cliente, que toda a equipe vê. Ex.: "Prefere contato depois das 18h".</>),
                 }

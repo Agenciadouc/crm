@@ -7,11 +7,11 @@ import {
 import { PANEL_BLOCKS } from '../server/services/panelLayouts.js'
 
 test('padrao de fabrica = exatamente a aba Atendimento de hoje', () => {
-  assert.deepEqual(visibleIds(factoryLayout()), ['score', 'atendente', 'etapa', 'tags', 'proximo_passo', 'avulsa', 'tarefas', 'vendas'])
+  assert.deepEqual(visibleIds(factoryLayout()), ['score', 'atendente', 'etapa', 'tags', 'proximo_passo', 'avulsa', 'tarefas', 'vendas', 'cliente'])
   const f = factoryLayout()
   assert.equal(f.find(b => b.id === 'contato').visible, false)
   assert.equal(f.find(b => b.id === 'observacoes').visible, false)
-  assert.equal(f.length, 10)
+  assert.equal(f.length, 11)
   // quem nunca mexeu: nada salvo -> fabrica
   assert.deepEqual(resolveLayout({ account: null, user: null }), { layout: f, source: 'factory' })
   assert.deepEqual(resolveLayout(null), { layout: f, source: 'factory' })
@@ -42,7 +42,7 @@ test('mescla: ids desconhecidos/repetidos saem, blocos novos entram no fim com a
     { id: 'contato', visible: true }, null, { id: 'score' },
   ])
   assert.deepEqual(l.slice(0, 3), [{ id: 'vendas', visible: false }, { id: 'contato', visible: true }, { id: 'score', visible: true }])
-  assert.deepEqual(l.slice(3).map(b => b.id), ['atendente', 'etapa', 'tags', 'proximo_passo', 'avulsa', 'tarefas', 'observacoes'])
+  assert.deepEqual(l.slice(3).map(b => b.id), ['atendente', 'etapa', 'tags', 'proximo_passo', 'avulsa', 'tarefas', 'cliente', 'observacoes'])
   assert.equal(l.find(b => b.id === 'observacoes').visible, false)
   assert.equal(l.find(b => b.id === 'tarefas').visible, true)
   assert.deepEqual(normalizeLayout('lixo'), factoryLayout())
@@ -67,7 +67,7 @@ test('mostrar/esconder alterna so o bloco escolhido', () => {
   assert.equal(l.find(b => b.id === 'vendas').visible, false)
   assert.equal(toggleVisible(l, 'vendas').find(b => b.id === 'vendas').visible, true)
   assert.equal(f.find(b => b.id === 'vendas').visible, true)
-  assert.deepEqual(visibleIds(l), ['score', 'atendente', 'etapa', 'tags', 'proximo_passo', 'avulsa', 'tarefas'])
+  assert.deepEqual(visibleIds(l), ['score', 'atendente', 'etapa', 'tags', 'proximo_passo', 'avulsa', 'tarefas', 'cliente'])
 })
 
 test('validar: mesma regra do servidor', () => {
@@ -107,5 +107,5 @@ test('Arrumar: etapa + avulsa viram UMA linha "Cadência" e voltam juntas', () =
   assert.equal(toggleRow(rows, 'vendas')[3].visible, false)
   // o resultado continua valido para o servidor (mesmos ids)
   assert.equal(validateLayout(expandRows(editorRows(factoryLayout()))), null)
-  assert.equal(expandRows(editorRows(factoryLayout())).length, 10)
+  assert.equal(expandRows(editorRows(factoryLayout())).length, 11)
 })

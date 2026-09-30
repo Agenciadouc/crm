@@ -12,6 +12,7 @@ export const ATENDIMENTO_BLOCKS = [
   { id: 'avulsa', label: 'Cadência avulsa', visible: true },
   { id: 'tarefas', label: 'Tarefas', visible: true },
   { id: 'vendas', label: 'Vendas', visible: true },
+  { id: 'cliente', label: 'Cliente', visible: true },
   { id: 'observacoes', label: 'Observações', visible: false },
 ]
 
