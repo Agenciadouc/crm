@@ -24,6 +24,9 @@ import { runScoreNightly } from './services/leadScore/nightly.js'
 import { runHotLeadAlerts } from './services/leadScore/hotLeadAlerts.js'
 import { collectDueCadenceTasks } from './services/cadence/tasks.js'
 import { warnMissingCadenceTable } from './services/cadence/errors.js'
+import { runLtvTick } from './services/ltv/daily.js'
+import { repurchaseAiFor } from './services/ltv/aiRuntime.js'
+import { productionSendFor } from './services/ltv/autoSendRuntime.js'
 
 // Roda a cada 1min — precisao do agendamento <= 60s. Custo desprezivel (1 SELECT/min).
 const INTERVAL_MS = 60 * 1000
@@ -493,12 +496,26 @@ function markStaleMessagesAsFailed() {
 const HOT_LEAD_EVERY_TICKS = 5
 let hotLeadTickCount = 0
 
+// Rotina da recompra (spec §9): a cada 10 ticks (tick = 1 min) — a rotina diaria se protege
+// sozinha (1x/dia/conta via ltv_daily_on). ltvRunning evita sobreposicao se um ciclo demorar.
+const LTV_EVERY_TICKS = 10
+let ltvTickCount = 0
+let ltvRunning = false
+
 async function tick() {
   hotLeadTickCount = (hotLeadTickCount + 1) % HOT_LEAD_EVERY_TICKS
   if (hotLeadTickCount === 0) {
     try {
       runHotLeadAlerts(db, { now: new Date(), broadcast: broadcastSSE })
     } catch (e) { console.error('[Termometro] aviso de lead quente:', e.message) }
+  }
+  ltvTickCount++
+  if (ltvTickCount >= LTV_EVERY_TICKS && !ltvRunning) {
+    ltvTickCount = 0
+    ltvRunning = true
+    runLtvTick(db, { now: new Date(), aiForAccount: id => repurchaseAiFor(db, id), sendFor: () => productionSendFor(), broadcast: broadcastSSE })
+      .catch(e => console.error('[Recompra] tick:', e.message))
+      .finally(() => { ltvRunning = false })
   }
   try {
     await Promise.all([
