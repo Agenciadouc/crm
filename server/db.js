@@ -12,6 +12,7 @@ import { migrateLegacyQualifications } from './services/roteiro/migrateLegacy.js
 import { applyCadenceSchema } from './services/cadence/schema.js'
 import { migrateStageCadences } from './services/cadence/migrateStageCadences.js'
 import { applyPanelLayoutSchema } from './services/panelLayouts.js'
+import { applyLtvSchema } from './services/ltv/schema.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const dbPath = resolve(__dirname, 'data', 'crm.db')
@@ -1511,6 +1512,12 @@ try {
   applyPanelLayoutSchema(db)
 } catch (err) {
   console.error('[DB] panel_layouts (Arrumar) FALHOU:', err.message)
+}
+
+try {
+  applyLtvSchema(db)
+} catch (e) {
+  console.error('[DB] LTV schema:', e.message)
 }
 
 export default db
