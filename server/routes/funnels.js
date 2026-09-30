@@ -2,6 +2,7 @@ import { Router } from 'express'
 import db from '../db.js'
 import { requireRole } from '../middleware/auth.js'
 import { funnelUpdateTarget } from '../services/funnelScope.js'
+import { checkStagesUpdate, canDeactivateFunnel } from '../services/ltv/funnel.js'
 
 const router = Router()
 
@@ -52,6 +53,10 @@ router.put('/:id/stages', requireRole('super_admin', 'gerente'), (req, res) => {
   const funnel = db.prepare('SELECT * FROM funnels WHERE id = ?').get(req.params.id)
   if (!funnel) return res.status(404).json({ error: 'Funil nao encontrado' })
 
+  // Recompra: etapas do sistema nao podem ser apagadas/desvinculadas (spec §12)
+  const guard = checkStagesUpdate(db, Number(req.params.id), stages)
+  if (!guard.ok) return res.status(409).json({ error: guard.error })
+
   // IDs que o frontend enviou (stages que existem e devem ser mantidas/atualizadas)
   const sentStageIds = new Set(stages.filter(s => s.id).map(s => s.id))
   // Stages com QUALQUER lead apontando (inclui arquivados) NUNCA podem ser deletadas
@@ -81,8 +86,12 @@ router.put('/:id/stages', requireRole('super_admin', 'gerente'), (req, res) => {
     for (let i = 0; i < stages.length; i++) {
       const s = stages[i]
       if (s.id) {
+        // Etapa do sistema (ex.: da Recompra): is_conversion/is_terminal sao fixadas por system_key, ignora o payload
+        const cur = db.prepare('SELECT system_key, is_conversion, is_terminal FROM funnel_stages WHERE id = ?').get(s.id)
+        const isConversion = cur?.system_key ? cur.is_conversion : (s.is_conversion ? 1 : 0)
+        const isTerminal = cur?.system_key ? cur.is_terminal : (s.is_terminal ? 1 : 0)
         db.prepare('UPDATE funnel_stages SET name = ?, position = ?, color = ?, is_conversion = ?, is_terminal = ?, is_qualified = ?, is_meeting = ?, auto_keywords = ?, meta_event_name = ? WHERE id = ?').run(
-          s.name, i, s.color || '#FFB300', s.is_conversion ? 1 : 0, s.is_terminal ? 1 : 0, s.is_qualified ? 1 : 0, s.is_meeting ? 1 : 0, s.auto_keywords ? JSON.stringify(s.auto_keywords) : null, s.meta_event_name || null, s.id
+          s.name, i, s.color || '#FFB300', isConversion, isTerminal, s.is_qualified ? 1 : 0, s.is_meeting ? 1 : 0, s.auto_keywords ? JSON.stringify(s.auto_keywords) : null, s.meta_event_name || null, s.id
         )
       } else {
         db.prepare('INSERT INTO funnel_stages (funnel_id, name, position, color, is_conversion, is_terminal, is_qualified, is_meeting, auto_keywords, meta_event_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(
@@ -100,6 +109,9 @@ router.put('/:id/stages', requireRole('super_admin', 'gerente'), (req, res) => {
 // Update funnel name
 router.put('/:id', requireRole('super_admin', 'gerente'), (req, res) => {
   const { name, is_active, first_msg_template } = req.body
+  if (is_active === 0 || is_active === false) {
+    if (!canDeactivateFunnel(db, Number(req.params.id))) return res.status(409).json({ error: 'O funil Recompra não pode ser desativado.' })
+  }
   const sets = []; const params = []
   if (name !== undefined) { sets.push('name = ?'); params.push(name) }
   if (is_active !== undefined) { sets.push('is_active = ?'); params.push(is_active ? 1 : 0) }

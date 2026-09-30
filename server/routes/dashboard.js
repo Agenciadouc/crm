@@ -47,10 +47,11 @@ router.get('/stats', (req, res) => {
   const leadsToday = db.prepare(`SELECT COUNT(*) as c FROM leads WHERE account_id = ? AND is_archived = 0 AND is_blocked = 0 AND date(created_at) = date('now')${cw.sql}`).get(req.accountId, ...cw.params).c
 
   // Conversion rate (all active leads, not just period — a lead created months ago can convert today)
+  // So conta conversao de funil de vendas (exclui atividade do funil Recompra das metricas antigas)
   const convData = db.prepare(`
     SELECT COUNT(*) as total,
       SUM(CASE WHEN fs.is_conversion = 1 THEN 1 ELSE 0 END) as converted
-    FROM leads l JOIN funnel_stages fs ON l.stage_id = fs.id
+    FROM leads l JOIN funnel_stages fs ON l.stage_id = fs.id JOIN funnels fk ON fk.id = fs.funnel_id AND fk.kind = 'vendas'
     WHERE l.account_id = ? AND l.is_active = 1 AND l.is_archived = 0 AND l.is_blocked = 0${cwl.sql}
   `).get(req.accountId, ...cwl.params)
   const conversionRate = convData.total > 0 ? (convData.converted / convData.total) * 100 : 0
@@ -103,7 +104,7 @@ router.get('/agents', requireRole('super_admin', 'gerente'), (req, res) => {
     SELECT u.id, u.name, u.is_active,
       (SELECT COUNT(*) FROM leads WHERE attendant_id = u.id AND is_archived = 0 AND is_blocked = 0 AND created_at >= ?${cw.sql}) as leads_period,
       (SELECT COUNT(*) FROM leads WHERE attendant_id = u.id AND is_active = 1 AND is_archived = 0 AND is_blocked = 0${cw.sql}) as leads_total,
-      (SELECT COUNT(*) FROM leads l JOIN funnel_stages fs ON l.stage_id = fs.id WHERE l.attendant_id = u.id AND fs.is_conversion = 1 AND l.is_active = 1 AND l.is_archived = 0 AND l.is_blocked = 0${cwl.sql}) as conversions
+      (SELECT COUNT(*) FROM leads l JOIN funnel_stages fs ON l.stage_id = fs.id JOIN funnels fk ON fk.id = fs.funnel_id AND fk.kind = 'vendas' WHERE l.attendant_id = u.id AND fs.is_conversion = 1 AND l.is_active = 1 AND l.is_archived = 0 AND l.is_blocked = 0${cwl.sql}) as conversions
     FROM users u WHERE u.account_id = ? AND u.role IN ('atendente', 'gerente')
     ORDER BY leads_total DESC
   `).all(sinceStr, ...cw.params, ...cw.params, ...cwl.params, req.accountId)

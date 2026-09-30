@@ -79,10 +79,12 @@ export function aggregateAttendantMetricsForDate(accountId, userId, dateStr) {
 
   // 5. Conversões — leads que estão em stage com is_conversion=1 no dia
   // Considera lead.stage_id atual + criado/movido pra esse stage no dia
+  // So conta funil de vendas (exclui atividade do funil Recompra das metricas antigas)
   const conversions = db.prepare(`
     SELECT COUNT(DISTINCT l.id) as n
     FROM leads l
     JOIN funnel_stages fs ON fs.id = l.stage_id
+    JOIN funnels fk ON fk.id = fs.funnel_id AND fk.kind = 'vendas'
     LEFT JOIN stage_history sh ON sh.lead_id = l.id AND sh.to_stage_id = fs.id
     WHERE l.account_id = ? AND l.attendant_id = ?
       AND fs.is_conversion = 1

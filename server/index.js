@@ -36,6 +36,8 @@ import roteiroRoutes from './routes/roteiro.js'
 import adminRoutes from './routes/admin.js'
 import appSettingsRoutes from './routes/app-settings.js'
 import globalTemplatesRoutes from './routes/globalTemplates.js'
+import { createCustomersRouter } from './routes/customersRouter.js'
+import { repurchaseAiFor } from './services/ltv/aiRuntime.js'
 import { authenticate, scopeToAccount } from './middleware/auth.js'
 import { addSSEClient, removeSSEClient, broadcastSSE } from './sse.js'
 import { triggerCapiForStageChange } from './services/metaCapi.js'
@@ -114,6 +116,8 @@ app.use('/api/admin', authenticate, adminRoutes)
 app.use('/api/app-settings', authenticate, appSettingsRoutes)
 // Templates globais (super_admin only) — sem scopeToAccount pq nao sao presos a conta
 app.use('/api/global-templates', authenticate, globalTemplatesRoutes)
+// Tela Clientes / LTV / Recompra (spec §10)
+app.use('/api/customers', authenticate, scopeToAccount, createCustomersRouter(db, { aiFor: id => repurchaseAiFor(db, id), broadcast: broadcastSSE }))
 
 // Settings: distribution rules
 app.get('/api/settings/distribution', authenticate, scopeToAccount, (req, res) => {

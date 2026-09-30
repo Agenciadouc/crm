@@ -20,6 +20,7 @@ import { recalcLeadScore } from '../services/leadScore/recalc.js'
 import { BAND_LABEL } from '../services/leadScore/compute.js'
 import { registerSale, patchSale, deleteSale, outcomeStageBlocked } from '../services/ltv/sales.js'
 import { repurchaseAiFor } from '../services/ltv/aiRuntime.js'
+import { customerWhere } from '../services/ltv/filters.js'
 
 const router = Router()
 
@@ -111,6 +112,8 @@ router.get('/', (req, res) => {
   { const g = cityWhere('l', req.query); if (g.sql) { where.push(g.sql.replace(/^ AND /, '')); params.push(...g.params) } }
   // Filtros do termometro (faixa, nota minima, perfil A/B, engajamento alto) — spec 5.4
   { const s = scoreWhere('l', req.query); if (s.sql) { where.push(s.sql.replace(/^ AND /, '')); params.push(...s.params) } }
+  // Filtros de cliente (curva, selo, atrasado na recompra) — spec 10.5
+  { const cw2 = customerWhere('l', req.query); if (cw2.sql) { where.push(cw2.sql.replace(/^\s*AND\s+/i, '')); params.push(...cw2.params) } }
   if (search) { where.push("(l.name LIKE ? OR l.phone LIKE ? OR l.email LIKE ?)"); params.push(`%${search}%`, `%${search}%`, `%${search}%`) }
   if (date_from) { where.push('l.created_at >= ?'); params.push(date_from) }
   if (date_to) { where.push('l.created_at <= ?'); params.push(date_to + ' 23:59:59') }
