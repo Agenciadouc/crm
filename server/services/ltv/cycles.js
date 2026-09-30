@@ -146,9 +146,11 @@ export function onMessageExchanged(db, { leadId, now = new Date() }) {
   const c = db.prepare("SELECT * FROM repurchase_cycles WHERE lead_id = ? AND status = 'a_contatar'").get(leadId)
   if (!c) return
   const lead = db.prepare('SELECT id, account_id, stage_id FROM leads WHERE id = ?').get(leadId)
-  db.prepare("UPDATE repurchase_cycles SET status = 'em_conversa', updated_at = datetime('now') WHERE id = ?").run(c.id)
-  db.prepare('UPDATE repurchase_attempts SET contacted_at = COALESCE(contacted_at, ?) WHERE cycle_id = ? AND attempt = ?').run(nowSql(now), c.id, c.attempt)
-  if (stageKey(db, lead.stage_id) === 'a_contatar') moveToKey(db, lead, 'em_conversa')
+  db.transaction(() => {
+    db.prepare("UPDATE repurchase_cycles SET status = 'em_conversa', updated_at = datetime('now') WHERE id = ?").run(c.id)
+    db.prepare('UPDATE repurchase_attempts SET contacted_at = COALESCE(contacted_at, ?) WHERE cycle_id = ? AND attempt = ?').run(nowSql(now), c.id, c.attempt)
+    if (stageKey(db, lead.stage_id) === 'a_contatar') moveToKey(db, lead, 'em_conversa')
+  })()
 }
 
 const STATUS_BY_KEY = { aguardando: 'aguardando', a_contatar: 'a_contatar', em_conversa: 'em_conversa' }
