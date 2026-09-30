@@ -1408,3 +1408,37 @@ export const createStaleTasks = (accountId: number, leadIds: number[]) =>
   apiFetch<{ created: number }>(`/api/customers/stale/tasks?account_id=${accountId}`, { method: 'POST', body: JSON.stringify({ lead_ids: leadIds }) })
 export const fetchTiers = (accountId: number) =>
   apiFetch<{ tiers: CustomerTier[] }>(`/api/customers/tiers?account_id=${accountId}`).then(d => d.tiers)
+export const createTier = (accountId: number, input: { name: string; icon?: string | null; color: string; min_ltv: number }) =>
+  apiFetch<{ tier: CustomerTier }>(`/api/customers/tiers?account_id=${accountId}`, { method: 'POST', body: JSON.stringify(input) }).then(d => d.tier)
+export const updateTier = (accountId: number, id: number, input: { name: string; icon?: string | null; color: string; min_ltv: number }) =>
+  apiFetch<{ tier: CustomerTier }>(`/api/customers/tiers/${id}?account_id=${accountId}`, { method: 'PUT', body: JSON.stringify(input) }).then(d => d.tier)
+export const deleteTier = (accountId: number, id: number) =>
+  apiFetch<{ ok: true }>(`/api/customers/tiers/${id}?account_id=${accountId}`, { method: 'DELETE' })
+
+// =============================================
+// Configuracoes "Clientes" (spec LTV/Recompra §10.1) — curva por ritmo, limite de tentativas
+// e chave de lembretes automaticos (so gestor/admin muda, GET disponivel para todos).
+// =============================================
+export interface CustomerSettings {
+  curve: { a: number; b: number; c: number }
+  maxAttempts: number
+  autoSend: boolean
+  autoAvailable: { ok: boolean; reason?: string }
+}
+export interface CustomerSettingsPatch {
+  curve?: { a: number; b: number; c: number }
+  maxAttempts?: number
+  autoSend?: boolean
+}
+export const fetchCustomerSettings = (accountId: number) =>
+  apiFetch<CustomerSettings>(`/api/customers/settings?account_id=${accountId}`)
+export const saveCustomerSettings = (accountId: number, patch: CustomerSettingsPatch) =>
+  apiFetch<CustomerSettings>(`/api/customers/settings?account_id=${accountId}`, { method: 'PUT', body: JSON.stringify(patch) })
+
+export interface RepurchaseReason { id: number; account_id: number; grp: 'nao_agora' | 'nao_quer'; label: string; position: number; is_active: number }
+export const fetchReasons = (accountId: number) =>
+  apiFetch<{ reasons: RepurchaseReason[] }>(`/api/customers/reasons?account_id=${accountId}`).then(d => d.reasons)
+export const createReason = (accountId: number, input: { grp: 'nao_agora' | 'nao_quer'; label: string }) =>
+  apiFetch<{ reason: RepurchaseReason }>(`/api/customers/reasons?account_id=${accountId}`, { method: 'POST', body: JSON.stringify(input) }).then(d => d.reason)
+export const updateReason = (accountId: number, id: number, patch: Partial<{ label: string; is_active: boolean; position: number }>) =>
+  apiFetch<{ reason: RepurchaseReason }>(`/api/customers/reasons/${id}?account_id=${accountId}`, { method: 'PUT', body: JSON.stringify(patch) }).then(d => d.reason)

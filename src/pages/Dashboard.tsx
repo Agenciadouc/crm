@@ -8,6 +8,7 @@ import { Users, Target, TrendingUp, TrendingDown, Calendar, UserX, Zap } from 'l
 import FunilMensalPanel from '../components/FunilMensal'
 import CityFilter, { useCityFilter } from '../components/CityFilter'
 import ConversionByBandCard from '../components/score/ConversionByBandCard'
+import RepurchaseDashboardCard from '../components/RepurchaseDashboardCard'
 
 const DAYS_OPTIONS = [{ label: '7d', value: 7 }, { label: '14d', value: 14 }, { label: '30d', value: 30 }, { label: '90d', value: 90 }]
 const COLORS = ['#FFB300', '#34C759', '#5DADE2', '#FF6B8A', '#9B59B6', '#FFAA83', '#EA4335', '#2ECC71']
@@ -159,7 +160,10 @@ export default function Dashboard() {
 
       {(user?.role === 'gerente' || user?.role === 'super_admin') && (
         <section className="dash-section">
-          <ConversionByBandCard accountId={accountId} />
+          <div className="charts-grid">
+            <ConversionByBandCard accountId={accountId} />
+            <RepurchaseDashboardCard accountId={accountId} />
+          </div>
         </section>
       )}
     </div>

@@ -4,6 +4,7 @@ import { useAccount } from '../context/AccountContext'
 import { fetchFunnels, fetchUsers, apiFetch, fetchAppSettings, updateAppSetting, fetchAllInstancesAdmin, fetchAntibanSettings, saveAntibanSettings, type Funnel, type User as UserType, type AntibanSettings } from '../lib/api'
 import { Settings as SettingsIcon, RotateCw, Users, Save, Check, Bell, ShieldAlert } from 'lucide-react'
 import { InlineNotice, useInlineNotice } from '../components/InlineNotice'
+import CustomersSettings from '../components/settings/CustomersSettings'
 
 interface DistRule { id?: number; funnel_id: number; type: 'round_robin' | 'manual'; active_attendants: number[] }
 
@@ -275,6 +276,14 @@ export default function SettingsPage() {
           )
         })}
       </section>
+
+      {/* Clientes e recompra (curva por ritmo, selos de valor, limite de tentativas e automatico) */}
+      {isGerenteOuAdmin && accountId && (
+        <section className="dash-section">
+          <div className="section-title">Clientes e recompra</div>
+          <CustomersSettings accountId={accountId} />
+        </section>
+      )}
     </div>
   )
 }
