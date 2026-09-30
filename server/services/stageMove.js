@@ -3,6 +3,7 @@
 import { checkRoteiroGate } from './roteiro/leadRoteiro.js'
 import { onStageMoved } from './cadence/leadCadence.js'
 import { warnMissingCadenceTable } from './cadence/errors.js'
+import { syncCycleWithStage } from './ltv/cycles.js'
 
 let onMovedHook = () => {}
 
@@ -52,6 +53,12 @@ export function moveLeadToStage(db, { lead, toStageId, trigger, userId = null, n
     onStageMoved(db, { leadId: current.id, trigger })
   } catch (e) {
     if (!warnMissingCadenceTable(e)) console.error('[stageMove] cadencia da etapa:', e.message)
+  }
+
+  try {
+    syncCycleWithStage(db, { leadId: current.id, toStageId })
+  } catch (e) {
+    console.error('[Recompra] sincronizar ciclo:', e.message)
   }
 
   try {
