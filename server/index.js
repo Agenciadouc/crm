@@ -18,6 +18,7 @@ import tagMappingRoutes from './routes/tag-mapping.js'
 import messageRoutes from './routes/messages.js'
 import dashboardRoutes from './routes/dashboard.js'
 import webhookRoutes from './routes/webhooks.js'
+import embedRoutes from './routes/embed.js'
 import integrationRoutes from './routes/integrations.js'
 import broadcastRoutes from './routes/broadcasts.js'
 import cadenceRoutes from './routes/cadences.js'
@@ -76,6 +77,7 @@ app.use((req, res, next) => {
 // Public routes
 app.use('/api/auth', authRoutes)
 app.use('/api/webhooks', webhookRoutes)
+app.use('/api/embed', embedRoutes)  // Core Dros — autenticado por X-Core-Secret dentro da rota
 
 // Link temporario de midia (reserva do envio pela UzAPI). Publico; arquivos em server/data/media-temp por 10 min.
 const mediaTemp = createMediaTemp({ db, dir: resolve(__dirname, 'data', 'media-temp') })

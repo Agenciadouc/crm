@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { fetchContracts, createContract, updateContract, deleteContract, approveContract, syncContractHub, type Contract, type ContractInput } from '../lib/api'
-import { FileSignature, Plus, Edit3, Trash2, Download, CheckCircle2, RefreshCw } from 'lucide-react'
+import { FileSignature, Plus, Edit3, Trash2, Download, CheckCircle2, RefreshCw, FileText, Bold, Italic, Underline, List, ListOrdered, AlignLeft, AlignCenter, AlignRight, Heading1, Heading2, Undo2, Redo2, RotateCcw, X, Save } from 'lucide-react'
 
 const today = () => new Date().toISOString().slice(0, 10)
 
@@ -225,6 +225,75 @@ export default function Contratos() {
     setApproving(false)
   }
 
+  // ─── Editor de texto do contrato ────────────────────────────────────
+  const [textEditor, setTextEditor] = useState<{ contract: Contract; loading: boolean; saving: boolean; html: string } | null>(null)
+
+  const openTextEditor = async (c: Contract) => {
+    setTextEditor({ contract: c, loading: true, saving: false, html: '' })
+    try {
+      const token = localStorage.getItem('dros_crm_token')
+      const res = await fetch(`/crm/api/contracts/${c.id}/html`, { headers: { Authorization: `Bearer ${token}` } })
+      const html = await res.text()
+      setTextEditor(prev => prev ? { ...prev, loading: false, html } : null)
+      setTimeout(() => {
+        const ed = document.getElementById('contract-editor') as HTMLDivElement | null
+        if (ed) ed.innerHTML = html
+      }, 50)
+    } catch (e: any) {
+      alert('Erro carregando contrato: ' + e.message)
+      setTextEditor(null)
+    }
+  }
+
+  const applyExec = (cmd: string, value?: string) => {
+    document.execCommand(cmd, false, value)
+    const ed = document.getElementById('contract-editor')
+    if (ed) ed.focus()
+  }
+
+  const saveTextEditor = async () => {
+    if (!textEditor) return
+    const ed = document.getElementById('contract-editor') as HTMLDivElement | null
+    if (!ed) return
+    const html = ed.innerHTML
+    setTextEditor(prev => prev ? { ...prev, saving: true } : null)
+    try {
+      const token = localStorage.getItem('dros_crm_token')
+      const res = await fetch(`/crm/api/contracts/${textEditor.contract.id}/html`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ html }),
+      })
+      if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error(err.error || `HTTP ${res.status}`) }
+      alert('Contrato salvo. Ao gerar PDF ou visualizar, aparece a versao editada.')
+      setTextEditor(null)
+    } catch (e: any) {
+      alert('Erro ao salvar: ' + e.message)
+      setTextEditor(prev => prev ? { ...prev, saving: false } : null)
+    }
+  }
+
+  const resetTextEditor = async () => {
+    if (!textEditor) return
+    if (!confirm('Reverter para o texto original do template? As edicoes manuais serao perdidas.')) return
+    try {
+      const token = localStorage.getItem('dros_crm_token')
+      const res = await fetch(`/crm/api/contracts/${textEditor.contract.id}/html`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error(err.error || `HTTP ${res.status}`) }
+      // Recarrega o texto original no editor
+      const res2 = await fetch(`/crm/api/contracts/${textEditor.contract.id}/html?original=1`, { headers: { Authorization: `Bearer ${token}` } })
+      const html = await res2.text()
+      setTextEditor(prev => prev ? { ...prev, html } : null)
+      const ed = document.getElementById('contract-editor') as HTMLDivElement | null
+      if (ed) ed.innerHTML = html
+    } catch (e: any) {
+      alert('Erro: ' + e.message)
+    }
+  }
+
   const handleDownload = async (c: Contract) => {
     // Endpoint exige JWT — window.open direto perde o header.
     // Faz fetch autenticado, abre nova aba com about:blank, escreve o HTML e dispara print.
@@ -316,10 +385,15 @@ export default function Contratos() {
                         <RefreshCw size={12} /> Sync HUB
                       </button>
                     )}
+                    {!c.approved_at && (
+                      <button className="btn btn-secondary btn-sm" onClick={() => openTextEditor(c)} title="Editar texto do contrato" style={{ marginRight: 4 }}>
+                        <FileText size={12} />
+                      </button>
+                    )}
                     <button className="btn btn-secondary btn-sm" onClick={() => handleDownload(c)} title="Baixar PDF" style={{ marginRight: 4 }}>
                       <Download size={12} />
                     </button>
-                    <button className="btn btn-secondary btn-sm" onClick={() => openEdit(c)} title="Editar" style={{ marginRight: 4 }}>
+                    <button className="btn btn-secondary btn-sm" onClick={() => openEdit(c)} title="Editar dados" style={{ marginRight: 4 }}>
                       <Edit3 size={12} />
                     </button>
                     <button className="btn btn-danger btn-sm" onClick={() => handleDelete(c)} title="Apagar">
@@ -548,6 +622,78 @@ export default function Contratos() {
               <button className="btn btn-primary" onClick={handleSave} disabled={saving}>
                 {saving ? 'Salvando...' : (isEditing ? 'Salvar Alteracoes' : 'Criar Contrato')}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal do editor de texto do contrato */}
+      {textEditor && (
+        <div className="modal-overlay" onClick={() => !textEditor.saving && setTextEditor(null)}>
+          <div className="modal" style={{ maxWidth: '95vw', width: 1100, maxHeight: '92vh', display: 'flex', flexDirection: 'column' }} onClick={e => e.stopPropagation()}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 10 }}>
+              <h2 style={{ display: 'flex', alignItems: 'center', gap: 8, margin: 0 }}>
+                <FileText size={20} /> Editar texto do contrato
+              </h2>
+              <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                <strong>{textEditor.contract.numero}</strong> · {titleCaseRazao(textEditor.contract.razao_social)}
+              </div>
+            </div>
+
+            {/* Toolbar */}
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, padding: '8px 6px', background: 'var(--surface-2, #1a1622)', borderRadius: 6, marginBottom: 10, border: '1px solid var(--border, rgba(255,255,255,0.08))' }}>
+              <button type="button" className="btn btn-secondary btn-sm" onClick={() => applyExec('bold')} title="Negrito (Ctrl+B)"><Bold size={14} /></button>
+              <button type="button" className="btn btn-secondary btn-sm" onClick={() => applyExec('italic')} title="Italico (Ctrl+I)"><Italic size={14} /></button>
+              <button type="button" className="btn btn-secondary btn-sm" onClick={() => applyExec('underline')} title="Sublinhado (Ctrl+U)"><Underline size={14} /></button>
+              <div style={{ width: 1, background: 'var(--border, rgba(255,255,255,0.08))', margin: '0 4px' }} />
+              <button type="button" className="btn btn-secondary btn-sm" onClick={() => applyExec('formatBlock', '<h1>')} title="Titulo 1"><Heading1 size={14} /></button>
+              <button type="button" className="btn btn-secondary btn-sm" onClick={() => applyExec('formatBlock', '<h2>')} title="Titulo 2"><Heading2 size={14} /></button>
+              <button type="button" className="btn btn-secondary btn-sm" onClick={() => applyExec('formatBlock', '<p>')} title="Paragrafo">P</button>
+              <div style={{ width: 1, background: 'var(--border, rgba(255,255,255,0.08))', margin: '0 4px' }} />
+              <button type="button" className="btn btn-secondary btn-sm" onClick={() => applyExec('insertUnorderedList')} title="Lista"><List size={14} /></button>
+              <button type="button" className="btn btn-secondary btn-sm" onClick={() => applyExec('insertOrderedList')} title="Lista numerada"><ListOrdered size={14} /></button>
+              <div style={{ width: 1, background: 'var(--border, rgba(255,255,255,0.08))', margin: '0 4px' }} />
+              <button type="button" className="btn btn-secondary btn-sm" onClick={() => applyExec('justifyLeft')} title="Alinhar esquerda"><AlignLeft size={14} /></button>
+              <button type="button" className="btn btn-secondary btn-sm" onClick={() => applyExec('justifyCenter')} title="Centralizar"><AlignCenter size={14} /></button>
+              <button type="button" className="btn btn-secondary btn-sm" onClick={() => applyExec('justifyRight')} title="Alinhar direita"><AlignRight size={14} /></button>
+              <div style={{ width: 1, background: 'var(--border, rgba(255,255,255,0.08))', margin: '0 4px' }} />
+              <button type="button" className="btn btn-secondary btn-sm" onClick={() => applyExec('undo')} title="Desfazer (Ctrl+Z)"><Undo2 size={14} /></button>
+              <button type="button" className="btn btn-secondary btn-sm" onClick={() => applyExec('redo')} title="Refazer (Ctrl+Y)"><Redo2 size={14} /></button>
+              <div style={{ flex: 1 }} />
+              <button type="button" className="btn btn-secondary btn-sm" onClick={resetTextEditor} title="Reverter pro texto original do template" style={{ color: '#ff9d5c' }}>
+                <RotateCcw size={13} /> Voltar ao original
+              </button>
+            </div>
+
+            {/* Area de edicao */}
+            <div style={{ flex: 1, overflow: 'auto', border: '1px solid var(--border, rgba(255,255,255,0.08))', borderRadius: 6, background: '#fff', padding: 24, minHeight: 400 }}>
+              {textEditor.loading ? (
+                <div style={{ textAlign: 'center', padding: 60, color: '#666' }}>
+                  <div className="spinner" style={{ margin: '0 auto 12px' }} /> Carregando contrato...
+                </div>
+              ) : (
+                <div
+                  id="contract-editor"
+                  contentEditable
+                  suppressContentEditableWarning
+                  style={{ color: '#000', minHeight: '100%', outline: 'none', fontFamily: 'Georgia, serif', fontSize: 13, lineHeight: 1.5 }}
+                />
+              )}
+            </div>
+
+            {/* Footer */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 12, gap: 10 }}>
+              <p style={{ fontSize: 11.5, color: 'var(--text-muted)', margin: 0, maxWidth: 500 }}>
+                A versao editada substitui o template no PDF e visualizacoes. Contratos aprovados nao podem mais ser editados.
+              </p>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button className="btn btn-secondary" onClick={() => setTextEditor(null)} disabled={textEditor.saving}>
+                  <X size={13} /> Cancelar
+                </button>
+                <button className="btn btn-primary" onClick={saveTextEditor} disabled={textEditor.saving || textEditor.loading}>
+                  <Save size={13} /> {textEditor.saving ? 'Salvando...' : 'Salvar edicao'}
+                </button>
+              </div>
             </div>
           </div>
         </div>

@@ -867,7 +867,7 @@ router.put('/leads/:leadId/value', requireRole('super_admin', 'gerente', 'atende
 
 // Helper: retorna primeiro dia (inclusive) e primeiro dia do mes seguinte (exclusive)
 // no formato 'YYYY-MM-DD HH:MM:SS' (compat com created_at do DB).
-function monthBounds(yearMonth) {
+export function monthBounds(yearMonth) {
   const m = /^(\d{4})-(\d{2})$/.exec(String(yearMonth || ''))
   if (!m) return null
   const y = parseInt(m[1]), mo = parseInt(m[2])
@@ -879,13 +879,13 @@ function monthBounds(yearMonth) {
 }
 
 // Helper: mes atual no formato YYYY-MM
-function currentYearMonth() {
+export function currentYearMonth() {
   const d = new Date()
   return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`
 }
 
 // Helper: retorna configuracao efetiva do mes (com fallback pra defaults da conta).
-function loadMonthConfig(accountId, yearMonth) {
+export function loadMonthConfig(accountId, yearMonth) {
   const acc = db.prepare('SELECT investimento_anuncios, avg_ticket FROM accounts WHERE id = ?').get(accountId) || {}
   const row = db.prepare('SELECT ad_investment, sales_target, avg_ticket, notes, updated_at FROM account_monthly_metrics WHERE account_id = ? AND year_month = ?').get(accountId, yearMonth)
   return {
@@ -904,7 +904,7 @@ function loadMonthConfig(accountId, yearMonth) {
 // OU is_conversion=1 (progressao acumulativa). "reuniao" idem em is_meeting/is_conversion. "won" so
 // em is_conversion. Isso reflete o fluxo (mesmo se o lead voltou pra um stage anterior, o marco fica).
 // city (opcional): cidade (texto) ou { city, uf } — so leads dessa cidade/estado.
-function computeFunnelCascade(accountId, yearMonth, city = null) {
+export function computeFunnelCascade(accountId, yearMonth, city = null) {
   const b = monthBounds(yearMonth)
   if (!b) return null
   const cw = cityWhere('leads', city)

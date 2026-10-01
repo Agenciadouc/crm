@@ -44,7 +44,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, password }),
     })
-    if (!res.ok) { const err = await res.json(); throw new Error(err.error || 'Erro') }
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}))
+      // Prefere err.message (mensagem amigavel do backend, ex: conta desativada);
+      // fallback pra err.error (codigo tipo 'Credenciais invalidas').
+      throw new Error(err.message || err.error || 'Erro')
+    }
     const data = await res.json()
     localStorage.removeItem('dros_crm_active_account')
     localStorage.setItem('dros_crm_token', data.token)
