@@ -154,3 +154,37 @@ test('janela de silencio e a da conta, nao um valor fixo', () => {
   const result = processInboundSignal(db, { account: account(db, s.accountId), lead: db.prepare('SELECT * FROM leads WHERE id = ?').get(leadId), message: lastMessage(db, leadId) })
   assert.equal(result.type, null, 'gatilho de 2h atras nao deveria mais valer com janela de 1h')
 })
+
+test('usa a etapa ATUAL do lead no banco, nao a passada por referencia (lead ja avancou antes do motor rodar)', () => {
+  const db = createRoteiroTestDb()
+  const s = seedRoteiroBase(db)
+  setStageKeywords(db, s.stages.qualificando, { strong_keywords: ['quero comprar'] })
+  const leadId = addLead(db, { account_id: s.accountId, funnel_id: s.funnelId, stage_id: s.stages.novo, name: 'Lead A' })
+
+  // o chamador (inboundHandler.js) ja moveu o lead no BANCO para "qualificando" antes de chamar o motor,
+  // mas o objeto `lead` em memoria que ele passa ainda tem o stage_id antigo (novo) -- igual acontece de
+  // verdade quando moveLeadToStage roda primeiro (promocao da 1a resposta) e o motor roda logo depois.
+  const staleLead = db.prepare('SELECT * FROM leads WHERE id = ?').get(leadId)
+  db.prepare('UPDATE leads SET stage_id = ? WHERE id = ?').run(s.stages.qualificando, leadId)
+
+  addMessage(db, { leadId, direction: 'inbound', content: 'quero comprar agora' })
+  const result = processInboundSignal(db, { account: account(db, s.accountId), lead: staleLead, message: lastMessage(db, leadId) })
+
+  assert.equal(result.type, 'strong', 'deveria classificar com as palavras da etapa atual (qualificando), nao da etapa antiga (novo)')
+})
+
+test('mensagem neutra entre o gatilho e a resposta fraca NAO desarma o gatilho (spec: vale pela janela de tempo, nao so ate a proxima msg)', () => {
+  const db = createRoteiroTestDb()
+  const s = seedRoteiroBase(db)
+  setStageKeywords(db, s.stages.novo, { weak_keywords: ['quanto custa'], trigger_keywords: ['posso te mandar uma proposta'] })
+  const leadId = addLead(db, { account_id: s.accountId, funnel_id: s.funnelId, stage_id: s.stages.novo, name: 'Lead A' })
+
+  addMessage(db, { leadId, direction: 'outbound', content: 'posso te mandar uma proposta?', minutesAgo: 20 })
+  addMessage(db, { leadId, direction: 'inbound', content: 'oi, pode sim', minutesAgo: 15 })
+  processInboundSignal(db, { account: account(db, s.accountId), lead: db.prepare('SELECT * FROM leads WHERE id = ?').get(leadId), message: lastMessage(db, leadId) })
+
+  addMessage(db, { leadId, direction: 'inbound', content: 'quanto custa?', minutesAgo: 0 })
+  const result = processInboundSignal(db, { account: account(db, s.accountId), lead: db.prepare('SELECT * FROM leads WHERE id = ?').get(leadId), message: lastMessage(db, leadId) })
+
+  assert.equal(result.type, 'weak', 'o gatilho de 20min atras ainda deveria valer (janela padrao 24h), mesmo com uma resposta neutra no meio')
+})

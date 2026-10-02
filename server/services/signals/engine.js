@@ -5,11 +5,7 @@ import { getFunnelStages } from '../roteiro/leadRoteiro.js'
 import { moveLeadToStage } from '../stageMove.js'
 import { scheduleScore } from '../leadScore/recalc.js'
 import { classifyMessage, findTriggerKeyword, parseKeywordList } from './keywordMatch.js'
-import { getPrecedingOutboundRun, confirmPendingWeakSignals, recordSignal } from './repo.js'
-
-function hoursBetween(aIso, bIso) {
-  return Math.abs(new Date(aIso).getTime() - new Date(bIso).getTime()) / 3600000
-}
+import { getOutboundWithinWindow, confirmPendingWeakSignals, recordSignal } from './repo.js'
 
 function tryAdvance(db, lead, currentStageId) {
   const stages = getFunnelStages(db, lead.funnel_id)
@@ -23,19 +19,25 @@ function tryAdvance(db, lead, currentStageId) {
 }
 
 export function processInboundSignal(db, { account, lead, message }) {
-  if (!lead.stage_id) return { type: null, keyword: null, advanced: null }
-  const stage = db.prepare('SELECT * FROM funnel_stages WHERE id = ?').get(lead.stage_id)
+  // Sempre reler o lead do banco: quem chama pode ter movido a etapa dele um instante antes
+  // (ex.: inboundHandler.js promove a 1a resposta de "Novo Lead" pra "Em Atendimento" via
+  // moveLeadToStage ANTES de chamar o motor) -- moveLeadToStage le e atualiza sua PRoPRIA
+  // copia do lead, nunca o objeto `lead` recebido aqui, entao confiar nele classificaria com
+  // as palavras da etapa errada (a antiga).
+  const currentLead = db.prepare('SELECT * FROM leads WHERE id = ?').get(lead.id) || lead
+  if (!currentLead.stage_id) return { type: null, keyword: null, advanced: null }
+  const stage = db.prepare('SELECT * FROM funnel_stages WHERE id = ?').get(currentLead.stage_id)
   if (!stage) return { type: null, keyword: null, advanced: null }
 
   const ghostHours = account?.keyword_signal_ghost_hours ?? 24
 
   // Passo A: confirma sinais fracos pendentes (esta mensagem prova que o lead continuou engajando).
-  const confirmInfo = confirmPendingWeakSignals(db, lead.id, ghostHours, message.created_at)
+  const confirmInfo = confirmPendingWeakSignals(db, currentLead.id, ghostHours, message.created_at)
   const confirmedSomething = confirmInfo.changes > 0
 
   // Passo B: classifica esta mensagem.
-  const outboundRun = getPrecedingOutboundRun(db, lead.id, message.id)
-    .filter(m => hoursBetween(m.created_at, message.created_at) <= ghostHours)
+  const sinceIso = new Date(new Date(message.created_at).getTime() - ghostHours * 3600000).toISOString()
+  const outboundRun = getOutboundWithinWindow(db, currentLead.id, message.id, sinceIso)
   const hasArmedTrigger = !!findTriggerKeyword(outboundRun.map(m => m.content), parseKeywordList(stage.trigger_keywords))
 
   const classification = classifyMessage(message.content, {
@@ -47,7 +49,7 @@ export function processInboundSignal(db, { account, lead, message }) {
 
   if (classification.type) {
     recordSignal(db, {
-      accountId: account.id, leadId: lead.id, stageId: stage.id,
+      accountId: account.id, leadId: currentLead.id, stageId: stage.id,
       signalType: classification.type, keyword: classification.keyword,
       messageId: message.id, createdAt: message.created_at,
     })
@@ -57,10 +59,10 @@ export function processInboundSignal(db, { account, lead, message }) {
   // confirme um sinal fraco pendente (ex.: lead pergunta preco, depois manda "nao quero mais").
   let advanced = null
   if (classification.type !== 'negative' && (classification.type === 'strong' || confirmedSomething)) {
-    advanced = tryAdvance(db, lead, stage.id)
+    advanced = tryAdvance(db, currentLead, stage.id)
   }
 
-  scheduleScore(lead.id)
+  scheduleScore(currentLead.id)
 
   return { type: classification.type, keyword: classification.keyword, advanced }
 }

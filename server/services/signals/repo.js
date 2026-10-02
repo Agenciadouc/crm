@@ -1,15 +1,15 @@
 // Camada de banco dos sinais de venda por palavra-chave (spec 2026-10-02). Nao importa server/db.js: recebe db.
 
-export function getPrecedingOutboundRun(db, leadId, beforeMessageId) {
-  const lastInbound = db.prepare(`
-    SELECT MAX(id) as id FROM messages WHERE lead_id = ? AND id < ? AND direction = 'inbound'
-  `).get(leadId, beforeMessageId)
-  const floorId = lastInbound?.id ?? 0
+// Mensagens outbound deste lead dentro da janela de silencio da conta (spec §3.1: o gatilho
+// vale pelo TEMPO da janela, nao so ate a proxima mensagem qualquer). Nao limita pela ultima
+// inbound de proposito -- uma resposta neutra do lead no meio ("oi, pode sim") nao pode
+// desarmar um gatilho que ainda esta dentro da janela.
+export function getOutboundWithinWindow(db, leadId, beforeMessageId, sinceIso) {
   return db.prepare(`
     SELECT content, created_at FROM messages
-    WHERE lead_id = ? AND id < ? AND id > ? AND direction = 'outbound'
+    WHERE lead_id = ? AND id < ? AND direction = 'outbound' AND created_at >= datetime(?)
     ORDER BY id ASC
-  `).all(leadId, beforeMessageId, floorId)
+  `).all(leadId, beforeMessageId, sinceIso)
 }
 
 // created_at e normalizado com datetime(?) na gravacao: quem chama pode passar ISO

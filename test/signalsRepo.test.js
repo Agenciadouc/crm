@@ -1,32 +1,47 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createRoteiroTestDb, seedRoteiroBase, addLead, addMessage } from './helpers/roteiroDb.js'
-import { getPrecedingOutboundRun, confirmPendingWeakSignals, recordSignal, hasSignalLast7d, hasConfirmedWeakLast7d } from '../server/services/signals/repo.js'
+import { getOutboundWithinWindow, confirmPendingWeakSignals, recordSignal, hasSignalLast7d, hasConfirmedWeakLast7d } from '../server/services/signals/repo.js'
 
 function lastMessageId(db, leadId) {
   return db.prepare('SELECT id FROM messages WHERE lead_id = ? ORDER BY id DESC LIMIT 1').get(leadId).id
 }
 
-test('getPrecedingOutboundRun: pega so os outbound depois do ultimo inbound, antes da mensagem dada', () => {
+function hoursAgoIso(h) { return new Date(Date.now() - h * 3600000).toISOString() }
+
+test('getOutboundWithinWindow: pega os outbound dentro da janela, na ordem', () => {
   const db = createRoteiroTestDb()
   const s = seedRoteiroBase(db)
   const leadId = addLead(db, { account_id: s.accountId, funnel_id: s.funnelId, stage_id: s.stages.novo, name: 'Lead A' })
 
-  addMessage(db, { leadId, direction: 'inbound', content: 'oi', minutesAgo: 30 })
   addMessage(db, { leadId, direction: 'outbound', content: 'tudo bem?', minutesAgo: 20 })
   addMessage(db, { leadId, direction: 'outbound', content: 'posso te mandar uma proposta?', minutesAgo: 10 })
   addMessage(db, { leadId, direction: 'inbound', content: 'pode sim', minutesAgo: 0 })
 
-  const run = getPrecedingOutboundRun(db, leadId, lastMessageId(db, leadId))
+  const run = getOutboundWithinWindow(db, leadId, lastMessageId(db, leadId), hoursAgoIso(24))
   assert.deepEqual(run.map(m => m.content), ['tudo bem?', 'posso te mandar uma proposta?'])
 })
 
-test('getPrecedingOutboundRun: sem outbound antes -> array vazio', () => {
+test('getOutboundWithinWindow: mensagem inbound neutra no meio NAO exclui o outbound anterior (spec: vale pela janela de tempo)', () => {
   const db = createRoteiroTestDb()
   const s = seedRoteiroBase(db)
   const leadId = addLead(db, { account_id: s.accountId, funnel_id: s.funnelId, stage_id: s.stages.novo, name: 'Lead A' })
+
+  addMessage(db, { leadId, direction: 'outbound', content: 'posso te mandar uma proposta?', minutesAgo: 20 })
+  addMessage(db, { leadId, direction: 'inbound', content: 'oi, pode sim', minutesAgo: 15 })
+  addMessage(db, { leadId, direction: 'inbound', content: 'quanto custa?', minutesAgo: 0 })
+
+  const run = getOutboundWithinWindow(db, leadId, lastMessageId(db, leadId), hoursAgoIso(24))
+  assert.deepEqual(run.map(m => m.content), ['posso te mandar uma proposta?'])
+})
+
+test('getOutboundWithinWindow: fora da janela -> array vazio', () => {
+  const db = createRoteiroTestDb()
+  const s = seedRoteiroBase(db)
+  const leadId = addLead(db, { account_id: s.accountId, funnel_id: s.funnelId, stage_id: s.stages.novo, name: 'Lead A' })
+  addMessage(db, { leadId, direction: 'outbound', content: 'posso te mandar uma proposta?', minutesAgo: 120 })
   addMessage(db, { leadId, direction: 'inbound', content: 'oi', minutesAgo: 0 })
-  const run = getPrecedingOutboundRun(db, leadId, lastMessageId(db, leadId))
+  const run = getOutboundWithinWindow(db, leadId, lastMessageId(db, leadId), hoursAgoIso(1))
   assert.deepEqual(run, [])
 })
 
