@@ -6,7 +6,7 @@ import { createRoteiroTestDb, seedRoteiroBase, addLead, addMessage } from './hel
 
 const base = () => ({
   fit: { obtained: 0, max: 0, answeredCount: 0, totalCount: 0, reasons: [] },
-  engagement: { daysSinceLastInbound: null, halfLifeDays: 7, replyDelaysMin: [], lastOutboundReplied: [], advancedLast7d: false, buyingTermLast7d: false },
+  engagement: { daysSinceLastInbound: null, halfLifeDays: 7, replyDelaysMin: [], lastOutboundReplied: [], advancedLast7d: false, strongSignalLast7d: false, weakSignalConfirmedLast7d: false, negativeSignalLast7d: false },
   ai: { temperatura: null, chance: null, analyzedDaysAgo: null },
 })
 
@@ -36,12 +36,14 @@ test('perfil proporcional, com pontos negativos e sem passar de 0..50', () => {
 
 test('engajamento: recencia com meia-vida, rapidez, reciprocidade, intensidade', () => {
   const i = base()
-  i.engagement = { daysSinceLastInbound: 0, halfLifeDays: 7, replyDelaysMin: [5, 3, 8], lastOutboundReplied: [true, true, true, false, true], advancedLast7d: true, buyingTermLast7d: true }
+  i.engagement = { daysSinceLastInbound: 0, halfLifeDays: 7, replyDelaysMin: [5, 3, 8], lastOutboundReplied: [true, true, true, false, true], advancedLast7d: true, strongSignalLast7d: true, weakSignalConfirmedLast7d: false, negativeSignalLast7d: false }
   const r = computeLeadScore(i)
   assert.equal(r.engagement, 20 + 10 + 8 + 10) // 48
   i.engagement.daysSinceLastInbound = 7 // uma meia-vida: 10
   i.engagement.replyDelaysMin = [120] // < 6h: 4
-  i.engagement.advancedLast7d = false // termo de compra: 5
+  i.engagement.advancedLast7d = false
+  i.engagement.strongSignalLast7d = false
+  i.engagement.weakSignalConfirmedLast7d = true // fraco confirmado: 5
   assert.equal(computeLeadScore(i).engagement, 10 + 4 + 8 + 5)
   i.engagement.replyDelaysMin = []
   i.engagement.daysSinceLastInbound = null
@@ -65,7 +67,7 @@ test('ajuste da IA so com analise de ate 7 dias', () => {
 test('nota final limitada a 0..100 e porque ordenado por grupo', () => {
   const i = base()
   i.fit = { obtained: 60, max: 60, answeredCount: 4, totalCount: 4, reasons: [{ texto: 'Orçamento: acima de R$20 mil', pontos: 30 }] }
-  i.engagement = { daysSinceLastInbound: 0, halfLifeDays: 7, replyDelaysMin: [1], lastOutboundReplied: [true, true, true, true, true], advancedLast7d: true, buyingTermLast7d: false }
+  i.engagement = { daysSinceLastInbound: 0, halfLifeDays: 7, replyDelaysMin: [1], lastOutboundReplied: [true, true, true, true, true], advancedLast7d: true, strongSignalLast7d: false, weakSignalConfirmedLast7d: false, negativeSignalLast7d: false }
   i.ai = { temperatura: 'quente', chance: 90, analyzedDaysAgo: 0 }
   const r = computeLeadScore(i)
   assert.equal(r.score, 100); assert.equal(r.band, 'pronto'); assert.equal(r.quadrant, 'atender_agora')
@@ -95,4 +97,35 @@ test('accountCycleDays: ciclos de 10 e 20 dias', () => {
 
   const cycles = accountCycleDays(db, accountId).sort((a, b) => a - b)
   assert.deepEqual(cycles.map(c => Math.round(c)), [10, 20])
+})
+
+test('intensity: forte sozinho vale 10 (sem avanco de etapa)', () => {
+  const i = base()
+  i.engagement.strongSignalLast7d = true
+  const r = computeLeadScore(i)
+  assert.equal(r.engagement, 10)
+})
+
+test('intensity: fraco confirmado sozinho vale 5', () => {
+  const i = base()
+  i.engagement.weakSignalConfirmedLast7d = true
+  const r = computeLeadScore(i)
+  assert.equal(r.engagement, 5)
+})
+
+test('intensity: negativo desconta 10, mesmo com forte confirmado (nao se cancelam escondido, o negativo domina quando e maior)', () => {
+  const i = base()
+  i.engagement.strongSignalLast7d = true
+  i.engagement.negativeSignalLast7d = true
+  const r = computeLeadScore(i)
+  // forte (+10) com negativo (-10) juntos: intensity liquida 0, engagement so com os outros fatores (0 aqui)
+  assert.equal(r.engagement, 0)
+})
+
+test('engagement nunca fica negativo mesmo com negativo isolado (piso 0)', () => {
+  const i = base()
+  i.engagement.negativeSignalLast7d = true
+  const r = computeLeadScore(i)
+  assert.ok(r.engagement >= 0, `engagement nao pode ser negativo, veio ${r.engagement}`)
+  assert.equal(r.engagement, 0)
 })

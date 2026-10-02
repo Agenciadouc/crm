@@ -65,8 +65,10 @@ export function computeLeadScore(input) {
   }
   let intensity = 0
   if (e.advancedLast7d) { intensity = 10; reasons.push({ grupo: 'engajamento', texto: 'Avançou de etapa nos últimos 7 dias', pontos: 10 }) }
-  else if (e.buyingTermLast7d) { intensity = 5; reasons.push({ grupo: 'engajamento', texto: 'Falou de preço, prazo ou pagamento nos últimos 7 dias', pontos: 5 }) }
-  const engagement = Math.min(50, recency + speed + reciprocity + intensity)
+  else if (e.strongSignalLast7d) { intensity = 10; reasons.push({ grupo: 'engajamento', texto: 'Confirmou interesse forte na conversa (ex.: "quero comprar")', pontos: 10 }) }
+  else if (e.weakSignalConfirmedLast7d) { intensity = 5; reasons.push({ grupo: 'engajamento', texto: 'Perguntou e continuou conversando depois', pontos: 5 }) }
+  if (e.negativeSignalLast7d) { intensity -= 10; reasons.push({ grupo: 'engajamento', texto: 'Sinal negativo na conversa (ex.: "não quero", "caro demais")', pontos: -10 }) }
+  const engagement = clamp(recency + speed + reciprocity + intensity, 0, 50)
 
   // IA
   let aiAdjust = 0
