@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useAuth } from '../context/AuthContext'
 import { useAccount } from '../context/AccountContext'
 import { fetchFunnels, createFunnel, updateFunnelStages, type Funnel, type FunnelStage } from '../lib/api'
+import { cleanKeywordList } from '../lib/stageKeywords.js'
 import { Plus, GripVertical, Trash2, Save, Target } from 'lucide-react'
 
 const DEFAULT_COLORS = ['#FFB300', '#5DADE2', '#9B59B6', '#FFAA83', '#FF6B8A', '#34C759', '#FF6B6B']
@@ -41,15 +42,6 @@ export default function Funnels() {
   // ja devolve 409 se a tentativa passar, mas aqui a gente nem deixa tentar (spec §12).
   const removeStage = (i: number) => { setEditStages(prev => prev[i]?.system_key ? prev : prev.filter((_, idx) => idx !== i)) }
   const updateStage = (i: number, field: string, value: any) => { setEditStages(prev => prev.map((s, idx) => idx === i ? { ...s, [field]: value } : s)) }
-
-  // So limpa (trim + remove vazios) na hora de salvar — durante a digitacao o valor fica
-  // cru, senao um espaco digitado dentro de uma unica palavra-chave (sem virgula ainda)
-  // seria removido a cada tecla (o segmento inteiro vira "a palavra toda" ate a 1a virgula).
-  const cleanKeywordList = (v: any): string[] | undefined => {
-    if (!Array.isArray(v)) return undefined
-    const cleaned = v.map((k: string) => k.trim()).filter(Boolean)
-    return cleaned.length ? cleaned : undefined
-  }
 
   const [savingStages, setSavingStages] = useState(false)
   const saveStages = async () => {
