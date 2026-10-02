@@ -1,68 +1,120 @@
-# Troca BANT → SPIN Selling no Roteiro de Qualificação — Desenho
+# SPIN Selling por Perfil de Cliente Ideal no Roteiro — Desenho
 
-Data: 02/10/2026 · Status: aprovado na conversa, aguardando revisão da spec escrita
+Data: 02/10/2026 · Status: desenho aprovado na conversa, aguardando revisão da spec escrita
 
 ## 1. Objetivo
 
-Todas as perguntas de qualificação do CRM (modelo pronto, "Montar com IA", marcação manual,
-rótulos do Termômetro) passam a seguir a metodologia **SPIN Selling** no lugar do BANT.
+As perguntas de qualificação do CRM deixam de ser BANT genérico e passam a ser **SPIN Selling
+feito sob medida para cada conta**: a conta registra o objetivo do negócio e os perfis de cliente
+ideal; a IA lê as conversas reais da conta e escreve perguntas SPIN por perfil, com opções de
+resposta tiradas do jeito que os leads falam; no atendimento, o perfil do lead é identificado
+pelas mensagens e só as perguntas daquele perfil valem; toda semana a IA revisa as conversas novas
+e sugere melhorias.
 
-SPIN é uma sequência consultiva, não 4 checagens soltas:
+Exemplo guia — **Ustulimp**: objetivo "revender produtos de limpeza"; perfis **Loja** (mercadinho,
+comércio, compra pra prateleira) e **Vendedor porta a porta** (renda extra, vende de casa em casa).
+Lead escreve "tenho um mercadinho" → perfil Loja → segue o SPIN da Loja.
 
-| Chave interna  | Rótulo na tela           | Pra que serve                                         |
-|----------------|--------------------------|-------------------------------------------------------|
-| `situation`    | Situação                 | Fatos do cliente hoje (como faz, quem decide, prazo)  |
-| `problem`      | Problema                 | Onde dói, o que não funciona                          |
-| `implication`  | Implicação               | O que esse problema custa / causa se continuar        |
-| `need_payoff`  | Necessidade de Solução   | Quanto vale resolver; cliente fala o ganho            |
+### SPIN
 
-Sucesso = gestor que clica "Começar com modelo" ou "Montar com IA" recebe perguntas SPIN na
-ordem certa, só nas etapas em que o lead já está conversando; perguntas antigas BANT continuam
-funcionando (respostas e pontos preservados), só com a etiqueta nova.
+| Chave interna  | Rótulo na tela         | Pra que serve                                        |
+|----------------|------------------------|------------------------------------------------------|
+| `situation`    | Situação               | Fatos do cliente hoje (como faz, quem decide, prazo) |
+| `problem`      | Problema               | Onde dói, o que não funciona                         |
+| `implication`  | Implicação             | O que o problema custa / causa se continuar          |
+| `need_payoff`  | Necessidade de Solução | Quanto vale resolver; o cliente fala o ganho         |
 
-## 2. Decisões fechadas com o dono
+## 2. Entregas
 
-1. **Redesenho de verdade:** acaba o limite de 1 pergunta por categoria. Ordem dentro da etapa:
-   Situação → Problema → Implicação → Necessidade de Solução. Poucas de Situação, mais de
-   Problema, mais ainda de Implicação, 1-2 de Necessidade de Solução.
-2. **Todas continuam múltipla escolha com pontos** (inclusive Necessidade de Solução), porque só
-   pergunta de opções pontua no Termômetro. Texto livre continua possível manualmente.
-3. **Etapas de tentativa de contato não recebem pergunta de qualificação.** Ex.: "Novo Lead" e
-   "Contato Feito" ficam só com a cadência de contato (que já existe). A qualificação SPIN começa
-   na etapa em que o lead já respondeu (ex.: "Atendimento") em diante.
-4. **"Respondeu → vira Atendimento" não é construído de novo:** já existe no follow-up
-   (`on_reply_action` = mover para etapa, `on_reply_move_to_stage_id`). Fica como está.
-5. **Migração das etiquetas antigas** (só troca a etiqueta; texto, opções, pontos e respostas
-   dos leads ficam iguais):
-   - `need` → `problem`
-   - `timeline` → `situation`
-   - `authority` → `situation`
-   - `budget` → `need_payoff`
-6. **Roteiro continua escrito uma vez** (por IA ou gestor); o atendimento segue a ordem escrita.
-   Sem motor novo em tempo real.
-7. **Treinador Global de IA fica para depois.** Este projeto só garante o rastro que ele vai
-   precisar: cada pergunta continua com `question_key` estável + versão do roteiro (já existe) e
-   agora com a fase SPIN, o que permite medir desempenho por fase entre contas no futuro.
+- **Entrega 1** (sobe primeiro): seções 3 a 9 — SPIN, perfis, identificação do perfil, roteiro
+  por perfil, "Montar com IA" lendo conversas reais, telas.
+- **Entrega 2** (logo depois, plano próprio): seção 10 — revisão semanal automática.
 
-## 3. Dados
+## 3. Decisões fechadas com o dono
 
-- Nova coluna `roteiro_questions.spin TEXT` (valores: `situation`, `problem`, `implication`,
-  `need_payoff` ou `NULL`). Adicionada com `ALTER TABLE ... ADD COLUMN` (compatível com o SQLite
-  antigo do servidor; nada de DROP/RENAME COLUMN).
-- Migração no boot, idempotente, em todas as versões (rascunho, publicada e históricas):
+1. Acaba o limite de 1 pergunta por categoria. Ordem dentro da etapa: Situação → Problema →
+   Implicação → Necessidade de Solução. Poucas de Situação, mais de Problema, mais de Implicação,
+   1-2 de Necessidade de Solução.
+2. Perguntas geradas são de múltipla escolha com pontos (pontuam no Termômetro). Texto livre
+   continua possível manualmente.
+3. Etapas de tentativa de contato ("Novo Lead", "Contato Feito") não recebem pergunta; só a
+   cadência de contato. O SPIN vale da etapa em que o lead já respondeu ("Atendimento") em diante.
+4. "Respondeu → vira Atendimento" já existe no follow-up (`on_reply_move_to_stage_id`). Não muda.
+5. Etiquetas antigas migram: `need`→`problem`, `timeline`→`situation`, `authority`→`situation`,
+   `budget`→`need_payoff`. Texto, opções, pontos e respostas ficam iguais.
+6. Perguntas por perfil (opção escolhida pelo dono): cada perfil tem seu próprio jogo SPIN; uma
+   pergunta de Situação para "Todos" serve para descobrir o perfil.
+7. Perfil do lead: IA identifica pelas mensagens; vendedor escolhe/corrige; escolha manual vale
+   mais e a IA não sobrescreve. Sem IA, só manual.
+8. "Montar com IA" lê as conversas reais da própria conta (nunca de outra conta).
+9. Nada muda sozinho no roteiro: sugestões semanais vão para a aba Sugestões; gestor aplica; A/B
+   como hoje.
+10. Treinador Global e mudança de critério do A/B ficam fora.
+
+## 4. Dados (Entrega 1)
+
+Tudo com `CREATE TABLE IF NOT EXISTS` / `ALTER TABLE ... ADD COLUMN` (SQLite antigo do servidor:
+nada de DROP/RENAME COLUMN).
+
+- `accounts.business_objective TEXT` — objetivo do negócio (até 300 caracteres).
+- Tabela nova `roteiro_profiles`:
+  `id, account_id, profile_key TEXT (estável, gerado), name TEXT (até 60), description TEXT
+  (como reconhecer, até 500), position INTEGER, created_at, updated_at`;
+  único `(account_id, profile_key)`; máximo 6 perfis por conta.
+- `roteiro_questions.spin TEXT` — `situation | problem | implication | need_payoff | NULL`.
+- `roteiro_questions.profile_key TEXT` — `NULL` = vale para todos.
+- `leads.roteiro_profile_key TEXT`, `leads.roteiro_profile_origin TEXT` (`ia` | `manual`).
+- Migração no boot, idempotente, em todas as versões do roteiro:
   `UPDATE roteiro_questions SET spin = CASE bant WHEN 'need' THEN 'problem' WHEN 'timeline' THEN
   'situation' WHEN 'authority' THEN 'situation' WHEN 'budget' THEN 'need_payoff' END
-  WHERE spin IS NULL AND bant IS NOT NULL`.
-- A coluna `bant` fica no banco (morta, sem leitura nem escrita no código novo) para não precisar
-  recriar tabela.
-- API: o campo `bant` some de requisições e respostas e vira `spin` (servidor e front sobem
-  juntos, então não há cliente antigo para manter).
+  WHERE spin IS NULL AND bant IS NOT NULL`. A coluna `bant` fica morta.
+- API: campo `bant` some e vira `spin`; perguntas ganham `profile_key` (servidor e front sobem
+  juntos).
+- Apagar perfil: recusado (400 "Este perfil tem perguntas. Mude ou apague as perguntas antes.")
+  se alguma pergunta publicada ou de rascunho usar o perfil; leads com esse perfil voltam a `NULL`.
 
-## 4. Peças
+## 5. Regra central: pergunta vale para o lead?
 
-### 4.1 Modelo pronto SPIN — `server/services/roteiro/spinTemplate.js` (substitui `bantTemplate.js`)
+`server/services/roteiro/profiles.js` (novo) exporta `appliesToLead(question, leadProfileKey)`:
+verdadeiro quando `question.profile_key` é `NULL` ou igual ao perfil do lead. Lead sem perfil →
+só perguntas `NULL`.
 
-`SPIN_QUESTIONS`, 6 perguntas de opções, obrigatórias, nesta ordem:
+Aplicada em todo lugar que trata perguntas **de um lead**:
+- `leadRoteiro.getLeadRoteiro` (próxima pergunta, progresso, perguntas da etapa).
+- `leadRoteiro.pendingRequired` / trava de etapa.
+- `autoAdvance` (avanço automático quando as obrigatórias respondidas).
+- `aiExtract.extractAnswers` (só pendentes aplicáveis).
+- `leadCadence` (passo de pergunta de outro perfil fica "não se aplica": não vira próximo passo,
+  não trava, não conta no total).
+- `leadScore/inputs.buildFit` (máximo e pontos só das aplicáveis).
+- `runtime.js` (agente pergunta só as aplicáveis — vem via `getLeadRoteiro`).
+
+Não muda: métricas, aprendizado diário e A/B (são por `question_key`).
+
+Mudar o perfil do lead → recalcula Termômetro e cadência da etapa (mesmo gatilho de quando salva
+resposta). Respostas já dadas a perguntas do perfil antigo ficam guardadas, só não contam.
+
+Conta com 0 ou 1 perfil: tudo funciona como hoje (com 1 perfil, o lead recebe esse perfil
+automaticamente ao entrar numa etapa de conversa — sem pergunta de descoberta).
+
+## 6. Identificação do perfil do lead
+
+- **IA:** `aiExtract.extractAnswers` passa a rodar também quando o lead não tem perfil e a conta
+  tem 2+ perfis. Na mesma chamada (sem custo extra) a ferramenta `record_answers` ganha
+  `profile_key` + `profile_evidence`; a IA recebe nome e descrição de cada perfil e só marca com
+  evidência clara nas mensagens. Grava com origem `ia`. Nunca troca perfil de origem `manual`.
+- **Resposta da pergunta de descoberta:** pergunta de opções "Todos" pode ter, em cada opção, um
+  `sets_profile_key` (ex.: opção "Tenho loja" → Loja). Ao salvar a resposta (vendedor ou IA), o
+  perfil é gravado se o lead ainda não tiver perfil manual. Coluna nova
+  `roteiro_options.sets_profile_key TEXT`.
+- **Manual:** rota `PUT /leads/:id/roteiro-profile` `{ profile_key | null }` (vendedor do lead ou
+  gestor) grava origem `manual`.
+
+## 7. SPIN e etapas
+
+### 7.1 Modelo pronto — `server/services/roteiro/spinTemplate.js` (substitui `bantTemplate.js`)
+
+6 perguntas de opções, obrigatórias, perfil "Todos":
 
 | Fase | Pergunta | Opções (pontos) |
 |---|---|---|
@@ -73,78 +125,101 @@ funcionando (respostas e pontos preservados), só com a etiqueta nova.
 | implication | Isso afeta mais alguém além de você (família, equipe, sócio)? | Sim, afeta outras pessoas (10) · Um pouco (5) · Só a mim (2) |
 | need_payoff | Se isso estivesse resolvido, o que mudaria pra você? Quanto valeria resolver agora? | Mudaria muito, quero resolver já (15) · Seria bom, mas sem pressa (6) · Não mudaria muito (0) |
 
-### 4.2 Etapa de contato × etapa de conversa — `server/services/roteiro/stageKind.js` (novo)
+Usado por "Começar com modelo SPIN" (funil: `createSpinDraft`, rota `/spin-template`; etapa:
+`spinStepQuestions`, modo `'spin'`) e para completar fase que a IA esquecer. Soma só as fases que
+o funil ainda não tem.
 
-`isContactStage(stage)`: verdadeiro quando o nome normalizado (minúsculo, sem acento) contém
-`novo`, `nova`, `contato`, `tentativa`, `prospec` ou `entrada`, e a etapa não é final.
-`conversationStages(stages)`: etapas não finais que não são de contato, em ordem. Se todas forem
-de contato (funil esquisito), devolve todas as não finais (não trava o gestor).
+### 7.2 Etapa de contato × conversa — `server/services/roteiro/stageKind.js` (novo)
 
-### 4.3 "Montar com IA" — `server/services/roteiro/aiDraft.js`
+`isContactStage(stage)`: nome normalizado (minúsculo, sem acento) contém `novo`, `nova`,
+`contato`, `tentativa`, `prospec` ou `entrada`, e a etapa não é final.
+`conversationStages(stages)`: não finais e não de contato, em ordem; se não sobrar nenhuma,
+devolve todas as não finais.
 
-- Prompt troca a regra BANT pela SPIN: fases, ordem, quantidade (1-2 Situação, 2-3 Problema,
-  2-3 Implicação, 1-2 Necessidade de Solução por etapa de conversa), "marque o campo spin",
-  "etapas marcadas como tentativa de contato não recebem perguntas".
-- A lista de etapas enviada à IA marca cada uma: `(tentativa de contato — sem perguntas)` ou
-  `(em conversa — perguntas SPIN)`.
-- Schema da ferramenta: `spin` com enum das 4 fases (sai `bant`).
-- Saneamento: `spin` só vale em pergunta de opções; pode repetir fase (acaba o `usedBant`).
-  Pergunta colocada em etapa de contato ou etapa inválida vai para a 1ª etapa de conversa.
-- Garantia: se faltar alguma das 4 fases no resultado, entram as perguntas do modelo daquela fase
-  na 1ª etapa de conversa.
-- Ordenação final dentro de cada etapa: pela ordem SPIN (situation, problem, implication,
-  need_payoff, sem fase por último), mantendo a ordem da IA dentro da mesma fase.
+## 8. "Montar com IA" lendo as conversas reais — `aiDraft.js`
 
-### 4.4 Modelo no funil inteiro — `repo.js` (`createBantDraft` → `createSpinDraft`)
+### 8.1 Amostra de conversas — `server/services/roteiro/conversationSample.js` (novo)
 
-Rota `POST /funnels/:funnelId/bant-template` → `/spin-template`. Soma ao rascunho as perguntas
-do modelo das fases que ainda não aparecem no roteiro, na 1ª etapa de conversa. Validação aceita
-só as 4 chaves SPIN ("Fase SPIN inválida.").
+Só da própria conta, últimos 90 dias, leads com pelo menos 1 mensagem recebida e 3 mensagens no
+total, mensagens com texto (`content` não vazio; áudio entra pelo `messages.transcription` quando já transcrito).
+Prioridade: até 20 que compraram (venda registrada ou etapa de conversão), até 10 que avançaram de
+etapa, até 10 das demais (incluindo perdidas). Por conversa: últimas 30 mensagens, cada uma
+cortada em 300 caracteres, formato `Cliente:` / `Vendedor:`, cabeçalho com resultado
+(comprou / avançou / não avançou) e etapa atual. Teto total: 60.000 caracteres (corta as de
+menor prioridade primeiro). Sem nome/telefone do lead no texto enviado.
 
-### 4.5 Modelo por etapa — `cadence/repo.js` + `cadencesRouter.js`
+### 8.2 Entrada da IA
 
-`bantStepQuestions` → `spinStepQuestions`: devolve as perguntas do modelo das fases que o funil
-ainda não tem. Modo da rota `stages/:stageId/template` muda de `'bant'` para `'spin'`. Mensagens:
-"O funil já tem perguntas das 4 fases do SPIN." e "A IA não sugeriu perguntas para esta etapa.
-Tente o modelo SPIN." O gestor ainda pode aplicar o modelo em qualquer etapa que escolher
-(decisão dele); o botão só aparece onde já aparece hoje.
+Etapas marcadas `(tentativa de contato — sem perguntas)` / `(em conversa — perguntas SPIN)`;
+objetivo do negócio; perfis (nome + descrição); briefing do agente (o que descobrir, critério,
+base de conhecimento cortada em 4.000 caracteres); a amostra de conversas.
 
-### 4.6 Termômetro — `leadScore/inputs.js`
+### 8.3 Regras do prompt
 
-Rótulos do motivo: `situation` Situação, `problem` Problema, `implication` Implicação,
-`need_payoff` Necessidade de Solução. Cálculo inalterado (proporção do máximo).
+SPIN por perfil em cada etapa de conversa (quantidade da decisão 1); 1 pergunta de descoberta de
+perfil "Todos" no início da 1ª etapa de conversa quando houver 2+ perfis, com `sets_profile_key`
+nas opções; opções e palavras tiradas das falas reais dos leads; perguntas objetivas, uma coisa
+por vez; nada em etapa de contato; marcar `spin` e `profile_key`. Sem conversas: usa briefing; sem
+briefing: roteiro SPIN geral.
 
-### 4.7 Front
+### 8.4 Saneamento
 
-- `roteiroApi.ts`: `BantKey` → `SpinKey`; `bant` → `spin`; `bantTemplate` → `spinTemplate`.
-- `cadenceApi.ts`, `stageCadence.js/.d.ts`, `roteiroManager.js/.d.ts`: campo `spin`.
-- `StepPanel.tsx`: campo "Fase SPIN" com as 4 opções e ajuda com exemplo:
-  "Situação = como é hoje ('Como você faz isso hoje?'). Problema = onde dói. Implicação = o que
-  isso causa se continuar. Necessidade de Solução = quanto vale resolver."
-- `StageEmpty.tsx`: modo `'spin'`, botão "Começar com modelo SPIN".
+`spin` só em pergunta de opções e pode repetir; `profile_key` inexistente vira `NULL`;
+`sets_profile_key` inexistente é descartado; pergunta em etapa de contato/inválida vai para a 1ª
+etapa de conversa; fase faltando (considerando o roteiro todo) é completada pelo modelo; ordem
+final por etapa: descoberta de perfil primeiro, depois por perfil (Todos, depois cada perfil na
+ordem cadastrada) e dentro dele pela ordem SPIN. `maxTokens` sobe para 8.000.
 
-### 4.8 Atendimento ao vivo — `leadRoteiro.js`
+### 8.5 "Sugerir com IA" do cadastro do negócio
 
-Expõe `spin` no lugar de `bant`. Sem outra mudança de comportamento.
+Botão no cartão "Negócio e clientes ideais": mesma amostra de conversas + briefing → IA propõe
+objetivo e até 6 perfis (nome + como reconhecer). Preenche o formulário; só grava quando o gestor
+clicar Salvar.
 
-## 5. Erros
+## 9. Telas (Entrega 1)
 
-- IA falha → mesma mensagem de hoje ("A IA não respondeu agora…").
-- Fase inválida no salvamento → 400 "Fase SPIN inválida."
-- Funil sem etapa de conversa → usa as não finais (4.2), nunca erro novo.
+- **Cadências — cartão "Negócio e clientes ideais"** (topo, só gestor): objetivo, lista de perfis
+  (nome, "como reconhecer"), [Sugerir com IA], [Salvar]. Ajuda com o exemplo da Ustulimp.
+- **Painel do passo de pergunta (`StepPanel`)**: campo "Fase SPIN" (4 opções + ajuda com exemplo)
+  e campo "Perfil" (Todos + perfis); em opções, "esta resposta define o perfil" (opcional).
+- **Etapa vazia (`StageEmpty`)**: "Começar com modelo SPIN"; em etapa de contato, aviso "Etapa de
+  tentativa de contato: normalmente sem perguntas".
+- **Lista de passos da etapa**: selo do perfil em cada pergunta.
+- **Chat, aba Atendimento**: seletor "Perfil do lead" (mostra "identificado pela IA" quando
+  origem `ia`).
+- **Ficha do lead**: perfil ao lado do Termômetro; motivo do Termômetro com rótulo SPIN.
 
-## 6. Testes
+## 10. Revisão semanal (Entrega 2)
 
-- Atualizar os testes que hoje cobrem BANT (repo, IA, rotas HTTP, cadência, termômetro,
-  roteiroManager, stageCadence) para SPIN.
-- Novos: migração (4 mapeamentos, idempotente, não mexe em quem já tem `spin`);
-  `isContactStage`/`conversationStages`; IA com fases repetidas, pergunta em etapa de contato
-  realocada, fase faltando completada, ordem SPIN dentro da etapa; modelo SPIN por funil e por
-  etapa.
-- Suíte inteira verde + `npm run build` + conferência no navegador (Cadências: modelo SPIN,
-  Montar com IA, campo Fase SPIN; ficha do lead: motivo do Termômetro com rótulo SPIN).
+Roda junto do job noturno (`leadScore/nightly.js`), 1x por semana por conta (guarda
+`roteiro_weekly_runs(account_id, ran_at)`; roda se passou 7 dias), só conta com IA ligada e
+roteiro publicado, dentro do orçamento de IA do roteiro. Lê a amostra de conversas dos últimos 7
+dias (mesmo formato de 8.1) + roteiro publicado + perfis e grava em `roteiro_suggestions` tipos
+novos: `new_question` (pergunta SPIN nova para um perfil/etapa), `new_profile` (perfil não
+cadastrado que aparece nas conversas), além dos existentes `new_option` e `rewrite` (que segue
+para A/B como hoje). O CHECK de `type` em `roteiro_suggestions` não aceita tipos novos: a tabela é reconstruída (cria nova, copia, troca o nome, mesmo padrão já usado na reconstrução de `cadence_attempts`). Não duplica sugestão ainda sem decisão. Aplicar `new_question` soma a
+pergunta à cadência da etapa e publica (mesmo caminho de `applySuggestionLive`); aplicar
+`new_profile` cria o perfil. Aparece na aba Sugestões existente com texto "da revisão semanal".
 
-## 7. Fora do escopo
+## 11. Erros
 
-Treinador Global de IA; mudança no critério do teste A/B; motor de pergunta em tempo real;
-mudança no follow-up "ao responder, mover para etapa".
+- IA falha → "A IA não respondeu agora. Monte à mão ou tente de novo."
+- Fase inválida → 400 "Fase SPIN inválida."; perfil inválido → 400 "Perfil inválido.";
+  mais de 6 perfis → 400 "Máximo de 6 perfis."
+- Funil sem etapa de conversa → usa as não finais.
+- Conta sem conversas → monta pelo briefing/modelo, sem erro.
+
+## 12. Testes
+
+Atualizar os testes de BANT para SPIN. Novos: migração (4 mapeamentos, idempotente); perfis
+(CRUD, limite, apagar com perguntas); `appliesToLead` em próxima pergunta, trava, avanço
+automático, cadência e Termômetro; perfil por IA (não sobrescreve manual), por opção
+`sets_profile_key` e manual; `stageKind`; amostra de conversas (prioridade, cortes, teto, só da
+conta, sem nome/telefone); IA com perfis, descoberta, realocação e completar fase. Suíte inteira +
+`npm run build` + conferência no navegador. Entrega 2: escolha da semana, tipos novos de
+sugestão, aplicar.
+
+## 13. Fora do escopo
+
+Treinador Global; critério do A/B; filtro da lista de leads por perfil; mudança no follow-up
+"ao responder, mover para etapa".
