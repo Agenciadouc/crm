@@ -1,12 +1,7 @@
 // Coleta os dados de entrada para computeLeadScore a partir do banco (spec 5.1).
 // Nao importa server/db.js: recebe db (testavel com banco em memoria).
 import { getPublishedQuestions } from '../roteiro/repo.js'
-
-// Termos de compra (sem acento, minusculas) usados no sinal de intensidade.
-export const BUYING_TERMS = [
-  'preco', 'valor', 'quanto custa', 'orcamento', 'prazo', 'pagamento',
-  'pix', 'boleto', 'parcel', 'contrato', 'fechar', 'comprar',
-]
+import { hasSignalLast7d, hasConfirmedWeakLast7d } from '../signals/repo.js'
 
 const BANT_LABEL = { budget: 'Orçamento', authority: 'Quem decide', need: 'Necessidade', timeline: 'Prazo' }
 
@@ -21,11 +16,6 @@ export function parseSqliteDate(s) {
 
 export function normalizeText(s) {
   return String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
-}
-
-export function hasBuyingTerm(text) {
-  const t = normalizeText(text)
-  return BUYING_TERMS.some(term => t.includes(term))
 }
 
 function questionShortLabel(q) {
@@ -110,7 +100,10 @@ function buildEngagement(db, lead, account, nowMs) {
   })
 
   const sevenDaysAgo = nowMs - 7 * DAY_MS
-  const buyingTermLast7d = msgs.some(m => m.direction === 'inbound' && m._ts != null && m._ts >= sevenDaysAgo && hasBuyingTerm(m.content))
+  const nowIso = new Date(nowMs).toISOString()
+  const strongSignalLast7d = hasSignalLast7d(db, lead.id, 'strong', nowIso)
+  const weakSignalConfirmedLast7d = hasConfirmedWeakLast7d(db, lead.id, nowIso)
+  const negativeSignalLast7d = hasSignalLast7d(db, lead.id, 'negative', nowIso)
 
   const historyRows = db.prepare(`
     SELECT h.created_at, fs_from.position AS from_pos, fs_to.position AS to_pos
@@ -126,7 +119,7 @@ function buildEngagement(db, lead, account, nowMs) {
 
   const halfLifeDays = account && account.score_half_life_days != null ? account.score_half_life_days : 7
 
-  return { daysSinceLastInbound, halfLifeDays, replyDelaysMin, lastOutboundReplied, advancedLast7d, buyingTermLast7d }
+  return { daysSinceLastInbound, halfLifeDays, replyDelaysMin, lastOutboundReplied, advancedLast7d, strongSignalLast7d, weakSignalConfirmedLast7d, negativeSignalLast7d }
 }
 
 function buildAi(db, leadId, nowMs) {

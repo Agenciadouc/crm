@@ -67,7 +67,9 @@ test('gatherScoreInputs: fit, recencia, delay de resposta, termo de compra, avan
   assert.equal(input.engagement.replyDelaysMin.length, 1)
   assert.ok(Math.abs(input.engagement.replyDelaysMin[0] - 5) < 0.1, `delay deveria ser ~5min, veio ${input.engagement.replyDelaysMin[0]}`)
   assert.deepEqual(input.engagement.lastOutboundReplied, [true])
-  assert.equal(input.engagement.buyingTermLast7d, true)
+  assert.equal(input.engagement.strongSignalLast7d, false)
+  assert.equal(input.engagement.weakSignalConfirmedLast7d, false)
+  assert.equal(input.engagement.negativeSignalLast7d, false)
   assert.equal(input.engagement.advancedLast7d, true)
   assert.equal(input.engagement.halfLifeDays, 10)
 
