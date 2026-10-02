@@ -9,6 +9,7 @@ import { ensureStageCadence } from './cadence/leadCadence.js'
 import { warnMissingCadenceTable } from './cadence/errors.js'
 import { onInboundSaved } from './roteiro/runtime.js'
 import { isRepurchaseFunnel } from './ltv/funnel.js'
+import { processInboundSignal } from './signals/engine.js'
 
 const STATUS_RANK = { sent: 1, delivered: 2, read: 3 }
 
@@ -389,6 +390,10 @@ export function createInboundHandler(deps) {
         try {
           onInboundSaved({ db, account, lead, message: { id: Number(insertedMsg.lastInsertRowid), content, media_type: mediaType } })
         } catch (e) { console.error('[Roteiro] inbound:', e?.message) }
+        try {
+          const savedMsg = db.prepare('SELECT id, content, created_at FROM messages WHERE id = ?').get(insertedMsg.lastInsertRowid)
+          processInboundSignal(db, { account, lead, message: savedMsg })
+        } catch (e) { console.error('[Sinais] inbound:', e?.message) }
       }
       // Incrementa unread_count se msg eh inbound e lead nao arquivado (arquivados usam has_new_after_archive).
       // Tambem seta last_inbound_at pra qualquer inbound (arquivado ou nao) — usado no sort do chat pra
