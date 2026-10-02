@@ -5,6 +5,7 @@ import { fetchFunnels, fetchUsers, apiFetch, fetchAppSettings, updateAppSetting,
 import { Settings as SettingsIcon, RotateCw, Users, Save, Check, Bell, ShieldAlert } from 'lucide-react'
 import { InlineNotice, useInlineNotice } from '../components/InlineNotice'
 import CustomersSettings from '../components/settings/CustomersSettings'
+import SignalSettings from '../components/settings/SignalSettings'
 
 interface DistRule { id?: number; funnel_id: number; type: 'round_robin' | 'manual'; active_attendants: number[] }
 
@@ -282,6 +283,13 @@ export default function SettingsPage() {
         <section className="dash-section">
           <div className="section-title">Clientes e recompra</div>
           <CustomersSettings accountId={accountId} />
+        </section>
+      )}
+
+      {isGerenteOuAdmin && accountId && (
+        <section className="dash-section">
+          <div className="section-title">Sinais de venda por palavra-chave</div>
+          <SignalSettings accountId={accountId} />
         </section>
       )}
     </div>
