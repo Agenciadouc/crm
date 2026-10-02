@@ -42,12 +42,30 @@ export default function Funnels() {
   const removeStage = (i: number) => { setEditStages(prev => prev[i]?.system_key ? prev : prev.filter((_, idx) => idx !== i)) }
   const updateStage = (i: number, field: string, value: any) => { setEditStages(prev => prev.map((s, idx) => idx === i ? { ...s, [field]: value } : s)) }
 
+  // So limpa (trim + remove vazios) na hora de salvar — durante a digitacao o valor fica
+  // cru, senao um espaco digitado dentro de uma unica palavra-chave (sem virgula ainda)
+  // seria removido a cada tecla (o segmento inteiro vira "a palavra toda" ate a 1a virgula).
+  const cleanKeywordList = (v: any): string[] | undefined => {
+    if (!Array.isArray(v)) return undefined
+    const cleaned = v.map((k: string) => k.trim()).filter(Boolean)
+    return cleaned.length ? cleaned : undefined
+  }
+
   const [savingStages, setSavingStages] = useState(false)
   const saveStages = async () => {
     if (!editing || !accountId) return
     setSavingStages(true)
     try {
-      await updateFunnelStages(editing.id, accountId, editStages.map((s, i) => ({ ...s, position: i })))
+      await updateFunnelStages(editing.id, accountId, editStages.map((s, i) => ({
+        ...s, position: i,
+        trigger_keywords: cleanKeywordList(s.trigger_keywords),
+        weak_keywords: cleanKeywordList(s.weak_keywords),
+        strong_keywords: cleanKeywordList(s.strong_keywords),
+        negative_keywords: cleanKeywordList(s.negative_keywords),
+        // Os 4 campos acima viajam como array nesta chamada (o backend faz o JSON.stringify);
+        // o tipo de FunnelStage declara string (formato de leitura do banco) — mesma folga de
+        // tipo que auto_keywords ja tem neste arquivo, so que aqui bate numa checagem estrita.
+      } as any)))
       setEditing(null); load()
     } catch (e: any) {
       alert('Erro ao salvar etapas: ' + (e.message || 'desconhecido'))
@@ -188,6 +206,29 @@ export default function Funnels() {
                         style={{ fontSize: 11, flex: 1 }}
                       />
                     )}
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4, paddingLeft: 22, marginTop: 4 }}>
+                    <span style={{ fontSize: 10, color: '#9B96B0' }}>Sinais de venda por palavra-chave (opcional, separe por vírgula):</span>
+                    <input
+                      className="input" style={{ fontSize: 11 }} placeholder="Gatilho do vendedor — ex: posso te mandar uma proposta"
+                      value={(Array.isArray(s.trigger_keywords) ? s.trigger_keywords : (s.trigger_keywords ? JSON.parse(s.trigger_keywords) : [])).join(', ')}
+                      onChange={e => updateStage(i, 'trigger_keywords', e.target.value.split(','))}
+                    />
+                    <input
+                      className="input" style={{ fontSize: 11 }} placeholder="Resposta fraca do lead (só conta com gatilho) — ex: quanto custa, qual o valor"
+                      value={(Array.isArray(s.weak_keywords) ? s.weak_keywords : (s.weak_keywords ? JSON.parse(s.weak_keywords) : [])).join(', ')}
+                      onChange={e => updateStage(i, 'weak_keywords', e.target.value.split(','))}
+                    />
+                    <input
+                      className="input" style={{ fontSize: 11 }} placeholder="Resposta forte do lead (vale sozinho) — ex: quero comprar, pode fechar"
+                      value={(Array.isArray(s.strong_keywords) ? s.strong_keywords : (s.strong_keywords ? JSON.parse(s.strong_keywords) : [])).join(', ')}
+                      onChange={e => updateStage(i, 'strong_keywords', e.target.value.split(','))}
+                    />
+                    <input
+                      className="input" style={{ fontSize: 11 }} placeholder="Resposta negativa — ex: não quero, caro demais"
+                      value={(Array.isArray(s.negative_keywords) ? s.negative_keywords : (s.negative_keywords ? JSON.parse(s.negative_keywords) : [])).join(', ')}
+                      onChange={e => updateStage(i, 'negative_keywords', e.target.value.split(','))}
+                    />
                   </div>
                 </div>
                 )
