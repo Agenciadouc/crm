@@ -51,6 +51,18 @@ test('reconstrucao e idempotente e o novo CHECK aceita pergunta so com question_
   assert.throws(() => db.prepare("INSERT INTO cadence_attempts (cadence_id, position, action_type) VALUES (?, 6, 'telepatia')").run(cad), /CHECK/)
 })
 
+test('reconstrucao ignora violacao de FK pre-existente em tabela alheia (lixo antigo do banco)', () => {
+  const { db, cad } = legacyDbWithData()
+  // simula producao: uma linha orfa numa tabela sem nenhuma relacao com cadence_attempts
+  // (ex.: cadencia apontando pra uma conta ja deletada ha muito tempo)
+  db.pragma('foreign_keys = OFF')
+  db.prepare("INSERT INTO cadences (id, account_id, name) VALUES (999, 888888, 'Orfa')").run()
+  db.pragma('foreign_keys = ON')
+  assert.ok(db.pragma('foreign_key_check').length > 0, 'pre-condicao: banco tem lixo de FK alheio')
+  assert.deepEqual(applyCadenceSchema(db), { rebuilt: true, count: 3 })
+  assert.ok(db.prepare("SELECT sql FROM sqlite_master WHERE name = 'cadence_attempts'").get().sql.includes("'pergunta'"))
+})
+
 test('reconstrucao recusa rodar dentro de uma transacao aberta (FK fica ligada) e nao muda nada', () => {
   const { db, cad, leadId } = legacyDbWithData()
   assert.equal(db.pragma('foreign_keys', { simple: true }), 1)

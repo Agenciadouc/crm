@@ -94,7 +94,10 @@ export function rebuildCadenceAttempts(db) {
       if (pointersAfter.current_attempt_id !== pointersBefore.current_attempt_id || pointersAfter.last_executed_attempt_id !== pointersBefore.last_executed_attempt_id) {
         throw new Error('lead_cadences perderia o passo atual')
       }
-      const fkViolations = db.pragma('foreign_key_check')
+      // Escopado em cadence_attempts: 'foreign_key_check' sem tabela varre o banco inteiro e
+      // pega lixo de FK alheio que ja existia (ex.: linhas orfas em outras tabelas), travando
+      // essa migracao para sempre sem relacao nenhuma com a reconstrucao.
+      const fkViolations = db.pragma('foreign_key_check(cadence_attempts)')
       if (fkViolations.length > 0) throw new Error(`cadence_attempts reconstruida com FK quebrada: ${JSON.stringify(fkViolations)}`)
     })()
   } finally {
