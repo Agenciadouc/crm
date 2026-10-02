@@ -15,7 +15,7 @@ import { applyPanelLayoutSchema } from './services/panelLayouts.js'
 import { applyLtvSchema } from './services/ltv/schema.js'
 import { backfillAllCustomers } from './services/ltv/customer.js'
 import { ensureAllRepurchaseFunnels } from './services/ltv/funnel.js'
-import { applyKeywordSignalsSchema } from './services/signals/schema.js'
+import { applyKeywordSignalsSchema, seedDefaultKeywordsForUntouchedStages } from './services/signals/schema.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const dbPath = resolve(__dirname, 'data', 'crm.db')
@@ -1533,6 +1533,8 @@ try { ensureAllRepurchaseFunnels(db) } catch (e) { console.error('[LTV] funil Re
 
 try {
   applyKeywordSignalsSchema(db)
+  const n = seedDefaultKeywordsForUntouchedStages(db)
+  if (n) console.log(`[Sinais] defaults de forte/negativo semeados em ${n} etapa(s) intocada(s)`)
 } catch (e) {
   console.error('[DB] sinais de palavra-chave (schema):', e.message)
 }
