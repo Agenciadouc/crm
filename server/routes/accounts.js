@@ -135,6 +135,33 @@ router.put('/:id/meta-capi', requireRole('super_admin', 'gerente'), (req, res) =
   res.json({ account: updated })
 })
 
+// Janela de silencio dos Sinais de Venda por Palavra-chave (spec 2026-10-02 §4.3).
+router.get('/:id/keyword-signals', (req, res) => {
+  const accountId = parseInt(req.params.id)
+  if (req.user.role !== 'super_admin' && req.user.account_id !== accountId) {
+    return res.status(403).json({ error: 'Sem permissao' })
+  }
+  const row = db.prepare('SELECT keyword_signal_ghost_hours FROM accounts WHERE id = ?').get(accountId)
+  if (!row) return res.status(404).json({ error: 'Conta nao encontrada' })
+  res.json(row)
+})
+
+router.put('/:id/keyword-signals', requireRole('super_admin', 'gerente'), (req, res) => {
+  const accountId = parseInt(req.params.id)
+  const account = db.prepare('SELECT id FROM accounts WHERE id = ?').get(accountId)
+  if (!account) return res.status(404).json({ error: 'Conta nao encontrada' })
+  if (req.user.role === 'gerente' && req.user.account_id !== account.id) {
+    return res.status(403).json({ error: 'Sem permissao' })
+  }
+  const hours = Number(req.body.keyword_signal_ghost_hours)
+  if (!Number.isInteger(hours) || hours < 1 || hours > 168) {
+    return res.status(400).json({ error: 'Janela deve ser um numero inteiro de 1 a 168 horas.' })
+  }
+  db.prepare("UPDATE accounts SET keyword_signal_ghost_hours = ?, updated_at = datetime('now') WHERE id = ?").run(hours, accountId)
+  const updated = db.prepare('SELECT keyword_signal_ghost_hours FROM accounts WHERE id = ?').get(accountId)
+  res.json(updated)
+})
+
 // Teste de conexao Meta CAPI — envia evento TestEvent pra validar credenciais
 router.post('/:id/test-meta-capi', requireRole('super_admin', 'gerente'), async (req, res) => {
   const account = db.prepare('SELECT id FROM accounts WHERE id = ?').get(req.params.id)

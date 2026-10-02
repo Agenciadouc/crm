@@ -1452,6 +1452,11 @@ export const fetchCustomerSettings = (accountId: number) =>
 export const saveCustomerSettings = (accountId: number, patch: CustomerSettingsPatch) =>
   apiFetch<CustomerSettings>(`/api/customers/settings?account_id=${accountId}`, { method: 'PUT', body: JSON.stringify(patch) })
 
+export const fetchKeywordSignalSettings = (accountId: number) =>
+  apiFetch<{ keyword_signal_ghost_hours: number }>(`/api/accounts/${accountId}/keyword-signals`)
+export const saveKeywordSignalSettings = (accountId: number, hours: number) =>
+  apiFetch<{ keyword_signal_ghost_hours: number }>(`/api/accounts/${accountId}/keyword-signals`, { method: 'PUT', body: JSON.stringify({ keyword_signal_ghost_hours: hours }) })
+
 export interface RepurchaseReason { id: number; account_id: number; grp: 'nao_agora' | 'nao_quer'; label: string; position: number; is_active: number }
 export const fetchReasons = (accountId: number) =>
   apiFetch<{ reasons: RepurchaseReason[] }>(`/api/customers/reasons?account_id=${accountId}`).then(d => d.reasons)
