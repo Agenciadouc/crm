@@ -26,9 +26,11 @@ router.post('/', requireRole('super_admin', 'gerente'), (req, res) => {
   const funnelId = result.lastInsertRowid
 
   if (stages && Array.isArray(stages)) {
-    const stmt = db.prepare('INSERT INTO funnel_stages (funnel_id, name, position, color, is_conversion, is_terminal, auto_keywords, meta_event_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+    const stmt = db.prepare('INSERT INTO funnel_stages (funnel_id, name, position, color, is_conversion, is_terminal, auto_keywords, meta_event_name, trigger_keywords, weak_keywords, strong_keywords, negative_keywords) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
     stages.forEach((s, i) => {
-      stmt.run(funnelId, s.name, i, s.color || '#FFB300', s.is_conversion ? 1 : 0, s.is_terminal ? 1 : 0, s.auto_keywords ? JSON.stringify(s.auto_keywords) : null, s.meta_event_name || null)
+      stmt.run(funnelId, s.name, i, s.color || '#FFB300', s.is_conversion ? 1 : 0, s.is_terminal ? 1 : 0, s.auto_keywords ? JSON.stringify(s.auto_keywords) : null, s.meta_event_name || null,
+        s.trigger_keywords ? JSON.stringify(s.trigger_keywords) : null, s.weak_keywords ? JSON.stringify(s.weak_keywords) : null,
+        s.strong_keywords ? JSON.stringify(s.strong_keywords) : null, s.negative_keywords ? JSON.stringify(s.negative_keywords) : null)
     })
   }
 
@@ -90,12 +92,16 @@ router.put('/:id/stages', requireRole('super_admin', 'gerente'), (req, res) => {
         const cur = db.prepare('SELECT system_key, is_conversion, is_terminal FROM funnel_stages WHERE id = ?').get(s.id)
         const isConversion = cur?.system_key ? cur.is_conversion : (s.is_conversion ? 1 : 0)
         const isTerminal = cur?.system_key ? cur.is_terminal : (s.is_terminal ? 1 : 0)
-        db.prepare('UPDATE funnel_stages SET name = ?, position = ?, color = ?, is_conversion = ?, is_terminal = ?, is_qualified = ?, is_meeting = ?, auto_keywords = ?, meta_event_name = ? WHERE id = ?').run(
-          s.name, i, s.color || '#FFB300', isConversion, isTerminal, s.is_qualified ? 1 : 0, s.is_meeting ? 1 : 0, s.auto_keywords ? JSON.stringify(s.auto_keywords) : null, s.meta_event_name || null, s.id
+        db.prepare('UPDATE funnel_stages SET name = ?, position = ?, color = ?, is_conversion = ?, is_terminal = ?, is_qualified = ?, is_meeting = ?, auto_keywords = ?, meta_event_name = ?, trigger_keywords = ?, weak_keywords = ?, strong_keywords = ?, negative_keywords = ? WHERE id = ?').run(
+          s.name, i, s.color || '#FFB300', isConversion, isTerminal, s.is_qualified ? 1 : 0, s.is_meeting ? 1 : 0, s.auto_keywords ? JSON.stringify(s.auto_keywords) : null, s.meta_event_name || null,
+          s.trigger_keywords ? JSON.stringify(s.trigger_keywords) : null, s.weak_keywords ? JSON.stringify(s.weak_keywords) : null,
+          s.strong_keywords ? JSON.stringify(s.strong_keywords) : null, s.negative_keywords ? JSON.stringify(s.negative_keywords) : null, s.id
         )
       } else {
-        db.prepare('INSERT INTO funnel_stages (funnel_id, name, position, color, is_conversion, is_terminal, is_qualified, is_meeting, auto_keywords, meta_event_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(
-          funnel.id, s.name, i, s.color || '#FFB300', s.is_conversion ? 1 : 0, s.is_terminal ? 1 : 0, s.is_qualified ? 1 : 0, s.is_meeting ? 1 : 0, s.auto_keywords ? JSON.stringify(s.auto_keywords) : null, s.meta_event_name || null
+        db.prepare('INSERT INTO funnel_stages (funnel_id, name, position, color, is_conversion, is_terminal, is_qualified, is_meeting, auto_keywords, meta_event_name, trigger_keywords, weak_keywords, strong_keywords, negative_keywords) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(
+          funnel.id, s.name, i, s.color || '#FFB300', s.is_conversion ? 1 : 0, s.is_terminal ? 1 : 0, s.is_qualified ? 1 : 0, s.is_meeting ? 1 : 0, s.auto_keywords ? JSON.stringify(s.auto_keywords) : null, s.meta_event_name || null,
+          s.trigger_keywords ? JSON.stringify(s.trigger_keywords) : null, s.weak_keywords ? JSON.stringify(s.weak_keywords) : null,
+          s.strong_keywords ? JSON.stringify(s.strong_keywords) : null, s.negative_keywords ? JSON.stringify(s.negative_keywords) : null
         )
       }
     }
