@@ -188,3 +188,18 @@ test('mensagem neutra entre o gatilho e a resposta fraca NAO desarma o gatilho (
 
   assert.equal(result.type, 'weak', 'o gatilho de 20min atras ainda deveria valer (janela padrao 24h), mesmo com uma resposta neutra no meio')
 })
+
+test('janela de silencio nao encolhe pelo fuso do servidor (America/Sao_Paulo, UTC-3): gatilho de 22h ainda vale dentro da janela padrao de 24h', () => {
+  const db = createRoteiroTestDb()
+  const s = seedRoteiroBase(db)
+  setStageKeywords(db, s.stages.novo, { weak_keywords: ['quanto custa'], trigger_keywords: ['posso te mandar uma proposta'] })
+  const leadId = addLead(db, { account_id: s.accountId, funnel_id: s.funnelId, stage_id: s.stages.novo, name: 'Lead A' })
+
+  // gatilho ha 22h (dentro da janela padrao de 24h); se a hora do created_at for lida como
+  // hora LOCAL (sem o 'Z') em vez de UTC, um servidor em UTC-3 encolheria a janela em 3h e
+  // excluiria esse gatilho por engano.
+  addMessage(db, { leadId, direction: 'outbound', content: 'posso te mandar uma proposta?', minutesAgo: 22 * 60 })
+  addMessage(db, { leadId, direction: 'inbound', content: 'quanto custa?', minutesAgo: 0 })
+  const result = processInboundSignal(db, { account: account(db, s.accountId), lead: db.prepare('SELECT * FROM leads WHERE id = ?').get(leadId), message: lastMessage(db, leadId) })
+  assert.equal(result.type, 'weak', 'gatilho de 22h atras deveria valer dentro da janela padrao de 24h, independente do fuso do servidor')
+})

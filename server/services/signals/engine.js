@@ -7,6 +7,14 @@ import { scheduleScore } from '../leadScore/recalc.js'
 import { classifyMessage, findTriggerKeyword, parseKeywordList } from './keywordMatch.js'
 import { getOutboundWithinWindow, confirmPendingWeakSignals, recordSignal } from './repo.js'
 
+// SQLite 'datetime(...)' grava 'YYYY-MM-DD HH:MM:SS' em UTC sem marcador de fuso -- o
+// construtor Date(...) do JS le isso como hora LOCAL (sem o 'Z'), o que encolhe a janela de
+// silencio pelo fuso do servidor (ex.: America/Sao_Paulo, UTC-3, tiraria 3h da janela).
+// Mesma correcao ja usada em server/services/leadScore/inputs.js (parseSqliteDate).
+function parseAsUtcMs(s) {
+  return Date.parse(String(s).replace(' ', 'T') + 'Z')
+}
+
 function tryAdvance(db, lead, currentStageId) {
   const stages = getFunnelStages(db, lead.funnel_id)
   const current = stages.find(s => s.id === currentStageId)
@@ -36,7 +44,7 @@ export function processInboundSignal(db, { account, lead, message }) {
   const confirmedSomething = confirmInfo.changes > 0
 
   // Passo B: classifica esta mensagem.
-  const sinceIso = new Date(new Date(message.created_at).getTime() - ghostHours * 3600000).toISOString()
+  const sinceIso = new Date(parseAsUtcMs(message.created_at) - ghostHours * 3600000).toISOString()
   const outboundRun = getOutboundWithinWindow(db, currentLead.id, message.id, sinceIso)
   const hasArmedTrigger = !!findTriggerKeyword(outboundRun.map(m => m.content), parseKeywordList(stage.trigger_keywords))
 
