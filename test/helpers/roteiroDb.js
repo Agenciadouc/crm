@@ -1,5 +1,6 @@
 import { createTestDb } from './memoryDb.js'
 import { applyRoteiroSchema } from '../../server/services/roteiro/schema.js'
+import { applyKeywordSignalsSchema } from '../../server/services/signals/schema.js'
 
 function addCol(db, table, col, type) {
   if (!db.prepare(`PRAGMA table_info(${table})`).all().some(c => c.name === col)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${type}`)
@@ -24,6 +25,7 @@ export function createRoteiroTestDb() {
     CREATE TABLE IF NOT EXISTS lead_instance_assignments (id INTEGER PRIMARY KEY AUTOINCREMENT, lead_id INTEGER NOT NULL, instance_id INTEGER NOT NULL, attendant_id INTEGER, created_at TEXT NOT NULL DEFAULT (datetime('now')));
   `)
   applyRoteiroSchema(db)
+  applyKeywordSignalsSchema(db)
   return db
 }
 

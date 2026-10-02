@@ -15,6 +15,7 @@ import { applyPanelLayoutSchema } from './services/panelLayouts.js'
 import { applyLtvSchema } from './services/ltv/schema.js'
 import { backfillAllCustomers } from './services/ltv/customer.js'
 import { ensureAllRepurchaseFunnels } from './services/ltv/funnel.js'
+import { applyKeywordSignalsSchema } from './services/signals/schema.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const dbPath = resolve(__dirname, 'data', 'crm.db')
@@ -1529,5 +1530,11 @@ try {
 try { const n = backfillAllCustomers(db); if (n) console.log(`[LTV] cache de ${n} clientes recalculado`) } catch (e) { console.error('[LTV] backfill:', e.message) }
 
 try { ensureAllRepurchaseFunnels(db) } catch (e) { console.error('[LTV] funil Recompra:', e.message) }
+
+try {
+  applyKeywordSignalsSchema(db)
+} catch (e) {
+  console.error('[DB] sinais de palavra-chave (schema):', e.message)
+}
 
 export default db
