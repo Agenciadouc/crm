@@ -99,7 +99,7 @@ router.put('/:id', requireRole('super_admin'), (req, res) => {
   if (anthropic_api_key !== undefined) { sets.push('anthropic_api_key = ?'); params.push(anthropic_api_key || null) }
   if (analysis_token_limit !== undefined) { sets.push('analysis_token_limit = ?'); params.push(analysis_token_limit || 200000) }
   if (ai_key_source !== undefined) {
-    if (!['client', 'dros'].includes(ai_key_source)) return res.status(400).json({ error: 'ai_key_source invalido' })
+    if (!['client', 'dros', 'auto'].includes(ai_key_source)) return res.status(400).json({ error: 'ai_key_source invalido' })
     sets.push('ai_key_source = ?'); params.push(ai_key_source)
   }
   if (sets.length === 0) return res.status(400).json({ error: 'Nada pra atualizar' })

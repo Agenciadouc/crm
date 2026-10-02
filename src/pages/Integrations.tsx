@@ -67,7 +67,7 @@ export default function Integrations() {
   if (!accountId) return <div className="loading-container"><span>Selecione uma conta</span></div>
   if (loading) return <div className="loading-container"><div className="spinner" /></div>
 
-  const hasAiKey = !!(account?.anthropic_api_key || account?.ai_key_source === 'dros')
+  const hasAiKey = !!(account?.anthropic_api_key || account?.ai_key_source === 'dros' || account?.ai_key_source === 'auto')
   const tiles: CardTile[] = [
     { id: 'whatsapp', label: 'WhatsApp', icon: <Smartphone size={16} />, status: whatsappTileStatus({ instances, loadError: instancesError }), visible: true },
     { id: 'leads', label: 'Entrada de leads', icon: <GitBranch size={16} />, status: 'Formulários e Google Planilhas', visible: isGerenteOuAdmin && !!account },

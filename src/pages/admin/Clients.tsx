@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { fetchAccounts, createAccount, formatNumber, checkAllInstances, type Account, type InstanceCheckResult } from '../../lib/api'
-import { Building2, Plus, Eye, RefreshCw, Wifi, WifiOff, QrCode, AlertTriangle, Loader, CheckCircle, X } from 'lucide-react'
+import { fetchAccounts, createAccount, updateAccount, formatNumber, checkAllInstances, type Account, type InstanceCheckResult } from '../../lib/api'
+import { Building2, Plus, Eye, RefreshCw, Wifi, WifiOff, QrCode, AlertTriangle, Loader, CheckCircle, X, Sparkles } from 'lucide-react'
 
 const SEGMENTOS = ['Imobiliaria', 'Clinica', 'E-commerce', 'Restaurante', 'Educacao', 'Saude', 'Servicos', 'Industria', 'Varejo', 'Tecnologia', 'Outro']
 
@@ -13,9 +13,34 @@ export default function Clients() {
   const [form, setForm] = useState({ name: '', cnpj: '', razao_social: '', instagram: '', segmento: '', trabalha_anuncio: false, investimento_anuncios: '', valor_mensal: '', observacoes: '' })
   const [checking, setChecking] = useState(false)
   const [checkResults, setCheckResults] = useState<{ summary: any; results: InstanceCheckResult[] } | null>(null)
+  const [selected, setSelected] = useState<Set<number>>(new Set())
+  const [applyingAiFallback, setApplyingAiFallback] = useState(false)
 
   const load = () => { setLoading(true); fetchAccounts().then(setAccounts).finally(() => setLoading(false)) }
   useEffect(load, [])
+
+  const toggleSelected = (id: number) => setSelected(prev => {
+    const next = new Set(prev)
+    if (next.has(id)) next.delete(id); else next.add(id)
+    return next
+  })
+  const allSelected = accounts.length > 0 && selected.size === accounts.length
+  const toggleSelectAll = () => setSelected(allSelected ? new Set() : new Set(accounts.map(a => a.id)))
+
+  // Liga a IA global (com fallback) nas contas selecionadas: cada uma usa a propria chave
+  // quando tiver, senao cai na chave da Dros. Custo segue a chave que de fato roda.
+  const handleActivateAiFallback = async () => {
+    if (selected.size === 0) return
+    setApplyingAiFallback(true)
+    try {
+      await Promise.all(Array.from(selected).map(id => updateAccount(id, { ai_key_source: 'auto' })))
+      setSelected(new Set())
+      load()
+    } catch (e: any) {
+      alert('Erro ao ativar IA global nos selecionados: ' + e.message)
+    }
+    setApplyingAiFallback(false)
+  }
 
   const handleCreate = async () => {
     if (!form.name) return
@@ -49,6 +74,11 @@ export default function Clients() {
       <div className="page-header">
         <h1><Building2 size={20} style={{ marginRight: 8 }} /> Clientes</h1>
         <div style={{ display: 'flex', gap: 8 }}>
+          {selected.size > 0 && (
+            <button className="btn btn-secondary btn-sm" onClick={handleActivateAiFallback} disabled={applyingAiFallback} title="Usa a chave propria quando a conta tiver; sem chave, cai na chave da Dros (custo cai na Dros)">
+              {applyingAiFallback ? <><Loader size={14} className="spinning" /> Ativando...</> : <><Sparkles size={14} /> Ativar IA global ({selected.size})</>}
+            </button>
+          )}
           <button className="btn btn-secondary btn-sm" onClick={handleCheckAll} disabled={checking} title="Verifica estado real de cada instancia na Evolution e reconecta as que cairam">
             {checking ? <><Loader size={14} className="spinning" /> Verificando...</> : <><RefreshCw size={14} /> Verificar instancias</>}
           </button>
@@ -97,10 +127,14 @@ export default function Clients() {
 
       {loading ? <div className="loading-container"><div className="spinner" /></div> : (
         <div className="table-card"><table>
-          <thead><tr><th>Nome</th><th>CNPJ</th><th>Instagram</th><th className="right">Leads</th><th>Anuncio</th><th className="right">Valor</th><th>Status</th><th className="right">Acoes</th></tr></thead>
+          <thead><tr>
+            <th style={{ width: 32 }}><input type="checkbox" checked={allSelected} onChange={toggleSelectAll} title="Selecionar todos" /></th>
+            <th>Nome</th><th>CNPJ</th><th>Instagram</th><th className="right">Leads</th><th>Anuncio</th><th className="right">Valor</th><th>Status</th><th className="right">Acoes</th>
+          </tr></thead>
           <tbody>
             {accounts.map(a => (
               <tr key={a.id}>
+                <td><input type="checkbox" checked={selected.has(a.id)} onChange={() => toggleSelected(a.id)} /></td>
                 <td className="name">{a.name}</td>
                 <td style={{ color: '#9B96B0', fontSize: 12 }}>{a.cnpj || '-'}</td>
                 <td style={{ fontSize: 12 }}>{a.instagram || '-'}</td>
@@ -111,7 +145,7 @@ export default function Clients() {
                 <td className="right"><button className="btn btn-secondary btn-sm" onClick={() => navigate(`/admin/clients/${a.id}`)}><Eye size={12} /> Ver</button></td>
               </tr>
             ))}
-            {accounts.length === 0 && <tr><td colSpan={8} style={{ textAlign: 'center', padding: 40, color: '#6B6580' }}>Nenhum cliente cadastrado</td></tr>}
+            {accounts.length === 0 && <tr><td colSpan={9} style={{ textAlign: 'center', padding: 40, color: '#6B6580' }}>Nenhum cliente cadastrado</td></tr>}
           </tbody>
         </table></div>
       )}

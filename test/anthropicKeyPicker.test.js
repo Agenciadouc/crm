@@ -22,3 +22,15 @@ test('dros sem a variavel devolve null (nao cai na chave do cliente)', () => {
 test('conta inexistente devolve null', () => {
   assert.equal(pickAnthropicKey(null, { ANTHROPIC_API_KEY_DROS: 'sk-dros' }), null)
 })
+
+test('auto com chave propria usa a propria (custo cai no cliente)', () => {
+  assert.equal(pickAnthropicKey({ anthropic_api_key: '  sk-cliente  ', ai_key_source: 'auto' }, { ANTHROPIC_API_KEY_DROS: 'sk-dros' }), 'sk-cliente')
+})
+
+test('auto sem chave propria cai na da Dros (custo cai na Dros)', () => {
+  assert.equal(pickAnthropicKey({ anthropic_api_key: '   ', ai_key_source: 'auto' }, { ANTHROPIC_API_KEY_DROS: ' sk-dros ' }), 'sk-dros')
+})
+
+test('auto sem chave propria e sem a variavel da Dros devolve null', () => {
+  assert.equal(pickAnthropicKey({ anthropic_api_key: null, ai_key_source: 'auto' }, {}), null)
+})

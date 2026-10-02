@@ -20,13 +20,13 @@ export default function AiCard({ accountId, account, isSuperAdmin, onAccountUpda
   const [anthropicSaved, setAnthropicSaved] = useState(false)
   const [testingAnthropic, setTestingAnthropic] = useState(false)
   const [anthropicTestResult, setAnthropicTestResult] = useState<{ ok: boolean; msg: string } | null>(null)
-  const [keySource, setKeySource] = useState<'client' | 'dros'>(account.ai_key_source === 'dros' ? 'dros' : 'client')
+  const [keySource, setKeySource] = useState<'client' | 'dros' | 'auto'>(account.ai_key_source === 'dros' || account.ai_key_source === 'auto' ? account.ai_key_source : 'client')
   const [savingKeySource, setSavingKeySource] = useState(false)
   // Avisos no lugar do alert(): um na origem da chave e um na chave Anthropic.
   const keySourceNotice = useInlineNotice()
   const keyNotice = useInlineNotice()
 
-  const handleKeySourceChange = async (value: 'client' | 'dros') => {
+  const handleKeySourceChange = async (value: 'client' | 'dros' | 'auto') => {
     const previous = keySource
     setKeySource(value)
     setSavingKeySource(true)
@@ -47,12 +47,14 @@ export default function AiCard({ accountId, account, isSuperAdmin, onAccountUpda
           <div className="section-title"><KeyRound size={14} /> Origem da chave da IA (só admin Dros)</div>
           <div className="card">
             <InlineNotice notice={keySourceNotice.notice} onClose={keySourceNotice.clear} />
-            <select className="select" value={keySource} disabled={savingKeySource} onChange={e => handleKeySourceChange(e.target.value as 'client' | 'dros')} style={{ minWidth: 280 }}>
-              <option value="client">Chave do cliente (cadastrada abaixo)</option>
-              <option value="dros">Chave da Dros</option>
+            <select className="select" value={keySource} disabled={savingKeySource} onChange={e => handleKeySourceChange(e.target.value as 'client' | 'dros' | 'auto')} style={{ minWidth: 280 }}>
+              <option value="client">Chave do cliente (cadastrada abaixo), sem fallback</option>
+              <option value="dros">Chave da Dros, sempre</option>
+              <option value="auto">Chave do cliente, com fallback pra Dros</option>
             </select>
             <p style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 6 }}>
               Vale para todos os agentes de IA, o Copiloto e as análises desta conta. Salva na hora, sem precisar clicar em Salvar.
+              {keySource === 'auto' && ' Com fallback: usa a chave do cliente quando ela existe (custo cai nele); sem chave do cliente, usa a chave da Dros (custo cai na Dros).'}
             </p>
           </div>
         </section>
@@ -61,12 +63,14 @@ export default function AiCard({ accountId, account, isSuperAdmin, onAccountUpda
         <div className="section-title"><Activity size={14} /> Chave da API Anthropic</div>
         <div className="card">
           <p style={{ fontSize: 12, color: '#9B96B0', marginBottom: 12 }}>
-            Esta conta usa <strong>sua própria conta Anthropic</strong> em todas as funções de IA (agentes no WhatsApp, análise de atendimentos e coaching). <strong>Sem a chave, a IA não funciona</strong> — não há fallback. A transcrição de áudio continua por nossa conta.
+            {keySource === 'auto'
+              ? <>Esta conta usa <strong>sua própria conta Anthropic</strong> quando cadastrada abaixo; sem ela, cai automaticamente na chave da Dros. A transcrição de áudio continua por nossa conta.</>
+              : <>Esta conta usa <strong>sua própria conta Anthropic</strong> em todas as funções de IA (agentes no WhatsApp, análise de atendimentos e coaching). <strong>Sem a chave, a IA não funciona</strong> — não há fallback. A transcrição de áudio continua por nossa conta.</>}
           </p>
 
           <InlineNotice notice={keyNotice.notice} onClose={keyNotice.clear} />
 
-          {!anthropicKey.trim() && keySource !== 'dros' && (
+          {!anthropicKey.trim() && keySource === 'client' && (
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#FFB300', background: 'rgba(255,179,0,0.08)', padding: '8px 10px', borderRadius: 6, marginBottom: 12 }}>
               <AlertTriangle size={14} /> Agentes habilitados, mas falta cadastrar a API Anthropic. Os agentes não respondem até salvar uma chave válida.
             </div>
