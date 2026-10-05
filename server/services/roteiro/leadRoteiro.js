@@ -2,6 +2,7 @@
 // (spec 4.1, 4.3, 7.5). Nao importa server/db.js: recebe db.
 import { RoteiroError, getPublishedQuestions } from './repo.js'
 import { questionTextForLead } from './variants.js'
+import { appliesToLead, effectiveProfileKey, setLeadProfile } from './profiles.js'
 
 const MAX_ANSWER_TEXT = 1000
 
@@ -83,8 +84,11 @@ export function getLeadRoteiro(db, { accountId, leadId }) {
   const lead = getLead(db, accountId, leadId)
   const funnelId = lead.funnel_id || null
   const stagesRaw = funnelId ? getFunnelStages(db, funnelId) : []
-  const questions = safeGetPublishedQuestions(db, accountId, funnelId)
-  const hasRoteiro = questions.length > 0
+  const allQuestions = safeGetPublishedQuestions(db, accountId, funnelId)
+  const hasRoteiro = allQuestions.length > 0
+  // So as perguntas do perfil do lead (sem perfil: so as de "Todos") — spec 2026-10-02 §5.
+  const leadProfile = effectiveProfileKey(db, lead)
+  const questions = allQuestions.filter(q => appliesToLead(q, leadProfile))
 
   const questionsByStage = new Map()
   for (const q of questions) {
@@ -118,7 +122,8 @@ export function getLeadRoteiro(db, { accountId, leadId }) {
     nextQuestionKey = first ? first.question_key : null
   }
 
-  const publishedKeys = new Set(questions.map(q => q.question_key))
+  // Resposta de pergunta de outro perfil nao e "orfa": a pergunta continua no roteiro.
+  const publishedKeys = new Set(allQuestions.map(q => q.question_key))
   const allAnswers = db.prepare('SELECT * FROM lead_answers WHERE lead_id = ? AND account_id = ? ORDER BY answered_at ASC').all(leadId, accountId)
   const legacyAnswers = allAnswers
     .filter(a => !publishedKeys.has(a.question_key))
@@ -132,6 +137,7 @@ export function getLeadRoteiro(db, { accountId, leadId }) {
     next_question_key: nextQuestionKey,
     progress,
     legacy_answers: legacyAnswers,
+    profile: { key: leadProfile, origin: lead.roteiro_profile_origin ?? null },
   }
 }
 
@@ -146,8 +152,9 @@ export function pendingRequired(db, { accountId, lead, fromStageId, toStageId })
 
   const stageById = new Map(stages.map(s => [s.id, s]))
   const questions = safeGetPublishedQuestions(db, accountId, lead.funnel_id)
+  const leadProfile = effectiveProfileKey(db, lead)
   const inRange = questions.filter(q => {
-    if (!q.required) return false
+    if (!q.required || !appliesToLead(q, leadProfile)) return false
     const stage = stageById.get(q.stage_id)
     return stage && stage.position >= fromStage.position && stage.position < toStage.position
   })
@@ -197,10 +204,12 @@ export function saveAnswer(db, { accountId, leadId, questionKey, optionKey = nul
 
   let finalOptionKey = null
   let finalAnswerText = null
+  let chosenOption = null
   if (question.kind === 'options') {
     const option = (question.options || []).find(o => o.option_key === optionKey)
     if (!option) throw new RoteiroError('invalid', 400, 'Selecione uma opção válida.')
     finalOptionKey = option.option_key
+    chosenOption = option
   } else {
     const text = typeof answerText === 'string' ? answerText.trim() : ''
     if (!text) throw new RoteiroError('invalid', 400, 'A resposta precisa de um texto.')
@@ -210,7 +219,7 @@ export function saveAnswer(db, { accountId, leadId, questionKey, optionKey = nul
 
   const existing = loadAnswerRow(db, leadId, questionKey)
   if (existing && existing.origin === 'manual' && origin === 'ia') {
-    return { answer: formatAnswer(existing, question), skipped: true }
+    return { answer: formatAnswer(existing, question), skipped: true, profile_changed: false }
   }
 
   db.prepare(`
@@ -231,6 +240,15 @@ export function saveAnswer(db, { accountId, leadId, questionKey, optionKey = nul
   // Resposta da IA nao libera: senao a IA desfaria o "Desfazer" do vendedor.
   if (origin === 'manual') db.prepare('UPDATE leads SET roteiro_no_auto_from_stage = NULL WHERE id = ?').run(leadId)
 
+  // Resposta que define o perfil (pergunta de descoberta): grava o perfil, menos por cima de
+  // um perfil escolhido a mao (spec 2026-10-02 §6).
+  let profileChanged = false
+  if (chosenOption && chosenOption.sets_profile_key && lead.roteiro_profile_origin !== 'manual') {
+    try {
+      profileChanged = setLeadProfile(db, { accountId, leadId, profileKey: chosenOption.sets_profile_key, origin }).changed
+    } catch (e) { if (!(e instanceof RoteiroError)) throw e } // perfil apagado: so ignora
+  }
+
   const saved = loadAnswerRow(db, leadId, questionKey)
-  return { answer: formatAnswer(saved, question), skipped: false }
+  return { answer: formatAnswer(saved, question), skipped: false, profile_changed: profileChanged }
 }

@@ -3,6 +3,7 @@
 import { getPublishedQuestions } from '../roteiro/repo.js'
 import { hasSignalLast7d, hasConfirmedWeakLast7d } from '../signals/repo.js'
 import { SPIN_LABEL } from '../roteiro/spinTemplate.js'
+import { appliesToLead, effectiveProfileKey } from '../roteiro/profiles.js'
 
 const DAY_MS = 86400000
 
@@ -23,9 +24,12 @@ function questionShortLabel(q) {
 }
 
 // Perfil (0..50 na computeLeadScore): soma das opcoes respondidas x maximo possivel.
-function buildFit(db, leadId, accountId, funnelId) {
-  const questions = funnelId ? getPublishedQuestions(db, accountId, funnelId) : []
-  const optionQuestions = questions.filter(q => q.kind === 'options')
+// So perguntas do perfil de cliente do lead (spec 2026-10-02 §5).
+function buildFit(db, lead) {
+  const leadId = lead.id
+  const questions = lead.funnel_id ? getPublishedQuestions(db, lead.account_id, lead.funnel_id) : []
+  const leadProfile = effectiveProfileKey(db, lead)
+  const optionQuestions = questions.filter(q => q.kind === 'options' && appliesToLead(q, leadProfile))
   const answers = db.prepare('SELECT question_key, option_key FROM lead_answers WHERE lead_id = ?').all(leadId)
   const answerByKey = new Map(answers.map(a => [a.question_key, a]))
 
@@ -141,7 +145,7 @@ export function gatherScoreInputs(db, leadId, { now = new Date() } = {}) {
   const nowMs = now.getTime()
 
   return {
-    fit: buildFit(db, leadId, lead.account_id, lead.funnel_id),
+    fit: buildFit(db, lead),
     engagement: buildEngagement(db, lead, account, nowMs),
     ai: buildAi(db, leadId, nowMs),
   }

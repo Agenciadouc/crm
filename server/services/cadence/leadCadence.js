@@ -5,6 +5,7 @@ import { CadenceError } from './errors.js'
 import { computeNext } from './nextStep.js'
 import { getLeadRoteiro, safeGetPublishedQuestions } from '../roteiro/leadRoteiro.js'
 import { activeDeviationForLead } from '../roteiro/deviations.js'
+import { appliesToLead, effectiveProfileKey } from '../roteiro/profiles.js'
 
 const MANAGER_ROLES = ['gerente', 'super_admin']
 const DONE_HOWS = ['enviado', 'feito', 'pulado']
@@ -32,8 +33,23 @@ function loadSteps(db, cadenceId) {
   const steps = db.prepare('SELECT * FROM cadence_attempts WHERE cadence_id = ? ORDER BY position ASC, id ASC').all(cadenceId)
   if (!steps.some(s => s.action_type === 'pergunta')) return steps.map(s => ({ ...s, orphan: false }))
   const cad = db.prepare('SELECT account_id, funnel_id FROM cadences WHERE id = ?').get(cadenceId)
-  const keys = new Set(cad ? safeGetPublishedQuestions(db, cad.account_id, cad.funnel_id).map(q => q.question_key) : [])
-  return steps.map(s => ({ ...s, orphan: s.action_type === 'pergunta' && !keys.has(s.question_key) }))
+  const profileByKey = new Map(cad ? safeGetPublishedQuestions(db, cad.account_id, cad.funnel_id).map(q => [q.question_key, q.profile_key ?? null]) : [])
+  return steps.map(s => ({
+    ...s,
+    orphan: s.action_type === 'pergunta' && !profileByKey.has(s.question_key),
+    question_profile_key: profileByKey.get(s.question_key) ?? null,
+  }))
+}
+
+// Pergunta de outro perfil fica "nao se aplica" para este lead (spec 2026-10-02 §5): os passos
+// em cache valem para todos os leads; a marca e calculada por lead.
+function forLead(db, leadId, steps) {
+  if (!steps.some(s => s.action_type === 'pergunta' && s.question_profile_key)) return steps
+  const p = effectiveProfileKey(db, db.prepare('SELECT * FROM leads WHERE id = ?').get(leadId))
+  return steps.map(s => ({
+    ...s,
+    not_applicable: s.action_type === 'pergunta' && !s.orphan && !appliesToLead({ profile_key: s.question_profile_key }, p),
+  }))
 }
 
 // Entrada atual do lead na etapa = ultimo stage_history para ela (0 quando nao ha historico).
@@ -65,7 +81,7 @@ function close(db, leadCadenceId) {
 export function refreshLeadCadence(db, { leadCadenceId, stepsCache = null }) {
   const lc = db.prepare('SELECT * FROM lead_cadences WHERE id = ?').get(leadCadenceId)
   if (!lc || lc.status !== 'active' || lc.kind !== 'etapa') return lc || null
-  const steps = stepsOf(db, lc.cadence_id, stepsCache)
+  const steps = forLead(db, lc.lead_id, stepsOf(db, lc.cadence_id, stepsCache))
   if (!steps.length) return lc // sem passos: fica aberta, sem passo atual (spec 9)
   const { nextAttemptId } = computeNext(steps, ctxFor(db, lc, steps))
   if (nextAttemptId === null) {
@@ -243,7 +259,7 @@ export function getLeadStageCadence(db, { accountId, leadId, role = null }) {
   }
   if (!lc) return { ...base, lead_cadence: null, steps: [], next_attempt_id: null, done_count: 0, total: 0 }
   const cad = db.prepare('SELECT id, name FROM cadences WHERE id = ?').get(lc.cadence_id)
-  const steps = stepsOf(db, lc.cadence_id)
+  const steps = forLead(db, lead.id, stepsOf(db, lc.cadence_id))
   const ctx = ctxFor(db, lc, steps)
   const { states, nextAttemptId, doneCount, total } = computeNext(steps, ctx)
   const roteiro = getLeadRoteiro(db, { accountId, leadId: lead.id })
@@ -259,7 +275,7 @@ export function getLeadStageCadence(db, { accountId, leadId, role = null }) {
         attempt_id: st.id, position: st.position, action_type: st.action_type, description: st.description, instructions: st.instructions,
         auto_message: st.auto_message, call_script: st.call_script, delay_days: st.delay_days, question_key: st.question_key,
         state: states[i].state, how: states[i].how, done_at: done ? done.done_at : null, done_by_name: by ? by.name : null,
-        orphan: st.orphan, question: st.question_key ? (qByKey.get(st.question_key) || null) : null,
+        orphan: st.orphan, not_applicable: !!st.not_applicable, question: st.question_key ? (qByKey.get(st.question_key) || null) : null,
       }
     }),
     next_attempt_id: lc.status === 'active' ? nextAttemptId : null,

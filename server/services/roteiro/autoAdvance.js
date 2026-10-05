@@ -4,6 +4,7 @@
 import { RoteiroError } from './repo.js'
 import { getFunnelStages, safeGetPublishedQuestions } from './leadRoteiro.js'
 import { moveLeadToStage } from '../stageMove.js'
+import { appliesToLead, effectiveProfileKey } from './profiles.js'
 
 // Etapa atual tem >= 1 obrigatoria, todas respondidas, o lead nao esta marcado pra nao
 // avancar a partir dela, e a proxima etapa (menor position maior que a atual) existe e
@@ -18,7 +19,9 @@ export function maybeAutoAdvance(db, { accountId, leadId, userId = null }) {
   if (!currentStage) return null
 
   const questions = safeGetPublishedQuestions(db, accountId, lead.funnel_id)
-  const requiredInStage = questions.filter(q => q.stage_id === lead.stage_id && q.required)
+  // So obrigatorias do perfil do lead (spec 2026-10-02 §5).
+  const leadProfile = effectiveProfileKey(db, lead)
+  const requiredInStage = questions.filter(q => q.stage_id === lead.stage_id && q.required && appliesToLead(q, leadProfile))
   if (!requiredInStage.length) return null
 
   const allAnswered = requiredInStage.every(q =>
