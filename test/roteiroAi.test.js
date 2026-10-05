@@ -344,9 +344,9 @@ test('buildAiDraft: salva rascunho, completa as fases SPIN, corrige etapa invali
   const fases = qs.map(q => q.spin).filter(Boolean).sort()
   assert.deepEqual(fases, ['implication', 'implication', 'need_payoff', 'problem', 'problem', 'situation'])
   const convidados = qs.find(q => q.text === 'Quantos convidados?')
-  assert.equal(convidados.stage_id, s.stages.novo) // 1a nao final
+  assert.equal(convidados.stage_id, s.stages.qualificando) // 1a etapa de conversa (Novo e de contato)
   const orcamento = qs.find(q => q.text === 'Qual o orçamento?')
-  assert.equal(orcamento.stage_id, s.stages.novo) // etapa final nao tem pergunta
+  assert.equal(orcamento.stage_id, s.stages.qualificando) // etapa final nao tem pergunta
   assert.equal(orcamento.options[1].points, 50) // pontos no limite
   assert.equal(qs.find(q => q.text === 'Opções sem opções').kind, 'text')
   assert.equal(qs.find(q => q.text === 'O que você precisa?').spin, null) // fase SPIN so em opcoes
@@ -617,4 +617,45 @@ test('bootRoteiroAi: IA identifica o perfil -> SSE lead:cadence (seletor e carta
   enqueueAiExtract({ db, account: null, lead: db.prepare('SELECT * FROM leads WHERE id = ?').get(leadId), message: { id: 1 } })
   await queue.flushAll()
   assert.deepEqual(sse.find(e => e[1] === 'lead:cadence'), [s.accountId, 'lead:cadence', { lead_id: leadId }])
+})
+
+test('montar com IA: SPIN por perfil, descoberta primeiro, contato realocado, fase faltando completada, conversas no prompt', async () => {
+  const db = createRoteiroTestDb(); const s = seedRoteiroBase(db) // Novo = contato; Qualificando/Proposta = conversa
+  const [loja, porta] = saveBusiness(db, s.accountId, { business_objective: 'revender limpeza', profiles: [{ name: 'Loja', description: 'mercadinho' }, { name: 'Porta', description: 'renda extra' }] }).profiles
+  const lead = addLead(db, { account_id: s.accountId, funnel_id: s.funnelId, stage_id: s.stages.qualificando })
+  addMessage(db, { leadId: lead, direction: 'inbound', content: 'quero revender no meu mercadinho' })
+  addMessage(db, { leadId: lead, direction: 'outbound', content: 'que legal' })
+  addMessage(db, { leadId: lead, direction: 'inbound', content: 'qual o preço da caixa?' })
+  const o = (l, p, sets) => ({ label: l, points: p, ...(sets ? { sets_profile_key: sets } : {}) })
+  let prompt = ''
+  const ai = fakeAi({ roteiro_draft: [p => { prompt = p.messages[0].content; assert.equal(p.maxTokens, 8000); return tool('propose_roteiro', { questions: [
+    { stage_id: s.stages.novo, text: 'Na etapa de contato', kind: 'options', spin: 'problem', profile_key: loja.profile_key, options: [o('a', 1), o('b', 0)] },
+    { stage_id: s.stages.qualificando, text: 'Quantas casas?', kind: 'options', spin: 'situation', profile_key: porta.profile_key, options: [o('a', 1), o('b', 0)] },
+    { stage_id: s.stages.qualificando, text: 'Loja ou porta?', kind: 'options', spin: 'situation', options: [o('Loja', 5, loja.profile_key), o('Porta', 5, porta.profile_key), o('x', 0, 'inventado')] },
+    { stage_id: s.stages.qualificando, text: 'Perfil inventado', kind: 'text', profile_key: 'nao-existe' },
+  ], deviations: [] }) }] })
+  const d = await buildAiDraft(db, { accountId: s.accountId, funnelId: s.funnelId, ai })
+  assert.match(prompt, /Novo \(tentativa de contato — sem perguntas\)/)
+  assert.match(prompt, /Qualificando \(em conversa — perguntas SPIN\)/)
+  assert.match(prompt, /revender limpeza/); assert.match(prompt, /mercadinho/); assert.match(prompt, /qual o preço da caixa/)
+  assert.equal(d.questions.some(q => q.stage_id === s.stages.novo), false)
+  const qual = d.questions.filter(q => q.stage_id === s.stages.qualificando).sort((a, b) => a.position - b.position)
+  assert.equal(qual[0].text, 'Loja ou porta?') // descoberta primeiro
+  assert.deepEqual(qual[0].options.map(x => x.sets_profile_key), [loja.profile_key, porta.profile_key, null])
+  assert.equal(d.questions.find(q => q.text === 'Perfil inventado').profile_key, null)
+  const fases = new Set(d.questions.map(q => q.spin))
+  for (const k of ['situation', 'problem', 'implication', 'need_payoff']) assert.ok(fases.has(k), k)
+  // ordem: Todos (descoberta, depois por fase) -> Loja -> Porta
+  const idx = t => qual.findIndex(q => q.text === t)
+  assert.ok(idx('Perfil inventado') < idx('Na etapa de contato'))
+  assert.ok(idx('Na etapa de contato') < idx('Quantas casas?'))
+  assert.deepEqual(qual.map(q => q.position), qual.map((_, i) => i))
+})
+
+test('montar com IA sem conversas e sem briefing: monta o SPIN geral', async () => {
+  const db = createRoteiroTestDb(); const s = seedRoteiroBase(db)
+  const ai = fakeAi({ roteiro_draft: [p => { assert.match(p.messages[0].content, /roteiro SPIN geral/); return tool('propose_roteiro', { questions: [], deviations: [] }) }] })
+  const d = await buildAiDraft(db, { accountId: s.accountId, funnelId: s.funnelId, ai })
+  assert.equal(d.questions.length, 6) // modelo SPIN inteiro completou as fases
+  assert.ok(d.questions.every(q => q.stage_id === s.stages.qualificando))
 })
