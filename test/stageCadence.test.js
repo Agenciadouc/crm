@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import {
   stageChipLabel, stepShortText, stepDayText, metricBadge, metricWhy, moveStep, dropStep, formFromStep, stepPatchFor,
   createSaveQueue, saveStatusLabel, readyDeviations, suggestionsForStep, stageSuggestions, testForStep, stageFromSearch,
-  stageSummary, sseTouchesView, deviationSuggestions, stageChipTitle,
+  stageSummary, sseTouchesView, deviationSuggestions, stageChipTitle, SPIN_OPTIONS,
 } from '../src/lib/stageCadence.js'
 
 function fakeTimers() {
@@ -65,7 +65,7 @@ test('ordem: id que nao esta na lista nao mexe em nada', () => {
 })
 
 test('formulario da pergunta: valida antes de mandar e guarda option_key', () => {
-  const step = { action_type: 'pergunta', delay_days: 0, question: { text: 'Para quando?', kind: 'options', required: true, bant: 'timeline', ai_hint: null,
+  const step = { action_type: 'pergunta', delay_days: 0, question: { text: 'Para quando?', kind: 'options', required: true, spin: 'situation', ai_hint: null,
     options: [{ option_key: 'a1', label: 'Até 30 dias', points: 15 }, { option_key: 'b2', label: 'Mais de 30 dias', points: 5 }] } }
   const form = formFromStep(step)
   const ok = stepPatchFor('pergunta', form)
@@ -85,7 +85,7 @@ test('formulario da pergunta: valida antes de mandar e guarda option_key', () =>
 })
 
 test('formulario da pergunta: opcao reordenada ou editada continua com a mesma option_key', () => {
-  const step = { action_type: 'pergunta', question: { text: 'Orçamento?', kind: 'options', required: false, bant: null, ai_hint: null,
+  const step = { action_type: 'pergunta', question: { text: 'Orçamento?', kind: 'options', required: false, spin: null, ai_hint: null,
     options: [{ option_key: 'k1', label: 'Até 5 mil', points: 5 }, { option_key: 'k2', label: 'Mais de 5 mil', points: 15 }] } }
   const form = formFromStep(step)
   const edited = { ...form, options: [{ ...form.options[1], label: 'Acima de 5 mil' }, form.options[0], { label: 'Não sei', points: '' }] }
@@ -235,7 +235,7 @@ test('campo Dia vazio ou invalido nao salva', () => {
   const reason = 'Coloque o dia: 0 ou mais (ex.: 0 = no mesmo dia).'
   assert.deepEqual(stepPatchFor('mensagem', { ...form, delay_days: '' }), { ok: false, reason })
   assert.deepEqual(stepPatchFor('ligacao', { ...form, delay_days: '-1' }), { ok: false, reason })
-  assert.deepEqual(stepPatchFor('pergunta', { ...formFromStep({ action_type: 'pergunta', question: { text: 'Quando?', kind: 'text', required: false, bant: null, ai_hint: null, options: [] } }), delay_days: '1.5' }), { ok: false, reason })
+  assert.deepEqual(stepPatchFor('pergunta', { ...formFromStep({ action_type: 'pergunta', question: { text: 'Quando?', kind: 'text', required: false, spin: null, ai_hint: null, options: [] } }), delay_days: '1.5' }), { ok: false, reason })
   assert.deepEqual(stepPatchFor('mensagem', { ...form, delay_days: '3' }), { ok: true, patch: { auto_message: 'Oi', delay_days: 3 } })
 })
 
@@ -244,4 +244,16 @@ test('porque dos numeros do chip', () => {
   assert.equal(stageChipTitle({ summary: { steps: 1, questions: 0 } }), '1 passo que o vendedor segue nesta etapa, na ordem; nenhum é pergunta do roteiro.')
   assert.equal(stageChipTitle({ summary: { steps: 1, questions: 1 } }), '1 passo que o vendedor segue nesta etapa, na ordem; 1 é pergunta do roteiro.')
   assert.equal(stageChipTitle({ summary: { steps: 0, questions: 0 } }), 'Nenhum passo ainda. Clique para montar a cadência desta etapa.')
+})
+
+test('formulario da pergunta leva fase SPIN, perfil e "define o perfil" das opcoes', () => {
+  const step = { action_type: 'pergunta', delay_days: 0, question: { text: 'Tem loja?', kind: 'options', required: true, spin: 'situation', profile_key: null, ai_hint: null,
+    options: [{ option_key: 'a', label: 'Sim', points: 5, sets_profile_key: 'loja' }, { option_key: 'b', label: 'Não', points: 0, sets_profile_key: null }] } }
+  const form = formFromStep(step)
+  assert.equal(form.spin, 'situation'); assert.equal(form.profile_key, null); assert.equal(form.options[0].sets_profile_key, 'loja')
+  const r = stepPatchFor('pergunta', { ...form, profile_key: 'porta' })
+  assert.equal(r.patch.question.spin, 'situation'); assert.equal(r.patch.question.profile_key, 'porta')
+  assert.deepEqual(r.patch.question.options.map(o => o.sets_profile_key ?? null), ['loja', null])
+  assert.equal('bant' in r.patch.question, false)
+  assert.deepEqual(SPIN_OPTIONS.map(o => o.label), ['Situação', 'Problema', 'Implicação', 'Necessidade de Solução'])
 })

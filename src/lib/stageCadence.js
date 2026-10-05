@@ -97,14 +97,23 @@ export function dropStep(ids, dragId, overId) {
   return out
 }
 
+// Fases SPIN da pergunta (spec 2026-10-02 §1): valor da API + rotulo da tela.
+export const SPIN_OPTIONS = [
+  { value: 'situation', label: 'Situação' },
+  { value: 'problem', label: 'Problema' },
+  { value: 'implication', label: 'Implicação' },
+  { value: 'need_payoff', label: 'Necessidade de Solução' },
+]
+
 export function formFromStep(step) {
   const q = step.question || null
   return {
     text: q ? q.text : '',
     required: q ? !!q.required : false,
     kind: q ? q.kind : 'text',
-    options: q ? (q.options || []).map(o => ({ option_key: o.option_key, label: o.label, points: String(o.points) })) : [],
-    bant: q ? q.bant : null,
+    options: q ? (q.options || []).map(o => ({ option_key: o.option_key, label: o.label, points: String(o.points), sets_profile_key: o.sets_profile_key ?? null })) : [],
+    spin: q ? (q.spin ?? null) : null,
+    profile_key: q ? (q.profile_key ?? null) : null,
     ai_hint: q && q.ai_hint ? q.ai_hint : '',
     auto_message: step.auto_message || '',
     description: step.description || '',
@@ -139,12 +148,12 @@ export function stepPatchFor(type, form) {
         const o = filled[i]
         const points = Number(String(o.points).trim() === '' ? 0 : o.points)
         if (!Number.isInteger(points) || points < -50 || points > 50) return { ok: false, reason: 'Os pontos vão de -50 a 50 (ex.: 15).' }
-        options.push({ ...(o.option_key ? { option_key: o.option_key } : {}), label: o.label.trim(), points, position: i })
+        options.push({ ...(o.option_key ? { option_key: o.option_key } : {}), label: o.label.trim(), points, position: i, ...(o.sets_profile_key ? { sets_profile_key: o.sets_profile_key } : {}) })
       }
     }
     return {
       ok: true,
-      patch: { delay_days: delay, question: { text, kind: form.kind, required: !!form.required, bant: form.bant || null, ai_hint: orNull(form.ai_hint), options } },
+      patch: { delay_days: delay, question: { text, kind: form.kind, required: !!form.required, spin: form.spin || null, profile_key: form.profile_key || null, ai_hint: orNull(form.ai_hint), options } },
     }
   }
   if (type === 'mensagem' || type === 'whatsapp') return { ok: true, patch: { auto_message: orNull(form.auto_message), delay_days: delay } }

@@ -194,7 +194,7 @@ export const forceAiRespond = async (id: number, instanceId?: number): Promise<{
   return body
 }
 // Trava do roteiro (spec 4.3): PUT /leads/:id/stage devolve 409 {code:'roteiro_gate', pending}
-export interface RoteiroOption { option_key: string; label: string; points: number; position: number }
+export interface RoteiroOption { option_key: string; label: string; points: number; position: number; sets_profile_key?: string | null }
 export interface RoteiroPendingQuestion {
   question_key: string; text: string; stage_id: number; stage_name: string
   kind: 'text' | 'options'; options: RoteiroOption[]

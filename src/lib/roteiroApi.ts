@@ -7,7 +7,7 @@ export type { RoteiroOption, RoteiroPendingQuestion }
 export { RoteiroGateError } from './api'
 
 export type RoteiroQuestionKind = 'text' | 'options'
-export type BantKey = 'budget' | 'authority' | 'need' | 'timeline'
+export type SpinKey = 'situation' | 'problem' | 'implication' | 'need_payoff'
 
 // ---------------------------------------------------------------- vendedor ----
 
@@ -30,7 +30,8 @@ export interface QState {
   variant: 'A' | 'B'
   kind: RoteiroQuestionKind
   required: boolean
-  bant: BantKey | null
+  spin: SpinKey | null
+  profile_key: string | null // perfil de cliente para o qual a pergunta vale (null = todos)
   options: RoteiroOption[]
   answer: RoteiroAnswer | null
   last_ask: { asked_at: string; replied_at: string | null } | null
@@ -56,6 +57,7 @@ export interface LeadRoteiroBase {
   next_question_key: string | null
   progress: { answered: number; total: number }
   legacy_answers: LegacyAnswer[]
+  profile: { key: string | null; origin: 'ia' | 'manual' | null } // perfil de cliente que vale para o lead
 }
 
 export interface RoteiroDeviation { triggers: string; reply_text: string; return_question_key: string | null; position: number }
@@ -107,7 +109,8 @@ export interface RoteiroQuestion {
   text: string
   kind: RoteiroQuestionKind
   required: boolean
-  bant: BantKey | null
+  spin: SpinKey | null
+  profile_key: string | null
   ai_hint: string | null
   options: RoteiroOption[]
 }
@@ -207,9 +210,33 @@ export const publishRoteiro = (funnelId: number, accountId: number) =>
 export const restoreVersion = (versionId: number, accountId: number) =>
   apiFetch<RoteiroVersion>(`/api/roteiro/versions/${versionId}/restore?account_id=${accountId}`, { method: 'POST' })
 
-// Soma as 4 perguntas BANT que faltarem ao rascunho
-export const bantTemplate = (funnelId: number, accountId: number) =>
-  apiFetch<RoteiroVersion>(`${fp(funnelId)}/bant-template?account_id=${accountId}`, { method: 'POST' })
+// Soma as perguntas do modelo SPIN cujas fases faltarem ao rascunho
+export const spinTemplate = (funnelId: number, accountId: number) =>
+  apiFetch<RoteiroVersion>(`${fp(funnelId)}/spin-template?account_id=${accountId}`, { method: 'POST' })
+
+// ------------------------------------------------ negocio e perfis de cliente ----
+
+export interface RoteiroProfile { profile_key: string; name: string; description: string | null; position: number }
+export interface Business { business_objective: string | null; profiles: RoteiroProfile[] }
+export interface BusinessInput { business_objective: string | null; profiles: { profile_key?: string; name: string; description: string | null }[] }
+
+export const fetchBusiness = (accountId: number) => apiFetch<Business>(`/api/roteiro/profiles?account_id=${accountId}`)
+export const saveBusiness = (accountId: number, body: BusinessInput) =>
+  apiFetch<Business>(`/api/roteiro/profiles?account_id=${accountId}`, { method: 'PUT', body: JSON.stringify(body) })
+// IA propoe objetivo + perfis a partir das conversas; nada e gravado ate o [Salvar]
+export const suggestBusiness = (accountId: number) =>
+  apiFetch<{ business_objective: string | null; profiles: { name: string; description: string }[] }>(`/api/roteiro/profiles/suggest?account_id=${accountId}`, { method: 'POST' })
+
+export interface LeadProfileView {
+  profile_key: string | null
+  origin: 'ia' | 'manual' | null
+  effective_key: string | null // com 1 perfil na conta, vale o unico mesmo sem escolha
+  profiles: { profile_key: string; name: string }[]
+}
+export const fetchLeadProfile = (leadId: number, accountId: number) =>
+  apiFetch<LeadProfileView>(`${lp(leadId)}/roteiro-profile?account_id=${accountId}`)
+export const saveLeadProfile = (leadId: number, accountId: number, profileKey: string | null) =>
+  apiFetch<LeadProfileView>(`${lp(leadId)}/roteiro-profile?account_id=${accountId}`, { method: 'PUT', body: JSON.stringify({ profile_key: profileKey }) })
 
 // Montar com IA: SUBSTITUI o rascunho inteiro (confirmar antes se ja houver rascunho).
 // 503 sem IA na conta; 502 quando a IA nao respondeu.

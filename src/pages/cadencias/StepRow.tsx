@@ -11,10 +11,11 @@ export interface StepRowProps {
   onSelect: () => void; onMove: (dir: -1 | 1) => void
   onDragStart: () => void; onDropHere: () => void
   onDeleteOrphan: () => void // pergunta que saiu do roteiro: so da para apagar
+  profileName?: string | null // pergunta so para um perfil de cliente ideal
 }
 
 // Uma linha por passo: numero, tipo, texto curto, obrigatoria, dia, selo da metrica, subir/descer.
-export default function StepRow({ step, index, metric, windowH, minRate, selected, first, last, onSelect, onMove, onDragStart, onDropHere, onDeleteOrphan }: StepRowProps) {
+export default function StepRow({ step, index, metric, windowH, minRate, selected, first, last, onSelect, onMove, onDragStart, onDropHere, onDeleteOrphan, profileName = null }: StepRowProps) {
   const Icon = STEP_ICONS[step.action_type] || MessageCircle
   const badge = step.orphan ? null : metricBadge(metric)
   const open = () => { if (!step.orphan) onSelect() }
@@ -40,6 +41,11 @@ export default function StepRow({ step, index, metric, windowH, minRate, selecte
         {step.action_type === 'pergunta' && step.question?.required && (
           <span title="Obrigatória: trava a mudança de etapa até ter resposta" style={{ fontSize: 11, color: 'var(--negative)', display: 'inline-flex', alignItems: 'center', gap: 2 }}>
             <Lock size={11} /> obrigatória
+          </span>
+        )}
+        {profileName && (
+          <span title={`Pergunta só para o perfil ${profileName}`} style={{ fontSize: 11, color: 'var(--text-secondary)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-full)', padding: '1px 7px', whiteSpace: 'nowrap' }}>
+            {profileName}
           </span>
         )}
         <span title="Quantos dias depois de entrar na etapa este passo vira tarefa" style={{ fontSize: 11, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{stepDayText(step)}</span>

@@ -86,7 +86,7 @@ export function addQuestion(questions, stageId, key = newLocalKey()) {
   const list = questions || []
   const q = {
     question_key: key, stage_id: stageId, position: stageQuestions(list, stageId).length,
-    text: '', kind: 'text', required: false, bant: null, ai_hint: null, options: [],
+    text: '', kind: 'text', required: false, spin: null, profile_key: null, ai_hint: null, options: [],
   }
   return list.concat([q])
 }
@@ -118,7 +118,7 @@ function canon(content) {
     .sort((a, b) => (a.stage_id - b.stage_id) || (a.position - b.position))
     .map(q => ({
       k: q.question_key || '', s: q.stage_id, p: q.position, t: String(q.text || '').trim(), kind: q.kind,
-      r: !!q.required, b: q.bant || null, h: String(q.ai_hint || '').trim() || null,
+      r: !!q.required, b: q.spin || null, pk: q.profile_key || null, h: String(q.ai_hint || '').trim() || null,
       o: (q.options || []).map(o => [String(o.label || '').trim(), Number(o.points) || 0]),
     }))
   const ds = ((content && content.deviations) || []).map(d => [
@@ -156,9 +156,9 @@ export function toDraftInput(content) {
   return {
     questions: (content.questions || []).map(q => ({
       question_key: q.question_key, stage_id: q.stage_id, position: q.position, text: q.text, kind: q.kind,
-      required: !!q.required, bant: q.bant || null, ai_hint: q.ai_hint || null,
+      required: !!q.required, spin: q.spin || null, profile_key: q.profile_key || null, ai_hint: q.ai_hint || null,
       options: q.kind === 'options'
-        ? (q.options || []).map((o, idx) => ({ option_key: o.option_key, label: o.label, points: Number(o.points) || 0, position: idx }))
+        ? (q.options || []).map((o, idx) => ({ option_key: o.option_key, label: o.label, points: Number(o.points) || 0, position: idx, ...(o.sets_profile_key ? { sets_profile_key: o.sets_profile_key } : {}) }))
         : [],
     })),
     deviations: (content.deviations || []).map((d, idx) => ({

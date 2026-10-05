@@ -7,7 +7,7 @@ import {
 } from '../src/lib/roteiroManager.js'
 
 const q = (key, stage, position, extra = {}) => ({
-  question_key: key, stage_id: stage, position, text: key, kind: 'text', required: false, bant: null, ai_hint: null, options: [], ...extra,
+  question_key: key, stage_id: stage, position, text: key, kind: 'text', required: false, spin: null, profile_key: null, ai_hint: null, options: [], ...extra,
 })
 const order = (qs, stage) => stageQuestions(qs, stage).map(x => x.question_key)
 
@@ -95,13 +95,14 @@ test('previousVersions tira o rascunho e ordena da mais nova', () => {
 test('toDraftInput: pontos numericos, posicao das opcoes e texto sem opcoes', () => {
   const r = toDraftInput({
     questions: [
-      q('a', 1, 0, { kind: 'options', bant: 'budget', options: [{ label: 'x', points: '15' }, { label: 'y', points: 0, option_key: 'k' }] }),
+      q('a', 1, 0, { kind: 'options', spin: 'need_payoff', profile_key: 'loja', options: [{ label: 'x', points: '15' }, { label: 'y', points: 0, option_key: 'k' }] }),
       q('b', 1, 1, { options: [{ label: 'sobra', points: 1 }] }),
     ],
     deviations: [{ triggers: 'preço', reply_text: 'r', return_question_key: '' }],
   })
   assert.deepEqual(r.questions[0].options, [{ option_key: undefined, label: 'x', points: 15, position: 0 }, { option_key: 'k', label: 'y', points: 0, position: 1 }])
-  assert.equal(r.questions[0].bant, 'budget')
+  assert.equal(r.questions[0].spin, 'need_payoff')
+  assert.equal(r.questions[0].profile_key, 'loja')
   assert.deepEqual(r.questions[1].options, [])
   assert.deepEqual(r.deviations, [{ triggers: 'preço', reply_text: 'r', return_question_key: null, position: 0 }])
 })

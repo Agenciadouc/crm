@@ -12,9 +12,10 @@ export function metricBadge(m: StepMetric | null | undefined): { text: string; t
 export function metricWhy(m: StepMetric | null | undefined, opts: { windowH: number; minRate: number }): string
 export function moveStep(ids: number[], id: number, dir: -1 | 1): number[]
 export function dropStep(ids: number[], dragId: number | null, overId: number): number[]
-export interface OptionForm { option_key?: string; label: string; points: string }
+export interface OptionForm { option_key?: string; label: string; points: string; sets_profile_key?: string | null }
+export const SPIN_OPTIONS: { value: 'situation' | 'problem' | 'implication' | 'need_payoff'; label: string }[]
 export interface StepForm {
-  text: string; required: boolean; kind: 'text' | 'options'; options: OptionForm[]; bant: string | null; ai_hint: string
+  text: string; required: boolean; kind: 'text' | 'options'; options: OptionForm[]; spin: string | null; profile_key: string | null; ai_hint: string
   auto_message: string; description: string; instructions: string; call_script: string; delay_days: number | string
 }
 export function formFromStep(step: Partial<CadenceStep>): StepForm

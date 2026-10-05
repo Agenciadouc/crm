@@ -7,7 +7,7 @@ import {
   type CadenceStep, type StageCadence, type StepPatch, type StepSaveResult, type StepType,
 } from '../../lib/cadenceApi'
 import {
-  createSaveQueue, formFromStep, saveStatusLabel, stepLabel, stepPatchFor,
+  createSaveQueue, formFromStep, saveStatusLabel, stepLabel, stepPatchFor, SPIN_OPTIONS,
   type SaveStatus, type StepForm, type OptionForm,
 } from '../../lib/stageCadence.js'
 import { STEP_ICONS } from './StepRow'
@@ -27,6 +27,7 @@ export interface StepPanelProps {
   onBackgroundError?: () => void
   onDeleted: (cadence: StageCadence) => void
   onClose?: () => void
+  profiles?: { profile_key: string; name: string }[] // perfis de cliente ideal da conta
   children?: ReactNode // StepInsights embaixo
 }
 
@@ -52,7 +53,7 @@ const errMsg = (e: unknown) => (e instanceof Error ? e.message : 'Erro ao salvar
 
 // Painel de um passo com salvar automatico. Montado com key por passo aberto: o texto local
 // nao e trocado por recargas da lista (SSE), e o passo novo continua no mesmo painel depois de criado.
-export default function StepPanel({ accountId, stageId, cadenceId, step, onSaved, onCreatedCadence, ensureCadence, onBackgroundError, onDeleted, onClose, children }: StepPanelProps) {
+export default function StepPanel({ accountId, stageId, cadenceId, step, onSaved, onCreatedCadence, ensureCadence, onBackgroundError, onDeleted, onClose, profiles = [], children }: StepPanelProps) {
   const type = step.action_type
   const [form, setForm] = useState<StepForm>(() => formFromStep(step as Partial<CadenceStep>))
   const [status, setStatus] = useState<SaveStatus>('idle')
@@ -162,6 +163,30 @@ export default function StepPanel({ accountId, stageId, cadenceId, step, onSaved
             Obrigatória (trava a etapa)
             <HelpTip title="Obrigatória">Com a chave ligada, o lead só passa para a próxima etapa quando esta pergunta tiver resposta. Ex.: sem saber a data do evento, não dá para mandar proposta.</HelpTip>
           </label>
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+            <div style={{ display: 'grid', gap: 4, flex: '1 1 160px' }}>
+              <span style={labelStyle}>
+                <label htmlFor="step-spin">Fase SPIN</label>
+                <HelpTip title="Fase SPIN" width={320}>Em que parte da conversa de venda a pergunta entra. Situação = como o cliente faz hoje (ex.: "Como você resolve isso hoje?"). Problema = onde dói (ex.: "O que mais te incomoda?"). Implicação = o que custa se continuar (ex.: "E se continuar assim, o que acontece?"). Necessidade de Solução = o cliente fala o ganho (ex.: "Se estivesse resolvido, o que mudaria?").</HelpTip>
+              </span>
+              <select id="step-spin" className="select" value={form.spin || ''} onChange={e => change({ spin: e.target.value || null })}>
+                <option value="">Nenhuma</option>
+                {SPIN_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </select>
+            </div>
+            {profiles.length > 0 && (
+              <div style={{ display: 'grid', gap: 4, flex: '1 1 160px' }}>
+                <span style={labelStyle}>
+                  <label htmlFor="step-profile">Perfil</label>
+                  <HelpTip title="Perfil">Para qual cliente ideal esta pergunta vale. Ex.: "Quantos clientes passam na loja?" só para o perfil Loja. "Todos" vale para qualquer lead.</HelpTip>
+                </span>
+                <select id="step-profile" className="select" value={form.profile_key || ''} onChange={e => change({ profile_key: e.target.value || null })}>
+                  <option value="">Todos</option>
+                  {profiles.map(p => <option key={p.profile_key} value={p.profile_key}>{p.name}</option>)}
+                </select>
+              </div>
+            )}
+          </div>
           <div style={{ display: 'grid', gap: 6 }}>
             <span style={labelStyle}>
               Respostas
@@ -184,6 +209,14 @@ export default function StepPanel({ accountId, stageId, cadenceId, step, onSaved
                       onChange={e => setOption(i, { label: e.target.value })} />
                     <input className="input" style={{ width: 72, textAlign: 'center' }} inputMode="numeric" value={o.points} placeholder="ex.: 15" aria-label={`Pontos da opção ${i + 1}`}
                       title="Pontos que esta resposta soma no termômetro (de -50 a 50)" onChange={e => setOption(i, { points: e.target.value })} />
+                    {profiles.length >= 2 && !form.profile_key && (
+                      <select className="select" style={{ width: 120 }} value={o.sets_profile_key || ''} aria-label={`Esta resposta define o perfil (opção ${i + 1})`}
+                        title='Opcional: quem escolher esta resposta passa a ser deste perfil. Ex.: "Tenho loja" → Loja'
+                        onChange={e => setOption(i, { sets_profile_key: e.target.value || null })}>
+                        <option value="">Perfil: —</option>
+                        {profiles.map(p => <option key={p.profile_key} value={p.profile_key}>{p.name}</option>)}
+                      </select>
+                    )}
                     <button type="button" className="btn btn-secondary btn-sm btn-icon" aria-label="Tirar opção" title="Tirar opção"
                       onClick={() => change({ options: form.options.filter((_, idx) => idx !== i) })}><X size={12} /></button>
                   </div>
@@ -205,19 +238,6 @@ export default function StepPanel({ accountId, stageId, cadenceId, step, onSaved
                   <label style={labelStyle} htmlFor="step-hint">Dica para a IA</label>
                   <input id="step-hint" className="input" value={form.ai_hint} placeholder="ex.: procure a data do evento na conversa, mesmo escrita por extenso"
                     onChange={e => change({ ai_hint: e.target.value })} />
-                </div>
-                <div style={{ display: 'grid', gap: 4 }}>
-                  <span style={labelStyle}>
-                    <label htmlFor="step-bant">BANT</label>
-                    <HelpTip title="BANT">Marque qual das 4 perguntas clássicas de venda esta pergunta cobre. Ex.: "Para quando você precisa?" = Prazo.</HelpTip>
-                  </span>
-                  <select id="step-bant" className="select" value={form.bant || ''} onChange={e => change({ bant: e.target.value || null })}>
-                    <option value="">Nenhum</option>
-                    <option value="budget">Orçamento</option>
-                    <option value="authority">Quem decide</option>
-                    <option value="need">Necessidade</option>
-                    <option value="timeline">Prazo</option>
-                  </select>
                 </div>
               </div>
             )}

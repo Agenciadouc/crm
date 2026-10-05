@@ -22,6 +22,7 @@ import StepPanel, { type NewStep } from './StepPanel'
 import StepInsights from './StepInsights'
 import StageDeviations from './StageDeviations'
 import StageSettings from './StageSettings'
+import BusinessProfilesCard from './BusinessProfilesCard'
 import StageEmpty, { AddStepMenu, TemplateButtons } from './StageEmpty'
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : 'Erro.')
@@ -218,6 +219,8 @@ export default function StageCadences() {
         </div>
       )}
 
+      <BusinessProfilesCard accountId={accountId} onSaved={() => loadView()} />
+
       {!view ? (
         <div className="loading-container"><div className="spinner" /></div>
       ) : (
@@ -273,7 +276,8 @@ export default function StageCadences() {
                     onMove={dir => reorder(moveStep(ids, a.id, dir))}
                     onDragStart={() => { dragRef.current = a.id }}
                     onDropHere={() => { const from = dragRef.current; dragRef.current = null; if (from != null && from !== a.id) reorder(dropStep(ids, from, a.id)) }}
-                    onDeleteOrphan={() => setOrphanToDelete(a)} />
+                    onDeleteOrphan={() => setOrphanToDelete(a)}
+                    profileName={a.question?.profile_key ? (view.profiles || []).find(p => p.profile_key === a.question?.profile_key)?.name ?? null : null} />
                 ))}
                 {selected === 'novo' && newStep && (
                   <div style={{ fontSize: 12, color: 'var(--text-muted)', padding: '6px 10px', border: '1px dashed var(--border-subtle)', borderRadius: 'var(--radius-sm)' }}>
@@ -294,7 +298,8 @@ export default function StageCadences() {
                     ensureCadence={ensureCadenceFor(stage.id)}
                     onBackgroundError={() => setError(`Não salvou a última mudança do passo ${stepNo}. Abra o passo e tente de novo.`)}
                     onDeleted={c => { putCadence(c); closePanel() }}
-                    onClose={closePanel}>
+                    onClose={closePanel}
+                    profiles={view.profiles || []}>
                     {panelStep.id != null && (
                       <StepInsights accountId={accountId} step={panelStep as CadenceStep} metric={metricOf(panelStep.id)} windowH={windowH} minRate={minRate}
                         suggestions={suggestionsForStep(sugs.suggestions, panelStep as CadenceStep)} test={testForStep(sugs.tests, panelStep as CadenceStep)}

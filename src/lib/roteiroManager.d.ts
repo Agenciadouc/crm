@@ -6,7 +6,7 @@ export function fmtPct(n: number | null | undefined): string
 interface OptionLike { label: string; points: number | string; option_key?: string; position?: number }
 interface QuestionLike {
   question_key: string; stage_id: number; position: number; text: string; kind: 'text' | 'options'
-  required: boolean; bant: string | null; ai_hint: string | null; options: OptionLike[]
+  required: boolean; spin: string | null; profile_key?: string | null; ai_hint: string | null; options: OptionLike[]
 }
 interface DeviationLike { triggers: string; reply_text: string; return_question_key: string | null; position?: number }
 interface ContentLike { questions: QuestionLike[]; deviations: DeviationLike[] }
@@ -25,7 +25,7 @@ export function hasUnpublished(roteiro: { draft: ContentLike | null; published: 
 export function hasAnyQuestions(roteiro: { draft: ContentLike | null; published: ContentLike | null } | null | undefined): boolean
 export function previousVersions<V extends { status: string; version: number }>(versions: V[] | null | undefined): V[]
 export function toDraftInput(content: ContentLike): {
-  questions: (Omit<QuestionLike, 'options' | 'bant'> & { bant: any; options: { option_key?: string; label: string; points: number; position: number }[] })[]
+  questions: (Omit<QuestionLike, 'options' | 'spin'> & { spin: any; profile_key: string | null; options: { option_key?: string; label: string; points: number; position: number; sets_profile_key?: string }[] })[]
   deviations: (DeviationLike & { position: number })[]
 }
 

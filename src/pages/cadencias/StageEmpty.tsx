@@ -35,14 +35,14 @@ export interface TemplateButtonsProps {
   compact?: boolean // cabecalho da lista (etapa com passos): botoes menores, sem HelpTip
 }
 
-// [Comecar com modelo] (BANT) e [Montar com IA]. Etapa que ja tem passos pede confirmacao antes.
+// [Comecar com modelo SPIN] e [Montar com IA]. Etapa que ja tem passos pede confirmacao antes.
 export function TemplateButtons({ accountId, funnelId, stage, onCadence, compact = false }: TemplateButtonsProps) {
-  const [busy, setBusy] = useState<'bant' | 'ia' | null>(null)
-  const [confirm, setConfirm] = useState<'bant' | 'ia' | null>(null)
+  const [busy, setBusy] = useState<'spin' | 'ia' | null>(null)
+  const [confirm, setConfirm] = useState<'spin' | 'ia' | null>(null)
   const [aiOff, setAiOff] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const run = async (mode: 'bant' | 'ia') => {
+  const run = async (mode: 'spin' | 'ia') => {
     setConfirm(null)
     setBusy(mode); setError(null)
     try {
@@ -54,15 +54,15 @@ export function TemplateButtons({ accountId, funnelId, stage, onCadence, compact
       setBusy(null)
     }
   }
-  const ask = (mode: 'bant' | 'ia') => { if (stage.summary.steps > 0) setConfirm(mode); else run(mode) }
+  const ask = (mode: 'spin' | 'ia') => { if (stage.summary.steps > 0) setConfirm(mode); else run(mode) }
 
   return (
     <>
       <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-        <button type="button" className="btn btn-secondary btn-sm" disabled={busy !== null} onClick={() => ask('bant')}>
-          <ListChecks size={12} /> {busy === 'bant' ? 'Montando…' : 'Começar com modelo'}
+        <button type="button" className="btn btn-secondary btn-sm" disabled={busy !== null} onClick={() => ask('spin')}>
+          <ListChecks size={12} /> {busy === 'spin' ? 'Montando…' : 'Começar com modelo SPIN'}
         </button>
-        {!compact && <HelpTip title="Começar com modelo">Coloca as 4 perguntas clássicas de venda: necessidade, orçamento, quem decide e prazo (só as que o funil ainda não tem).</HelpTip>}
+        {!compact && <HelpTip title="Começar com modelo SPIN">Coloca 6 perguntas de venda SPIN: como o cliente faz hoje, o que incomoda (2), o que isso custa (2) e quanto vale resolver. Só as fases que o funil ainda não tem.</HelpTip>}
         <button type="button" className="btn btn-secondary btn-sm" disabled={busy !== null || aiOff} title={aiOff ? AI_OFF_TEXT : undefined} onClick={() => ask('ia')}>
           <Sparkles size={12} /> {busy === 'ia' ? 'A IA está montando…' : 'Montar com IA'}
         </button>
@@ -70,7 +70,7 @@ export function TemplateButtons({ accountId, funnelId, stage, onCadence, compact
       {aiOff && <div style={{ fontSize: 12, color: 'var(--warning)', marginTop: 6, width: '100%' }}>{AI_OFF_TEXT}</div>}
       {error && <div style={{ fontSize: 12, color: 'var(--negative)', marginTop: 6, width: '100%' }}>{error}</div>}
       {confirm && (
-        <ConfirmDialog title="Somar perguntas a esta etapa?" confirmLabel={confirm === 'ia' ? 'Montar com IA' : 'Começar com modelo'}
+        <ConfirmDialog title="Somar perguntas a esta etapa?" confirmLabel={confirm === 'ia' ? 'Montar com IA' : 'Começar com modelo SPIN'}
           onConfirm={() => run(confirm)} onCancel={() => setConfirm(null)}>
           {`A etapa ${stage.name} já tem ${stage.summary.steps} ${stage.summary.steps === 1 ? 'passo' : 'passos'}. As perguntas novas entram no fim da lista e nada é apagado. Ex.: se já existe "Para quando é o evento?", confira depois se não ficou repetida.`}
         </ConfirmDialog>
@@ -89,6 +89,11 @@ export default function StageEmpty({ accountId, funnelId, stage, onCadence, onAd
   return (
     <div className="card" style={{ padding: 16, display: 'grid', gap: 10 }}>
       <div style={{ fontSize: 14, fontWeight: 600 }}>Esta etapa ainda não tem passos.</div>
+      {stage.is_contact && (
+        <div style={{ fontSize: 12, color: 'var(--warning)', lineHeight: 1.5 }}>
+          Etapa de tentativa de contato: normalmente sem perguntas. Use mensagens e ligações até o cliente responder. Ex.: 1º Mensagem "Oi {'{nome}'}, vi seu cadastro" · 2º Ligação no dia 1.
+        </div>
+      )}
       <div style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.5 }}>
         Exemplo: 1º Pergunta "Para quando é o seu evento, {'{nome}'}?" · 2º Mensagem "Segue o catálogo" · 3º Ligação no dia 2.
       </div>
