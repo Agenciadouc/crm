@@ -57,10 +57,10 @@ export function leadIn(db, s, stageKey, fields = {}) {
 }
 
 export const Q_PRAZO = {
-  text: 'Para quando é o seu evento, {nome}?', kind: 'options', required: true, bant: 'timeline', ai_hint: null,
+  text: 'Para quando é o seu evento, {nome}?', kind: 'options', required: true, spin: 'situation', ai_hint: null,
   options: [{ label: 'Até 30 dias', points: 15 }, { label: 'Mais de 30 dias', points: 5 }],
 }
-export const Q_LIVRE = { text: 'Conte mais sobre o evento', kind: 'text', required: false, bant: null, ai_hint: null, options: [] }
+export const Q_LIVRE = { text: 'Conte mais sobre o evento', kind: 'text', required: false, spin: null, ai_hint: null, options: [] }
 
 export function publishedRoteiro(db, s) {
   return getRoteiro(db, s.accountId, s.funnelId).published

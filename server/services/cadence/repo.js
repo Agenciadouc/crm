@@ -2,7 +2,7 @@
 // passos 'pergunta' com o roteiro (spec 2026-09-27 §3.1-3.4, §4.3). A cadencia e a tela;
 // o roteiro publicado continua sendo o motor. Recebe db (nao importa server/db.js).
 import { getRoteiro, saveDraft, publish, newKey } from '../roteiro/repo.js'
-import { BANT_QUESTIONS } from '../roteiro/bantTemplate.js'
+import { missingSpinQuestions } from '../roteiro/spinTemplate.js'
 import { buildAiDraft } from '../roteiro/aiDraft.js'
 import { applySuggestion, confirmVariant } from '../roteiro/learning.js'
 import { CADENCE_ACTION_TYPES } from './schema.js'
@@ -168,9 +168,9 @@ export function deleteCadence(db, accountId, cadenceId) {
 
 function projectQuestion(q) {
   const opts = q.kind === 'options' ? (q.options || []) : []
-  return [q.question_key, q.stage_id, q.position, String(q.text || '').trim(), q.kind, !!q.required, q.bant ?? null,
+  return [q.question_key, q.stage_id, q.position, String(q.text || '').trim(), q.kind, !!q.required, q.spin ?? null, q.profile_key ?? null,
     (typeof q.ai_hint === 'string' && q.ai_hint.trim()) || null,
-    opts.map((o, i) => [o.option_key ?? null, String(o.label || '').trim(), Number(o.points), Number.isInteger(o.position) ? o.position : i])]
+    opts.map((o, i) => [o.option_key ?? null, String(o.label || '').trim(), Number(o.points), Number.isInteger(o.position) ? o.position : i, o.sets_profile_key ?? null])]
 }
 function projectDeviation(d, i) {
   return [String(d.triggers || '').trim(), String(d.reply_text || '').trim(), d.return_question_key ?? null, i]
@@ -221,11 +221,11 @@ export function syncStageQuestions(db, accountId, cadenceId, { overrides = new M
   const stageQuestions = steps.map((a, idx) => {
     const base = baseByKey.get(a.question_key)
     const patch = overrides.get(a.question_key)
-    const m = { ...(base || { kind: 'text', required: false, bant: null, ai_hint: null, options: [] }), ...(patch || {}) }
+    const m = { ...(base || { kind: 'text', required: false, spin: null, profile_key: null, ai_hint: null, options: [] }), ...(patch || {}) }
     if (base && patch && Array.isArray(patch.options)) m.options = keepOptionKeys(base.options || [], patch.options)
     return {
       question_key: a.question_key, stage_id: c.stage_id, position: idx,
-      text: m.text, kind: m.kind, required: !!m.required, bant: m.bant ?? null, ai_hint: m.ai_hint ?? null,
+      text: m.text, kind: m.kind, required: !!m.required, spin: m.spin ?? null, profile_key: m.profile_key ?? null, ai_hint: m.ai_hint ?? null,
       options: m.kind === 'options' ? (m.options || []) : [],
     }
   })
@@ -427,15 +427,15 @@ export function addQuestionSteps(db, accountId, { stageId, questions, userId = n
 
 function toQuestionInput(q) {
   return {
-    text: q.text, kind: q.kind, required: !!q.required, bant: q.bant ?? null, ai_hint: q.ai_hint ?? null,
-    options: (q.options || []).map((o, i) => ({ label: o.label, points: o.points, position: i })),
+    text: q.text, kind: q.kind, required: !!q.required, spin: q.spin ?? null, profile_key: q.profile_key ?? null, ai_hint: q.ai_hint ?? null,
+    options: (q.options || []).map((o, i) => ({ label: o.label, points: o.points, position: i, sets_profile_key: o.sets_profile_key ?? null })),
   }
 }
 
-export function bantStepQuestions(db, accountId, funnelId) {
+// "Comecar com modelo SPIN" da etapa: so as fases que o funil publicado ainda nao tem.
+export function spinStepQuestions(db, accountId, funnelId) {
   const { content } = publishedContent(db, accountId, funnelId)
-  const used = new Set(content.questions.map(q => q.bant).filter(Boolean))
-  return BANT_QUESTIONS.filter(b => !used.has(b.bant)).map(b => toQuestionInput({ ...b, ai_hint: null }))
+  return missingSpinQuestions(content.questions).map(b => toQuestionInput({ ...b, profile_key: null, ai_hint: null }))
 }
 
 // Montar com IA (spec 5.1): usa o gerador do roteiro e fica so com as perguntas desta etapa.
@@ -447,7 +447,7 @@ export async function aiStepQuestions(db, accountId, { funnelId, stageId, ai }) 
   if (before) saveDraft(db, accountId, funnelId, { questions: before.questions, deviations: before.deviations })
   else resetDraftToPublished(db, accountId, funnelId)
   const qs = draft.questions.filter(q => q.stage_id === Number(stageId))
-  if (!qs.length) throw new CadenceError('ai_empty', 422, 'A IA não sugeriu perguntas para esta etapa. Tente o modelo BANT.')
+  if (!qs.length) throw new CadenceError('ai_empty', 422, 'A IA não sugeriu perguntas para esta etapa. Tente o modelo SPIN.')
   return qs.map(toQuestionInput)
 }
 

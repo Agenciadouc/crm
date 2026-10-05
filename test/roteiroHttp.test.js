@@ -67,9 +67,9 @@ async function comServidor(fn, { ai = null } = {}) {
 function publishRoteiroDuasEtapas(db, accountId, funnelId, stages) {
   saveDraft(db, accountId, funnelId, {
     questions: [
-      { stage_id: stages.novo, position: 0, text: 'Qual seu nome completo?', kind: 'text', required: true, bant: null, ai_hint: null },
+      { stage_id: stages.novo, position: 0, text: 'Qual seu nome completo?', kind: 'text', required: true, spin: null, ai_hint: null },
       {
-        stage_id: stages.qualificando, position: 0, text: 'Qual sua faixa de orçamento?', kind: 'options', required: true, bant: 'budget', ai_hint: null,
+        stage_id: stages.qualificando, position: 0, text: 'Qual sua faixa de orçamento?', kind: 'options', required: true, spin: 'need_payoff', ai_hint: null,
         options: [{ label: 'Até R$5 mil', points: 5 }, { label: 'Acima de R$20 mil', points: 15 }],
       },
     ],
@@ -94,7 +94,7 @@ test('gestor salva rascunho, publica e le o funil', async () => {
       path: `/api/roteiro/funnels/${funnelId}/draft`,
       jwtToken: t,
       body: {
-        questions: [{ stage_id: stages.novo, position: 0, text: 'Qual seu nome?', kind: 'text', required: true, bant: null, ai_hint: null }],
+        questions: [{ stage_id: stages.novo, position: 0, text: 'Qual seu nome?', kind: 'text', required: true, spin: null, ai_hint: null }],
         deviations: [],
       },
     })
@@ -124,7 +124,7 @@ test('atendente recebe 403 nas rotas de gestor', async () => {
       ['PUT', `/api/roteiro/funnels/${funnelId}/draft`],
       ['POST', `/api/roteiro/funnels/${funnelId}/publish`],
       ['POST', '/api/roteiro/versions/1/restore'],
-      ['POST', `/api/roteiro/funnels/${funnelId}/bant-template`],
+      ['POST', `/api/roteiro/funnels/${funnelId}/spin-template`],
       ['POST', `/api/roteiro/funnels/${funnelId}/ai-draft`],
       ['GET', `/api/roteiro/performance?funnel_id=${funnelId}`],
       ['GET', '/api/roteiro/settings'],
@@ -142,14 +142,14 @@ test('atendente recebe 403 nas rotas de gestor', async () => {
   })
 })
 
-test('modelo BANT e restaurar versao', async () => {
+test('modelo SPIN e restaurar versao', async () => {
   await comServidor(async ({ db, base }) => {
     const { accountId, funnelId } = seedRoteiroBase(db)
     const t = token({ id: 999, role: 'gerente', accountId })
 
-    const bant = await peca(base, { method: 'POST', path: `/api/roteiro/funnels/${funnelId}/bant-template`, jwtToken: t, body: {} })
+    const bant = await peca(base, { method: 'POST', path: `/api/roteiro/funnels/${funnelId}/spin-template`, jwtToken: t, body: {} })
     assert.equal(bant.status, 200)
-    assert.equal(bant.body.questions.length, 4, 'as 4 perguntas BANT')
+    assert.equal(bant.body.questions.length, 6, 'as 6 perguntas SPIN')
 
     const publicado = await peca(base, { method: 'POST', path: `/api/roteiro/funnels/${funnelId}/publish`, jwtToken: t, body: {} })
     assert.equal(publicado.status, 200)
@@ -159,7 +159,7 @@ test('modelo BANT e restaurar versao', async () => {
     await peca(base, { method: 'PUT', path: `/api/roteiro/funnels/${funnelId}/draft`, jwtToken: t, body: { questions: [], deviations: [] } })
     const restaurado = await peca(base, { method: 'POST', path: `/api/roteiro/versions/${versionId}/restore`, jwtToken: t, body: {} })
     assert.equal(restaurado.status, 200)
-    assert.equal(restaurado.body.questions.length, 4)
+    assert.equal(restaurado.body.questions.length, 6)
   })
 })
 
@@ -198,7 +198,7 @@ test('ai-draft com IA e chave monta o rascunho; IA falhando -> 502 em portugues'
     const ok = await peca(base, { method: 'POST', path: `/api/roteiro/funnels/${funnelId}/ai-draft`, jwtToken: t, body: {} })
     assert.equal(ok.status, 200)
     assert.equal(ok.body.status, 'draft')
-    assert.equal(ok.body.questions.filter(q => q.bant).length, 4)
+    assert.equal(ok.body.questions.filter(q => q.spin).length, 6)
     const falha = await peca(base, { method: 'POST', path: `/api/roteiro/funnels/${funnelId}/ai-draft`, jwtToken: t, body: {} })
     assert.equal(falha.status, 502)
     assert.equal(falha.body.error, 'A IA não respondeu agora. Monte à mão ou tente de novo.')

@@ -4,7 +4,7 @@
 // e a casca que injeta o db de producao — ver comentario em agentBriefingsRouter.js).
 import { Router } from 'express'
 import { requireRole } from '../middleware/auth.js'
-import { getRoteiro, saveDraft, publish, restoreVersion, createBantDraft, RoteiroError } from '../services/roteiro/repo.js'
+import { getRoteiro, saveDraft, publish, restoreVersion, createSpinDraft, RoteiroError } from '../services/roteiro/repo.js'
 import { getLeadRoteiro, saveAnswer, checkRoteiroGate } from '../services/roteiro/leadRoteiro.js'
 import { maybeAutoAdvance, undoAutoAdvance } from '../services/roteiro/autoAdvance.js'
 import { recordAsk, markAnswered } from '../services/roteiro/asks.js'
@@ -81,9 +81,9 @@ export function createRoteiroRouter(db, { ai = null, now = () => new Date() } = 
     } catch (e) { fail(res, e) }
   })
 
-  router.post('/funnels/:funnelId/bant-template', manager, (req, res) => {
+  router.post('/funnels/:funnelId/spin-template', manager, (req, res) => {
     try {
-      res.json(createBantDraft(db, req.accountId, req.params.funnelId))
+      res.json(createSpinDraft(db, req.accountId, req.params.funnelId))
     } catch (e) { fail(res, e) }
   })
 

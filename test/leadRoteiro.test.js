@@ -9,11 +9,11 @@ function publishBasicRoteiro(db, accountId, funnelId, stages) {
   saveDraft(db, accountId, funnelId, {
     questions: [
       {
-        stage_id: stages.qualificando, position: 0, text: 'Qual sua faixa de orçamento, {nome}?', kind: 'options', required: true, bant: 'budget', ai_hint: null,
+        stage_id: stages.qualificando, position: 0, text: 'Qual sua faixa de orçamento, {nome}?', kind: 'options', required: true, spin: 'need_payoff', ai_hint: null,
         options: [{ label: 'Até R$5 mil', points: 5 }, { label: 'Acima de R$20 mil', points: 15 }],
       },
-      { stage_id: stages.qualificando, position: 1, text: 'Conte mais sobre seu projeto', kind: 'text', required: false, bant: null, ai_hint: null },
-      { stage_id: stages.proposta, position: 0, text: 'Qual o prazo desejado?', kind: 'text', required: true, bant: 'timeline', ai_hint: null },
+      { stage_id: stages.qualificando, position: 1, text: 'Conte mais sobre seu projeto', kind: 'text', required: false, spin: null, ai_hint: null },
+      { stage_id: stages.proposta, position: 0, text: 'Qual o prazo desejado?', kind: 'text', required: true, spin: 'situation', ai_hint: null },
     ],
     deviations: [],
   })
@@ -247,8 +247,8 @@ test('saveAnswer: pergunta removida da versao publicada -> 400 e aparece em lega
   // republica sem Q2
   saveDraft(db, accountId, funnelId, {
     questions: [
-      { stage_id: stages.qualificando, position: 0, text: 'Qual sua faixa de orçamento?', kind: 'options', required: true, bant: 'budget', ai_hint: null, options: [{ label: 'Até R$5 mil', points: 5 }, { label: 'Acima de R$20 mil', points: 15 }] },
-      { stage_id: stages.proposta, position: 0, text: 'Qual o prazo desejado?', kind: 'text', required: true, bant: 'timeline', ai_hint: null },
+      { stage_id: stages.qualificando, position: 0, text: 'Qual sua faixa de orçamento?', kind: 'options', required: true, spin: 'need_payoff', ai_hint: null, options: [{ label: 'Até R$5 mil', points: 5 }, { label: 'Acima de R$20 mil', points: 15 }] },
+      { stage_id: stages.proposta, position: 0, text: 'Qual o prazo desejado?', kind: 'text', required: true, spin: 'situation', ai_hint: null },
     ],
     deviations: [],
   })
@@ -311,7 +311,7 @@ test('questionTextForLead: "{nome}, " no inicio sem nome vira frase limpa e capi
   const { accountId, funnelId, stages } = seedRoteiroBase(db)
   saveDraft(db, accountId, funnelId, {
     questions: [
-      { stage_id: stages.qualificando, position: 0, text: '{nome}, tudo bem?', kind: 'text', required: false, bant: null, ai_hint: null },
+      { stage_id: stages.qualificando, position: 0, text: '{nome}, tudo bem?', kind: 'text', required: false, spin: null, ai_hint: null },
     ],
     deviations: [],
   })

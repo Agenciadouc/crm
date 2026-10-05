@@ -2,10 +2,9 @@
 // briefing do agente, das conversas de quem comprou e das etapas do funil. Vira rascunho;
 // nada e publicado sozinho. Nao importa server/db.js: recebe db e `ai` (ver aiCall.js).
 import { RoteiroError, getRoteiro, saveDraft, newKey } from './repo.js'
-import { BANT_QUESTIONS } from './bantTemplate.js'
+import { SPIN_KEYS, missingSpinQuestions } from './spinTemplate.js'
 import { toolInput } from './aiCall.js'
 
-const BANT_KEYS = ['budget', 'authority', 'need', 'timeline']
 const MAX_INSIGHTS = 20
 const MAX_QUESTIONS = 40
 const MAX_DEVIATIONS = 20
@@ -15,7 +14,7 @@ const SYSTEM_PROMPT = `Você monta roteiros de qualificação de vendas pelo Wha
 Regras:
 - Perguntas curtas, simpáticas, em português do Brasil, uma coisa por vez. Pode usar {nome} para o primeiro nome do cliente.
 - Distribua as perguntas nas etapas informadas (use o stage_id de cada etapa).
-- Sempre inclua as 4 perguntas BANT como perguntas de opções com pontos: need (necessidade), budget (orçamento), authority (quem decide), timeline (prazo). Marque o campo bant.
+- Use SPIN: situation (como o cliente faz hoje), problem (onde dói), implication (o que custa se continuar), need_payoff (o ganho de resolver). Marque o campo spin.
 - Perguntas de opções têm de 2 a 10 opções; points vai de -50 a 50 (mais pontos = cliente mais perto de comprar).
 - required = true só para o que é indispensável para avançar de etapa.
 - ai_hint é uma dica curta de como reconhecer a resposta na conversa.
@@ -37,7 +36,7 @@ const PROPOSE_TOOL = {
             text: { type: 'string' },
             kind: { type: 'string', enum: ['text', 'options'] },
             required: { type: 'boolean' },
-            bant: { type: 'string', enum: BANT_KEYS },
+            spin: { type: 'string', enum: SPIN_KEYS },
             ai_hint: { type: 'string' },
             options: {
               type: 'array',
@@ -118,7 +117,7 @@ function buildUserContent({ briefing, summaries, stages }) {
   return parts.join('\n')
 }
 
-function sanitizeQuestion(raw, { stageIds, fallbackStageId, usedBant }) {
+function sanitizeQuestion(raw, { stageIds, fallbackStageId }) {
   const text = str(raw?.text).slice(0, 500)
   if (!text) return null
   let options = []
@@ -130,17 +129,16 @@ function sanitizeQuestion(raw, { stageIds, fallbackStageId, usedBant }) {
       .slice(0, 10)
     if (options.length < 2) { kind = 'text'; options = [] }
   }
-  // BANT so vale em pergunta de opcoes; senao o modelo BANT completa depois.
-  let bant = kind === 'options' && BANT_KEYS.includes(raw.bant) ? raw.bant : null
-  if (bant && usedBant.has(bant)) bant = null
-  if (bant) usedBant.add(bant)
+  // Fase SPIN so vale em pergunta de opcoes; fase que faltar o modelo SPIN completa depois.
+  const spin = kind === 'options' && SPIN_KEYS.includes(raw.spin) ? raw.spin : null
   return {
     question_key: newKey(),
     stage_id: stageIds.has(Number(raw.stage_id)) ? Number(raw.stage_id) : fallbackStageId,
     text,
     kind,
     required: raw.required === true,
-    bant,
+    spin,
+    profile_key: null,
     ai_hint: str(raw.ai_hint).slice(0, 300) || null,
     options: options.map((o, idx) => ({ ...o, position: idx })),
   }
@@ -172,22 +170,20 @@ export async function buildAiDraft(db, { accountId, funnelId, ai }) {
   // Perguntas: etapa invalida/final vai para a 1a nao final; indice original -> question_key.
   const stageIds = new Set(open.map(s => s.id))
   const firstStageId = open[0].id
-  const usedBant = new Set()
   const keyByIndex = new Map()
   const questions = []
   const rawQuestions = Array.isArray(input.questions) ? input.questions.slice(0, MAX_QUESTIONS) : []
   rawQuestions.forEach((raw, idx) => {
-    const q = sanitizeQuestion(raw, { stageIds, fallbackStageId: firstStageId, usedBant })
+    const q = sanitizeQuestion(raw, { stageIds, fallbackStageId: firstStageId })
     if (!q) return
     keyByIndex.set(idx, q.question_key)
     questions.push(q)
   })
 
-  // Garante as 4 BANT: as que faltaram entram do modelo na 1a etapa nao final.
-  for (const bq of BANT_QUESTIONS) {
-    if (usedBant.has(bq.bant)) continue
+  // Garante as 4 fases SPIN: as que faltaram entram do modelo na 1a etapa nao final.
+  for (const bq of missingSpinQuestions(questions)) {
     questions.push({
-      question_key: newKey(), stage_id: firstStageId, text: bq.text, kind: bq.kind, required: bq.required, bant: bq.bant, ai_hint: null,
+      question_key: newKey(), stage_id: firstStageId, text: bq.text, kind: bq.kind, required: bq.required, spin: bq.spin, profile_key: null, ai_hint: null,
       options: bq.options.map((o, idx) => ({ label: o.label, points: o.points, position: idx })),
     })
   }

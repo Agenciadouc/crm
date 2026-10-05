@@ -7,7 +7,7 @@ import { CadenceError } from '../services/cadence/errors.js'
 import {
   listCadences, getCadence, createCadence, updateCadence, deleteCadence, replaceAttemptsById,
   addStep, updateStep, deleteStep, reorderSteps, getStageView, saveDeviations,
-  addQuestionSteps, bantStepQuestions, aiStepQuestions, applySuggestionLive, confirmVariantLive,
+  addQuestionSteps, spinStepQuestions, aiStepQuestions, applySuggestionLive, confirmVariantLive,
 } from '../services/cadence/repo.js'
 import {
   attachLeadsInStage, refreshLeadsOfCadence, getLeadStageCadence, markStepDone,
@@ -102,9 +102,9 @@ export function createCadencesRouter(db, { ai = null, broadcast = () => {} } = {
       stageOfFunnel(req, req.params.funnelId, req.params.stageId)
       const mode = req.body?.mode
       let questions
-      if (mode === 'bant') {
-        questions = bantStepQuestions(db, req.accountId, req.params.funnelId)
-        if (!questions.length) throw new CadenceError('invalid', 400, 'As 4 perguntas do modelo BANT já estão no funil.')
+      if (mode === 'spin') {
+        questions = spinStepQuestions(db, req.accountId, req.params.funnelId)
+        if (!questions.length) throw new CadenceError('invalid', 400, 'As fases do modelo SPIN já estão no funil.')
       } else if (mode === 'ia') {
         const account = db.prepare('SELECT * FROM accounts WHERE id = ?').get(req.accountId)
         if (!ai || !pickAnthropicKey(account)) return res.status(503).json({ error: 'A IA não está ligada nesta conta.', code: 'ai_off' })

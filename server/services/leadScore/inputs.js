@@ -2,8 +2,7 @@
 // Nao importa server/db.js: recebe db (testavel com banco em memoria).
 import { getPublishedQuestions } from '../roteiro/repo.js'
 import { hasSignalLast7d, hasConfirmedWeakLast7d } from '../signals/repo.js'
-
-const BANT_LABEL = { budget: 'Orçamento', authority: 'Quem decide', need: 'Necessidade', timeline: 'Prazo' }
+import { SPIN_LABEL } from '../roteiro/spinTemplate.js'
 
 const DAY_MS = 86400000
 
@@ -19,7 +18,7 @@ export function normalizeText(s) {
 }
 
 function questionShortLabel(q) {
-  if (q.bant && BANT_LABEL[q.bant]) return BANT_LABEL[q.bant]
+  if (q.spin && SPIN_LABEL[q.spin]) return SPIN_LABEL[q.spin]
   return String(q.text || '').slice(0, 40)
 }
 

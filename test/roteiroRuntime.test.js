@@ -19,9 +19,9 @@ function insertAsk(db, { accountId, leadId, questionKey, hoursAgo = 0 }) {
 function publishRoteiro(db, accountId, funnelId, stages) {
   saveDraft(db, accountId, funnelId, {
     questions: [
-      { stage_id: stages.qualificando, position: 0, question_key: 'orcamento', text: 'Qual sua faixa de orçamento para o projeto?', kind: 'text', required: true, bant: null, ai_hint: null },
-      { stage_id: stages.qualificando, position: 1, question_key: 'prazo', text: 'Qual o prazo desejado para começar?', kind: 'text', required: false, bant: null, ai_hint: null },
-      { stage_id: stages.proposta, position: 0, question_key: 'decisor', text: 'Quem decide a compra?', kind: 'text', required: true, bant: null, ai_hint: null },
+      { stage_id: stages.qualificando, position: 0, question_key: 'orcamento', text: 'Qual sua faixa de orçamento para o projeto?', kind: 'text', required: true, spin: null, ai_hint: null },
+      { stage_id: stages.qualificando, position: 1, question_key: 'prazo', text: 'Qual o prazo desejado para começar?', kind: 'text', required: false, spin: null, ai_hint: null },
+      { stage_id: stages.proposta, position: 0, question_key: 'decisor', text: 'Quem decide a compra?', kind: 'text', required: true, spin: null, ai_hint: null },
     ],
     deviations: [],
   })

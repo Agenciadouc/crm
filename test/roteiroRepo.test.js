@@ -2,16 +2,16 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createRoteiroTestDb, seedRoteiroBase } from './helpers/roteiroDb.js'
 import {
-  newKey, getRoteiro, saveDraft, publish, restoreVersion, createBantDraft,
+  newKey, getRoteiro, saveDraft, publish, restoreVersion, createSpinDraft,
   getPublishedQuestions, getPublishedDeviations, RoteiroError,
 } from '../server/services/roteiro/repo.js'
 
 function baseContent(stageId, otherStageId) {
   return {
     questions: [
-      { stage_id: stageId, position: 0, text: 'Qual seu nome completo?', kind: 'text', required: true, bant: null, ai_hint: null },
+      { stage_id: stageId, position: 0, text: 'Qual seu nome completo?', kind: 'text', required: true, spin: null, ai_hint: null },
       {
-        stage_id: stageId, position: 1, text: 'Qual sua faixa de orçamento?', kind: 'options', required: true, bant: 'budget', ai_hint: null,
+        stage_id: stageId, position: 1, text: 'Qual sua faixa de orçamento?', kind: 'options', required: true, spin: 'need_payoff', ai_hint: null,
         options: [{ label: 'Até R$5 mil', points: 5 }, { label: 'Acima de R$20 mil', points: 15 }],
       },
     ],
@@ -259,42 +259,41 @@ test('restoreVersion: versao de outra conta -> 404', () => {
   })
 })
 
-test('createBantDraft: adiciona 4 perguntas BANT na 1a etapa nao final; chamar 2x nao duplica', () => {
+test('createSpinDraft: adiciona as 6 perguntas SPIN na 1a etapa de conversa (Novo e contato); chamar 2x nao duplica', () => {
   const db = createRoteiroTestDb()
   const { accountId, funnelId, stages } = seedRoteiroBase(db)
 
-  const draft = createBantDraft(db, accountId, funnelId)
+  const draft = createSpinDraft(db, accountId, funnelId)
   assert.equal(draft.status, 'draft')
-  assert.equal(draft.questions.length, 4)
+  assert.equal(draft.questions.length, 6)
   for (const q of draft.questions) {
-    assert.equal(q.stage_id, stages.novo)
+    assert.equal(q.stage_id, stages.qualificando)
     assert.equal(q.required, true)
     assert.equal(q.kind, 'options')
   }
-  const bants = draft.questions.map(q => q.bant).sort()
-  assert.deepEqual(bants, ['authority', 'budget', 'need', 'timeline'])
+  assert.deepEqual(draft.questions.map(q => q.spin), ['situation', 'problem', 'problem', 'implication', 'implication', 'need_payoff'])
 
-  const draft2 = createBantDraft(db, accountId, funnelId)
-  assert.equal(draft2.questions.length, 4)
+  const draft2 = createSpinDraft(db, accountId, funnelId)
+  assert.equal(draft2.questions.length, 6)
   assert.deepEqual(draft2.questions.map(q => q.question_key).sort(), draft.questions.map(q => q.question_key).sort())
 })
 
-test('createBantDraft: parte do rascunho atual (preserva perguntas existentes) e posiciona apos elas', () => {
+test('createSpinDraft: parte do rascunho atual (preserva perguntas existentes) e posiciona apos elas', () => {
   const db = createRoteiroTestDb()
   const { accountId, funnelId, stages } = seedRoteiroBase(db)
   saveDraft(db, accountId, funnelId, {
-    questions: [{ stage_id: stages.novo, position: 0, text: 'Pergunta manual', kind: 'text', required: false }],
+    questions: [{ stage_id: stages.qualificando, position: 0, text: 'Pergunta manual', kind: 'text', required: false }],
     deviations: [],
   })
-  const draft = createBantDraft(db, accountId, funnelId)
-  assert.equal(draft.questions.length, 5)
+  const draft = createSpinDraft(db, accountId, funnelId)
+  assert.equal(draft.questions.length, 7)
   const manual = draft.questions.find(q => q.text === 'Pergunta manual')
   assert.ok(manual)
-  const bantQs = draft.questions.filter(q => q.bant)
-  for (const q of bantQs) assert.ok(q.position > manual.position)
+  const spinQs = draft.questions.filter(q => q.spin)
+  for (const q of spinQs) assert.ok(q.position > manual.position)
 })
 
-test('createBantDraft: parte da publicada quando nao ha rascunho', () => {
+test('createSpinDraft: parte da publicada quando nao ha rascunho', () => {
   const db = createRoteiroTestDb()
   const { accountId, funnelId, gerenteId, stages } = seedRoteiroBase(db)
   saveDraft(db, accountId, funnelId, baseContent(stages.novo))
@@ -302,18 +301,18 @@ test('createBantDraft: parte da publicada quando nao ha rascunho', () => {
   // apaga rascunho manualmente para simular "sem rascunho"
   db.prepare("DELETE FROM roteiro_versions WHERE account_id = ? AND funnel_id = ? AND status = 'draft'").run(accountId, funnelId)
 
-  const draft = createBantDraft(db, accountId, funnelId)
+  const draft = createSpinDraft(db, accountId, funnelId)
   assert.equal(draft.status, 'draft')
-  // ja tinha 'budget' publicado -> so adiciona need/authority/timeline
-  const bants = draft.questions.map(q => q.bant).filter(Boolean).sort()
-  assert.deepEqual(bants, ['authority', 'budget', 'need', 'timeline'])
-  assert.equal(draft.questions.length, 2 + 3)
+  // ja tinha need_payoff publicado -> so adiciona situation/problem(2)/implication(2)
+  const fases = draft.questions.map(q => q.spin).filter(Boolean).sort()
+  assert.deepEqual(fases, ['implication', 'implication', 'need_payoff', 'problem', 'problem', 'situation'])
+  assert.equal(draft.questions.length, 2 + 5)
 })
 
-test('createBantDraft: funil de outra conta -> 404', () => {
+test('createSpinDraft: funil de outra conta -> 404', () => {
   const db = createRoteiroTestDb()
   const { funnelId } = seedRoteiroBase(db)
-  assert.throws(() => createBantDraft(db, 999999, funnelId), (err) => err instanceof RoteiroError && err.status === 404)
+  assert.throws(() => createSpinDraft(db, 999999, funnelId), (err) => err instanceof RoteiroError && err.status === 404)
 })
 
 test('getPublishedQuestions/getPublishedDeviations: vazio quando nao ha publicada', () => {
@@ -326,7 +325,7 @@ test('getPublishedQuestions/getPublishedDeviations: vazio quando nao ha publicad
 test('publish: pergunta apagada que estava em teste A/B cancela o teste (spec 6.5)', () => {
   const db = createRoteiroTestDb()
   const s = seedRoteiroBase(db)
-  const q = (key, text) => ({ question_key: key, stage_id: s.stages.qualificando, position: 0, text, kind: 'text', required: false, bant: null, ai_hint: null })
+  const q = (key, text) => ({ question_key: key, stage_id: s.stages.qualificando, position: 0, text, kind: 'text', required: false, spin: null, ai_hint: null })
   saveDraft(db, s.accountId, s.funnelId, { questions: [q('orcamento', 'Qual seu orçamento?'), q('prazo', 'Qual o prazo?')], deviations: [] })
   publish(db, s.accountId, s.funnelId, s.gerenteId)
 

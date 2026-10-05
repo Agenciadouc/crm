@@ -63,7 +63,7 @@ test('atendente: 403 nas rotas do gestor e em lead que nao acessa; le a lista', 
     for (const [method, path, body] of [
       ['POST', '/api/cadences', { name: 'X' }], ['PATCH', `/api/cadences/${m.etapa.id}/steps/${m.mensagem}`, { auto_message: 'x' }],
       ['DELETE', `/api/cadences/${m.etapa.id}/steps/${m.mensagem}`], ['GET', `/api/cadences/stage-view?funnel_id=${s.funnelId}`],
-      ['POST', `/api/cadences/funnels/${s.funnelId}/stages/${s.stages.novo}/template`, { mode: 'bant' }],
+      ['POST', `/api/cadences/funnels/${s.funnelId}/stages/${s.stages.novo}/template`, { mode: 'spin' }],
     ]) {
       assert.equal((await peca(base, { method, path, jwtToken: t, body })).status, 403, `${method} ${path}`)
     }
@@ -114,14 +114,14 @@ test('vendedor: Feito avanca e avisa lead:cadence; passo apagado -> 409; GET /le
   })
 })
 
-test('super_admin sem conta -> 400; modelo BANT pela rota cria a cadencia da etapa', async () => {
+test('super_admin sem conta -> 400; modelo SPIN pela rota cria a cadencia da etapa', async () => {
   await comServidor(async ({ db, s, base }) => {
     const ts = token({ id: 1, role: 'super_admin' })
     assert.equal((await peca(base, { path: '/api/cadences', jwtToken: ts })).status, 400)
     const tg = token({ id: s.gerenteId, role: 'gerente', accountId: s.accountId })
-    const r = await peca(base, { method: 'POST', path: `/api/cadences/funnels/${s.funnelId}/stages/${s.stages.novo}/template`, jwtToken: tg, body: { mode: 'bant' } })
+    const r = await peca(base, { method: 'POST', path: `/api/cadences/funnels/${s.funnelId}/stages/${s.stages.novo}/template`, jwtToken: tg, body: { mode: 'spin' } })
     assert.equal(r.status, 200)
-    assert.equal(r.body.cadence.attempts.length, 4)
+    assert.equal(r.body.cadence.attempts.length, 6)
     const ia = await peca(base, { method: 'POST', path: `/api/cadences/funnels/${s.funnelId}/stages/${s.stages.proposta}/template`, jwtToken: tg, body: { mode: 'ia' } })
     assert.deepEqual([ia.status, ia.body.error], [503, 'A IA não está ligada nesta conta.'])
   })
@@ -292,7 +292,7 @@ test('modelo com etapa de outro funil -> 404; sugestao e variante de outra conta
     const tg = token({ id: s.gerenteId, role: 'gerente', accountId: s.accountId })
     const f2 = Number(db.prepare("INSERT INTO funnels (account_id, name, is_default, is_active) VALUES (?, 'Funil 2', 0, 1)").run(s.accountId).lastInsertRowid)
     const st2 = Number(db.prepare("INSERT INTO funnel_stages (funnel_id, name, position, is_conversion, is_terminal) VALUES (?, 'Outra', 0, 0, 0)").run(f2).lastInsertRowid)
-    const r = await peca(base, { method: 'POST', path: `/api/cadences/funnels/${s.funnelId}/stages/${st2}/template`, jwtToken: tg, body: { mode: 'bant' } })
+    const r = await peca(base, { method: 'POST', path: `/api/cadences/funnels/${s.funnelId}/stages/${st2}/template`, jwtToken: tg, body: { mode: 'spin' } })
     assert.equal(r.status, 404)
     assert.equal(db.prepare('SELECT COUNT(*) AS n FROM cadences WHERE stage_id = ?').get(st2).n, 0)
     for (const path of ['/api/cadences/suggestions/999999/apply', '/api/cadences/variants/999999/confirm']) {

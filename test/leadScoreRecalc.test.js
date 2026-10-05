@@ -11,7 +11,7 @@ import {
 function publishOrcamento(db, accountId, funnelId, stageId) {
   saveDraft(db, accountId, funnelId, {
     questions: [{
-      stage_id: stageId, position: 0, text: 'Qual sua faixa de orçamento?', kind: 'options', required: true, bant: 'budget', ai_hint: null,
+      stage_id: stageId, position: 0, text: 'Qual sua faixa de orçamento?', kind: 'options', required: true, spin: 'need_payoff', ai_hint: null,
       options: [
         { label: 'até R$5 mil', points: 0 },
         { label: 'R$5 a R$20 mil', points: 15 },
@@ -60,7 +60,7 @@ test('gatherScoreInputs: fit, recencia, delay de resposta, termo de compra, avan
   assert.equal(input.fit.max, 30)
   assert.equal(input.fit.answeredCount, 1)
   assert.equal(input.fit.totalCount, 1)
-  assert.ok(input.fit.reasons.some(r => r.texto === 'Orçamento: acima de R$20 mil' && r.pontos === 30))
+  assert.ok(input.fit.reasons.some(r => r.texto === 'Necessidade de Solução: acima de R$20 mil' && r.pontos === 30))
 
   // engajamento
   assert.ok(input.engagement.daysSinceLastInbound < 0.01, `daysSinceLastInbound deveria ser ~0, veio ${input.engagement.daysSinceLastInbound}`)

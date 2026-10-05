@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { createCadenceTestDb, seedCadenceBase, leadIn, Q_PRAZO, Q_LIVRE, publishedRoteiro } from './helpers/cadenceDb.js'
 import {
   createCadence, getCadence, listCadences, updateCadence, deleteCadence, addStep, updateStep, deleteStep, reorderSteps,
-  replaceAttemptsById, saveDeviations, addQuestionSteps, bantStepQuestions, aiStepQuestions, applySuggestionLive, confirmVariantLive, getStageView, syncStageQuestions,
+  replaceAttemptsById, saveDeviations, addQuestionSteps, spinStepQuestions, aiStepQuestions, applySuggestionLive, confirmVariantLive, getStageView, syncStageQuestions,
 } from '../server/services/cadence/repo.js'
 import { CadenceError } from '../server/services/cadence/errors.js'
 import { getLeadRoteiro, saveAnswer, checkRoteiroGate } from '../server/services/roteiro/leadRoteiro.js'
@@ -128,14 +128,14 @@ test('duas edicoes seguidas no mesmo passo: fica a ultima, id igual, uma versao 
   assert.equal(getCadence(db, s.accountId, c.id).attempts[0].id, id)
 })
 
-test('modelo BANT e IA: cria a cadencia da etapa e so poe o que falta', async () => {
+test('modelo SPIN e IA: cria a cadencia da etapa e so poe o que falta', async () => {
   const db = createCadenceTestDb(); const s = seedCadenceBase(db)
-  const bant = bantStepQuestions(db, s.accountId, s.funnelId)
-  assert.equal(bant.length, 4)
+  const bant = spinStepQuestions(db, s.accountId, s.funnelId)
+  assert.equal(bant.length, 6)
   const cad = addQuestionSteps(db, s.accountId, { stageId: s.stages.novo, questions: bant })
   assert.equal(cad.stage_id, s.stages.novo)
-  assert.equal(cad.attempts.length, 4)
-  assert.equal(bantStepQuestions(db, s.accountId, s.funnelId).length, 0)
+  assert.equal(cad.attempts.length, 6)
+  assert.equal(spinStepQuestions(db, s.accountId, s.funnelId).length, 0)
   const ai = { call: async () => ({ toolUses: [{ name: 'propose_roteiro', input: { questions: [
     { stage_id: s.stages.proposta, text: 'Qual a data do evento?', kind: 'text', required: true },
     { stage_id: s.stages.qualificando, text: 'Quantos convidados?', kind: 'text' },

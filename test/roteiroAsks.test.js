@@ -24,7 +24,7 @@ function insertMessageAt(db, { leadId, accountId, direction, content, createdAt 
 function publishWithDeviation(db, accountId, funnelId, stages, returnQuestionKey = null) {
   saveDraft(db, accountId, funnelId, {
     questions: [
-      { stage_id: stages.qualificando, position: 0, question_key: 'orcamento', text: 'Qual sua faixa de orçamento?', kind: 'text', required: false, bant: null, ai_hint: null },
+      { stage_id: stages.qualificando, position: 0, question_key: 'orcamento', text: 'Qual sua faixa de orçamento?', kind: 'text', required: false, spin: null, ai_hint: null },
     ],
     deviations: [
       { triggers: 'preço, quanto custa', reply_text: 'Os planos começam em R$500.', return_question_key: returnQuestionKey, position: 0 },

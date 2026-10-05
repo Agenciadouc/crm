@@ -124,5 +124,28 @@ export function applyRoteiroSchema(db) {
     ['score_alert_minutes', 'INTEGER NOT NULL DEFAULT 60'], ['score_half_life_days', 'REAL NOT NULL DEFAULT 7'],
     ['roteiro_ai_token_limit', 'INTEGER NOT NULL DEFAULT 300000'], // teto mensal proprio da IA do roteiro
   ]) addColumnIfNotExists(db, 'accounts', c, t)
+  // SPIN por perfil de cliente ideal (spec 2026-10-02 §4)
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS roteiro_profiles (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      account_id INTEGER NOT NULL,
+      profile_key TEXT NOT NULL,
+      name TEXT NOT NULL,
+      description TEXT,
+      position INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(account_id, profile_key)
+    );
+  `)
+  addColumnIfNotExists(db, 'accounts', 'business_objective', 'TEXT')
+  addColumnIfNotExists(db, 'roteiro_questions', 'spin', 'TEXT')
+  addColumnIfNotExists(db, 'roteiro_questions', 'profile_key', 'TEXT')
+  addColumnIfNotExists(db, 'roteiro_options', 'sets_profile_key', 'TEXT')
+  addColumnIfNotExists(db, 'leads', 'roteiro_profile_key', 'TEXT')
+  addColumnIfNotExists(db, 'leads', 'roteiro_profile_origin', 'TEXT')
+  // BANT -> SPIN: so a etiqueta muda; texto/opcoes/pontos/respostas iguais. Coluna bant fica morta. Idempotente.
+  db.exec(`UPDATE roteiro_questions SET spin = CASE bant WHEN 'need' THEN 'problem' WHEN 'timeline' THEN 'situation'
+    WHEN 'authority' THEN 'situation' WHEN 'budget' THEN 'need_payoff' END WHERE spin IS NULL AND bant IS NOT NULL`)
   try { db.exec('CREATE INDEX IF NOT EXISTS idx_leads_score ON leads(account_id, score)') } catch (e) { console.warn('[Roteiro] indice idx_leads_score:', e.message) }
 }

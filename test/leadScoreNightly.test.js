@@ -12,7 +12,7 @@ const DAY = 86400000
 function makeHotLead(db, s, name = 'Lead Quente') {
   saveDraft(db, s.accountId, s.funnelId, {
     questions: [{
-      question_key: 'orc', stage_id: s.stages.qualificando, position: 0, text: 'Qual sua faixa de orçamento?', kind: 'options', required: true, bant: 'budget',
+      question_key: 'orc', stage_id: s.stages.qualificando, position: 0, text: 'Qual sua faixa de orçamento?', kind: 'options', required: true, spin: 'need_payoff',
       options: [{ option_key: 'baixo', label: 'até R$5 mil', points: 0 }, { option_key: 'alto', label: 'acima de R$20 mil', points: 30 }],
     }],
     deviations: [],

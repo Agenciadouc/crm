@@ -319,17 +319,17 @@ function setupDraft() {
   return { db, s }
 }
 
-test('buildAiDraft: salva rascunho, completa as 4 BANT, corrige etapa invalida e liga o desvio a pergunta', async () => {
+test('buildAiDraft: salva rascunho, completa as fases SPIN, corrige etapa invalida e liga o desvio a pergunta', async () => {
   const { db, s } = setupDraft()
   const ai = fakeAi({ roteiro_draft: [tool('propose_roteiro', {
     questions: [
       { stage_id: s.stages.qualificando, text: 'Qual a data do evento?', kind: 'text', required: true, ai_hint: 'data' },
       { stage_id: 99999, text: 'Quantos convidados?', kind: 'options', required: false,
         options: [{ label: 'Até 50', points: 5 }, { label: 'Mais de 50', points: 10 }] },
-      { stage_id: s.stages.venda, text: 'Qual o orçamento?', kind: 'options', required: true, bant: 'budget',
+      { stage_id: s.stages.venda, text: 'Qual o orçamento?', kind: 'options', required: true, spin: 'need_payoff',
         options: [{ label: 'Até 10 mil', points: 0 }, { label: 'Acima de 10 mil', points: 80 }] },
       { stage_id: s.stages.qualificando, text: 'Opções sem opções', kind: 'options', options: [{ label: 'só uma', points: 1 }] },
-      { stage_id: s.stages.qualificando, text: 'O que você precisa?', kind: 'text', bant: 'need' },
+      { stage_id: s.stages.qualificando, text: 'O que você precisa?', kind: 'text', spin: 'problem' },
     ],
     deviations: [{ triggers: 'preço, valor', reply_text: 'Depende do número de convidados.', return_question_index: 1 }],
   })] })
@@ -340,16 +340,16 @@ test('buildAiDraft: salva rascunho, completa as 4 BANT, corrige etapa invalida e
   assert.equal(rot.published, null)
   assert.equal(rot.draft.id, draft.id)
   const qs = draft.questions
-  const bants = qs.map(q => q.bant).filter(Boolean).sort()
-  assert.deepEqual(bants, ['authority', 'budget', 'need', 'timeline'])
+  const fases = qs.map(q => q.spin).filter(Boolean).sort()
+  assert.deepEqual(fases, ['implication', 'implication', 'need_payoff', 'problem', 'problem', 'situation'])
   const convidados = qs.find(q => q.text === 'Quantos convidados?')
   assert.equal(convidados.stage_id, s.stages.novo) // 1a nao final
   const orcamento = qs.find(q => q.text === 'Qual o orçamento?')
   assert.equal(orcamento.stage_id, s.stages.novo) // etapa final nao tem pergunta
   assert.equal(orcamento.options[1].points, 50) // pontos no limite
   assert.equal(qs.find(q => q.text === 'Opções sem opções').kind, 'text')
-  assert.equal(qs.find(q => q.text === 'O que você precisa?').bant, null) // BANT so em opcoes
-  assert.equal(qs.find(q => q.bant === 'need').kind, 'options') // veio do modelo BANT
+  assert.equal(qs.find(q => q.text === 'O que você precisa?').spin, null) // fase SPIN so em opcoes
+  assert.equal(qs.find(q => q.spin === 'problem').kind, 'options') // veio do modelo SPIN
   assert.equal(draft.deviations[0].return_question_key, convidados.question_key)
 
   const call = ai.calls[0]

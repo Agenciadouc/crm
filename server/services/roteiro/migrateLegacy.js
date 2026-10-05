@@ -50,7 +50,8 @@ function buildQuestions(sequences, stageId) {
       text,
       kind: 'text',
       required: false,
-      bant: null,
+      spin: null,
+      profile_key: null,
       ai_hint: null,
     })
   }
