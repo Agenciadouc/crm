@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { ListChecks, Plus, Sparkles } from 'lucide-react'
+import { Plus, Sparkles } from 'lucide-react'
 import HelpTip from '../../components/HelpTip'
 import ConfirmDialog from '../../components/ConfirmDialog'
 import { stageTemplate, isAiOff, AI_OFF_TEXT, type StageCadence, type StageViewStage, type StepType } from '../../lib/cadenceApi'
@@ -35,14 +35,14 @@ export interface TemplateButtonsProps {
   compact?: boolean // cabecalho da lista (etapa com passos): botoes menores, sem HelpTip
 }
 
-// [Comecar com modelo SPIN] e [Montar com IA]. Etapa que ja tem passos pede confirmacao antes.
+// [Montar com IA]. Etapa que ja tem passos pede confirmacao antes.
 export function TemplateButtons({ accountId, funnelId, stage, onCadence, compact = false }: TemplateButtonsProps) {
-  const [busy, setBusy] = useState<'spin' | 'ia' | null>(null)
-  const [confirm, setConfirm] = useState<'spin' | 'ia' | null>(null)
+  const [busy, setBusy] = useState<'ia' | null>(null)
+  const [confirm, setConfirm] = useState<'ia' | null>(null)
   const [aiOff, setAiOff] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const run = async (mode: 'spin' | 'ia') => {
+  const run = async (mode: 'ia') => {
     setConfirm(null)
     setBusy(mode); setError(null)
     try {
@@ -54,23 +54,20 @@ export function TemplateButtons({ accountId, funnelId, stage, onCadence, compact
       setBusy(null)
     }
   }
-  const ask = (mode: 'spin' | 'ia') => { if (stage.summary.steps > 0) setConfirm(mode); else run(mode) }
+  const ask = (mode: 'ia') => { if (stage.summary.steps > 0) setConfirm(mode); else run(mode) }
 
   return (
     <>
       <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-        <button type="button" className="btn btn-secondary btn-sm" disabled={busy !== null} onClick={() => ask('spin')}>
-          <ListChecks size={12} /> {busy === 'spin' ? 'Montando…' : 'Começar com modelo SPIN'}
-        </button>
-        {!compact && <HelpTip title="Começar com modelo SPIN">Coloca 6 perguntas de venda SPIN: como o cliente faz hoje, o que incomoda (2), o que isso custa (2) e quanto vale resolver. Só as fases que o funil ainda não tem.</HelpTip>}
         <button type="button" className="btn btn-secondary btn-sm" disabled={busy !== null || aiOff} title={aiOff ? AI_OFF_TEXT : undefined} onClick={() => ask('ia')}>
           <Sparkles size={12} /> {busy === 'ia' ? 'A IA está montando…' : 'Montar com IA'}
         </button>
+        {!compact && <HelpTip title="Montar com IA">A IA monta as perguntas desta etapa a partir do seu negócio e das conversas. Você confere depois. Ex.: numa loja de limpeza, "Você revende para quem hoje?".</HelpTip>}
       </span>
       {aiOff && <div style={{ fontSize: 12, color: 'var(--warning)', marginTop: 6, width: '100%' }}>{AI_OFF_TEXT}</div>}
       {error && <div style={{ fontSize: 12, color: 'var(--negative)', marginTop: 6, width: '100%' }}>{error}</div>}
       {confirm && (
-        <ConfirmDialog title="Somar perguntas a esta etapa?" confirmLabel={confirm === 'ia' ? 'Montar com IA' : 'Começar com modelo SPIN'}
+        <ConfirmDialog title="Somar perguntas a esta etapa?" confirmLabel="Montar com IA"
           onConfirm={() => run(confirm)} onCancel={() => setConfirm(null)}>
           {`A etapa ${stage.name} já tem ${stage.summary.steps} ${stage.summary.steps === 1 ? 'passo' : 'passos'}. As perguntas novas entram no fim da lista e nada é apagado. Ex.: se já existe "Para quando é o evento?", confira depois se não ficou repetida.`}
         </ConfirmDialog>

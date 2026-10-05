@@ -39,7 +39,7 @@ export function saveBusiness(db, accountId, { business_objective = null, profile
   const objective = str(business_objective)
   if (objective.length > 300) throw new RoteiroError('invalid', 400, 'O objetivo do negócio pode ter até 300 caracteres.')
   if (!Array.isArray(profiles)) throw new RoteiroError('invalid', 400, 'Lista de perfis obrigatória.')
-  if (profiles.length > MAX_PROFILES) throw new RoteiroError('invalid', 400, 'Máximo de 6 perfis.')
+  if (profiles.length > MAX_PROFILES) throw new RoteiroError('invalid', 400, 'Máximo de 6 tipos de cliente.')
   const currentList = listProfiles(db, accountId)
   const current = new Set(currentList.map(p => p.profile_key))
   const clean = profiles.map((p, i) => {
@@ -53,7 +53,7 @@ export function saveBusiness(db, accountId, { business_objective = null, profile
   const keep = new Set(clean.map(p => p.profile_key))
   const removed = [...current].filter(k => !keep.has(k))
   const used = usedProfileKeys(db, accountId)
-  if (removed.some(k => used.has(k))) throw new RoteiroError('in_use', 400, 'Este perfil tem perguntas. Mude ou apague as perguntas antes.')
+  if (removed.some(k => used.has(k))) throw new RoteiroError('in_use', 400, 'Este tipo de cliente tem perguntas. Mude ou apague as perguntas antes.')
   db.transaction(() => {
     db.prepare('UPDATE accounts SET business_objective = ? WHERE id = ?').run(objective || null, accountId)
     const del = db.prepare('DELETE FROM roteiro_profiles WHERE account_id = ? AND profile_key = ?')
@@ -91,7 +91,7 @@ export function setLeadProfile(db, { accountId, leadId, profileKey, origin }) {
   if (!lead) throw new RoteiroError('not_found', 404, 'Lead não encontrado.')
   const key = profileKey || null
   if (key && !db.prepare('SELECT 1 FROM roteiro_profiles WHERE account_id = ? AND profile_key = ?').get(accountId, key)) {
-    throw new RoteiroError('invalid', 400, 'Perfil inválido.')
+    throw new RoteiroError('invalid', 400, 'Tipo de cliente inválido.')
   }
   if (origin === 'ia' && (lead.roteiro_profile_origin === 'manual' || !key)) return { changed: false }
   const nextOrigin = key ? origin : null

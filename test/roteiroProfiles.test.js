@@ -24,7 +24,7 @@ test('saveBusiness: grava objetivo e perfis, gera chave estavel, limites', () =>
   assert.equal(b2.profiles[0].profile_key, key)
   assert.equal(b2.profiles[0].name, 'Lojas')
   assert.equal(b2.profiles.length, 1)
-  assert.throws(() => saveBusiness(db, s.accountId, { profiles: Array.from({ length: 7 }, (_, i) => ({ name: `P${i}` })) }), /Máximo de 6 perfis/)
+  assert.throws(() => saveBusiness(db, s.accountId, { profiles: Array.from({ length: 7 }, (_, i) => ({ name: `P${i}` })) }), /Máximo de 6 tipos de cliente/)
   assert.throws(() => saveBusiness(db, s.accountId, { profiles: [{ name: '' }] }), /nome/i)
   assert.throws(() => saveBusiness(db, s.accountId, { business_objective: 'x'.repeat(301), profiles: [] }), /300/)
   assert.equal(getBusiness(db, s.otherAccountId).profiles.length, 0) // isolado por conta
@@ -34,7 +34,7 @@ test('apagar perfil usado por pergunta (rascunho ou publicada) e recusado; leads
   const db = createRoteiroTestDb(); const s = seedRoteiroBase(db)
   const [loja, porta] = saveBusiness(db, s.accountId, { profiles: two }).profiles
   saveDraft(db, s.accountId, s.funnelId, { questions: [{ stage_id: s.stages.qualificando, text: 'q', kind: 'text', profile_key: loja.profile_key }] })
-  assert.throws(() => saveBusiness(db, s.accountId, { profiles: [porta] }), /Este perfil tem perguntas/)
+  assert.throws(() => saveBusiness(db, s.accountId, { profiles: [porta] }), /Este tipo de cliente tem perguntas/)
   const lead = addLead(db, { account_id: s.accountId, funnel_id: s.funnelId, stage_id: s.stages.qualificando })
   setLeadProfile(db, { accountId: s.accountId, leadId: lead, profileKey: porta.profile_key, origin: 'manual' })
   saveBusiness(db, s.accountId, { profiles: [loja] })
@@ -46,7 +46,7 @@ test('apagar perfil citado so numa opcao (define o perfil) tambem e recusado', (
   const [loja, porta] = saveBusiness(db, s.accountId, { profiles: two }).profiles
   saveDraft(db, s.accountId, s.funnelId, { questions: [{ stage_id: s.stages.qualificando, text: 'Tem loja?', kind: 'options',
     options: [{ label: 'Sim', points: 1, sets_profile_key: loja.profile_key }, { label: 'Não', points: 0 }] }] })
-  assert.throws(() => saveBusiness(db, s.accountId, { profiles: [porta] }), /Este perfil tem perguntas/)
+  assert.throws(() => saveBusiness(db, s.accountId, { profiles: [porta] }), /Este tipo de cliente tem perguntas/)
 })
 
 test('setLeadProfile: IA nao troca manual; perfil invalido e recusado; manual aceita null', () => {
@@ -56,7 +56,7 @@ test('setLeadProfile: IA nao troca manual; perfil invalido e recusado; manual ac
   assert.equal(setLeadProfile(db, { accountId: s.accountId, leadId: lead, profileKey: loja.profile_key, origin: 'ia' }).changed, true)
   setLeadProfile(db, { accountId: s.accountId, leadId: lead, profileKey: porta.profile_key, origin: 'manual' })
   assert.equal(setLeadProfile(db, { accountId: s.accountId, leadId: lead, profileKey: loja.profile_key, origin: 'ia' }).changed, false)
-  assert.throws(() => setLeadProfile(db, { accountId: s.accountId, leadId: lead, profileKey: 'zz', origin: 'manual' }), /Perfil inválido/)
+  assert.throws(() => setLeadProfile(db, { accountId: s.accountId, leadId: lead, profileKey: 'zz', origin: 'manual' }), /Tipo de cliente inválido/)
   setLeadProfile(db, { accountId: s.accountId, leadId: lead, profileKey: null, origin: 'manual' })
   const v = leadProfileView(db, { accountId: s.accountId, lead: db.prepare('SELECT * FROM leads WHERE id = ?').get(lead) })
   assert.equal(v.profile_key, null); assert.equal(v.profiles.length, 2)

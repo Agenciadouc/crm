@@ -111,13 +111,13 @@ export default function BusinessProfilesCard({ accountId, onSaved, suggestions =
     <div className="card" style={{ padding: 14, display: 'grid', gap: 10 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
         <strong style={{ fontSize: 14, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-          Negócio e clientes ideais
-          <HelpTip title="Negócio e clientes ideais" width={340}>Conte o que a empresa vende e quem são os clientes ideais. A IA usa isso para montar as perguntas certas para cada tipo de cliente e para reconhecer o perfil de cada lead pelas mensagens. Ex.: Ustulimp — objetivo "revender produtos de limpeza"; perfis "Loja" (mercadinho, comércio, compra pra prateleira) e "Vendedor porta a porta" (renda extra, vende de casa em casa).</HelpTip>
+          Sobre o seu negócio
+          <HelpTip title="Sobre o seu negócio" width={340}>Conte o que a empresa vende e quais tipos de cliente compram de você. A IA usa isso para montar as perguntas certas para cada tipo de cliente e para reconhecer o tipo de cada lead pelas mensagens. Ex.: Ustulimp — objetivo "revender produtos de limpeza"; tipos de cliente "Loja" (mercadinho, comércio, compra pra prateleira) e "Vendedor porta a porta" (renda extra, vende de casa em casa).</HelpTip>
         </strong>
         {!open && (
           <>
             <span style={{ fontSize: 12, color: 'var(--text-secondary)', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: '1 1 200px' }}>
-              {objective || 'Sem objetivo'} · {named.length} {named.length === 1 ? 'perfil' : 'perfis'}{named.length ? `: ${named.map(p => p.name).join(', ')}` : ''}
+              {objective || 'Sem objetivo'} · {named.length} {named.length === 1 ? 'tipo de cliente' : 'tipos de cliente'}{named.length ? `: ${named.map(p => p.name).join(', ')}` : ''}
             </span>
             <button type="button" className="btn btn-secondary btn-sm" onClick={() => setOpen(true)}><Pencil size={12} /> Editar</button>
           </>
@@ -126,10 +126,10 @@ export default function BusinessProfilesCard({ accountId, onSaved, suggestions =
 
       {suggestions.map(s => (
         <div key={s.id} style={{ border: '1px dashed var(--border-accent)', borderRadius: 'var(--radius-sm)', padding: 10, display: 'grid', gap: 6, fontSize: 13 }}>
-          <strong style={{ fontSize: 12, color: 'var(--accent)' }}>A IA sugere um perfil novo: {String(s.payload.name || '')}{s.payload.description ? ` — ${s.payload.description}` : ''}</strong>
+          <strong style={{ fontSize: 12, color: 'var(--accent)' }}>A IA sugere um tipo de cliente novo: {String(s.payload.name || '')}{s.payload.description ? ` — ${s.payload.description}` : ''}</strong>
           <span style={{ color: 'var(--text-secondary)', fontSize: 12 }}>{suggestionWhy(s)}</span>
           <span style={{ display: 'flex', gap: 6 }}>
-            <button type="button" className="btn btn-primary btn-sm" disabled={sugBusy !== null || busy !== null} onClick={() => decide(s.id, true)}>Criar perfil</button>
+            <button type="button" className="btn btn-primary btn-sm" disabled={sugBusy !== null || busy !== null} onClick={() => decide(s.id, true)}>Criar tipo de cliente</button>
             <button type="button" className="btn btn-secondary btn-sm" disabled={sugBusy !== null || busy !== null} onClick={() => decide(s.id, false)}>Ignorar</button>
           </span>
         </div>
@@ -145,24 +145,24 @@ export default function BusinessProfilesCard({ accountId, onSaved, suggestions =
 
           <div style={{ display: 'grid', gap: 6 }}>
             <span style={labelStyle}>
-              Perfis de cliente ideal
-              <HelpTip title="Perfis de cliente ideal">Cada tipo de cliente que compra de você, com o jeito de reconhecer pelas mensagens. Ex.: "Loja" — tem mercadinho ou comércio, compra pra prateleira. Até 6 perfis.</HelpTip>
+              Tipos de cliente
+              <HelpTip title="Tipos de cliente">Cada tipo de cliente que compra de você, com o jeito de reconhecer pelas mensagens. Ex.: "Loja" — tem mercadinho ou comércio, compra pra prateleira. Até 6 tipos.</HelpTip>
             </span>
-            {profiles.length === 0 && <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Nenhum perfil ainda. Sem perfis, as perguntas valem para todos os leads.</div>}
+            {profiles.length === 0 && <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Nenhum tipo de cliente ainda. Sem tipos, as perguntas valem para todos os leads.</div>}
             {profiles.map((p, i) => (
               <div key={p.profile_key || `novo-${i}`} style={{ display: 'flex', gap: 6, alignItems: 'flex-start', flexWrap: 'wrap' }}>
                 <input className="input" style={{ flex: '1 1 140px', minWidth: 0 }} maxLength={60} value={p.name} placeholder="ex.: Loja"
-                  aria-label={`Nome do perfil ${i + 1}`} onChange={e => setProfile(i, { name: e.target.value })} />
+                  aria-label={`Nome do tipo de cliente ${i + 1}`} onChange={e => setProfile(i, { name: e.target.value })} />
                 <input className="input" style={{ flex: '3 1 240px', minWidth: 0 }} maxLength={500} value={p.description} placeholder="Como reconhecer: ex.: tem mercadinho ou comércio, compra pra prateleira"
-                  aria-label={`Como reconhecer o perfil ${i + 1}`} onChange={e => setProfile(i, { description: e.target.value })} />
-                <button type="button" className="btn btn-secondary btn-sm btn-icon" aria-label="Tirar perfil" title="Tirar perfil"
+                  aria-label={`Como reconhecer o tipo de cliente ${i + 1}`} onChange={e => setProfile(i, { description: e.target.value })} />
+                <button type="button" className="btn btn-secondary btn-sm btn-icon" aria-label="Tirar tipo de cliente" title="Tirar tipo de cliente"
                   onClick={() => { setSaved(false); setProfiles(list => list.filter((_, idx) => idx !== i)) }}><X size={12} /></button>
               </div>
             ))}
             <div>
               <button type="button" className="btn btn-secondary btn-sm" disabled={profiles.length >= MAX_PROFILES}
-                title={profiles.length >= MAX_PROFILES ? 'Máximo de 6 perfis' : undefined}
-                onClick={() => { setSaved(false); setProfiles(list => [...list, { name: '', description: '' }]) }}><Plus size={12} /> Perfil</button>
+                title={profiles.length >= MAX_PROFILES ? 'Máximo de 6 tipos de cliente' : undefined}
+                onClick={() => { setSaved(false); setProfiles(list => [...list, { name: '', description: '' }]) }}><Plus size={12} /> Tipo de cliente</button>
             </div>
           </div>
 
@@ -179,8 +179,8 @@ export default function BusinessProfilesCard({ accountId, onSaved, suggestions =
       )}
       {error && <div role="alert" style={{ fontSize: 12, color: 'var(--negative)' }}>{error}</div>}
       {confirmRemove && (
-        <ConfirmDialog title="Apagar perfis?" danger confirmLabel="Salvar e apagar" onConfirm={save} onCancel={() => setConfirmRemove(null)}>
-          {`Estes perfis saem da conta: ${confirmRemove.join(', ')}. Os leads que estavam neles ficam sem perfil até a IA ou o vendedor marcar de novo. Ex.: um lead "Loja" passa a "Ainda não sei".`}
+        <ConfirmDialog title="Apagar tipos de cliente?" danger confirmLabel="Salvar e apagar" onConfirm={save} onCancel={() => setConfirmRemove(null)}>
+          {`Estes tipos de cliente saem da conta: ${confirmRemove.join(', ')}. Os leads que estavam neles ficam sem tipo de cliente até a IA ou o vendedor marcar de novo. Ex.: um lead "Loja" passa a "Ainda não sei".`}
         </ConfirmDialog>
       )}
     </div>

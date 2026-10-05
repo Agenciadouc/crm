@@ -35,10 +35,10 @@ test('pergunta guarda spin, profile_key e sets_profile_key; recusa fase e perfil
   assert.equal(d.questions[1].profile_key, 'loja')
   assert.equal('bant' in d.questions[0], false)
   assert.throws(() => saveDraft(db, s.accountId, s.funnelId, { questions: [{ stage_id: s.stages.qualificando, text: 'x', kind: 'text', spin: 'budget' }] }), /Fase SPIN inválida/)
-  assert.throws(() => saveDraft(db, s.accountId, s.funnelId, { questions: [{ stage_id: s.stages.qualificando, text: 'x', kind: 'text', profile_key: 'nao' }] }), /Perfil inválido/)
+  assert.throws(() => saveDraft(db, s.accountId, s.funnelId, { questions: [{ stage_id: s.stages.qualificando, text: 'x', kind: 'text', profile_key: 'nao' }] }), /Tipo de cliente inválido/)
   // perfil de outra conta tambem e invalido
   db.prepare("INSERT INTO roteiro_profiles (account_id, profile_key, name, position) VALUES (?, 'outra', 'Outra', 0)").run(s.otherAccountId)
-  assert.throws(() => saveDraft(db, s.accountId, s.funnelId, { questions: [{ stage_id: s.stages.qualificando, text: 'x', kind: 'text', profile_key: 'outra' }] }), /Perfil inválido/)
+  assert.throws(() => saveDraft(db, s.accountId, s.funnelId, { questions: [{ stage_id: s.stages.qualificando, text: 'x', kind: 'text', profile_key: 'outra' }] }), /Tipo de cliente inválido/)
 })
 
 test('restaurar versao com perfil que nao existe mais vira Todos', () => {

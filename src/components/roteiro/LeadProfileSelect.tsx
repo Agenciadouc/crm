@@ -29,13 +29,13 @@ export default function LeadProfileSelect({ leadId, accountId, style }: { leadId
   return (
     <div style={{ display: 'grid', gap: 4, ...style }}>
       <label htmlFor={id} style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-secondary)', display: 'inline-flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
-        Perfil do lead
+        Tipo de cliente
         {view.origin === 'ia' && <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}>· identificado pela IA</span>}
-        {view.origin === 'herdado' && <span style={{ fontWeight: 400, color: 'var(--text-muted)' }} title="A conta tinha só este perfil quando o lead chegou. Confira e troque se precisar.">· era o único perfil</span>}
-        <HelpTip title="Perfil do lead">Que tipo de cliente ideal ele é. As perguntas da cadência mudam conforme o perfil. Ex.: quem diz "tenho um mercadinho" é Loja. A IA marca sozinha pelas mensagens; se errar, troque aqui.</HelpTip>
+        {view.origin === 'herdado' && <span style={{ fontWeight: 400, color: 'var(--text-muted)' }} title="A conta tinha só este tipo de cliente quando o lead chegou. Confira e troque se precisar.">· era o único tipo</span>}
+        <HelpTip title="Tipo de cliente">Que tipo de cliente ele é. As perguntas mudam conforme o tipo. Ex.: quem diz "tenho um mercadinho" é Loja. A IA marca sozinha pelas mensagens; se errar, troque aqui.</HelpTip>
       </label>
       <select id={id} className="select" style={{ width: '100%' }} disabled={busy} value={view.profile_key || ''} onChange={e => change(e.target.value)}>
-        <option value="">{only ? `${only.name} (único perfil)` : 'Ainda não sei'}</option>
+        <option value="">{only ? `${only.name} (único tipo)` : 'Ainda não sei'}</option>
         {view.profiles.map(p => <option key={p.profile_key} value={p.profile_key}>{p.name}</option>)}
       </select>
       {error && <div role="alert" style={{ fontSize: 11, color: 'var(--negative)' }}>{error}</div>}

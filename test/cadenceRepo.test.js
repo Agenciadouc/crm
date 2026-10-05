@@ -331,6 +331,6 @@ test('aplicar perfil novo: cria o perfil; com 6 perfis recusa e a sugestao conti
   assert.deepEqual(listProfiles(db, s.accountId).map(p => [p.name, p.description]), [['Loja', null], ['Atacado', 'caixa fechada']])
   saveBusiness(db, s.accountId, { profiles: listProfiles(db, s.accountId).concat([1, 2, 3, 4].map(i => ({ name: `P${i}` }))) })
   const cheio = weeklySuggestion(db, s.accountId, 'new_profile', { name: 'Setimo', description: '' })
-  assert.throws(() => applySuggestionLive(db, s.accountId, cheio, {}), /Máximo de 6 perfis/)
+  assert.throws(() => applySuggestionLive(db, s.accountId, cheio, {}), /Máximo de 6 tipos de cliente/)
   assert.equal(db.prepare('SELECT status FROM roteiro_suggestions WHERE id = ?').get(cheio).status, 'new')
 })

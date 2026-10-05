@@ -255,7 +255,7 @@ test('formulario da pergunta leva fase SPIN, perfil e "define o perfil" das opco
   assert.equal(r.patch.question.spin, 'situation'); assert.equal(r.patch.question.profile_key, 'porta')
   assert.deepEqual(r.patch.question.options.map(o => o.sets_profile_key ?? null), ['loja', null])
   assert.equal('bant' in r.patch.question, false)
-  assert.deepEqual(SPIN_OPTIONS.map(o => o.label), ['Situação', 'Problema', 'Implicação', 'Necessidade de Solução'])
+  assert.deepEqual(SPIN_OPTIONS.map(o => o.label), ['Como faz hoje', 'O que incomoda', 'O que isso custa', 'O que ganha resolvendo'])
 })
 
 test('filtros das sugestoes semanais: pergunta nova por etapa e perfis novos', async () => {

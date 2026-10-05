@@ -147,9 +147,9 @@ test('sugestoes da revisao semanal: titulo e porque com exemplo', async () => {
   assert.equal(titles.new_question, 'Pergunta nova')
   assert.equal(titles.new_profile, 'Perfil novo')
   assert.equal(why({ type: 'new_question', payload: { text: 'O que falta na prateleira?', spin: 'problem', profile_name: 'Loja' }, evidence: ev }),
-    'Da revisão semanal: lojistas reclamam de falta de produto. Ex.: "O que falta na prateleira?" (Problema, perfil Loja).')
+    'Da revisão semanal: lojistas reclamam de falta de produto. Ex.: "O que falta na prateleira?" (O que incomoda, tipo de cliente Loja).')
   assert.equal(why({ type: 'new_question', payload: { text: 'Q?', spin: null, profile_name: null }, evidence: { source: 'weekly', reason: null } }),
-    'Da revisão semanal: Ex.: "Q?" (sem fase, perfil Todos).')
+    'Da revisão semanal: Ex.: "Q?" (sem tipo de pergunta, para todos os clientes).')
   assert.equal(why({ type: 'new_profile', payload: { name: 'Atacado' }, evidence: { source: 'weekly', reason: 'compram em caixa.', count: 3 } }),
     'Da revisão semanal: compram em caixa. Apareceu em 3 conversas.')
   assert.match(why({ type: 'new_option', payload: { label: 'x', count: 2 }, evidence: { source: 'weekly' } }), /^Da revisão semanal: /)

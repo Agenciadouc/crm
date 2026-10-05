@@ -99,10 +99,10 @@ export function dropStep(ids, dragId, overId) {
 
 // Fases SPIN da pergunta (spec 2026-10-02 §1): valor da API + rotulo da tela.
 export const SPIN_OPTIONS = [
-  { value: 'situation', label: 'Situação' },
-  { value: 'problem', label: 'Problema' },
-  { value: 'implication', label: 'Implicação' },
-  { value: 'need_payoff', label: 'Necessidade de Solução' },
+  { value: 'situation', label: 'Como faz hoje' },
+  { value: 'problem', label: 'O que incomoda' },
+  { value: 'implication', label: 'O que isso custa' },
+  { value: 'need_payoff', label: 'O que ganha resolvendo' },
 ]
 
 export function formFromStep(step) {

@@ -95,7 +95,7 @@ function normalizeQuestion(q, stageMap, profileKeys) {
   const spin = q.spin ?? null
   if (spin !== null && !SPIN_KEYS.includes(spin)) throw new RoteiroError('invalid', 400, 'Fase SPIN inválida.')
   const profileKey = q.profile_key ?? null
-  if (profileKey !== null && !profileKeys.has(profileKey)) throw new RoteiroError('invalid', 400, 'Perfil inválido.')
+  if (profileKey !== null && !profileKeys.has(profileKey)) throw new RoteiroError('invalid', 400, 'Tipo de cliente inválido.')
 
   let options = []
   if (q.kind === 'options') {

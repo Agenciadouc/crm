@@ -44,7 +44,7 @@ export default function StepRow({ step, index, metric, windowH, minRate, selecte
           </span>
         )}
         {profileName && (
-          <span title={`Pergunta só para o perfil ${profileName}`} style={{ fontSize: 11, color: 'var(--text-secondary)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-full)', padding: '1px 7px', whiteSpace: 'nowrap' }}>
+          <span title={`Pergunta só para o tipo de cliente ${profileName}`} style={{ fontSize: 11, color: 'var(--text-secondary)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-full)', padding: '1px 7px', whiteSpace: 'nowrap' }}>
             {profileName}
           </span>
         )}

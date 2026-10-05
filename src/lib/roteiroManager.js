@@ -178,7 +178,7 @@ function weakIntro(rate, sent) {
   return `Esta pergunta perde ${fmtPct(l)} dos clientes (taxa ${fmtPct(rate)}${envios}).`
 }
 
-const SPIN_NAMES = { situation: 'Situação', problem: 'Problema', implication: 'Implicação', need_payoff: 'Necessidade de Solução' }
+const SPIN_NAMES = { situation: 'Como faz hoje', problem: 'O que incomoda', implication: 'O que isso custa', need_payoff: 'O que ganha resolvendo' }
 const WEEKLY = 'Da revisão semanal:'
 
 // Sugestao da revisao semanal (spec 2026-10-02 §10): o motivo que a IA viu nas conversas.
@@ -187,7 +187,7 @@ function weeklyWhy(s) {
   const e = s.evidence || {}
   const reason = e.reason ? ` ${e.reason}` : ''
   if (s.type === 'new_question') {
-    return `${WEEKLY}${reason} Ex.: "${p.text}" (${p.spin ? SPIN_NAMES[p.spin] || p.spin : 'sem fase'}, perfil ${p.profile_name || 'Todos'}).`
+    return `${WEEKLY}${reason} Ex.: "${p.text}" (${p.spin ? SPIN_NAMES[p.spin] || p.spin : 'sem tipo de pergunta'}, ${p.profile_name ? `tipo de cliente ${p.profile_name}` : 'para todos os clientes'}).`
   }
   if (s.type === 'new_profile') {
     const n = Number(e.count) || 0
