@@ -8,6 +8,7 @@ import { maybeAutoAdvance } from './autoAdvance.js'
 import { matchDeviation } from './deviations.js'
 import { normalizeText } from './recognize.js'
 import { AI_UNAVAILABLE, toolInput } from './aiCall.js'
+import { listProfiles, setLeadProfile } from './profiles.js'
 
 export const EXTRACT_DELAY_MS = 120000
 const MAX_MESSAGES = 20
@@ -23,6 +24,7 @@ Regras:
 - Para pergunta de texto, escreva a resposta do cliente curta, em português.
 - evidence é o trecho exato da mensagem do cliente que prova a resposta (até 300 caracteres).
 - off_script: só se o cliente fez uma pergunta que não está no roteiro e ainda não foi respondida pelo vendedor. Traga a pergunta dele e uma sugestão curta e simpática de resposta para o vendedor.
+- profile_key: só quando a lista de perfis vier na mensagem e o CLIENTE deixou claro que tipo de cliente ele é. profile_evidence é o trecho exato dele. Na dúvida, não marque.
 Use sempre a ferramenta record_answers.`
 
 const RECORD_ANSWERS_TOOL = {
@@ -59,6 +61,23 @@ const RECORD_ANSWERS_TOOL = {
 
 const str = v => (typeof v === 'string' ? v.trim() : '')
 
+// Com perfis a identificar, a ferramenta ganha profile_key (so as chaves da conta) e a evidencia.
+function buildTool(profiles) {
+  if (!profiles.length) return RECORD_ANSWERS_TOOL
+  const schema = RECORD_ANSWERS_TOOL.input_schema
+  return {
+    ...RECORD_ANSWERS_TOOL,
+    input_schema: {
+      ...schema,
+      properties: {
+        ...schema.properties,
+        profile_key: { type: 'string', enum: profiles.map(p => p.profile_key), description: 'Perfil do cliente, só com evidência clara.' },
+        profile_evidence: { type: 'string', description: 'Trecho exato da mensagem do cliente que mostra o perfil (até 300 caracteres).' },
+      },
+    },
+  }
+}
+
 function lastMessages(db, leadId) {
   const rows = db.prepare(`
     SELECT direction, content, media_type FROM messages WHERE lead_id = ?
@@ -78,16 +97,20 @@ function describeQuestion(q, hint) {
   return lines.join('\n')
 }
 
-// Responde as pendentes da etapa atual; devolve { saved, offscript, advanced }.
+// Responde as pendentes da etapa atual e, se o lead ainda nao tem perfil (conta com 2+ perfis),
+// identifica o perfil na mesma chamada; devolve { saved, offscript, advanced, profile_set }.
 export async function extractAnswers(db, { accountId, leadId, ai }) {
-  const empty = { saved: [], offscript: null, advanced: null }
+  const empty = { saved: [], offscript: null, advanced: null, profile_set: null }
   if (!ai) return empty
 
   const roteiro = getLeadRoteiro(db, { accountId, leadId }) // 404 se o lead nao e da conta
   if (!roteiro.has_roteiro) return empty
   const current = roteiro.stages.find(s => s.is_current)
   const pending = current ? current.questions.filter(q => !q.answer) : []
-  if (!pending.length) return empty
+  const leadRow = db.prepare('SELECT roteiro_profile_key FROM leads WHERE id = ?').get(leadId)
+  const allProfiles = leadRow.roteiro_profile_key ? [] : listProfiles(db, accountId)
+  const profiles = allProfiles.length >= 2 ? allProfiles : []
+  if (!pending.length && !profiles.length) return empty
 
   const messages = lastMessages(db, leadId)
   if (!messages.length) return empty
@@ -96,9 +119,15 @@ export async function extractAnswers(db, { accountId, leadId, ai }) {
 
   const lead = db.prepare('SELECT funnel_id FROM leads WHERE id = ? AND account_id = ?').get(leadId, accountId)
   const hints = new Map(safeGetPublishedQuestions(db, accountId, lead.funnel_id).map(q => [q.question_key, q.ai_hint]))
+  const profileLines = profiles.length ? [
+    'Perfis de cliente (marque profile_key só com evidência clara nas mensagens do CLIENTE; na dúvida, não marque):',
+    profiles.map(p => `- profile_key: ${p.profile_key} = "${p.name}"${p.description ? ` — como reconhecer: ${p.description}` : ''}`).join('\n'),
+    '',
+  ] : []
   const userContent = [
+    ...profileLines,
     'Perguntas pendentes:',
-    pending.map(q => describeQuestion(q, hints.get(q.question_key))).join('\n'),
+    pending.length ? pending.map(q => describeQuestion(q, hints.get(q.question_key))).join('\n') : '(nenhuma)',
     '',
     `Últimas mensagens (${messages.length}):`,
     messages.join('\n'),
@@ -108,7 +137,7 @@ export async function extractAnswers(db, { accountId, leadId, ai }) {
     accountId, leadId,
     systemPrompt: SYSTEM_PROMPT,
     messages: [{ role: 'user', content: userContent }],
-    tools: [RECORD_ANSWERS_TOOL],
+    tools: [buildTool(profiles)],
     toolChoice: { type: 'tool', name: 'record_answers' },
     maxTokens: 800,
     source: 'roteiro_extraction',
@@ -141,8 +170,13 @@ export async function extractAnswers(db, { accountId, leadId, ai }) {
     }
   }
 
-  const advanced = saved.length ? maybeAutoAdvance(db, { accountId, leadId }) : null
-  return { saved, offscript: handleOffscript(db, { accountId, leadId, funnelId: lead.funnel_id, raw: input.off_script }), advanced }
+  let profileSet = null
+  if (profiles.length && profiles.some(p => p.profile_key === input.profile_key) && str(input.profile_evidence)) {
+    if (setLeadProfile(db, { accountId, leadId, profileKey: input.profile_key, origin: 'ia' }).changed) profileSet = input.profile_key
+  }
+
+  const advanced = saved.length || profileSet ? maybeAutoAdvance(db, { accountId, leadId }) : null
+  return { saved, offscript: handleOffscript(db, { accountId, leadId, funnelId: lead.funnel_id, raw: input.off_script }), advanced, profile_set: profileSet }
 }
 
 // Pergunta fora do roteiro: se casar um desvio cadastrado, o cartao ja mostra o desvio

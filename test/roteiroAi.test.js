@@ -14,6 +14,7 @@ import { buildAiDraft } from '../server/services/roteiro/aiDraft.js'
 import { runAiLearning } from '../server/services/roteiro/aiLearning.js'
 import { buildRoteiroAi, AI_UNAVAILABLE } from '../server/services/roteiro/aiCall.js'
 import { runLearning } from '../server/services/roteiro/learning.js'
+import { saveBusiness } from '../server/services/roteiro/profiles.js'
 import { runScoreNightly } from '../server/services/leadScore/nightly.js'
 import { bootRoteiroRuntime, bootRoteiroAi, enqueueAiExtract, setAiExtractHandler } from '../server/services/roteiro/runtime.js'
 
@@ -171,7 +172,7 @@ test('extractAnswers: mesma pergunta fora do roteiro do mesmo lead em 7 dias nao
 test('extractAnswers: sem pendente na etapa, sem roteiro ou IA indisponivel -> nao chama a IA', async () => {
   const { db, s, leadId } = setupExtract()
   const off = fakeAi({}, { available: false })
-  assert.deepEqual(await extractAnswers(db, { accountId: s.accountId, leadId, ai: off }), { saved: [], offscript: null, advanced: null })
+  assert.deepEqual(await extractAnswers(db, { accountId: s.accountId, leadId, ai: off }), { saved: [], offscript: null, advanced: null, profile_set: null })
   assert.equal(off.calls.length, 0)
 
   const ai = fakeAi({})
@@ -556,4 +557,64 @@ test('runLearning com ai soma as sugestoes da IA; noturno so passa IA para conta
   assert.ok(asked.includes(s2.accountId))
   assert.equal(ai2.calls.length, 1)
   assert.equal(suggestions(db2, s2.accountId, 'rewrite').length, 1)
+})
+
+// Perfil do lead pela IA (spec 2026-10-02 §6): mesma chamada da extracao, so com evidencia.
+function setupPerfis() {
+  const db = createRoteiroTestDb(); const s = seedRoteiroBase(db)
+  const [loja, porta] = saveBusiness(db, s.accountId, { profiles: [{ name: 'Loja', description: 'mercadinho' }, { name: 'Porta', description: 'renda extra' }] }).profiles
+  saveDraft(db, s.accountId, s.funnelId, { questions: [{ stage_id: s.stages.qualificando, text: 'Quantos clientes?', kind: 'text', profile_key: loja.profile_key }] })
+  publish(db, s.accountId, s.funnelId, s.gerenteId)
+  const leadId = addLead(db, { account_id: s.accountId, funnel_id: s.funnelId, stage_id: s.stages.qualificando })
+  addMessage(db, { leadId, direction: 'inbound', content: 'tenho um mercadinho no centro' })
+  return { db, s, loja, porta, leadId }
+}
+
+test('extracao: lead sem perfil e sem pendentes -> IA recebe os perfis e marca com evidencia (origem ia)', async () => {
+  const { db, s, loja, leadId } = setupPerfis()
+  const ai = fakeAi({ roteiro_extraction: [p => {
+    assert.match(p.messages[0].content, /Loja/); assert.match(p.messages[0].content, /mercadinho/)
+    assert.deepEqual(p.tools[0].input_schema.properties.profile_key.enum.length, 2)
+    return tool('record_answers', { answers: [], profile_key: loja.profile_key, profile_evidence: 'tenho um mercadinho' })
+  }] })
+  const r = await extractAnswers(db, { accountId: s.accountId, leadId, ai })
+  assert.equal(r.profile_set, loja.profile_key)
+  assert.equal(db.prepare('SELECT roteiro_profile_origin o FROM leads WHERE id = ?').get(leadId).o, 'ia')
+})
+
+test('extracao: perfil inventado ou sem evidencia e ignorado', async () => {
+  const { db, s, leadId } = setupPerfis()
+  for (const resposta of [{ answers: [], profile_key: 'inventado', profile_evidence: 'x' }, { answers: [], profile_key: null, profile_evidence: '' }]) {
+    const r = await extractAnswers(db, { accountId: s.accountId, leadId, ai: fakeAi({ roteiro_extraction: [tool('record_answers', resposta)] }) })
+    assert.equal(r.profile_set, null)
+  }
+  assert.equal(db.prepare('SELECT roteiro_profile_key k FROM leads WHERE id = ?').get(leadId).k, null)
+})
+
+test('extracao: lead com perfil manual e sem pendentes do perfil -> nem chama a IA', async () => {
+  const { db, s, porta, leadId } = setupPerfis()
+  db.prepare("UPDATE leads SET roteiro_profile_key = ?, roteiro_profile_origin = 'manual' WHERE id = ?").run(porta.profile_key, leadId)
+  const ai = fakeAi({})
+  const r = await extractAnswers(db, { accountId: s.accountId, leadId, ai })
+  assert.equal(r.profile_set, null)
+  assert.equal(ai.calls.length, 0)
+})
+
+test('extracao: com perfil, a IA nao recebe a lista de perfis', async () => {
+  const { db, s, loja, leadId } = setupPerfis()
+  db.prepare("UPDATE leads SET roteiro_profile_key = ?, roteiro_profile_origin = 'ia' WHERE id = ?").run(loja.profile_key, leadId)
+  const ai = fakeAi({ roteiro_extraction: [p => { assert.equal(p.tools[0].input_schema.properties.profile_key, undefined); return tool('record_answers', { answers: [] }) }] })
+  await extractAnswers(db, { accountId: s.accountId, leadId, ai })
+  assert.equal(ai.calls.length, 1)
+})
+
+test('bootRoteiroAi: IA identifica o perfil -> SSE lead:cadence (seletor e cartao recarregam)', async () => {
+  const { db, s, loja, leadId } = setupPerfis()
+  const sse = []
+  bootRoteiroRuntime({ db, broadcastSSE: (...a) => sse.push(a), triggerCapiForStageChange: () => {}, schedule: () => {} })
+  const ai = fakeAi({ roteiro_extraction: [tool('record_answers', { answers: [], profile_key: loja.profile_key, profile_evidence: 'tenho um mercadinho' })] })
+  const queue = bootRoteiroAi({ db, ai, setTimer: () => 1, clearTimer: () => {} })
+  enqueueAiExtract({ db, account: null, lead: db.prepare('SELECT * FROM leads WHERE id = ?').get(leadId), message: { id: 1 } })
+  await queue.flushAll()
+  assert.deepEqual(sse.find(e => e[1] === 'lead:cadence'), [s.accountId, 'lead:cadence', { lead_id: leadId }])
 })
