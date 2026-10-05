@@ -4,6 +4,44 @@ function addColumnIfNotExists(db, table, column, type) {
   if (!cols.some(c => c.name === column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`)
 }
 
+// Tipos de sugestao; new_question/new_profile vem da revisao semanal (spec 2026-10-02 §10).
+export const SUGGESTION_TYPES = ['rewrite', 'seller_phrasing', 'new_option', 'new_deviation', 'reorder', 'new_question', 'new_profile']
+const SUGGESTION_TYPES_SQL = SUGGESTION_TYPES.map(t => `'${t}'`).join(',')
+const SUGGESTION_COLUMNS = 'id, account_id, funnel_id, question_key, type, payload_json, evidence_json, status, created_at, decided_by, decided_at'
+
+// SQLite nao altera CHECK: cria a tabela nova, copia com os MESMOS ids, confere e troca.
+// Nenhuma FK aponta para roteiro_suggestions (roteiro_variants.suggestion_id e so numero).
+export function rebuildSuggestionsIfNeeded(db) {
+  const row = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'roteiro_suggestions'").get()
+  if (!row || row.sql.includes("'new_profile'")) return { rebuilt: false, count: null }
+  const count = db.prepare('SELECT COUNT(*) AS n FROM roteiro_suggestions').get().n
+  const hasSeq = !!db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'sqlite_sequence'").get()
+  const seqRow = hasSeq ? db.prepare("SELECT seq FROM sqlite_sequence WHERE name = 'roteiro_suggestions'").get() : null
+  db.transaction(() => {
+    db.exec('DROP TABLE IF EXISTS roteiro_suggestions_new')
+    db.exec(`CREATE TABLE roteiro_suggestions_new (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      account_id INTEGER NOT NULL,
+      funnel_id INTEGER,
+      question_key TEXT,
+      type TEXT NOT NULL CHECK (type IN (${SUGGESTION_TYPES_SQL})),
+      payload_json TEXT NOT NULL,
+      evidence_json TEXT,
+      status TEXT NOT NULL DEFAULT 'new' CHECK (status IN ('new','testing','applied','rejected')),
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      decided_by INTEGER, decided_at TEXT
+    )`)
+    db.exec(`INSERT INTO roteiro_suggestions_new (${SUGGESTION_COLUMNS}) SELECT ${SUGGESTION_COLUMNS} FROM roteiro_suggestions`)
+    const copied = db.prepare('SELECT COUNT(*) AS n FROM roteiro_suggestions_new').get().n
+    if (copied !== count) throw new Error(`copia incompleta de roteiro_suggestions (${copied} de ${count})`)
+    db.exec('DROP TABLE roteiro_suggestions')
+    db.exec('ALTER TABLE roteiro_suggestions_new RENAME TO roteiro_suggestions')
+    // id novo nunca reaproveita id antigo (roteiro_variants.suggestion_id aponta pra ele)
+    if (seqRow) db.prepare("UPDATE sqlite_sequence SET seq = MAX(seq, ?) WHERE name = 'roteiro_suggestions'").run(seqRow.seq)
+  })()
+  return { rebuilt: true, count }
+}
+
 export function applyRoteiroSchema(db) {
   db.exec(`
     CREATE TABLE IF NOT EXISTS roteiro_versions (
@@ -91,7 +129,7 @@ export function applyRoteiroSchema(db) {
       account_id INTEGER NOT NULL,
       funnel_id INTEGER,
       question_key TEXT,
-      type TEXT NOT NULL CHECK (type IN ('rewrite','seller_phrasing','new_option','new_deviation','reorder')),
+      type TEXT NOT NULL CHECK (type IN ('rewrite','seller_phrasing','new_option','new_deviation','reorder','new_question','new_profile')),
       payload_json TEXT NOT NULL,
       evidence_json TEXT,
       status TEXT NOT NULL DEFAULT 'new' CHECK (status IN ('new','testing','applied','rejected')),
@@ -144,8 +182,17 @@ export function applyRoteiroSchema(db) {
   addColumnIfNotExists(db, 'roteiro_options', 'sets_profile_key', 'TEXT')
   addColumnIfNotExists(db, 'leads', 'roteiro_profile_key', 'TEXT')
   addColumnIfNotExists(db, 'leads', 'roteiro_profile_origin', 'TEXT')
+  // Revisao semanal: ultima rodada por conta (spec 2026-10-02 §10)
+  db.exec('CREATE TABLE IF NOT EXISTS roteiro_weekly_runs (account_id INTEGER PRIMARY KEY, ran_at TEXT NOT NULL)')
   // BANT -> SPIN: so a etiqueta muda; texto/opcoes/pontos/respostas iguais. Coluna bant fica morta. Idempotente.
   db.exec(`UPDATE roteiro_questions SET spin = CASE bant WHEN 'need' THEN 'problem' WHEN 'timeline' THEN 'situation'
     WHEN 'authority' THEN 'situation' WHEN 'budget' THEN 'need_payoff' END WHERE spin IS NULL AND bant IS NOT NULL`)
   try { db.exec('CREATE INDEX IF NOT EXISTS idx_leads_score ON leads(account_id, score)') } catch (e) { console.warn('[Roteiro] indice idx_leads_score:', e.message) }
+  // Por ultimo: se a reconstrucao falhar, o resto ja existe (so sugestoes novas sao recusadas).
+  try {
+    const r = rebuildSuggestionsIfNeeded(db)
+    if (r.rebuilt) console.log(`[Roteiro] roteiro_suggestions reconstruida: ${r.count} sugestoes, ids mantidos`)
+  } catch (e) {
+    console.error('[Roteiro] reconstrucao de roteiro_suggestions FALHOU (sugestoes da revisao semanal serao recusadas):', e.message)
+  }
 }
