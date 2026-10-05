@@ -18,6 +18,7 @@ import {
 import { ArrowLeft, Phone, Mail, MapPin, MessageCircle, Send, Clock, User, GitBranch, Edit3, Save, X, Plus, StickyNote, Tag as TagIcon, ListOrdered, Zap, ClipboardList, ChevronRight, Check, Archive, ArchiveRestore, FileText, DollarSign, Trash2 } from 'lucide-react'
 import MessageMedia from '../components/MessageMedia'
 import ScoreThermometer from '../components/score/ScoreThermometer'
+import LeadProfileSelect from '../components/roteiro/LeadProfileSelect'
 import RoteiroCard from '../components/roteiro/RoteiroCard'
 import NextStepCard from '../components/cadence/NextStepCard'
 import { applyMessageVars } from '../lib/messageVars'
@@ -324,6 +325,7 @@ export default function LeadDetail() {
         {/* Left column: Info + Tags + History */}
         <div>
           {accountId && <ScoreThermometer key={lead.id} leadId={lead.id} accountId={accountId} />}
+          {accountId && <LeadProfileSelect key={`perfil-${lead.id}`} leadId={lead.id} accountId={accountId} style={{ marginBottom: 16 }} />}
           {/* Lead Info Card */}
           <div className="card" style={{ marginBottom: 16 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>

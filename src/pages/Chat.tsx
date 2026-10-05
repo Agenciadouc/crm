@@ -27,6 +27,7 @@ import { useCityFilter } from '../components/CityFilter'
 import MoreFilters, { useScoreFilter } from '../components/MoreFilters'
 import ScoreBadge from '../components/score/ScoreBadge'
 import ScoreLine from '../components/score/ScoreLine'
+import LeadProfileSelect from '../components/roteiro/LeadProfileSelect'
 import { isScoreBand } from '../lib/score'
 import NextStepCard from '../components/cadence/NextStepCard'
 import StepReviewModal from '../components/cadence/StepReviewModal'
@@ -2184,6 +2185,8 @@ export default function Chat() {
                     >
                       {allStages.filter(s => s.funnel_id === lead.funnel_id).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                     </select>
+                    {/* Perfil de cliente ideal: muda as perguntas da cadencia (some sem perfis na conta) */}
+                    <LeadProfileSelect key={`perfil-${lead.id}`} leadId={lead.id} accountId={accountId} style={{ marginTop: 8 }} />
                   </div>
                   </>),
                   // Dados do contato e Observacoes: o mesmo cartao da aba Info (mesma edicao e permissoes)
