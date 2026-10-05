@@ -3,6 +3,7 @@
 import { recalcLeadScore, getRuntimeOnBandUp } from './recalc.js'
 import { computeHalfLife, accountCycleDays } from './halfLife.js'
 import { runLearning } from '../roteiro/learning.js'
+import { runWeeklyReview } from '../roteiro/weeklyReview.js'
 import { toSqliteDate } from '../roteiro/time.js'
 
 const KEEP_DAYS = 120
@@ -57,6 +58,13 @@ export async function runScoreNightly(db, { now = new Date(), batchSize = 200, o
       try { ai = typeof aiForAccount === 'function' ? aiForAccount(accountId) : null } catch (e) { console.error('[Termometro] IA da conta', accountId, e.message) }
       const learned = await runLearning(db, { accountId, now, ai })
       totals.suggestions += learned.created
+      // Revisao semanal (spec 2026-10-02 §10): so com IA; ela mesma confere se ja passou 1 semana.
+      if (ai) {
+        try {
+          const weekly = await runWeeklyReview(db, { accountId, ai, now })
+          totals.suggestions += weekly.created
+        } catch (e) { console.error('[Roteiro] revisao semanal da conta', accountId, e.message) }
+      }
       totals.accounts++
     } catch (e) {
       totals.errors++
