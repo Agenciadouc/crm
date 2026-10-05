@@ -17,10 +17,11 @@ import { buildAiDraft } from '../services/roteiro/aiDraft.js'
 import { canAtendenteAccessLead } from '../services/leadAccess.js'
 import { refreshLeadStageCadence } from '../services/cadence/leadCadence.js'
 import { warnMissingCadenceTable } from '../services/cadence/errors.js'
+import { getBusiness, saveBusiness, setLeadProfile, leadProfileView } from '../services/roteiro/profiles.js'
 
 const MANAGER_ROLES = ['super_admin', 'gerente']
 
-export function createRoteiroRouter(db, { ai = null, now = () => new Date() } = {}) {
+export function createRoteiroRouter(db, { ai = null, now = () => new Date(), broadcast = () => {} } = {}) {
   const router = Router()
 
   function fail(res, e) {
@@ -99,6 +100,19 @@ export function createRoteiroRouter(db, { ai = null, now = () => new Date() } = 
     }
     try {
       res.json(await buildAiDraft(db, { accountId: req.accountId, funnelId: req.params.funnelId, ai }))
+    } catch (e) { fail(res, e) }
+  })
+
+  // Negocio e clientes ideais (spec 2026-10-02 §4, §9): objetivo + ate 6 perfis.
+  router.get('/profiles', manager, (req, res) => {
+    try {
+      res.json(getBusiness(db, req.accountId))
+    } catch (e) { fail(res, e) }
+  })
+
+  router.put('/profiles', manager, (req, res) => {
+    try {
+      res.json(saveBusiness(db, req.accountId, { business_objective: req.body?.business_objective ?? null, profiles: req.body?.profiles }))
     } catch (e) { fail(res, e) }
   })
 
@@ -265,6 +279,30 @@ export function createRoteiroRouter(db, { ai = null, now = () => new Date() } = 
         source: 'recognized',
       })
       res.status(201).json({ ask_id: askId })
+    } catch (e) { fail(res, e) }
+  })
+
+  // Perfil do lead (spec 2026-10-02 §6): escolha do vendedor vale mais que a da IA.
+  router.get('/leads/:leadId/roteiro-profile', (req, res) => {
+    try {
+      const lead = getLeadScoped(req.accountId, req.params.leadId)
+      assertLeadAccess(req, lead)
+      res.json(leadProfileView(db, { accountId: req.accountId, lead }))
+    } catch (e) { fail(res, e) }
+  })
+
+  router.put('/leads/:leadId/roteiro-profile', (req, res) => {
+    try {
+      const lead = getLeadScoped(req.accountId, req.params.leadId)
+      assertLeadAccess(req, lead)
+      const r = setLeadProfile(db, { accountId: req.accountId, leadId: lead.id, profileKey: req.body?.profile_key ?? null, origin: 'manual' })
+      if (r.changed) {
+        // Perguntas do lead mudaram: proximo passo da cadencia e nota (Perfil) recalculam.
+        try { refreshLeadStageCadence(db, { leadId: lead.id }) } catch (e) { if (!warnMissingCadenceTable(e)) console.error('[Cadencia] proximo passo:', e.message) }
+        scheduleScore(lead.id)
+        try { broadcast(req.accountId, 'lead:cadence', { lead_id: lead.id }) } catch (e) { console.error('[Roteiro] SSE lead:cadence:', e.message) }
+      }
+      res.json(leadProfileView(db, { accountId: req.accountId, lead: getLeadScoped(req.accountId, lead.id) }))
     } catch (e) { fail(res, e) }
   })
 

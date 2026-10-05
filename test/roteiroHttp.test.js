@@ -48,11 +48,11 @@ function peca(base, { method = 'GET', path = '/', jwtToken, body }) {
   })
 }
 
-async function comServidor(fn, { ai = null } = {}) {
+async function comServidor(fn, { ai = null, broadcast } = {}) {
   const db = createRoteiroTestDb()
   const app = express()
   app.use(express.json())
-  app.use('/api/roteiro', authenticate, scopeToAccount, createRoteiroRouter(db, { ai }))
+  app.use('/api/roteiro', authenticate, scopeToAccount, createRoteiroRouter(db, { ai, broadcast }))
   const server = http.createServer(app)
   await new Promise(r => server.listen(0, '127.0.0.1', r))
   const base = `http://127.0.0.1:${server.address().port}`
@@ -457,4 +457,42 @@ test('atendente sem vinculo com o lead recebe 403 nas rotas de escrita do vended
     assert.equal(db.prepare('SELECT COUNT(*) AS n FROM lead_answers').get().n, 0)
     assert.equal(db.prepare('SELECT COUNT(*) AS n FROM roteiro_asks').get().n, 0)
   })
+})
+
+test('perfis da conta: gestor le e grava; atendente 403; limite de 6', async () => {
+  await comServidor(async ({ db, base }) => {
+    const { accountId, atendenteId } = seedRoteiroBase(db)
+    const tg = token({ id: 999, role: 'gerente', accountId })
+    const ta = token({ id: atendenteId, role: 'atendente', accountId })
+    assert.equal((await peca(base, { path: '/api/roteiro/profiles', jwtToken: ta })).status, 403)
+    assert.equal((await peca(base, { method: 'PUT', path: '/api/roteiro/profiles', jwtToken: ta, body: { profiles: [] } })).status, 403)
+    const ok = await peca(base, { method: 'PUT', path: '/api/roteiro/profiles', jwtToken: tg, body: { business_objective: 'revender limpeza', profiles: [{ name: 'Loja', description: 'mercadinho' }] } })
+    assert.equal(ok.status, 200)
+    assert.equal(ok.body.profiles[0].name, 'Loja')
+    const lido = await peca(base, { path: '/api/roteiro/profiles', jwtToken: tg })
+    assert.equal(lido.body.business_objective, 'revender limpeza')
+    const muitos = await peca(base, { method: 'PUT', path: '/api/roteiro/profiles', jwtToken: tg, body: { profiles: Array.from({ length: 7 }, (_, i) => ({ name: `P${i}` })) } })
+    assert.deepEqual([muitos.status, muitos.body.error], [400, 'Máximo de 6 perfis.'])
+  })
+})
+
+test('perfil do lead: vendedor com acesso grava manual, avisa a cadencia; invalido 400; sem acesso 403', async () => {
+  const avisos = []
+  await comServidor(async ({ db, base }) => {
+    const { accountId, funnelId, stages, atendenteId } = seedRoteiroBase(db)
+    const tg = token({ id: 999, role: 'gerente', accountId })
+    const ta = token({ id: atendenteId, role: 'atendente', accountId })
+    const loja = (await peca(base, { method: 'PUT', path: '/api/roteiro/profiles', jwtToken: tg, body: { profiles: [{ name: 'Loja' }, { name: 'Porta' }] } })).body.profiles[0]
+    const meu = addLead(db, { account_id: accountId, funnel_id: funnelId, stage_id: stages.qualificando, attendant_id: atendenteId })
+    const outro = addLead(db, { account_id: accountId, funnel_id: funnelId, stage_id: stages.qualificando, attendant_id: 999 })
+    const r = await peca(base, { method: 'PUT', path: `/api/roteiro/leads/${meu}/roteiro-profile`, jwtToken: ta, body: { profile_key: loja.profile_key } })
+    assert.equal(r.status, 200)
+    assert.deepEqual([r.body.profile_key, r.body.origin, r.body.profiles.length], [loja.profile_key, 'manual', 2])
+    assert.deepEqual(avisos, [[accountId, 'lead:cadence', { lead_id: meu }]])
+    const lido = await peca(base, { path: `/api/roteiro/leads/${meu}/roteiro-profile`, jwtToken: ta })
+    assert.equal(lido.body.profile_key, loja.profile_key)
+    const ruim = await peca(base, { method: 'PUT', path: `/api/roteiro/leads/${meu}/roteiro-profile`, jwtToken: ta, body: { profile_key: 'zz' } })
+    assert.deepEqual([ruim.status, ruim.body.error], [400, 'Perfil inválido.'])
+    assert.equal((await peca(base, { method: 'PUT', path: `/api/roteiro/leads/${outro}/roteiro-profile`, jwtToken: ta, body: { profile_key: null } })).status, 403)
+  }, { broadcast: (...a) => avisos.push(a) })
 })

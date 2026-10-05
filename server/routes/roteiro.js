@@ -5,5 +5,6 @@
 import db from '../db.js'
 import { createRoteiroRouter } from './roteiroRouter.js'
 import { createRoteiroAi } from '../services/roteiro/aiAdapter.js'
+import { broadcastSSE } from '../sse.js'
 
-export default createRoteiroRouter(db, { ai: createRoteiroAi(db) })
+export default createRoteiroRouter(db, { ai: createRoteiroAi(db), broadcast: broadcastSSE })
