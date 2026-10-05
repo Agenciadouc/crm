@@ -288,3 +288,49 @@ test('stage-view: marca etapa de contato e lista os perfis da conta', async () =
   assert.deepEqual(view.profiles.map(p => p.name), ['Loja'])
   assert.ok(view.profiles[0].profile_key)
 })
+
+// Sugestoes da revisao semanal (spec 2026-10-02 §10)
+function weeklySuggestion(db, accountId, type, payload, funnelId = null) {
+  return Number(db.prepare("INSERT INTO roteiro_suggestions (account_id, funnel_id, type, payload_json, evidence_json) VALUES (?, ?, ?, ?, '{\"source\":\"weekly\"}')")
+    .run(accountId, funnelId, type, JSON.stringify(payload)).lastInsertRowid)
+}
+
+test('aplicar pergunta nova da revisao semanal: cria a cadencia da etapa com o passo e publica', async () => {
+  const { saveBusiness } = await import('../server/services/roteiro/profiles.js')
+  const db = createCadenceTestDb(); const s = seedCadenceBase(db)
+  const [loja] = saveBusiness(db, s.accountId, { profiles: [{ name: 'Loja' }, { name: 'Porta' }] }).profiles
+  const id = weeklySuggestion(db, s.accountId, 'new_question', { stage_id: s.stages.qualificando, text: 'O que falta na prateleira?', spin: 'problem', profile_key: loja.profile_key,
+    options: [{ label: 'Limpeza pesada', points: 10 }, { label: 'Nada', points: 0 }] }, s.funnelId)
+  const r = applySuggestionLive(db, s.accountId, id, { userId: s.gerenteId })
+  assert.equal(r.published, true)
+  const q = publishedRoteiro(db, s).questions.find(x => x.text === 'O que falta na prateleira?')
+  assert.deepEqual([q.stage_id, q.spin, q.profile_key, q.kind, q.options.length], [s.stages.qualificando, 'problem', loja.profile_key, 'options', 2])
+  const cad = db.prepare('SELECT id FROM cadences WHERE stage_id = ? AND is_active = 1').get(s.stages.qualificando)
+  assert.ok(db.prepare("SELECT 1 FROM cadence_attempts WHERE cadence_id = ? AND question_key = ? AND action_type = 'pergunta'").get(cad.id, q.question_key))
+  assert.deepEqual(r.cadence_ids, [cad.id])
+  assert.equal(db.prepare('SELECT status FROM roteiro_suggestions WHERE id = ?').get(id).status, 'applied')
+  assert.throws(() => applySuggestionLive(db, s.accountId, id, {}), e => e.status === 409)
+})
+
+test('aplicar pergunta nova com perfil apagado vira Todos', () => {
+  const db = createCadenceTestDb(); const s = seedCadenceBase(db)
+  const id = weeklySuggestion(db, s.accountId, 'new_question', { stage_id: s.stages.qualificando, text: 'Q?', spin: null, profile_key: 'sumiu',
+    options: [{ label: 'a', points: 1 }, { label: 'b', points: 0 }] }, s.funnelId)
+  applySuggestionLive(db, s.accountId, id, {})
+  assert.equal(publishedRoteiro(db, s).questions.find(x => x.text === 'Q?').profile_key, null)
+})
+
+test('aplicar perfil novo: cria o perfil; com 6 perfis recusa e a sugestao continua nova; outra conta 404', async () => {
+  const { saveBusiness, listProfiles } = await import('../server/services/roteiro/profiles.js')
+  const db = createCadenceTestDb(); const s = seedCadenceBase(db)
+  saveBusiness(db, s.accountId, { profiles: [{ name: 'Loja' }] })
+  const id = weeklySuggestion(db, s.accountId, 'new_profile', { name: 'Atacado', description: 'caixa fechada' })
+  assert.throws(() => applySuggestionLive(db, s.otherAccountId, id, {}), e => e.status === 404)
+  const r = applySuggestionLive(db, s.accountId, id, { userId: s.gerenteId })
+  assert.deepEqual(r, { published: false, funnel_id: null, cadence_ids: [] })
+  assert.deepEqual(listProfiles(db, s.accountId).map(p => [p.name, p.description]), [['Loja', null], ['Atacado', 'caixa fechada']])
+  saveBusiness(db, s.accountId, { profiles: listProfiles(db, s.accountId).concat([1, 2, 3, 4].map(i => ({ name: `P${i}` }))) })
+  const cheio = weeklySuggestion(db, s.accountId, 'new_profile', { name: 'Setimo', description: '' })
+  assert.throws(() => applySuggestionLive(db, s.accountId, cheio, {}), /Máximo de 6 perfis/)
+  assert.equal(db.prepare('SELECT status FROM roteiro_suggestions WHERE id = ?').get(cheio).status, 'new')
+})

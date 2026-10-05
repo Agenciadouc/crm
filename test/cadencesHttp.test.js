@@ -361,3 +361,15 @@ test('PATCH do passo nao troca a pergunta (question_key) -> 400; mesma chave pas
     assert.equal(igual.status, 200)
   })
 })
+
+test('aplicar pergunta nova da revisao semanal pela rota: 200 e avisa a tela', async () => {
+  await comServidor(async ({ db, s, base, sent }) => {
+    const tg = token({ id: s.gerenteId, role: 'gerente', accountId: s.accountId })
+    const id = Number(db.prepare("INSERT INTO roteiro_suggestions (account_id, funnel_id, type, payload_json) VALUES (?, ?, 'new_question', ?)")
+      .run(s.accountId, s.funnelId, JSON.stringify({ stage_id: s.stages.qualificando, text: 'Q nova?', options: [{ label: 'a', points: 1 }, { label: 'b', points: 0 }] })).lastInsertRowid)
+    const r = await peca(base, { method: 'POST', path: `/api/cadences/suggestions/${id}/apply`, jwtToken: tg })
+    assert.equal(r.status, 200)
+    assert.equal(r.body.cadence_ids.length, 1)
+    assert.ok(sent.some(e => e[1] === 'cadence:updated' && e[2].stage_id === s.stages.qualificando))
+  })
+})

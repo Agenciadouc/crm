@@ -261,6 +261,8 @@ export function keepCurrent(db, { accountId, variantId, userId = null, now } = {
 export function applySuggestion(db, { accountId, suggestionId, userId = null, now } = {}) {
   const s = getSuggestion(db, accountId, suggestionId)
   if (s.status !== 'new') throw new RoteiroError('decided', 409, 'Essa sugestão já foi decidida.')
+  // Pergunta/perfil novos da revisao semanal mexem na cadencia/perfis: so pela tela de Cadencias.
+  if (s.type === 'new_question' || s.type === 'new_profile') throw new RoteiroError('invalid', 400, 'Aplique pela tela de Cadências.')
   const funnelId = suggestionFunnel(db, accountId, s)
   const p = s.payload
 

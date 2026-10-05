@@ -1,11 +1,11 @@
 // Cadencias (da etapa e avulsas): CRUD com passos atualizados por id e sincronizacao dos
 // passos 'pergunta' com o roteiro (spec 2026-09-27 §3.1-3.4, §4.3). A cadencia e a tela;
 // o roteiro publicado continua sendo o motor. Recebe db (nao importa server/db.js).
-import { getRoteiro, saveDraft, publish, newKey } from '../roteiro/repo.js'
+import { getRoteiro, saveDraft, publish, newKey, RoteiroError } from '../roteiro/repo.js'
 import { missingSpinQuestions } from '../roteiro/spinTemplate.js'
 import { buildAiDraft } from '../roteiro/aiDraft.js'
 import { isContactStage } from '../roteiro/stageKind.js'
-import { listProfiles } from '../roteiro/profiles.js'
+import { listProfiles, saveBusiness } from '../roteiro/profiles.js'
 import { applySuggestion, confirmVariant } from '../roteiro/learning.js'
 import { CADENCE_ACTION_TYPES } from './schema.js'
 import { CadenceError } from './errors.js'
@@ -480,10 +480,48 @@ export function pullFromRoteiro(db, accountId, funnelId) {
   return touched
 }
 
+function markApplied(db, suggestionId, userId) {
+  db.prepare("UPDATE roteiro_suggestions SET status = 'applied', decided_by = ?, decided_at = datetime('now') WHERE id = ?").run(userId ?? null, suggestionId)
+}
+
+// Sugestoes da revisao semanal (spec 2026-10-02 §10): pergunta nova vira passo da cadencia da
+// etapa (e publica); perfil novo entra nos perfis da conta. Devolve null para os outros tipos.
+function applyWeeklySuggestion(db, accountId, row, userId) {
+  let p = {}
+  try { p = JSON.parse(row.payload_json) || {} } catch {}
+  if (row.type === 'new_question') {
+    if (!row.funnel_id || !db.prepare('SELECT 1 FROM funnel_stages WHERE id = ? AND funnel_id = ?').get(p.stage_id, row.funnel_id)) {
+      throw new RoteiroError('question_gone', 409, 'A etapa desta sugestão não existe mais.')
+    }
+    const profileKeys = new Set(listProfiles(db, accountId).map(x => x.profile_key))
+    const question = {
+      text: p.text, kind: 'options', required: false, spin: p.spin || null, ai_hint: null,
+      profile_key: p.profile_key && profileKeys.has(p.profile_key) ? p.profile_key : null, // perfil apagado: vira Todos
+      options: (Array.isArray(p.options) ? p.options : []).map((o, i) => ({ label: o.label, points: o.points, position: i })),
+    }
+    const cadence = addQuestionSteps(db, accountId, { stageId: p.stage_id, questions: [question], userId })
+    markApplied(db, row.id, userId)
+    return { published: true, funnel_id: row.funnel_id, cadence_ids: [cadence.id] }
+  }
+  if (row.type === 'new_profile') {
+    const current = listProfiles(db, accountId).map(x => ({ profile_key: x.profile_key, name: x.name, description: x.description }))
+    const biz = db.prepare('SELECT business_objective FROM accounts WHERE id = ?').get(accountId)
+    saveBusiness(db, accountId, { business_objective: biz ? biz.business_objective : null, profiles: current.concat([{ name: p.name, description: p.description || null }]) })
+    markApplied(db, row.id, userId)
+    return { published: false, funnel_id: null, cadence_ids: [] }
+  }
+  return null
+}
+
 // [Aplicar] na tela nova: sem botao Publicar, a sugestao ja entra no ar.
 export function applySuggestionLive(db, accountId, suggestionId, { userId = null } = {}) {
   let result
   db.transaction(() => {
+    const row = db.prepare('SELECT * FROM roteiro_suggestions WHERE id = ? AND account_id = ?').get(suggestionId, accountId)
+    if (!row) throw new RoteiroError('not_found', 404, 'Sugestão não encontrada.')
+    if (row.status !== 'new') throw new RoteiroError('decided', 409, 'Essa sugestão já foi decidida.')
+    result = applyWeeklySuggestion(db, accountId, row, userId)
+    if (result) return
     const sug = db.prepare('SELECT funnel_id, question_key FROM roteiro_suggestions WHERE id = ? AND account_id = ?').get(suggestionId, accountId)
     const fid = sug && (sug.funnel_id ?? (sug.question_key ? funnelOfQuestion(db, accountId, sug.question_key) : null))
     if (fid) resetDraftToPublished(db, accountId, fid)
