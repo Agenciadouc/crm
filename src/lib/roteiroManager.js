@@ -178,10 +178,33 @@ function weakIntro(rate, sent) {
   return `Esta pergunta perde ${fmtPct(l)} dos clientes (taxa ${fmtPct(rate)}${envios}).`
 }
 
+const SPIN_NAMES = { situation: 'Situação', problem: 'Problema', implication: 'Implicação', need_payoff: 'Necessidade de Solução' }
+const WEEKLY = 'Da revisão semanal:'
+
+// Sugestao da revisao semanal (spec 2026-10-02 §10): o motivo que a IA viu nas conversas.
+function weeklyWhy(s) {
+  const p = s.payload || {}
+  const e = s.evidence || {}
+  const reason = e.reason ? ` ${e.reason}` : ''
+  if (s.type === 'new_question') {
+    return `${WEEKLY}${reason} Ex.: "${p.text}" (${p.spin ? SPIN_NAMES[p.spin] || p.spin : 'sem fase'}, perfil ${p.profile_name || 'Todos'}).`
+  }
+  if (s.type === 'new_profile') {
+    const n = Number(e.count) || 0
+    return `${WEEKLY}${reason}${n ? ` Apareceu em ${n} ${n === 1 ? 'conversa' : 'conversas'}.` : ''}`
+  }
+  if (s.type === 'rewrite') return `${WEEKLY}${reason} A IA escreveu 2 versões novas; teste uma contra a atual.`
+  return null
+}
+
 // Frase com o numero que justifica a sugestao (spec 3.3)
 export function suggestionWhy(s) {
   const p = (s && s.payload) || {}
   const e = (s && s.evidence) || {}
+  if (e.source === 'weekly') {
+    const w = weeklyWhy(s)
+    if (w) return w
+  }
   switch (s && s.type) {
     case 'seller_phrasing': {
       const who = p.seller_name ? ` com ${p.seller_name}` : ''
@@ -191,7 +214,8 @@ export function suggestionWhy(s) {
       return `${weakIntro(p.current_rate, e.sent)} A IA escreveu 2 versões novas; teste uma contra a atual.`
     case 'new_option': {
       const n = Number(p.count) || 0
-      return `${n} ${n === 1 ? 'cliente respondeu' : 'clientes responderam'} algo como "${p.label}" em texto livre. Virando opção, o vendedor marca com um clique e a resposta conta pontos no Perfil.`
+      const base = `${n} ${n === 1 ? 'cliente respondeu' : 'clientes responderam'} algo como "${p.label}"${e.source === 'weekly' ? ' nas conversas da semana' : ' em texto livre'}. Virando opção, o vendedor marca com um clique e a resposta conta pontos no Perfil.`
+      return e.source === 'weekly' ? `${WEEKLY} ${base}` : base
     }
     case 'new_deviation': {
       const n = Number(p.count) || Number(e.leads) || 0
@@ -217,6 +241,8 @@ export const SUGGESTION_TITLES = {
   new_option: 'Nova opção de resposta',
   new_deviation: 'Novo desvio',
   reorder: 'Trocar a ordem',
+  new_question: 'Pergunta nova',
+  new_profile: 'Perfil novo',
 }
 
 // Sugestao seller_phrasing ja criada para a pergunta e o vendedor (Desempenho > "Usar o jeito de X")

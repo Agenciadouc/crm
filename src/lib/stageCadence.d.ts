@@ -34,3 +34,5 @@ export function deviationSuggestions(suggestions: RoteiroSuggestion[], funnelId:
 export function testForStep(tests: RoteiroTest[], step: { question_key: string | null } | null): RoteiroTest | null
 export function stageFromSearch(search: string, stages: { id: number; is_terminal: boolean }[]): number | null
 export function sseTouchesView(data: { funnel_id?: number | string | null; stage_id?: number | string | null; cadence_id?: number } | null | undefined, funnelId: number | null, stageIds: number[]): boolean
+export function newQuestionSuggestions(suggestions: RoteiroSuggestion[], stageId: number): RoteiroSuggestion[]
+export function newProfileSuggestions(suggestions: RoteiroSuggestion[]): RoteiroSuggestion[]

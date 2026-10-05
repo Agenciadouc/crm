@@ -257,3 +257,13 @@ test('formulario da pergunta leva fase SPIN, perfil e "define o perfil" das opco
   assert.equal('bant' in r.patch.question, false)
   assert.deepEqual(SPIN_OPTIONS.map(o => o.label), ['Situação', 'Problema', 'Implicação', 'Necessidade de Solução'])
 })
+
+test('filtros das sugestoes semanais: pergunta nova por etapa e perfis novos', async () => {
+  const { newQuestionSuggestions, newProfileSuggestions } = await import('../src/lib/stageCadence.js')
+  const list = [
+    { id: 1, type: 'new_question', payload: { stage_id: 5 } }, { id: 2, type: 'new_question', payload: { stage_id: 6 } },
+    { id: 3, type: 'new_profile', payload: { name: 'A' } }, { id: 4, type: 'reorder', payload: { stage_id: 5 } },
+  ]
+  assert.deepEqual(newQuestionSuggestions(list, 5).map(s => s.id), [1])
+  assert.deepEqual(newProfileSuggestions(list).map(s => s.id), [3])
+})

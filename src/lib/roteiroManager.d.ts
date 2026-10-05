@@ -31,7 +31,7 @@ export function toDraftInput(content: ContentLike): {
 
 interface SuggestionLike { type: string; question_key?: string | null; payload: Record<string, any>; evidence: Record<string, any> | null }
 export function suggestionWhy(s: SuggestionLike): string
-export const SUGGESTION_TITLES: Record<'rewrite' | 'seller_phrasing' | 'new_option' | 'new_deviation' | 'reorder', string>
+export const SUGGESTION_TITLES: Record<'rewrite' | 'seller_phrasing' | 'new_option' | 'new_deviation' | 'reorder' | 'new_question' | 'new_profile', string>
 export function findSellerSuggestion<S extends SuggestionLike>(suggestions: S[] | null | undefined, questionKey: string, seller: { user_id: number; name: string | null } | null): S | null
 
 interface TestLike { status: string; days_left?: number; a?: { sent: number; rate: number | null }; b?: { sent: number; rate: number | null } }

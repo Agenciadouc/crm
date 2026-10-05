@@ -241,3 +241,7 @@ export function sseTouchesView(data, funnelId, stageIds) {
   if (data.stage_id != null) return (stageIds || []).some(id => Number(id) === Number(data.stage_id))
   return false
 }
+
+// Sugestoes da revisao semanal (spec 2026-10-02 §10)
+export const newQuestionSuggestions = (suggestions, stageId) => (suggestions || []).filter(s => s.type === 'new_question' && s.payload && Number(s.payload.stage_id) === Number(stageId))
+export const newProfileSuggestions = suggestions => (suggestions || []).filter(s => s.type === 'new_profile')

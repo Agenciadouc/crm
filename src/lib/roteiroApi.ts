@@ -162,7 +162,7 @@ export interface RoteiroPerformance {
 
 export interface RoteiroSettings { min_reply_rate: number; reply_window_h: number; alert_minutes: number }
 
-export type SuggestionType = 'rewrite' | 'seller_phrasing' | 'new_option' | 'new_deviation' | 'reorder'
+export type SuggestionType = 'rewrite' | 'seller_phrasing' | 'new_option' | 'new_deviation' | 'reorder' | 'new_question' | 'new_profile'
 export interface RoteiroSuggestion {
   id: number
   funnel_id: number | null

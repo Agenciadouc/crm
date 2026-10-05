@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Check, Pencil, Plus, Sparkles, X } from 'lucide-react'
 import HelpTip from '../../components/HelpTip'
 import ConfirmDialog from '../../components/ConfirmDialog'
-import { fetchBusiness, saveBusiness, suggestBusiness } from '../../lib/roteiroApi'
-import { isAiOff, AI_OFF_TEXT } from '../../lib/cadenceApi'
+import { fetchBusiness, saveBusiness, suggestBusiness, suggestionAction, type RoteiroSuggestion } from '../../lib/roteiroApi'
+import { isAiOff, AI_OFF_TEXT, applySuggestionLive } from '../../lib/cadenceApi'
+import { suggestionWhy } from '../../lib/roteiroManager.js'
 import { labelStyle } from './StepPanel'
 
 const MAX_PROFILES = 6
@@ -11,7 +12,7 @@ type ProfileForm = { profile_key?: string; name: string; description: string }
 
 // Negocio e clientes ideais (spec 2026-10-02 §9): objetivo + ate 6 perfis. A IA usa isso para
 // montar as perguntas SPIN de cada tipo de cliente e para reconhecer o perfil do lead.
-export default function BusinessProfilesCard({ accountId, onSaved }: { accountId: number; onSaved?: () => void }) {
+export default function BusinessProfilesCard({ accountId, onSaved, suggestions = [] }: { accountId: number; onSaved?: () => void; suggestions?: RoteiroSuggestion[] }) {
   const [objective, setObjective] = useState('')
   const [profiles, setProfiles] = useState<ProfileForm[]>([])
   const [loaded, setLoaded] = useState(false)
@@ -23,18 +24,35 @@ export default function BusinessProfilesCard({ accountId, onSaved }: { accountId
   const [stored, setStored] = useState<{ profile_key: string; name: string }[]>([]) // perfis gravados no servidor
   const [confirmRemove, setConfirmRemove] = useState<string[] | null>(null)
 
-  useEffect(() => {
+  const load = useCallback((first: boolean) => {
     let alive = true
     fetchBusiness(accountId).then(b => {
       if (!alive) return
       setObjective(b.business_objective || '')
       setProfiles(b.profiles.map(p => ({ profile_key: p.profile_key, name: p.name, description: p.description || '' })))
       setStored(b.profiles.map(p => ({ profile_key: p.profile_key, name: p.name })))
-      setOpen(!b.profiles.length && !b.business_objective)
+      if (first) setOpen(!b.profiles.length && !b.business_objective)
       setLoaded(true)
     }).catch(e => { if (alive) { setError(e instanceof Error ? e.message : 'Erro.'); setLoaded(true) } })
     return () => { alive = false }
   }, [accountId])
+  useEffect(() => load(true), [load])
+
+  // Perfil novo sugerido pela revisao semanal: [Criar perfil] grava na hora; [Ignorar] recusa.
+  const [sugBusy, setSugBusy] = useState<number | null>(null)
+  const decide = async (id: number, apply: boolean) => {
+    setSugBusy(id); setError(null)
+    try {
+      if (apply) await applySuggestionLive(id, accountId)
+      else await suggestionAction(id, accountId, 'reject')
+      load(false)
+      onSaved?.()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Erro.')
+    } finally {
+      setSugBusy(null)
+    }
+  }
 
   const setProfile = (i: number, patch: Partial<ProfileForm>) => { setSaved(false); setProfiles(list => list.map((p, idx) => idx === i ? { ...p, ...patch } : p)) }
 
@@ -105,6 +123,17 @@ export default function BusinessProfilesCard({ accountId, onSaved }: { accountId
           </>
         )}
       </div>
+
+      {suggestions.map(s => (
+        <div key={s.id} style={{ border: '1px dashed var(--border-accent)', borderRadius: 'var(--radius-sm)', padding: 10, display: 'grid', gap: 6, fontSize: 13 }}>
+          <strong style={{ fontSize: 12, color: 'var(--accent)' }}>A IA sugere um perfil novo: {String(s.payload.name || '')}{s.payload.description ? ` — ${s.payload.description}` : ''}</strong>
+          <span style={{ color: 'var(--text-secondary)', fontSize: 12 }}>{suggestionWhy(s)}</span>
+          <span style={{ display: 'flex', gap: 6 }}>
+            <button type="button" className="btn btn-primary btn-sm" disabled={sugBusy !== null || busy !== null} onClick={() => decide(s.id, true)}>Criar perfil</button>
+            <button type="button" className="btn btn-secondary btn-sm" disabled={sugBusy !== null || busy !== null} onClick={() => decide(s.id, false)}>Ignorar</button>
+          </span>
+        </div>
+      ))}
 
       {open && (
         <>

@@ -13,7 +13,7 @@ import {
 import { fetchSuggestions, fetchRoteiroSettings, suggestionAction, type RoteiroSuggestions, type RoteiroSettings } from '../../lib/roteiroApi'
 import {
   stageChipLabel, stageChipTitle, stageFromSearch, stageSummary, moveStep, dropStep, suggestionsForStep, testForStep,
-  stageSuggestions, deviationSuggestions, sseTouchesView,
+  stageSuggestions, deviationSuggestions, sseTouchesView, newQuestionSuggestions, newProfileSuggestions,
 } from '../../lib/stageCadence.js'
 import { suggestionWhy } from '../../lib/roteiroManager.js'
 import { AUTOMATION_PATH, automationUrl } from '../../lib/automationTabs.js'
@@ -219,7 +219,7 @@ export default function StageCadences() {
         </div>
       )}
 
-      <BusinessProfilesCard accountId={accountId} onSaved={() => loadView()} />
+      <BusinessProfilesCard accountId={accountId} onSaved={() => loadView()} suggestions={newProfileSuggestions(sugs.suggestions)} />
 
       {!view ? (
         <div className="loading-container"><div className="spinner" /></div>
@@ -247,6 +247,20 @@ export default function StageCadences() {
               <span style={{ color: 'var(--text-secondary)', fontSize: 12 }}>{suggestionWhy(s)}</span>
               <span style={{ display: 'flex', gap: 6 }}>
                 <button type="button" className="btn btn-primary btn-sm" disabled={sugBusy !== null} onClick={() => reorderAction(s.id, () => applySuggestionLive(s.id, accountId))}>Aplicar</button>
+                <button type="button" className="btn btn-secondary btn-sm" disabled={sugBusy !== null} onClick={() => reorderAction(s.id, () => suggestionAction(s.id, accountId, 'reject'))}>Ignorar</button>
+              </span>
+            </div>
+          ))}
+
+          {stage && newQuestionSuggestions(sugs.suggestions, stage.id).map(s => (
+            <div key={s.id} style={{ border: '1px dashed var(--border-accent)', borderRadius: 'var(--radius-sm)', padding: 10, display: 'grid', gap: 6, fontSize: 13 }}>
+              <strong style={{ fontSize: 12, color: 'var(--accent)' }}>A IA sugere uma pergunta nova nesta etapa: "{String(s.payload.text || '')}"</strong>
+              <span style={{ color: 'var(--text-secondary)', fontSize: 12 }}>{suggestionWhy(s)}</span>
+              {Array.isArray(s.payload.options) && (
+                <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>Respostas: {s.payload.options.map((o: { label: string; points: number }) => `${o.label} (${o.points})`).join(' · ')}</span>
+              )}
+              <span style={{ display: 'flex', gap: 6 }}>
+                <button type="button" className="btn btn-primary btn-sm" disabled={sugBusy !== null} onClick={() => reorderAction(s.id, () => applySuggestionLive(s.id, accountId))}>Colocar na cadência</button>
                 <button type="button" className="btn btn-secondary btn-sm" disabled={sugBusy !== null} onClick={() => reorderAction(s.id, () => suggestionAction(s.id, accountId, 'reject'))}>Ignorar</button>
               </span>
             </div>
