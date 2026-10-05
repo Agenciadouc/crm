@@ -3,7 +3,7 @@ export type ReviewKind = 'pergunta' | 'mensagem'
 export interface StepReview { leadId: number; kind: ReviewKind; text: string; questionKey: string | null; attemptId: number | null }
 export interface ReviewPos { n: number; m: number }
 export function reviewPosition(
-  data: { steps: Array<Pick<LeadStep, 'attempt_id' | 'question_key' | 'state'> & { orphan?: boolean }> } | null | undefined,
+  data: { steps: Array<Pick<LeadStep, 'attempt_id' | 'question_key' | 'state'> & { orphan?: boolean; not_applicable?: boolean }> } | null | undefined,
   key: { attemptId?: number | null; questionKey?: string | null },
 ): ReviewPos | null
 export function reviewTitle(kind: ReviewKind, pos: ReviewPos | null | undefined): string

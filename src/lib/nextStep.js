@@ -7,8 +7,9 @@ function cut(text, max) {
   return t.length > max ? `${t.slice(0, max - 1)}…` : t
 }
 
-// Pergunta orfa (saiu do roteiro) sem resposta nao trava: fica fora do proximo e do "Depois"
-const skipped = s => !!s.orphan && s.state !== 'feito'
+// Pergunta orfa (saiu do roteiro) ou de outro perfil de cliente (not_applicable) sem resposta
+// nao trava: fica fora do proximo e do "Depois"
+const skipped = s => !!(s.orphan || s.not_applicable) && s.state !== 'feito'
 
 export function splitSteps(data) {
   const steps = (data && data.steps) || []

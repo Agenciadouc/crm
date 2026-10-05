@@ -240,10 +240,10 @@ export function saveAnswer(db, { accountId, leadId, questionKey, optionKey = nul
   // Resposta da IA nao libera: senao a IA desfaria o "Desfazer" do vendedor.
   if (origin === 'manual') db.prepare('UPDATE leads SET roteiro_no_auto_from_stage = NULL WHERE id = ?').run(leadId)
 
-  // Resposta que define o perfil (pergunta de descoberta): grava o perfil, menos por cima de
-  // um perfil escolhido a mao (spec 2026-10-02 §6).
+  // Resposta que define o perfil (pergunta de descoberta): grava o perfil. A IA nunca passa por
+  // cima de um perfil escolhido a mao; a resposta do vendedor sim (a ultima acao dele vale).
   let profileChanged = false
-  if (chosenOption && chosenOption.sets_profile_key && lead.roteiro_profile_origin !== 'manual') {
+  if (chosenOption && chosenOption.sets_profile_key && (origin === 'manual' || lead.roteiro_profile_origin !== 'manual')) {
     try {
       profileChanged = setLeadProfile(db, { accountId, leadId, profileKey: chosenOption.sets_profile_key, origin }).changed
     } catch (e) { if (!(e instanceof RoteiroError)) throw e } // perfil apagado: so ignora

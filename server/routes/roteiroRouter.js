@@ -246,7 +246,7 @@ export function createRoteiroRouter(db, { ai = null, now = () => new Date(), bro
     try {
       const lead = getLeadScoped(req.accountId, req.params.leadId)
       assertLeadAccess(req, lead)
-      saveAnswer(db, {
+      const saved = saveAnswer(db, {
         accountId: req.accountId,
         leadId: lead.id,
         questionKey: req.params.questionKey,
@@ -259,6 +259,8 @@ export function createRoteiroRouter(db, { ai = null, now = () => new Date(), bro
       try { refreshLeadStageCadence(db, { leadId: lead.id }) } catch (e) { if (!warnMissingCadenceTable(e)) console.error('[Cadencia] proximo passo:', e.message) }
       const advanced = maybeAutoAdvance(db, { accountId: req.accountId, leadId: lead.id, userId: req.user.id })
       scheduleScore(lead.id)
+      // Resposta de descoberta mudou o perfil: seletor "Perfil do lead" e cartao recarregam.
+      if (saved.profile_changed) { try { broadcast(req.accountId, 'lead:cadence', { lead_id: lead.id }) } catch (e) { console.error('[Roteiro] SSE lead:cadence:', e.message) } }
       const roteiro = getLeadRoteiro(db, { accountId: req.accountId, leadId: lead.id })
       res.json({ roteiro, advanced })
     } catch (e) { fail(res, e) }

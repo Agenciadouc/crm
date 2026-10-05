@@ -2,8 +2,9 @@ import { parseSqlDate } from './sqlDate.js'
 
 // Logica pura da aba Atendimento do Chat e da janela "Conferir mensagem" (ajuste 28/09). JS puro com .d.ts.
 
-// Mesma conta do servidor (services/cadence/nextStep.js): pergunta orfa sem resposta nao entra no total
-const counted = s => !(s.orphan && s.state !== 'feito')
+// Mesma conta do servidor (services/cadence/nextStep.js): pergunta orfa ou de outro perfil
+// (not_applicable) sem resposta nao entra no total
+const counted = s => !((s.orphan || s.not_applicable) && s.state !== 'feito')
 
 // "N de M" do passo na cadencia da etapa (por attempt_id ou, na pergunta, pela question_key)
 export function reviewPosition(data, { attemptId, questionKey } = {}) {

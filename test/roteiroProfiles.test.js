@@ -71,5 +71,26 @@ test('perfil efetivo: com 1 perfil na conta, lead sem perfil usa o unico', () =>
   const [only] = saveBusiness(db, s.accountId, { profiles: [two[0]] }).profiles
   assert.equal(effectiveProfileKey(db, row()), only.profile_key)
   saveBusiness(db, s.accountId, { profiles: [only, two[1]] })
-  assert.equal(effectiveProfileKey(db, row()), null)
+  assert.equal(effectiveProfileKey(db, row()), only.profile_key) // herdou o perfil unico ao ganhar o 2o
+  const novo = addLead(db, { account_id: s.accountId, funnel_id: s.funnelId, stage_id: s.stages.qualificando })
+  assert.equal(effectiveProfileKey(db, db.prepare('SELECT * FROM leads WHERE id = ?').get(novo)), null) // lead novo com 2 perfis: ainda nao sabe
+})
+
+test('passar de 1 para 2 perfis: leads sem perfil gravado ficam com o perfil unico de antes', () => {
+  const db = createRoteiroTestDb(); const s = seedRoteiroBase(db)
+  const [loja] = saveBusiness(db, s.accountId, { profiles: [two[0]] }).profiles
+  const semPerfil = addLead(db, { account_id: s.accountId, funnel_id: s.funnelId, stage_id: s.stages.qualificando })
+  const outraConta = addLead(db, { account_id: s.otherAccountId, funnel_id: s.funnelId, stage_id: s.stages.qualificando })
+  saveBusiness(db, s.accountId, { profiles: [loja, two[1]] })
+  const row = id => db.prepare('SELECT roteiro_profile_key k, roteiro_profile_origin o FROM leads WHERE id = ?').get(id)
+  assert.deepEqual(row(semPerfil), { k: loja.profile_key, o: 'ia' })
+  assert.deepEqual(row(outraConta), { k: null, o: null })
+})
+
+test('perfil unico trocado por outro (o antigo sai): ninguem herda o perfil apagado', () => {
+  const db = createRoteiroTestDb(); const s = seedRoteiroBase(db)
+  saveBusiness(db, s.accountId, { profiles: [two[0]] })
+  const lead = addLead(db, { account_id: s.accountId, funnel_id: s.funnelId, stage_id: s.stages.qualificando })
+  saveBusiness(db, s.accountId, { profiles: [two[1], { name: 'Atacado' }] })
+  assert.equal(db.prepare('SELECT roteiro_profile_key k FROM leads WHERE id = ?').get(lead).k, null)
 })

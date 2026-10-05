@@ -79,3 +79,12 @@ test('stageKind: etapa de contato pelo nome; conversa = nao finais e nao contato
   assert.deepEqual(conversationStages(all).map(s => s.name), ['Atendimento', 'Proposta'])
   assert.deepEqual(conversationStages([st('Novo'), st('Venda', true)]).map(s => s.name), ['Novo'])
 })
+
+test('pergunta de um perfil nao define perfil pelas opcoes (sets_profile_key some)', () => {
+  const db = createRoteiroTestDb()
+  const s = seedRoteiroBase(db)
+  db.prepare("INSERT INTO roteiro_profiles (account_id, profile_key, name, position) VALUES (?, 'loja', 'Loja', 0), (?, 'porta', 'Porta', 1)").run(s.accountId, s.accountId)
+  const d = saveDraft(db, s.accountId, s.funnelId, { questions: [{ stage_id: s.stages.qualificando, text: 'q', kind: 'options', profile_key: 'loja',
+    options: [{ label: 'a', points: 1, sets_profile_key: 'porta' }, { label: 'b', points: 0 }] }] })
+  assert.equal(d.questions[0].options[0].sets_profile_key, null)
+})

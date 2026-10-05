@@ -514,3 +514,19 @@ test('sugerir perfis pela rota: sem IA 503; com IA devolve a proposta', async ()
     assert.deepEqual(r.body, { business_objective: 'revender', profiles: [{ name: 'Loja', description: 'mercadinho' }] })
   }, { ai })
 })
+
+test('resposta de descoberta que muda o perfil avisa a tela (lead:cadence)', async () => {
+  const avisos = []
+  await comServidor(async ({ db, base }) => {
+    const { accountId, funnelId, stages } = seedRoteiroBase(db)
+    const tg = token({ id: 999, role: 'gerente', accountId })
+    const [loja, porta] = (await peca(base, { method: 'PUT', path: '/api/roteiro/profiles', jwtToken: tg, body: { profiles: [{ name: 'Loja' }, { name: 'Porta' }] } })).body.profiles
+    saveDraft(db, accountId, funnelId, { questions: [{ question_key: 'desc', stage_id: stages.qualificando, text: 'Loja ou porta?', kind: 'options',
+      options: [{ option_key: 'l', label: 'Loja', points: 1, sets_profile_key: loja.profile_key }, { option_key: 'p', label: 'Porta', points: 1, sets_profile_key: porta.profile_key }] }] })
+    publish(db, accountId, funnelId, 999)
+    const lead = addLead(db, { account_id: accountId, funnel_id: funnelId, stage_id: stages.qualificando })
+    const r = await peca(base, { method: 'PUT', path: `/api/roteiro/leads/${lead}/answers/desc`, jwtToken: tg, body: { option_key: 'p' } })
+    assert.equal(r.status, 200)
+    assert.deepEqual(avisos.filter(a => a[1] === 'lead:cadence'), [[accountId, 'lead:cadence', { lead_id: lead }]])
+  }, { broadcast: (...a) => avisos.push(a) })
+})

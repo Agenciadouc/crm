@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Check, Pencil, Plus, Sparkles, X } from 'lucide-react'
 import HelpTip from '../../components/HelpTip'
+import ConfirmDialog from '../../components/ConfirmDialog'
 import { fetchBusiness, saveBusiness, suggestBusiness } from '../../lib/roteiroApi'
 import { isAiOff, AI_OFF_TEXT } from '../../lib/cadenceApi'
 import { labelStyle } from './StepPanel'
@@ -19,6 +20,8 @@ export default function BusinessProfilesCard({ accountId, onSaved }: { accountId
   const [saved, setSaved] = useState(false)
   const [aiOff, setAiOff] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [stored, setStored] = useState<{ profile_key: string; name: string }[]>([]) // perfis gravados no servidor
+  const [confirmRemove, setConfirmRemove] = useState<string[] | null>(null)
 
   useEffect(() => {
     let alive = true
@@ -26,6 +29,7 @@ export default function BusinessProfilesCard({ accountId, onSaved }: { accountId
       if (!alive) return
       setObjective(b.business_objective || '')
       setProfiles(b.profiles.map(p => ({ profile_key: p.profile_key, name: p.name, description: p.description || '' })))
+      setStored(b.profiles.map(p => ({ profile_key: p.profile_key, name: p.name })))
       setOpen(!b.profiles.length && !b.business_objective)
       setLoaded(true)
     }).catch(e => { if (alive) { setError(e instanceof Error ? e.message : 'Erro.'); setLoaded(true) } })
@@ -34,7 +38,16 @@ export default function BusinessProfilesCard({ accountId, onSaved }: { accountId
 
   const setProfile = (i: number, patch: Partial<ProfileForm>) => { setSaved(false); setProfiles(list => list.map((p, idx) => idx === i ? { ...p, ...patch } : p)) }
 
+  // Perfil gravado que saiu da lista sera apagado e os leads dele ficam sem perfil: confirma antes.
+  const askSave = () => {
+    const kept = new Set(profiles.filter(p => p.name.trim()).map(p => p.profile_key).filter(Boolean))
+    const removed = stored.filter(p => !kept.has(p.profile_key)).map(p => p.name)
+    if (removed.length) setConfirmRemove(removed)
+    else save()
+  }
+
   const save = async () => {
+    setConfirmRemove(null)
     setBusy('save'); setError(null); setSaved(false)
     try {
       const b = await saveBusiness(accountId, {
@@ -43,6 +56,7 @@ export default function BusinessProfilesCard({ accountId, onSaved }: { accountId
       })
       setObjective(b.business_objective || '')
       setProfiles(b.profiles.map(p => ({ profile_key: p.profile_key, name: p.name, description: p.description || '' })))
+      setStored(b.profiles.map(p => ({ profile_key: p.profile_key, name: p.name })))
       setSaved(true)
       setTimeout(() => setSaved(false), 3000)
       onSaved?.()
@@ -124,7 +138,7 @@ export default function BusinessProfilesCard({ accountId, onSaved }: { accountId
           </div>
 
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-            <button type="button" className="btn btn-primary btn-sm" disabled={busy !== null} onClick={save}>{busy === 'save' ? 'Salvando…' : 'Salvar'}</button>
+            <button type="button" className="btn btn-primary btn-sm" disabled={busy !== null} onClick={askSave}>{busy === 'save' ? 'Salvando…' : 'Salvar'}</button>
             <button type="button" className="btn btn-secondary btn-sm" disabled={busy !== null || aiOff} title={aiOff ? AI_OFF_TEXT : 'A IA lê as conversas da conta e propõe. Nada é salvo até você clicar em Salvar.'} onClick={suggest}>
               <Sparkles size={12} /> {busy === 'ia' ? 'A IA está lendo as conversas…' : 'Sugerir com IA'}
             </button>
@@ -135,6 +149,11 @@ export default function BusinessProfilesCard({ accountId, onSaved }: { accountId
         </>
       )}
       {error && <div role="alert" style={{ fontSize: 12, color: 'var(--negative)' }}>{error}</div>}
+      {confirmRemove && (
+        <ConfirmDialog title="Apagar perfis?" danger confirmLabel="Salvar e apagar" onConfirm={save} onCancel={() => setConfirmRemove(null)}>
+          {`Estes perfis saem da conta: ${confirmRemove.join(', ')}. Os leads que estavam neles ficam sem perfil até a IA ou o vendedor marcar de novo. Ex.: um lead "Loja" passa a "Ainda não sei".`}
+        </ConfirmDialog>
+      )}
     </div>
   )
 }

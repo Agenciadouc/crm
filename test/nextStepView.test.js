@@ -121,3 +121,13 @@ test('recarga silenciosa: varios avisos seguidos viram uma so; guarda o 1o retra
   assert.equal(timers.filter(t => !t.cleared).length, 0)
   assert.equal(runs.length, 2)
 })
+
+test('pergunta de outro perfil (not_applicable) fica fora do proximo e do "Depois"', () => {
+  const data = { next_attempt_id: 1, steps: [
+    { attempt_id: 1, action_type: 'mensagem', auto_message: 'Oi', state: 'pendente' },
+    { attempt_id: 2, action_type: 'pergunta', description: 'Quantos clientes passam na loja?', state: 'pendente', not_applicable: true },
+    { attempt_id: 3, action_type: 'ligacao', description: 'Ligar', state: 'pendente' },
+  ] }
+  const r = splitSteps(data)
+  assert.deepEqual(r.after.map(s => s.attempt_id), [3])
+})

@@ -43,13 +43,13 @@ test('lead sem perfil ve so as perguntas Todos; com perfil ve Todos + as dele', 
   assert.equal(r.legacy_answers.length, 0)
 })
 
-test('opcao com sets_profile_key grava o perfil; nao troca perfil manual', () => {
+test('opcao com sets_profile_key grava o perfil; resposta da IA nao troca perfil manual', () => {
   const { db, s, loja, porta, leadId, pub } = cenario()
   const r = saveAnswer(db, { accountId: s.accountId, leadId, questionKey: pub[0].question_key, optionKey: pub[0].options[0].option_key, origin: 'ia', evidence: 'tenho um mercadinho' })
   assert.equal(r.profile_changed, true)
   assert.deepEqual([leadRow(db, leadId).roteiro_profile_key, leadRow(db, leadId).roteiro_profile_origin], [loja.profile_key, 'ia'])
   setLeadProfile(db, { accountId: s.accountId, leadId, profileKey: porta.profile_key, origin: 'manual' })
-  const r2 = saveAnswer(db, { accountId: s.accountId, leadId, questionKey: pub[0].question_key, optionKey: pub[0].options[0].option_key, origin: 'manual', userId: s.gerenteId })
+  const r2 = saveAnswer(db, { accountId: s.accountId, leadId, questionKey: pub[0].question_key, optionKey: pub[0].options[0].option_key, origin: 'ia', evidence: 'tenho loja' })
   assert.equal(r2.profile_changed, false)
   assert.equal(leadRow(db, leadId).roteiro_profile_key, porta.profile_key)
 })
@@ -81,4 +81,16 @@ test('termometro: Perfil soma so as aplicaveis e o motivo usa o rotulo SPIN', ()
   const fit = gatherScoreInputs(db, leadId).fit
   assert.equal(fit.totalCount, 2); assert.equal(fit.max, 15)
   assert.deepEqual(fit.reasons, [{ texto: 'Situação: Muitos', pontos: 10 }])
+})
+
+test('vendedor corrige a propria resposta de descoberta: o perfil acompanha a ultima resposta manual', () => {
+  const { db, s, loja, porta, leadId, pub } = cenario()
+  saveAnswer(db, { accountId: s.accountId, leadId, questionKey: pub[0].question_key, optionKey: pub[0].options[0].option_key, origin: 'manual' })
+  assert.equal(leadRow(db, leadId).roteiro_profile_key, loja.profile_key)
+  const r = saveAnswer(db, { accountId: s.accountId, leadId, questionKey: pub[0].question_key, optionKey: pub[0].options[1].option_key, origin: 'manual' })
+  assert.equal(r.profile_changed, true)
+  assert.deepEqual([leadRow(db, leadId).roteiro_profile_key, leadRow(db, leadId).roteiro_profile_origin], [porta.profile_key, 'manual'])
+  // resposta da IA continua sem trocar perfil manual
+  saveAnswer(db, { accountId: s.accountId, leadId, questionKey: pub[0].question_key, optionKey: pub[0].options[0].option_key, origin: 'ia', evidence: 'x' })
+  assert.equal(leadRow(db, leadId).roteiro_profile_key, porta.profile_key)
 })

@@ -137,3 +137,12 @@ test('parseSqlDate unico (sqlDate.js): SQLite sem fuso = UTC; ISO com Z/offset c
   assert.equal(parseSqlDate('2026-09-28T09:00:00-03:00').toISOString(), '2026-09-28T12:00:00.000Z')
   assert.ok(Number.isNaN(parseSqlDate(null).getTime()))
 })
+
+test('"N de M" nao conta pergunta de outro perfil (not_applicable)', () => {
+  const data = { steps: [
+    { attempt_id: 1, action_type: 'pergunta', question_key: 'a', state: 'pendente' },
+    { attempt_id: 2, action_type: 'pergunta', question_key: 'b', state: 'pendente', not_applicable: true },
+    { attempt_id: 3, action_type: 'mensagem', state: 'pendente' },
+  ] }
+  assert.deepEqual(reviewPosition(data, { attemptId: 3 }), { n: 2, m: 2 })
+})

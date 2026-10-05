@@ -40,7 +40,8 @@ export function saveBusiness(db, accountId, { business_objective = null, profile
   if (objective.length > 300) throw new RoteiroError('invalid', 400, 'O objetivo do negócio pode ter até 300 caracteres.')
   if (!Array.isArray(profiles)) throw new RoteiroError('invalid', 400, 'Lista de perfis obrigatória.')
   if (profiles.length > MAX_PROFILES) throw new RoteiroError('invalid', 400, 'Máximo de 6 perfis.')
-  const current = new Set(listProfiles(db, accountId).map(p => p.profile_key))
+  const currentList = listProfiles(db, accountId)
+  const current = new Set(currentList.map(p => p.profile_key))
   const clean = profiles.map((p, i) => {
     const name = str(p?.name)
     if (!name || name.length > 60) throw new RoteiroError('invalid', 400, 'Cada perfil precisa de um nome (até 60 caracteres).')
@@ -64,6 +65,12 @@ export function saveBusiness(db, accountId, { business_objective = null, profile
         position = excluded.position, updated_at = datetime('now')
     `)
     for (const p of clean) up.run(accountId, p.profile_key, p.name, p.description, p.position)
+    // Com 1 perfil o lead usa o unico sem gravar (effectiveProfileKey). Ao ganhar o 2o perfil,
+    // quem estava nele implicitamente passa a te-lo gravado, senao perderia as perguntas dele.
+    const sole = currentList.length === 1 ? currentList[0].profile_key : null
+    if (sole && keep.has(sole) && clean.length >= 2) {
+      db.prepare("UPDATE leads SET roteiro_profile_key = ?, roteiro_profile_origin = 'ia' WHERE account_id = ? AND roteiro_profile_key IS NULL").run(sole, accountId)
+    }
   })()
   return getBusiness(db, accountId)
 }

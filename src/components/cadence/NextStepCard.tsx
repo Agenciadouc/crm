@@ -505,12 +505,13 @@ export default function NextStepCard({ leadId, accountId, mode, onAsk, onSendSte
           if (step.state === 'feito') return doneRow(step)
           const StateIcon = step.state === 'aguardando' ? Hourglass : Circle
           return (
-            <div key={step.attempt_id} style={{ display: 'flex', gap: 6, alignItems: 'flex-start', padding: '6px 0', borderTop: '1px solid var(--border-subtle)', opacity: step.orphan ? 0.55 : 1 }}>
+            <div key={step.attempt_id} style={{ display: 'flex', gap: 6, alignItems: 'flex-start', padding: '6px 0', borderTop: '1px solid var(--border-subtle)', opacity: step.orphan || step.not_applicable ? 0.55 : 1 }}>
               <StateIcon size={10} style={{ color: 'var(--text-muted)', flexShrink: 0, marginTop: 3 }} />
               <div style={{ flex: 1, minWidth: 0, fontSize: 11, lineHeight: 1.4 }}>
                 <span style={{ color: 'var(--text-muted)' }}>{i + 1}. {stepTypeLabel(step.action_type)}: </span>
                 <span style={{ color: 'var(--text-primary)' }}>{stepTitle(step)}</span>
                 {step.orphan && <span style={{ fontSize: 10, color: 'var(--text-muted)' }}> (pergunta removida do roteiro)</span>}
+                {!step.orphan && step.not_applicable && <span style={{ fontSize: 10, color: 'var(--text-muted)' }}> (não se aplica a este perfil)</span>}
               </div>
             </div>
           )

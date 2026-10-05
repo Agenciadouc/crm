@@ -107,7 +107,8 @@ function normalizeQuestion(q, stageMap, profileKeys) {
       const points = Number(o.points)
       if (!Number.isInteger(points) || points < -50 || points > 50) throw new RoteiroError('invalid', 400, 'Os pontos de cada opção vão de -50 a 50.')
       // Opcao que define o perfil: perfil inexistente e descartado (nao trava o salvamento).
-      const setsProfileKey = o.sets_profile_key && profileKeys.has(o.sets_profile_key) ? o.sets_profile_key : null
+      // Pergunta de um perfil so vale para quem ja tem o perfil: nao define perfil.
+      const setsProfileKey = !profileKey && o.sets_profile_key && profileKeys.has(o.sets_profile_key) ? o.sets_profile_key : null
       return { option_key: o.option_key || newKey(), label, points, position: Number.isInteger(o.position) ? o.position : idx, sets_profile_key: setsProfileKey }
     })
   }
