@@ -8,6 +8,7 @@ import Sidebar from './components/Sidebar'
 import DisconnectedInstancesAlert from './components/DisconnectedInstancesAlert'
 import ReleaseNotesModal from './components/ReleaseNotesModal'
 import SystemNoticeBanner from './components/SystemNoticeBanner'
+import AiKeyBanner from './components/AiKeyBanner'
 import ScoreToasts from './components/score/ScoreToasts'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
@@ -90,6 +91,7 @@ function AppRoutes() {
     <AccountProvider>
     <SSEProvider>
     <SystemNoticeBanner />
+    <AiKeyBanner />
     <ScoreToasts />
     <DisconnectedInstancesAlert />
     <ReleaseNotesModal />

@@ -294,3 +294,7 @@ export function variantAction(id: number, accountId: number, action: 'keep'): Pr
 export function variantAction(id: number, accountId: number, action: 'confirm' | 'keep'): Promise<{ published: boolean; version?: RoteiroVersion } | { ok: true }> {
   return apiFetch(`/api/roteiro/variants/${id}/${action}?account_id=${accountId}`, { method: 'POST' })
 }
+
+// Faixa "Conecte sua chave de IA": conta sem chave propria e sem IA global
+export const fetchAiKeyStatus = (accountId: number) =>
+  apiFetch<{ needs_key: boolean }>(`/api/roteiro/ai-key-status?account_id=${accountId}`)

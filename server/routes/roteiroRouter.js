@@ -19,6 +19,7 @@ import { refreshLeadStageCadence } from '../services/cadence/leadCadence.js'
 import { warnMissingCadenceTable } from '../services/cadence/errors.js'
 import { getBusiness, saveBusiness, setLeadProfile, leadProfileView } from '../services/roteiro/profiles.js'
 import { suggestBusiness } from '../services/roteiro/aiProfiles.js'
+import { aiKeyStatus } from '../services/aiKeyStatus.js'
 
 const MANAGER_ROLES = ['super_admin', 'gerente']
 
@@ -123,6 +124,13 @@ export function createRoteiroRouter(db, { ai = null, now = () => new Date(), bro
     if (!ai || !pickAnthropicKey(account)) return res.status(503).json({ error: 'A IA não está ligada nesta conta.', code: 'ai_off' })
     try {
       res.json(await suggestBusiness(db, { accountId: req.accountId, ai }))
+    } catch (e) { fail(res, e) }
+  })
+
+  // Faixa "Conecte sua chave de IA" (so gestor/admin).
+  router.get('/ai-key-status', manager, (req, res) => {
+    try {
+      res.json(aiKeyStatus(db.prepare('SELECT ai_key_source, anthropic_api_key FROM accounts WHERE id = ?').get(req.accountId)))
     } catch (e) { fail(res, e) }
   })
 

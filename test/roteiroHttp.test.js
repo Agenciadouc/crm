@@ -530,3 +530,13 @@ test('resposta de descoberta que muda o perfil avisa a tela (lead:cadence)', asy
     assert.deepEqual(avisos.filter(a => a[1] === 'lead:cadence'), [[accountId, 'lead:cadence', { lead_id: lead }]])
   }, { broadcast: (...a) => avisos.push(a) })
 })
+
+test('aviso de chave de IA: gestor ve o status; atendente 403', async () => {
+  await comServidor(async ({ db, base }) => {
+    const { accountId, atendenteId } = seedRoteiroBase(db)
+    const tg = token({ id: 999, role: 'gerente', accountId })
+    const r = await peca(base, { path: '/api/roteiro/ai-key-status', jwtToken: tg })
+    assert.deepEqual([r.status, r.body], [200, { needs_key: true }])
+    assert.equal((await peca(base, { path: '/api/roteiro/ai-key-status', jwtToken: token({ id: atendenteId, role: 'atendente', accountId }) })).status, 403)
+  })
+})
