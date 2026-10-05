@@ -1,3 +1,4 @@
+import { canAutomate, logSkipped } from '../services/contacts/scope.js'
 import { Router } from 'express'
 import fetch from 'node-fetch'
 import db from '../db.js'
@@ -73,8 +74,9 @@ router.post('/', requireRole('super_admin', 'gerente'), (req, res) => {
   if (lead_ids && Array.isArray(lead_ids)) {
     const stmt = db.prepare('INSERT INTO broadcast_recipients (broadcast_id, lead_id, phone) VALUES (?, ?, ?)')
     for (const leadId of lead_ids) {
-      const lead = db.prepare('SELECT phone, opted_in_at, opted_out_at FROM leads WHERE id = ? AND phone IS NOT NULL AND is_archived = 0 AND is_blocked = 0').get(leadId)
+      const lead = db.prepare('SELECT phone, opted_in_at, opted_out_at, contact_type FROM leads WHERE id = ? AND phone IS NOT NULL AND is_archived = 0 AND is_blocked = 0').get(leadId)
       if (!lead) continue
+      if (!canAutomate(lead)) continue // revendedor/interno nao entram em disparo
       if (isOptedOut(lead)) { skippedNoOptin++; continue }
       stmt.run(result.lastInsertRowid, leadId, lead.phone)
     }

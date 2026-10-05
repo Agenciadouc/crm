@@ -269,3 +269,17 @@ test('moveLeadToStage forcado grava trigger forced e notas (fluxo do PUT /stage 
   assert.equal(h.trigger_type, 'forced')
   assert.equal(h.notes, 'cliente pediu proposta')
 })
+
+test('onInboundSaved: contato interno ou revendedor nao chama a extracao da IA', async () => {
+  const { applyContactSchema } = await import('../server/services/contacts/schema.js')
+  const { db, accountId, funnelId, stages } = setup()
+  applyContactSchema(db)
+  const leadId = addLead(db, { account_id: accountId, funnel_id: funnelId, stage_id: stages.qualificando })
+  db.prepare("UPDATE leads SET contact_type = 'interno' WHERE id = ?").run(leadId)
+  const extracted = []
+  setAiExtractHandler((p) => extracted.push(p.lead.id))
+  const account = db.prepare('SELECT * FROM accounts WHERE id = ?').get(accountId)
+  const lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(leadId)
+  onInboundSaved({ db, account, lead, message: { id: addMessage(db, { leadId, direction: 'inbound', content: 'oi' }), content: 'oi' } })
+  assert.deepEqual(extracted, [])
+})

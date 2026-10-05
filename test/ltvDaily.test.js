@@ -96,3 +96,17 @@ test('sem número de disparo não envia e registra o motivo', async () => {
   assert.equal(r.failed, 1)
   assert.equal(openCycleForLead(db, leadId).auto_failed_reason, 'no_send_number')
 })
+
+test('envio automatico de recompra: contato interno nao recebe', async () => {
+  const { applyContactSchema } = await import('../server/services/contacts/schema.js')
+  const { db, s, leadId } = setup()
+  applyContactSchema(db)
+  db.prepare("UPDATE leads SET contact_type = 'interno' WHERE id = ?").run(leadId)
+  await runLtvForAccount(db, { accountId: s.accountId, ai: aiOk, now: DUE })
+  db.prepare("UPDATE whatsapp_instances SET status = 'connected' WHERE id = ?").run(s.instanceId)
+  const sent = []
+  const r = await processAutoSends(db, { accountId: s.accountId, ai: aiOk, now: DUE,
+    availability: () => ({ ok: true, instance: { id: s.instanceId } }), send: async ({ text }) => { sent.push(text); return { ok: true } } })
+  assert.deepEqual([r.sent, sent.length], [0, 0])
+  assert.equal(openCycleForLead(db, leadId).auto_failed_reason, 'contact_type')
+})

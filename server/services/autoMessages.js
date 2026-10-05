@@ -1,3 +1,4 @@
+import { canAutomate, logSkipped } from './contacts/scope.js'
 import fetch from 'node-fetch'
 import db from '../db.js'
 import { sendViaInstance } from './leadHandoff.js'
@@ -59,6 +60,7 @@ export async function sendAutoMessage({ leadId, instanceId, type, text, accountI
     WHERE l.id = ?
   `).get(leadId)
   if (!lead) return { ok: false, error: 'lead_not_found' }
+  if (!canAutomate(lead)) { logSkipped(lead, `mensagem automatica ${type}`); return { ok: false, error: 'contact_type' } }
 
   const instance = db.prepare('SELECT * FROM whatsapp_instances WHERE id = ?').get(instanceId)
   if (!instance) return { ok: false, error: 'instance_not_found' }

@@ -1,4 +1,5 @@
 // Envio automatico do lembrete (spec §8). `send` e `availability` injetados; producao em autoSendRuntime.js.
+import { canAutomate } from '../contacts/scope.js'
 import { localDate, addDays } from './compute.js'
 import { completeTask } from './cycles.js'
 import { stageIdByKey, ensureRepurchaseFunnel } from './funnel.js'
@@ -25,6 +26,7 @@ export async function processAutoSends(db, { accountId, ai, send, now = new Date
   for (const c of cycles) {
     const lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(c.lead_id)
     if (!lead || lead.is_active === 0 || lead.repurchase_opt_out || isOptedOut(lead)) { fail(db, c.id, 'opted_out'); out.failed++; continue }
+    if (!canAutomate(lead)) { fail(db, c.id, 'contact_type'); out.failed++; continue }
     const avail = availability(db, accountId, { ai })
     if (!avail.ok) { fail(db, c.id, avail.reason); out.failed++; continue }
     const message = c.ai_suggestion ? JSON.parse(c.ai_suggestion).message : null

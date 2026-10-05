@@ -5,6 +5,14 @@ import { analyzeConversationsBatch, getAnalyzeEstimate } from '../services/conve
 import { aggregateAllAccounts } from '../services/attendantMetrics.js'
 import { generateCoachingForUser, isoMonday } from '../services/coachingAnalyzer.js'
 import { cityWhere, leadCityExists, hasGeo } from '../services/city.js'
+import { countsInMetrics } from '../services/contacts/scope.js'
+
+// Filtro de cidade/estado + so contatos que contam nos numeros (lead e cliente; revendedor e
+// interno ficam fora — spec 2026-10-05 crm simples §2).
+function leadsWhere(alias, geo) {
+  const cw = cityWhere(alias, geo)
+  return { sql: `${cw.sql} AND ${countsInMetrics(alias)}`, params: cw.params }
+}
 
 const router = Router()
 
@@ -36,8 +44,8 @@ router.get('/stats', (req, res) => {
   const prevSinceStr = prevSince.toISOString().slice(0, 19).replace('T', ' ')
 
   // Filtro opcional por cidade do lead (?city=), comparado sem acento
-  const cw = cityWhere('leads', req.query)
-  const cwl = cityWhere('l', req.query)
+  const cw = leadsWhere('leads', req.query)
+  const cwl = leadsWhere('l', req.query)
 
   // Total leads in period
   const totalLeads = db.prepare(`SELECT COUNT(*) as c FROM leads WHERE account_id = ? AND is_archived = 0 AND is_blocked = 0 AND created_at >= ?${cw.sql}`).get(req.accountId, sinceStr, ...cw.params).c
@@ -98,8 +106,8 @@ router.get('/agents', requireRole('super_admin', 'gerente'), (req, res) => {
   since.setDate(since.getDate() - d)
   const sinceStr = since.toISOString().slice(0, 19).replace('T', ' ')
 
-  const cw = cityWhere('leads', req.query)
-  const cwl = cityWhere('l', req.query)
+  const cw = leadsWhere('leads', req.query)
+  const cwl = leadsWhere('l', req.query)
   const agents = db.prepare(`
     SELECT u.id, u.name, u.is_active,
       (SELECT COUNT(*) FROM leads WHERE attendant_id = u.id AND is_archived = 0 AND is_blocked = 0 AND created_at >= ?${cw.sql}) as leads_period,
@@ -470,7 +478,7 @@ router.get('/overview-v2', requireRole('super_admin', 'gerente'), requireAnalyti
   // ?city= opcional: so conversas/erros/alertas de leads dessa cidade. SLA vem do agregado sem cidade -> nulo.
   const byCity = hasGeo(req.query)
   const lci = leadCityExists('conversation_insights.lead_id', req.query)
-  const cwl = cityWhere('l', req.query)
+  const cwl = leadsWhere('l', req.query)
 
   const conversasAnalisadas = db.prepare(`
     SELECT COUNT(*) as n FROM conversation_insights
@@ -635,7 +643,7 @@ router.get('/critical-conversations', requireRole('super_admin', 'gerente'), req
   const days = Math.min(365, Math.max(1, parseInt(req.query.days || '30')))
   const limit = Math.min(100, Math.max(1, parseInt(req.query.limit || '50')))
   const since = new Date(Date.now() - days * 86400 * 1000).toISOString().slice(0, 19).replace('T', ' ')
-  const cwl = cityWhere('l', req.query)
+  const cwl = leadsWhere('l', req.query)
 
   const rows = db.prepare(`
     SELECT ci.lead_id, l.name as lead_name, l.phone as lead_phone,
@@ -715,7 +723,7 @@ router.get('/alerts', requireRole('super_admin', 'gerente'), requireAnalyticsEna
   if (!req.accountId) return res.status(400).json({ error: 'account_id required' })
   const status = req.query.status || 'open'
   // Com cidade: so alertas de leads dessa cidade (alerta sem lead fica de fora)
-  const cwl = cityWhere('l', req.query)
+  const cwl = leadsWhere('l', req.query)
   const rows = db.prepare(`
     SELECT a.*, l.name as lead_name, l.phone as lead_phone, u.name as assigned_to_name
     FROM analyst_alerts a
@@ -907,8 +915,8 @@ export function loadMonthConfig(accountId, yearMonth) {
 export function computeFunnelCascade(accountId, yearMonth, city = null) {
   const b = monthBounds(yearMonth)
   if (!b) return null
-  const cw = cityWhere('leads', city)
-  const cwl = cityWhere('l', city)
+  const cw = leadsWhere('leads', city)
+  const cwl = leadsWhere('l', city)
 
   // Leads criados no mes (base)
   const totalRow = db.prepare(`

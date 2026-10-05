@@ -1,6 +1,7 @@
 // Liga roteiro + termometro no servidor: hook da troca de etapa, avisos de nota e
 // efeitos de mensagem recebida/enviada (spec 5.2, 5.5, 6.1, 7.2).
 // Nao importa server/db.js: recebe db, broadcastSSE e CAPI na inicializacao.
+import { canAutomate } from '../contacts/scope.js'
 import { configureStageMoveHooks } from '../stageMove.js'
 import { configureScoreRuntime, scheduleScore } from '../leadScore/recalc.js'
 import { markAdvanced, markBought, markReplied, recordAsk } from './asks.js'
@@ -106,7 +107,7 @@ export function onInboundSaved({ db, account, lead, message }) {
   }
   markReplied(db, { leadId: lead.id, windowHours })
   scheduleFn(lead.id)
-  enqueueAiExtract({ db, account, lead, message })
+  if (canAutomate(lead)) enqueueAiExtract({ db, account, lead, message }) // revendedor/interno: sem IA
   try { onMessageExchanged(db, { leadId: lead.id }) } catch (e) { console.error('[Recompra] conversa:', e.message) }
 }
 

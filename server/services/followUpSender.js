@@ -2,6 +2,7 @@
 // Chamado pelo scheduler.processFollowUps() quando next_run_at chega.
 // Reusa padrao de envio do broadcasts (POST pra Evolution API).
 
+import { canAutomate, logSkipped } from './contacts/scope.js'
 import fetch from 'node-fetch'
 import db from '../db.js'
 import { broadcastSSE } from '../sse.js'
@@ -73,6 +74,11 @@ export async function sendFollowUpMessage(leadFollowUpId) {
     if (lead.is_blocked) {
       pauseLeadFollowUp(leadFollowUpId, 'lead_blocked')
       console.log(`[FollowUp] Pausado lead=${lead.id} — lead bloqueado`)
+      return
+    }
+    if (!canAutomate(lead)) {
+      pauseLeadFollowUp(leadFollowUpId, 'contact_type')
+      logSkipped(lead, 'follow-up')
       return
     }
     if (lead.is_archived) {

@@ -8,6 +8,7 @@ import { applyAgentBriefingSchema } from './services/agentBriefingSchema.js'
 import { registerCityFunctions, normalizeExistingCities } from './services/city.js'
 import { applyGeoSchema } from './services/geo.js'
 import { applyRoteiroSchema } from './services/roteiro/schema.js'
+import { applyContactSchema } from './services/contacts/schema.js'
 import { migrateLegacyQualifications } from './services/roteiro/migrateLegacy.js'
 import { applyCadenceSchema } from './services/cadence/schema.js'
 import { migrateStageCadences } from './services/cadence/migrateStageCadences.js'
@@ -1489,6 +1490,9 @@ applyAgentBriefingSchema(db)
 
 // Roteiro de Qualificacao e Termometro do Lead (tabelas do roteiro, colunas score*)
 applyRoteiroSchema(db)
+
+// Tipo de contato: lead / cliente / revendedor / interno (spec 2026-10-05 crm simples §2)
+applyContactSchema(db)
 
 // Migra a qualificacao antiga (qualification_sequences/lead_qualifications) pro roteiro (idempotente).
 try {

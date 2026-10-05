@@ -1,6 +1,7 @@
 // Servico do Agente de IA: orquestra recebimento de msg -> Haiku -> tool calls -> envio.
 // Chamado fire-and-forget pelo webhook depois do lead ser identificado.
 
+import { canAutomate, logSkipped } from './contacts/scope.js'
 import fetch from 'node-fetch'
 import db from '../db.js'
 import { callHaiku } from './anthropicClient.js'
@@ -83,6 +84,8 @@ export function findAgentForLead(lead, instanceId, _opts = {}) {
 
   // 1. Lead pode receber bot?
   if (lead.is_blocked || lead.is_archived || !lead.is_active) return null
+  // 1a. Revendedor/interno nao recebem bot (spec crm simples §2)
+  if (!canAutomate(lead)) { logSkipped(lead, 'agente de IA'); return null }
 
   // 1b. Agente so atende numero de disparo (spec secao 6) — vale para resgate automatico e Forcar IA.
   //     Excecao: no numero de leitura so o agente em modo Copiloto (sugere, nunca envia).

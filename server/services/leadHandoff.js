@@ -4,6 +4,7 @@
 // Comportamento idempotente: primeira msg sai 1x por lead (lead.first_msg_sent_at).
 // Notificacao ao vendedor eh independente: sempre dispara se notification_instance_id configurado.
 
+import { canAutomate, logSkipped } from './contacts/scope.js'
 import db from '../db.js'
 import { getProvider } from './whatsapp/index.js'
 import { createSender } from './whatsapp/sender.js'
@@ -54,6 +55,7 @@ export async function notifyAndOpenLead(leadId, attendantUserId, opts = {}) {
   try {
     const lead = db.prepare('SELECT * FROM leads WHERE id=?').get(leadId)
     if (!lead || !lead.phone) return
+    if (!canAutomate(lead)) { logSkipped(lead, 'primeira mensagem/aviso de lead novo'); return }
 
     const user = db.prepare('SELECT id, name, primary_instance_id, notification_instance_id, is_bot, is_active FROM users WHERE id=?').get(attendantUserId)
     if (!user || user.is_bot || !user.is_active) return

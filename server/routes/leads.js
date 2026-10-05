@@ -21,6 +21,7 @@ import { BAND_LABEL } from '../services/leadScore/compute.js'
 import { registerSale, patchSale, deleteSale, outcomeStageBlocked } from '../services/ltv/sales.js'
 import { repurchaseAiFor } from '../services/ltv/aiRuntime.js'
 import { customerWhere } from '../services/ltv/filters.js'
+import { parseContactType, countsInMetrics } from '../services/contacts/scope.js'
 
 const router = Router()
 
@@ -54,9 +55,11 @@ function normalizePhone(phone) {
 router.get('/', (req, res) => {
   if (!req.accountId) return res.status(400).json({ error: 'account_id required' })
 
-  const { stage_id, attendant_id, instance_id, funnel_id, source, tag, city, search, date_from, date_to, show_archived, page = '1', limit = '50' } = req.query
+  const { stage_id, attendant_id, instance_id, funnel_id, source, tag, city, search, date_from, date_to, show_archived, page = '1', limit = '50', only_leads } = req.query
   const where = ['l.account_id = ?', 'l.is_active = 1', 'l.is_blocked = 0']
   const params = [req.accountId]
+  // Quadro do Pipeline: revendedor e interno ficam fora do funil (spec crm simples §2)
+  if (only_leads === '1') where.push(countsInMetrics('l'))
 
   // Archive filter: default hides archived; pass show_archived=1 to list only archived, =all to include both
   if (show_archived === '1') where.push('l.is_archived = 1')
@@ -586,8 +589,9 @@ router.get('/:id/score', (req, res) => {
 router.put('/:id', (req, res) => {
   const lead = db.prepare('SELECT * FROM leads WHERE id = ?').get(req.params.id)
   if (!lead) return res.status(404).json({ error: 'Lead nao encontrado' })
+  if (req.accountId && lead.account_id !== req.accountId) return res.status(404).json({ error: 'Lead nao encontrado' })
 
-  let { name, phone, email, city, notes, custom_fields, empresa, cpf_cnpj, instagram, trabalha_anuncio, investimento_anuncios } = req.body
+  let { name, phone, email, city, notes, custom_fields, empresa, cpf_cnpj, instagram, trabalha_anuncio, investimento_anuncios, contact_type } = req.body
 
   phone = normalizePhone(phone)
 
@@ -603,6 +607,11 @@ router.put('/:id', (req, res) => {
   if (instagram !== undefined) { sets.push('instagram = ?'); params.push(instagram || null) }
   if (trabalha_anuncio !== undefined) { sets.push('trabalha_anuncio = ?'); params.push(trabalha_anuncio ? 1 : 0) }
   if (investimento_anuncios !== undefined) { sets.push('investimento_anuncios = ?'); params.push(investimento_anuncios || null) }
+  if (contact_type !== undefined) {
+    // Tipo de contato escolhido a mao: deteccao automatica nunca passa por cima (spec crm simples §2)
+    try { sets.push('contact_type = ?', "contact_type_origin = 'manual'"); params.push(parseContactType(contact_type)) }
+    catch (e) { return res.status(400).json({ error: e.message }) }
+  }
   if (sets.length === 0) return res.status(400).json({ error: 'Nada pra atualizar' })
   sets.push("updated_at = datetime('now')")
   params.push(req.params.id)
