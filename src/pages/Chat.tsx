@@ -27,6 +27,7 @@ import { useCityFilter } from '../components/CityFilter'
 import MoreFilters, { useScoreFilter } from '../components/MoreFilters'
 import ScoreBadge from '../components/score/ScoreBadge'
 import ScoreLine from '../components/score/ScoreLine'
+import { funnelLabel, funnelBadgeStyle } from '../lib/funnelBadge.js'
 import LeadProfileSelect from '../components/roteiro/LeadProfileSelect'
 import { isScoreBand } from '../lib/score'
 import NextStepCard from '../components/cadence/NextStepCard'
@@ -1462,6 +1463,9 @@ export default function Chat() {
 
   const allStages = funnels.flatMap(f => f.stages || [])
   const currentStage = lead ? allStages.find(s => s.id === lead.stage_id) : null
+  // Conta com mais de um funil (ex.: Vendas + Recompra): todo lead mostra em qual esta.
+  const multiFunnel = funnels.filter(f => f.is_active !== 0).length > 1
+  const currentFunnelLabel = lead ? funnelLabel(funnels.find(f => f.id === lead.funnel_id)) : null
   const aiEnabledForAccount = !!accounts.find(a => a.id === accountId)?.ai_agents_enabled
   // Gerentes tambem atendem leads — incluir junto com atendentes no dropdown
   const attendants = users.filter(u => (u.role === 'atendente' || u.role === 'gerente') && u.is_active)
@@ -1680,6 +1684,7 @@ export default function Chat() {
             {filteredLeads.map(l => {
               const active = l.id === selectedLeadId
               const stage = allStages.find(s => s.id === l.stage_id)
+              const leadFunnel = multiFunnel ? funnelLabel(funnels.find(f => f.id === l.funnel_id)) : null
               return (
                 <div key={l.id} className={`chat-contact-item ${active ? 'active' : ''} ${(l.unread_count || 0) > 0 ? 'has-unread' : ''}`} onClick={() => selectLead(l.id)} style={{ position: 'relative' }}>
                   <div className="chat-contact-avatar" style={{ background: stage ? `${stage.color}25` : '#FFB30025', overflow: 'hidden' }}>
@@ -1704,6 +1709,7 @@ export default function Chat() {
                       {(l.unread_count || 0) > 0 && (
                         <span className="chat-contact-unread">{(l.unread_count || 0) > 99 ? '99+' : l.unread_count}</span>
                       )}
+                      {leadFunnel && (l.unread_count || 0) === 0 && <span title={`Funil ${leadFunnel}`} style={{ fontSize: 9, ...funnelBadgeStyle(leadFunnel), padding: '1px 6px', borderRadius: 8, whiteSpace: 'nowrap' }}>{leadFunnel}</span>}
                       {stage && (l.unread_count || 0) === 0 && <span style={{ fontSize: 9, color: stage.color, background: `${stage.color}20`, padding: '1px 6px', borderRadius: 8, whiteSpace: 'nowrap' }}>{stage.name}</span>}
                     </div>
                   </div>
@@ -2175,7 +2181,7 @@ export default function Chat() {
                   etapa: () => (<>
                   {/* 3. Etapa do funil: seletor grande; passa pela trava (Falta saber) e pela venda (handleStageChange) */}
                   <div className="card" style={PANEL_CARD}>
-                    <PanelTitle icon={<ListOrdered size={10} />} label="Etapa do funil" help={<>Em que ponto da venda o cliente está. Ex.: de "Novo lead" para "Em atendimento" quando ele respondeu. Se faltar uma pergunta obrigatória, abre a janela "Falta saber".</>} />
+                    <PanelTitle icon={<ListOrdered size={10} />} label="Funil e etapa" right={currentFunnelLabel ? <span style={{ fontSize: 10, fontWeight: 600, ...funnelBadgeStyle(currentFunnelLabel), padding: '1px 7px', borderRadius: 8 }}>{currentFunnelLabel}</span> : undefined} help={<>Em que funil (Vendas ou Recompra) e em que ponto da venda o cliente está. Ex.: de "Novo lead" para "Em atendimento" quando ele respondeu. Se faltar uma pergunta obrigatória, abre a janela "Falta saber".</>} />
                     <select
                       className="select"
                       aria-label="Etapa do funil"

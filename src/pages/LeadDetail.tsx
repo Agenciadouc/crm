@@ -18,6 +18,7 @@ import {
 import { ArrowLeft, Phone, Mail, MapPin, MessageCircle, Send, Clock, User, GitBranch, Edit3, Save, X, Plus, StickyNote, Tag as TagIcon, ListOrdered, Zap, ClipboardList, ChevronRight, Check, Archive, ArchiveRestore, FileText, DollarSign, Trash2 } from 'lucide-react'
 import MessageMedia from '../components/MessageMedia'
 import ScoreThermometer from '../components/score/ScoreThermometer'
+import { funnelLabel, funnelBadgeStyle } from '../lib/funnelBadge.js'
 import LeadProfileSelect from '../components/roteiro/LeadProfileSelect'
 import RoteiroCard from '../components/roteiro/RoteiroCard'
 import NextStepCard from '../components/cadence/NextStepCard'
@@ -303,6 +304,10 @@ export default function LeadDetail() {
           </div>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          {(() => {
+            const label = funnelLabel(funnels.find(f => f.id === lead.funnel_id))
+            return label ? <span title={`Funil ${label}`} style={{ fontSize: 11, fontWeight: 600, ...funnelBadgeStyle(label), padding: '3px 9px', borderRadius: 10 }}>{label}</span> : null
+          })()}
           <select className="select" style={{ width: 170 }} value={lead.stage_id} onChange={e => handleStageChange(+e.target.value)}>
             {allStages.filter(s => s.funnel_id === lead.funnel_id).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
           </select>
