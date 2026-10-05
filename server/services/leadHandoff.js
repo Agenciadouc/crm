@@ -55,7 +55,6 @@ export async function notifyAndOpenLead(leadId, attendantUserId, opts = {}) {
   try {
     const lead = db.prepare('SELECT * FROM leads WHERE id=?').get(leadId)
     if (!lead || !lead.phone) return
-    if (!canAutomate(lead)) { logSkipped(lead, 'primeira mensagem/aviso de lead novo'); return }
 
     const user = db.prepare('SELECT id, name, primary_instance_id, notification_instance_id, is_bot, is_active FROM users WHERE id=?').get(attendantUserId)
     if (!user || user.is_bot || !user.is_active) return
@@ -85,7 +84,11 @@ export async function notifyAndOpenLead(leadId, attendantUserId, opts = {}) {
     // Box Paper: mesma instancia MAS sem inbound (lead novo via planilha) → continua.
     const hasInbound = db.prepare("SELECT 1 FROM messages WHERE lead_id = ? AND direction = 'inbound' LIMIT 1").get(lead.id)
     const sameInstActiveLead = user.primary_instance_id === lead.instance_id && !!hasInbound
+    // Revendedor/interno: o vendedor ainda e avisado (etapa 2), mas o contato nao recebe 1a mensagem automatica
+    const contactOk = canAutomate(lead)
+    if (!contactOk) logSkipped(lead, 'primeira mensagem automatica')
     const shouldSendFirstMsg = (
+      contactOk &&
       !opts.skipFirstMsg &&
       user.primary_instance_id &&
       !sameInstActiveLead &&

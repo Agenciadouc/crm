@@ -1,4 +1,4 @@
-import { canAutomate, logSkipped } from '../services/contacts/scope.js'
+import { canAutomate } from '../services/contacts/scope.js'
 import { Router } from 'express'
 import fetch from 'node-fetch'
 import db from '../db.js'

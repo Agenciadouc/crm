@@ -1187,7 +1187,7 @@ router.get('/pipeline/metrics', (req, res) => {
       COUNT(l.id) as lead_count,
       AVG(CASE WHEN l.updated_at != l.created_at THEN (julianday(l.updated_at) - julianday(l.created_at)) * 24 ELSE NULL END) as avg_hours_in_stage
     FROM funnel_stages fs
-    LEFT JOIN leads l ON l.stage_id = fs.id AND l.is_active = 1 AND l.is_archived = 0 AND l.is_blocked = 0${cw.sql}
+    LEFT JOIN leads l ON l.stage_id = fs.id AND l.is_active = 1 AND l.is_archived = 0 AND l.is_blocked = 0${cw.sql} AND ${countsInMetrics('l')}
     WHERE fs.funnel_id = ? AND fs.funnel_id IN (SELECT id FROM funnels WHERE account_id = ?)
     GROUP BY fs.id
     ORDER BY fs.position

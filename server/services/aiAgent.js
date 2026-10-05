@@ -133,6 +133,7 @@ export function diagnoseForceAi(lead, instanceId) {
   if (lead.is_blocked) blockers.push('Lead esta bloqueado')
   if (lead.is_archived) blockers.push('Lead esta arquivado')
   if (!lead.is_active) blockers.push('Lead esta inativo')
+  if (!canAutomate(lead)) blockers.push('Contato marcado como Interno ou Revendedor (troque o tipo de contato para Lead)')
 
   // Agentes em copilot/sdr continuam atuando (como Copiloto) em lead com humano ou ja passado
   const hasCopilotAgent = !!db.prepare("SELECT 1 FROM ai_agents WHERE account_id = ? AND is_active = 1 AND mode IN ('copilot', 'sdr') LIMIT 1").get(lead.account_id)

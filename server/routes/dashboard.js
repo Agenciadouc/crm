@@ -478,7 +478,7 @@ router.get('/overview-v2', requireRole('super_admin', 'gerente'), requireAnalyti
   // ?city= opcional: so conversas/erros/alertas de leads dessa cidade. SLA vem do agregado sem cidade -> nulo.
   const byCity = hasGeo(req.query)
   const lci = leadCityExists('conversation_insights.lead_id', req.query)
-  const cwl = leadsWhere('l', req.query)
+  const cwl = cityWhere('l', req.query) // analise de conversas: mesma base dos cartoes (leadCityExists)
 
   const conversasAnalisadas = db.prepare(`
     SELECT COUNT(*) as n FROM conversation_insights
@@ -643,7 +643,7 @@ router.get('/critical-conversations', requireRole('super_admin', 'gerente'), req
   const days = Math.min(365, Math.max(1, parseInt(req.query.days || '30')))
   const limit = Math.min(100, Math.max(1, parseInt(req.query.limit || '50')))
   const since = new Date(Date.now() - days * 86400 * 1000).toISOString().slice(0, 19).replace('T', ' ')
-  const cwl = leadsWhere('l', req.query)
+  const cwl = cityWhere('l', req.query) // idem: lista igual ao cartao
 
   const rows = db.prepare(`
     SELECT ci.lead_id, l.name as lead_name, l.phone as lead_phone,
@@ -723,7 +723,7 @@ router.get('/alerts', requireRole('super_admin', 'gerente'), requireAnalyticsEna
   if (!req.accountId) return res.status(400).json({ error: 'account_id required' })
   const status = req.query.status || 'open'
   // Com cidade: so alertas de leads dessa cidade (alerta sem lead fica de fora)
-  const cwl = leadsWhere('l', req.query)
+  const cwl = cityWhere('l', req.query) // idem: lista igual ao cartao
   const rows = db.prepare(`
     SELECT a.*, l.name as lead_name, l.phone as lead_phone, u.name as assigned_to_name
     FROM analyst_alerts a
