@@ -20,6 +20,7 @@ import MessageMedia from '../components/MessageMedia'
 import ScoreThermometer from '../components/score/ScoreThermometer'
 import { funnelLabel, funnelBadgeStyle } from '../lib/funnelBadge.js'
 import LeadProfileSelect from '../components/roteiro/LeadProfileSelect'
+import ContactTypeSelect from '../components/roteiro/ContactTypeSelect'
 import RoteiroCard from '../components/roteiro/RoteiroCard'
 import NextStepCard from '../components/cadence/NextStepCard'
 import { applyMessageVars } from '../lib/messageVars'
@@ -330,7 +331,8 @@ export default function LeadDetail() {
         {/* Left column: Info + Tags + History */}
         <div>
           {accountId && <ScoreThermometer key={lead.id} leadId={lead.id} accountId={accountId} />}
-          {accountId && <LeadProfileSelect key={`perfil-${lead.id}`} leadId={lead.id} accountId={accountId} style={{ marginBottom: 16 }} />}
+          {accountId && <LeadProfileSelect key={`perfil-${lead.id}`} leadId={lead.id} accountId={accountId} style={{ marginBottom: 10 }} />}
+          <ContactTypeSelect key={`tipo-${lead.id}`} lead={lead} style={{ marginBottom: 16 }} onChanged={t => setLead(p => (p ? { ...p, contact_type: t } : p))} />
           {/* Lead Info Card */}
           <div className="card" style={{ marginBottom: 16 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>

@@ -29,6 +29,7 @@ import ScoreBadge from '../components/score/ScoreBadge'
 import ScoreLine from '../components/score/ScoreLine'
 import { funnelLabel, funnelBadgeStyle } from '../lib/funnelBadge.js'
 import LeadProfileSelect from '../components/roteiro/LeadProfileSelect'
+import ContactTypeSelect from '../components/roteiro/ContactTypeSelect'
 import { isScoreBand } from '../lib/score'
 import NextStepCard from '../components/cadence/NextStepCard'
 import StepReviewModal from '../components/cadence/StepReviewModal'
@@ -1710,7 +1711,8 @@ export default function Chat() {
                         <span className="chat-contact-unread">{(l.unread_count || 0) > 99 ? '99+' : l.unread_count}</span>
                       )}
                       {leadFunnel && (l.unread_count || 0) === 0 && <span title={`Funil ${leadFunnel}`} style={{ fontSize: 9, ...funnelBadgeStyle(leadFunnel), padding: '1px 6px', borderRadius: 8, whiteSpace: 'nowrap' }}>{leadFunnel}</span>}
-                      {stage && (l.unread_count || 0) === 0 && <span style={{ fontSize: 9, color: stage.color, background: `${stage.color}20`, padding: '1px 6px', borderRadius: 8, whiteSpace: 'nowrap' }}>{stage.name}</span>}
+                      {(l.contact_type === 'interno' || l.contact_type === 'revendedor') && (l.unread_count || 0) === 0 && <span title="Fora do funil e dos números" style={{ fontSize: 9, color: '#6B7280', background: '#6B728020', padding: '1px 6px', borderRadius: 8, whiteSpace: 'nowrap' }}>{l.contact_type === 'interno' ? 'Interno' : 'Revendedor'}</span>}
+                      {stage && l.contact_type !== 'interno' && l.contact_type !== 'revendedor' && (l.unread_count || 0) === 0 && <span style={{ fontSize: 9, color: stage.color, background: `${stage.color}20`, padding: '1px 6px', borderRadius: 8, whiteSpace: 'nowrap' }}>{stage.name}</span>}
                     </div>
                   </div>
                   <button
@@ -2193,6 +2195,7 @@ export default function Chat() {
                     </select>
                     {/* Perfil de cliente ideal: muda as perguntas da cadencia (some sem perfis na conta) */}
                     <LeadProfileSelect key={`perfil-${lead.id}`} leadId={lead.id} accountId={accountId} style={{ marginTop: 8 }} />
+                    <ContactTypeSelect key={`tipo-${lead.id}`} lead={lead} style={{ marginTop: 8 }} onChanged={t => setLead(p => (p && p.id === lead.id ? { ...p, contact_type: t } : p))} />
                   </div>
                   </>),
                   // Dados do contato e Observacoes: o mesmo cartao da aba Info (mesma edicao e permissoes)

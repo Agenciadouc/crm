@@ -105,7 +105,7 @@ export default function Pipeline() {
       if (active && active.id !== funnelId) setFunnelId(active.id)
       if (active) {
         const [data, m] = await Promise.all([
-          fetchLeads(accountId, { funnel_id: active.id, limit: 500, ...geoParams(cityFilter), ...scoreParams(scoreFilter), ...customerParams(customerFilter) }),
+          fetchLeads(accountId, { funnel_id: active.id, limit: 500, only_leads: '1', ...geoParams(cityFilter), ...scoreParams(scoreFilter), ...customerParams(customerFilter) }),
           fetchPipelineMetrics(accountId, active.id, cityFilter).catch(() => ({ metrics: [], totalLeads: 0 })),
         ])
         setLeads(data.leads)

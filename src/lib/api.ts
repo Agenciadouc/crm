@@ -58,6 +58,8 @@ export interface Lead {
   source: string | null; source_detail: string | null; notes: string | null
   wa_remote_jid: string | null; instance_id: number | null; last_instance_id?: number | null; profile_pic_url: string | null; is_active: number; created_at: string; updated_at: string
   is_archived?: number; archived_at?: string | null; has_new_after_archive?: number
+  contact_type?: 'lead' | 'cliente' | 'revendedor' | 'interno' | null // quem nao e cliente em potencial sai do funil e dos numeros
+  contact_type_origin?: string | null
   unread_count?: number  // qtd de msgs inbound nao lidas — zerado ao abrir o chat
   last_inbound_at?: string | null  // timestamp da ultima msg do cliente (nao do atendente) — sort do chat
   empresa?: string | null; cpf_cnpj?: string | null; instagram?: string | null; trabalha_anuncio?: number; investimento_anuncios?: number | null
@@ -145,7 +147,7 @@ export const updateFunnelFirstMessage = (funnelId: number, accountId: number, te
   apiFetch(`/api/funnels/${funnelId}?account_id=${accountId}`, { method: 'PUT', body: JSON.stringify({ first_msg_template: template }) })
 
 // Leads
-export interface LeadFilters { stage_id?: number | string; attendant_id?: number | string; instance_id?: number | string; funnel_id?: number; source?: string; city?: string; uf?: string; tag?: number | string; search?: string; date_from?: string; date_to?: string; show_archived?: '1' | 'all'; page?: number; limit?: number; score_bands?: string; score_min?: number; fit?: 'AB'; engagement?: 'high'; sort?: 'score'; curve?: string; tier_id?: number; repurchase_late?: '1' }
+export interface LeadFilters { stage_id?: number | string; attendant_id?: number | string; instance_id?: number | string; funnel_id?: number; source?: string; city?: string; uf?: string; tag?: number | string; search?: string; date_from?: string; date_to?: string; show_archived?: '1' | 'all'; page?: number; limit?: number; score_bands?: string; score_min?: number; fit?: 'AB'; engagement?: 'high'; sort?: 'score'; curve?: string; tier_id?: number; repurchase_late?: '1'; only_leads?: '1' }
 export const fetchLeads = (accountId: number, filters: LeadFilters = {}) => {
   const params = new URLSearchParams({ account_id: String(accountId) })
   Object.entries(filters).forEach(([k, v]) => { if (v !== undefined && v !== '') params.set(k, String(v)) })
