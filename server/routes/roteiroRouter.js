@@ -18,6 +18,7 @@ import { canAtendenteAccessLead } from '../services/leadAccess.js'
 import { refreshLeadStageCadence } from '../services/cadence/leadCadence.js'
 import { warnMissingCadenceTable } from '../services/cadence/errors.js'
 import { getBusiness, saveBusiness, setLeadProfile, leadProfileView } from '../services/roteiro/profiles.js'
+import { suggestBusiness } from '../services/roteiro/aiProfiles.js'
 
 const MANAGER_ROLES = ['super_admin', 'gerente']
 
@@ -113,6 +114,15 @@ export function createRoteiroRouter(db, { ai = null, now = () => new Date(), bro
   router.put('/profiles', manager, (req, res) => {
     try {
       res.json(saveBusiness(db, req.accountId, { business_objective: req.body?.business_objective ?? null, profiles: req.body?.profiles }))
+    } catch (e) { fail(res, e) }
+  })
+
+  // Sugerir com IA: so propoe (nao grava). Sem IA/sem chave -> 503, IA falhou -> 502.
+  router.post('/profiles/suggest', manager, async (req, res) => {
+    const account = db.prepare('SELECT * FROM accounts WHERE id = ?').get(req.accountId)
+    if (!ai || !pickAnthropicKey(account)) return res.status(503).json({ error: 'A IA não está ligada nesta conta.', code: 'ai_off' })
+    try {
+      res.json(await suggestBusiness(db, { accountId: req.accountId, ai }))
     } catch (e) { fail(res, e) }
   })
 

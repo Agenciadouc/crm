@@ -276,3 +276,15 @@ test('editar opcoes sem option_key mantem as chaves (por texto, depois por posic
   const cur = getLeadRoteiro(db, { accountId: s.accountId, leadId }).stages.find(x => x.is_current)
   assert.equal(cur.questions[0].answer.option_label, 'Até 30 dias') // resposta antiga ainda casa com a opcao
 })
+
+test('stage-view: marca etapa de contato e lista os perfis da conta', async () => {
+  const { saveBusiness } = await import('../server/services/roteiro/profiles.js')
+  const db = createCadenceTestDb(); const s = seedCadenceBase(db)
+  saveBusiness(db, s.accountId, { profiles: [{ name: 'Loja', description: 'mercadinho' }] })
+  const view = getStageView(db, s.accountId, s.funnelId)
+  const byName = Object.fromEntries(view.stages.map(st => [st.name, st.is_contact]))
+  assert.equal(byName.Novo, true)
+  assert.equal(byName.Qualificando, false)
+  assert.deepEqual(view.profiles.map(p => p.name), ['Loja'])
+  assert.ok(view.profiles[0].profile_key)
+})

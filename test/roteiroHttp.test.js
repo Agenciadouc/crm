@@ -496,3 +496,21 @@ test('perfil do lead: vendedor com acesso grava manual, avisa a cadencia; invali
     assert.equal((await peca(base, { method: 'PUT', path: `/api/roteiro/leads/${outro}/roteiro-profile`, jwtToken: ta, body: { profile_key: null } })).status, 403)
   }, { broadcast: (...a) => avisos.push(a) })
 })
+
+test('sugerir perfis pela rota: sem IA 503; com IA devolve a proposta', async () => {
+  await comServidor(async ({ db, base }) => {
+    const { accountId } = seedRoteiroBase(db)
+    const t = token({ id: 999, role: 'gerente', accountId })
+    const r = await peca(base, { method: 'POST', path: '/api/roteiro/profiles/suggest', jwtToken: t, body: {} })
+    assert.deepEqual([r.status, r.body.error], [503, 'A IA não está ligada nesta conta.'])
+  })
+  const ai = { isAvailable: () => true, call: async () => ({ toolUses: [{ id: 't', name: 'propose_profiles', input: { business_objective: 'revender', profiles: [{ name: 'Loja', description: 'mercadinho' }] } }], usage: {}, costUsd: 0 }) }
+  await comServidor(async ({ db, base }) => {
+    const { accountId } = seedRoteiroBase(db)
+    db.prepare("UPDATE accounts SET anthropic_api_key = 'sk-teste' WHERE id = ?").run(accountId)
+    const t = token({ id: 999, role: 'gerente', accountId })
+    const r = await peca(base, { method: 'POST', path: '/api/roteiro/profiles/suggest', jwtToken: t, body: {} })
+    assert.equal(r.status, 200)
+    assert.deepEqual(r.body, { business_objective: 'revender', profiles: [{ name: 'Loja', description: 'mercadinho' }] })
+  }, { ai })
+})

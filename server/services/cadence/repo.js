@@ -4,6 +4,8 @@
 import { getRoteiro, saveDraft, publish, newKey } from '../roteiro/repo.js'
 import { missingSpinQuestions } from '../roteiro/spinTemplate.js'
 import { buildAiDraft } from '../roteiro/aiDraft.js'
+import { isContactStage } from '../roteiro/stageKind.js'
+import { listProfiles } from '../roteiro/profiles.js'
 import { applySuggestion, confirmVariant } from '../roteiro/learning.js'
 import { CADENCE_ACTION_TYPES } from './schema.js'
 import { CadenceError } from './errors.js'
@@ -515,7 +517,7 @@ export function getStageView(db, accountId, funnelId) {
     const cadence = row ? withSteps(db, accountId, row) : null
     const steps = cadence ? cadence.attempts.length : 0
     const questions = cadence ? cadence.attempts.filter(a => a.action_type === 'pergunta').length : 0
-    return { id: st.id, name: st.name, position: st.position, is_terminal: st.is_terminal, cadence, summary: { steps, questions }, followups: fuStmt.all(accountId, st.id) }
+    return { id: st.id, name: st.name, position: st.position, is_terminal: st.is_terminal, is_contact: isContactStage(st), cadence, summary: { steps, questions }, followups: fuStmt.all(accountId, st.id) }
   })
   const pub = rot.published
   return {
@@ -523,5 +525,6 @@ export function getStageView(db, accountId, funnelId) {
     stages,
     deviations: pub ? pub.deviations : [],
     questions: pub ? pub.questions.map(q => ({ question_key: q.question_key, text: q.text, stage_id: q.stage_id })) : [],
+    profiles: listProfiles(db, accountId).map(p => ({ profile_key: p.profile_key, name: p.name })),
   }
 }

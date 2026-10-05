@@ -15,6 +15,7 @@ import { runAiLearning } from '../server/services/roteiro/aiLearning.js'
 import { buildRoteiroAi, AI_UNAVAILABLE } from '../server/services/roteiro/aiCall.js'
 import { runLearning } from '../server/services/roteiro/learning.js'
 import { saveBusiness } from '../server/services/roteiro/profiles.js'
+import { suggestBusiness } from '../server/services/roteiro/aiProfiles.js'
 import { runScoreNightly } from '../server/services/leadScore/nightly.js'
 import { bootRoteiroRuntime, bootRoteiroAi, enqueueAiExtract, setAiExtractHandler } from '../server/services/roteiro/runtime.js'
 
@@ -658,4 +659,18 @@ test('montar com IA sem conversas e sem briefing: monta o SPIN geral', async () 
   const d = await buildAiDraft(db, { accountId: s.accountId, funnelId: s.funnelId, ai })
   assert.equal(d.questions.length, 6) // modelo SPIN inteiro completou as fases
   assert.ok(d.questions.every(q => q.stage_id === s.stages.qualificando))
+})
+
+test('sugerir perfis: le conversas, corta em 6 e nos limites, nao grava; IA falhando -> 502', async (t) => {
+  t.mock.method(console, 'error', () => {})
+  const db = createRoteiroTestDb(); const s = seedRoteiroBase(db)
+  const lead = addLead(db, { account_id: s.accountId, funnel_id: s.funnelId, stage_id: s.stages.qualificando })
+  for (const [d, c] of [['inbound', 'tenho um mercadinho'], ['outbound', 'ok'], ['inbound', 'quanto custa?']]) addMessage(db, { leadId: lead, direction: d, content: c })
+  const many = Array.from({ length: 8 }, (_, i) => ({ name: `Perfil ${i} ${'x'.repeat(80)}`, description: 'y'.repeat(600) }))
+  const ai = fakeAi({ roteiro_profiles: [p => { assert.match(p.messages[0].content, /mercadinho/); return tool('propose_profiles', { business_objective: 'z'.repeat(400), profiles: many }) }] })
+  const r = await suggestBusiness(db, { accountId: s.accountId, ai })
+  assert.equal(r.profiles.length, 6); assert.equal(r.profiles[0].name.length, 60); assert.equal(r.profiles[0].description.length, 500)
+  assert.equal(r.business_objective.length, 300)
+  assert.equal(db.prepare('SELECT COUNT(*) n FROM roteiro_profiles').get().n, 0)
+  await assert.rejects(suggestBusiness(db, { accountId: s.accountId, ai: fakeAi({ roteiro_profiles: [new Error('x')] }) }), e => e.status === 502 && /A IA não respondeu agora/.test(e.message))
 })
