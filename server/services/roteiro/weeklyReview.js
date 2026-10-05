@@ -3,7 +3,8 @@
 // opcoes novas e reescritas. So vira sugestao (aba de sugestoes): nada muda sozinho.
 // Nao importa server/db.js: recebe db e `ai` (ver aiCall.js).
 import { getRoteiro } from './repo.js'
-import { getBusiness } from './profiles.js'
+import { getBusiness, MAX_PROFILES } from './profiles.js'
+import { activeVariant } from './variants.js'
 import { sampleConversations } from './conversationSample.js'
 import { isContactStage, conversationStages } from './stageKind.js'
 import { SPIN_KEYS, SPIN_LABEL } from './spinTemplate.js'
@@ -12,6 +13,7 @@ import { toSqliteDate } from './time.js'
 
 export const WEEK_DAYS = 7
 const LIMITS = { questions: 10, profiles: 3, options: 10, rewrites: 5 }
+const REJECTED_MEMORY_DAYS = 90 // sugestao ignorada nao volta nesse prazo
 const DAY_MS = 86400000
 
 const str = v => (typeof v === 'string' ? v.trim() : '')
@@ -149,8 +151,11 @@ function saveProposals(db, { accountId, business, roteiros, input, now }) {
   const questionsByKey = new Map()
   for (const r of roteiros) for (const q of r.questions) questionsByKey.set(q.question_key, { q, funnelId: r.funnel.id })
 
-  // Sugestoes ainda sem decisao (reescrita em teste A/B tambem conta): nao repete.
-  const open = db.prepare("SELECT type, question_key, payload_json FROM roteiro_suggestions WHERE account_id = ? AND status IN ('new','testing')").all(accountId)
+  // Sugestoes ainda sem decisao (reescrita em teste A/B tambem conta) e as ignoradas nos
+  // ultimos 90 dias: nao repete (senao "Ignorar" nao adianta).
+  const rejectedSince = toSqliteDate(new Date(now.getTime() - REJECTED_MEMORY_DAYS * DAY_MS))
+  const open = db.prepare(`SELECT type, status, question_key, payload_json FROM roteiro_suggestions
+    WHERE account_id = ? AND (status IN ('new','testing') OR (status = 'rejected' AND COALESCE(decided_at, created_at) >= ?))`).all(accountId, rejectedSince)
   const seen = new Set()
   const keyOf = (type, questionKey, payload) => {
     if (type === 'new_question') return `q|${norm(payload.text)}`
@@ -195,11 +200,16 @@ function saveProposals(db, { accountId, business, roteiros, input, now }) {
       }, raw)
     }
 
+    // So o que cabe: perfil novo com 6 perfis na conta nunca daria para aplicar.
     const existingNames = new Set(business.profiles.map(p => norm(p.name)))
+    const pendingProfiles = open.filter(x => x.type === 'new_profile' && x.status === 'new').length
+    let freeSlots = Math.max(0, MAX_PROFILES - business.profiles.length - pendingProfiles)
     for (const raw of (Array.isArray(input.new_profiles) ? input.new_profiles : []).slice(0, LIMITS.profiles)) {
       const name = str(raw?.name).slice(0, 60)
-      if (!name || existingNames.has(norm(name))) continue
+      if (!name || existingNames.has(norm(name)) || freeSlots <= 0) continue
+      const before = created
       add('new_profile', null, null, { name, description: str(raw?.description).slice(0, 500) }, raw)
+      if (created > before) freeSlots--
     }
 
     for (const raw of (Array.isArray(input.new_options) ? input.new_options : []).slice(0, LIMITS.options)) {
@@ -214,6 +224,8 @@ function saveProposals(db, { accountId, business, roteiros, input, now }) {
       const found = questionsByKey.get(raw?.question_key)
       const versions = (Array.isArray(raw?.versions) ? raw.versions : []).map(v => str(v).slice(0, 500)).filter(Boolean)
       if (!found || versions.length < 2) continue
+      // Pergunta em teste A/B: reescrever agora mudaria a versao A no meio do teste.
+      if (activeVariant(db, accountId, found.q.question_key)) continue
       add('rewrite', found.funnelId, found.q.question_key, { versions: versions.slice(0, 2), current_rate: null }, raw)
     }
   })()

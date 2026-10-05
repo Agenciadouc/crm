@@ -107,8 +107,9 @@ export async function extractAnswers(db, { accountId, leadId, ai }) {
   if (!roteiro.has_roteiro) return empty
   const current = roteiro.stages.find(s => s.is_current)
   const pending = current ? current.questions.filter(q => !q.answer) : []
-  const leadRow = db.prepare('SELECT roteiro_profile_key FROM leads WHERE id = ?').get(leadId)
-  const allProfiles = leadRow.roteiro_profile_key ? [] : listProfiles(db, accountId)
+  // Sem perfil, ou com perfil 'herdado' (ninguem escolheu): a IA ainda identifica.
+  const leadRow = db.prepare('SELECT roteiro_profile_key, roteiro_profile_origin FROM leads WHERE id = ? AND account_id = ?').get(leadId, accountId)
+  const allProfiles = leadRow.roteiro_profile_key && leadRow.roteiro_profile_origin !== 'herdado' ? [] : listProfiles(db, accountId)
   const profiles = allProfiles.length >= 2 ? allProfiles : []
   if (!pending.length && !profiles.length) return empty
 

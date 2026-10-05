@@ -57,7 +57,7 @@ export interface LeadRoteiroBase {
   next_question_key: string | null
   progress: { answered: number; total: number }
   legacy_answers: LegacyAnswer[]
-  profile: { key: string | null; origin: 'ia' | 'manual' | null } // perfil de cliente que vale para o lead
+  profile: { key: string | null; origin: 'ia' | 'manual' | 'herdado' | null } // perfil de cliente que vale para o lead
 }
 
 export interface RoteiroDeviation { triggers: string; reply_text: string; return_question_key: string | null; position: number }
@@ -229,7 +229,7 @@ export const suggestBusiness = (accountId: number) =>
 
 export interface LeadProfileView {
   profile_key: string | null
-  origin: 'ia' | 'manual' | null
+  origin: 'ia' | 'manual' | 'herdado' | null
   effective_key: string | null // com 1 perfil na conta, vale o unico mesmo sem escolha
   profiles: { profile_key: string; name: string }[]
 }

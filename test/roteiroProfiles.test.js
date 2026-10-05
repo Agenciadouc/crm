@@ -81,9 +81,13 @@ test('passar de 1 para 2 perfis: leads sem perfil gravado ficam com o perfil uni
   const [loja] = saveBusiness(db, s.accountId, { profiles: [two[0]] }).profiles
   const semPerfil = addLead(db, { account_id: s.accountId, funnel_id: s.funnelId, stage_id: s.stages.qualificando })
   const outraConta = addLead(db, { account_id: s.otherAccountId, funnel_id: s.funnelId, stage_id: s.stages.qualificando })
-  saveBusiness(db, s.accountId, { profiles: [loja, two[1]] })
+  const arquivado = addLead(db, { account_id: s.accountId, funnel_id: s.funnelId, stage_id: s.stages.qualificando, is_archived: 1 })
+  const [, porta] = saveBusiness(db, s.accountId, { profiles: [loja, two[1]] }).profiles
   const row = id => db.prepare('SELECT roteiro_profile_key k, roteiro_profile_origin o FROM leads WHERE id = ?').get(id)
-  assert.deepEqual(row(semPerfil), { k: loja.profile_key, o: 'ia' })
+  assert.deepEqual(row(semPerfil), { k: loja.profile_key, o: 'herdado' })
+  assert.equal(row(arquivado).k, null) // so leads ativos herdam
+  // IA pode trocar um perfil herdado (nao foi escolha de ninguem)
+  assert.equal(setLeadProfile(db, { accountId: s.accountId, leadId: semPerfil, profileKey: porta.profile_key, origin: 'ia' }).changed, true)
   assert.deepEqual(row(outraConta), { k: null, o: null })
 })
 

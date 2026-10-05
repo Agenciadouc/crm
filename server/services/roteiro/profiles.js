@@ -66,10 +66,12 @@ export function saveBusiness(db, accountId, { business_objective = null, profile
     `)
     for (const p of clean) up.run(accountId, p.profile_key, p.name, p.description, p.position)
     // Com 1 perfil o lead usa o unico sem gravar (effectiveProfileKey). Ao ganhar o 2o perfil,
-    // quem estava nele implicitamente passa a te-lo gravado, senao perderia as perguntas dele.
+    // quem estava nele implicitamente passa a te-lo gravado ('herdado'), senao perderia as
+    // perguntas dele. 'herdado' nao foi escolha de ninguem: a IA ainda pode trocar.
     const sole = currentList.length === 1 ? currentList[0].profile_key : null
     if (sole && keep.has(sole) && clean.length >= 2) {
-      db.prepare("UPDATE leads SET roteiro_profile_key = ?, roteiro_profile_origin = 'ia' WHERE account_id = ? AND roteiro_profile_key IS NULL").run(sole, accountId)
+      db.prepare(`UPDATE leads SET roteiro_profile_key = ?, roteiro_profile_origin = 'herdado'
+        WHERE account_id = ? AND roteiro_profile_key IS NULL AND COALESCE(is_active, 1) = 1 AND COALESCE(is_archived, 0) = 0`).run(sole, accountId)
     }
   })()
   return getBusiness(db, accountId)

@@ -143,3 +143,40 @@ test('noturno roda a revisao semanal e soma as sugestoes', async () => {
   assert.ok(totals.suggestions >= 1)
   assert.equal(db.prepare("SELECT COUNT(*) n FROM roteiro_suggestions WHERE type = 'new_profile'").get().n, 1)
 })
+
+test('toda fonte de IA do roteiro conta no teto do roteiro', async () => {
+  const fs = await import('node:fs')
+  const { ROTEIRO_SOURCES } = await import('../server/services/aiBudget.js')
+  const dir = new URL('../server/services/roteiro/', import.meta.url)
+  const found = new Set()
+  for (const f of fs.readdirSync(dir)) {
+    const src = fs.readFileSync(new URL(f, dir), 'utf8')
+    for (const m of src.matchAll(/source: '(roteiro_[a-z_]+)'/g)) found.add(m[1])
+  }
+  assert.ok(found.has('roteiro_weekly') && found.has('roteiro_profiles'))
+  for (const s of found) assert.ok(ROTEIRO_SOURCES.includes(s), `${s} fora do teto do roteiro`)
+})
+
+test('revisao semanal: sugestao ignorada nos ultimos 90 dias nao volta', async () => {
+  const { db, s, loja } = setup()
+  await runWeeklyReview(db, { accountId: s.accountId, ai: fakeAi([review(proposta(s, loja))]), now: NOW })
+  db.prepare("UPDATE roteiro_suggestions SET status = 'rejected', decided_at = datetime('now')").run()
+  db.prepare("UPDATE messages SET created_at = datetime(created_at, '+8 days')").run()
+  const r = await runWeeklyReview(db, { accountId: s.accountId, ai: fakeAi([review(proposta(s, loja))]), now: new Date(NOW.getTime() + 8 * DAY) })
+  assert.equal(r.created, 0)
+})
+
+test('revisao semanal: perfis novos so ate completar 6', async () => {
+  const { db, s, loja } = setup() // ja tem 2 perfis
+  saveBusiness(db, s.accountId, { profiles: db.prepare('SELECT profile_key, name FROM roteiro_profiles WHERE account_id = ? ORDER BY position').all(s.accountId).concat([{ name: 'P3' }, { name: 'P4' }, { name: 'P5' }]) })
+  const r = await runWeeklyReview(db, { accountId: s.accountId, ai: fakeAi([review({ new_profiles: [{ name: 'A1' }, { name: 'A2' }, { name: 'A3' }] })]), now: NOW })
+  assert.equal(r.created, 1)
+  assert.ok(loja)
+})
+
+test('revisao semanal: nao sugere reescrita de pergunta em teste A/B', async () => {
+  const { db, s } = setup()
+  db.prepare("INSERT INTO roteiro_variants (account_id, question_key, text, status) VALUES (?, 'q1', 'versao B', 'testing')").run(s.accountId)
+  const r = await runWeeklyReview(db, { accountId: s.accountId, ai: fakeAi([review({ rewrites: [{ question_key: 'q1', versions: ['a', 'b'], reason: 'r' }] })]), now: NOW })
+  assert.equal(r.created, 0)
+})

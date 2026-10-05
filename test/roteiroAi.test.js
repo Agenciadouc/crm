@@ -674,3 +674,12 @@ test('sugerir perfis: le conversas, corta em 6 e nos limites, nao grava; IA falh
   assert.equal(db.prepare('SELECT COUNT(*) n FROM roteiro_profiles').get().n, 0)
   await assert.rejects(suggestBusiness(db, { accountId: s.accountId, ai: fakeAi({ roteiro_profiles: [new Error('x')] }) }), e => e.status === 502 && /A IA não respondeu agora/.test(e.message))
 })
+
+test('extracao: lead com perfil herdado (virou 2 perfis) ainda recebe os perfis e a IA pode trocar', async () => {
+  const { db, s, porta, leadId } = setupPerfis()
+  const loja = db.prepare("SELECT profile_key FROM roteiro_profiles WHERE account_id = ? AND name = 'Loja'").get(s.accountId).profile_key
+  db.prepare("UPDATE leads SET roteiro_profile_key = ?, roteiro_profile_origin = 'herdado' WHERE id = ?").run(loja, leadId)
+  const ai = fakeAi({ roteiro_extraction: [p => { assert.ok(p.tools[0].input_schema.properties.profile_key); return tool('record_answers', { answers: [], profile_key: porta.profile_key, profile_evidence: 'vendo de porta em porta' }) }] })
+  const r = await extractAnswers(db, { accountId: s.accountId, leadId, ai })
+  assert.equal(r.profile_set, porta.profile_key)
+})
