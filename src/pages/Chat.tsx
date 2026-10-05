@@ -2194,8 +2194,6 @@ export default function Chat() {
                       {allStages.filter(s => s.funnel_id === lead.funnel_id).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                     </select>
                     {/* Perfil de cliente ideal: muda as perguntas da cadencia (some sem perfis na conta) */}
-                    <LeadProfileSelect key={`perfil-${lead.id}`} leadId={lead.id} accountId={accountId} style={{ marginTop: 8 }} />
-                    <ContactTypeSelect key={`tipo-${lead.id}`} lead={lead} style={{ marginTop: 8 }} onChanged={t => setLead(p => (p && p.id === lead.id ? { ...p, contact_type: t } : p))} />
                   </div>
                   </>),
                   // Dados do contato e Observacoes: o mesmo cartao da aba Info (mesma edicao e permissoes)
@@ -2543,6 +2541,13 @@ export default function Chat() {
                 <>
                   {/* Informacoes: o mesmo cartao e o bloco "Dados do contato" da aba Atendimento */}
                   {renderContatoCard(lead)}
+
+                  {/* Classificacao do lead: tipo de cliente e tipo de contato (fora da aba Atendimento para nao poluir) */}
+                  <div className="card" style={PANEL_CARD}>
+                    <PanelTitle icon={<TagIcon size={10} />} label="Classificação" help={<>Que tipo de cliente ele é e se é um cliente em potencial. Ex.: "Loja" e "Lead". Funcionário ou representante saem do funil e dos números.</>} />
+                    {accountId && <LeadProfileSelect key={`perfil-${lead.id}`} leadId={lead.id} accountId={accountId} />}
+                    <ContactTypeSelect key={`tipo-${lead.id}`} lead={lead} style={{ marginTop: 8 }} onChanged={t => setLead(p => (p && p.id === lead.id ? { ...p, contact_type: t } : p))} />
+                  </div>
 
                   {/* Observacoes (tambem pode aparecer na aba Atendimento) */}
                   {renderObservacoesCard(lead)}
