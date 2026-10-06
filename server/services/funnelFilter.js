@@ -45,6 +45,12 @@ export function leadListFunnelWhere(alias, query) {
   return currentFunnelWhere(alias, parseFunnelFilter(query))
 }
 
+// WHERE completo de funil para listas: funnel_id (Pipeline) ou ?funnel (Chat/Leads/export).
+export function leadListWhere(alias, query) {
+  if (query && query.funnel_id) return { sql: ` AND ${alias}.funnel_id = ?`, params: [query.funnel_id] }
+  return { sql: currentFunnelWhere(alias, parseFunnelFilter(query)), params: [] }
+}
+
 const RECOMPRA_ENTRIES = `
   SELECT sh.lead_id AS lead_id, sh.created_at AS period_at
   FROM stage_history sh

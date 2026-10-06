@@ -22,6 +22,7 @@ import { registerSale, patchSale, deleteSale, outcomeStageBlocked } from '../ser
 import { repurchaseAiFor } from '../services/ltv/aiRuntime.js'
 import { customerWhere } from '../services/ltv/filters.js'
 import { parseContactType, countsInMetrics } from '../services/contacts/scope.js'
+import { leadListWhere } from '../services/funnelFilter.js'
 
 const router = Router()
 
@@ -108,7 +109,7 @@ router.get('/', (req, res) => {
     if (ids.length === 1) { where.push('l.instance_id = ?'); params.push(ids[0]) }
     else if (ids.length > 1) { where.push(`l.instance_id IN (${ids.map(() => '?').join(',')})`); params.push(...ids) }
   }
-  if (funnel_id) { where.push('l.funnel_id = ?'); params.push(funnel_id) }
+  { const fw = leadListWhere('l', req.query); if (fw.sql) { where.push(fw.sql.replace(/^ AND /, '')); params.push(...fw.params) } }
   if (source) { where.push('l.source = ?'); params.push(source) }
   // Cidade escolhida no filtro: compara sem acento/maiuscula (city_key registrada em db.js)
   // Cidade/estado escolhidos no filtro (?city= sem acento, ?uf= sigla)
@@ -877,7 +878,7 @@ router.get('/export', requireRole('super_admin', 'gerente'), (req, res) => {
   const params = [req.accountId]
   if (date_from) { where.push('l.created_at >= ?'); params.push(date_from) }
   if (date_to) { where.push('l.created_at <= ?'); params.push(date_to + ' 23:59:59') }
-  if (funnel_id) { where.push('l.funnel_id = ?'); params.push(funnel_id) }
+  { const fw = leadListWhere('l', req.query); if (fw.sql) { where.push(fw.sql.replace(/^ AND /, '')); params.push(...fw.params) } }
   { const g = cityWhere('l', req.query); if (g.sql) { where.push(g.sql.replace(/^ AND /, '')); params.push(...g.params) } }
   // Filtros do termometro (faixa, nota minima, perfil A/B, engajamento alto) — spec 5.4
   { const s = scoreWhere('l', req.query); if (s.sql) { where.push(s.sql.replace(/^ AND /, '')); params.push(...s.params) } }
