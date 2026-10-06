@@ -9,6 +9,8 @@ import {
 } from '../lib/api'
 import { Settings, ChevronLeft, ChevronRight, DollarSign, Target, TrendingUp, AlertTriangle, X } from 'lucide-react'
 import { CityNotice } from './CityFilter'
+import { FunnelCostNotice } from './FunnelFilter'
+import type { FunnelValue } from '../lib/funnelFilter.js'
 
 const MESES = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez']
 
@@ -40,10 +42,11 @@ function fmtInt(v: number | null | undefined) {
   return v.toLocaleString('pt-BR')
 }
 
-// city: cidade escolhida no Dashboard ('' = todas)
-interface Props { accountId: number; city?: string }
+// city: cidade escolhida no Dashboard ('' = todas); funnel: Vendas novas | Recompra | Todos
+interface Props { accountId: number; city?: string; funnel?: FunnelValue }
 
-export default function FunilMensalPanel({ accountId, city = '' }: Props) {
+export default function FunilMensalPanel({ accountId, city = '', funnel = 'todos' }: Props) {
+  const isRec = funnel === 'recompra'
   const { user } = useAuth()
   const canEdit = user?.role === 'super_admin' || user?.role === 'gerente'
   const [month, setMonth] = useState(currentYearMonth())
@@ -53,12 +56,12 @@ export default function FunilMensalPanel({ accountId, city = '' }: Props) {
 
   const load = () => {
     setLoading(true)
-    fetchFunilMensal(accountId, month, city)
+    fetchFunilMensal(accountId, month, city, funnel)
       .then(setData)
       .catch(() => setData(null))
       .finally(() => setLoading(false))
   }
-  useEffect(() => { load() }, [accountId, month, city])
+  useEffect(() => { load() }, [accountId, month, city, funnel])
 
   if (loading) return <section className="dash-section"><div className="card" style={{ padding: 24, textAlign: 'center', color: '#6B6580' }}>Carregando funil...</div></section>
   if (!data) return null
@@ -69,7 +72,11 @@ export default function FunilMensalPanel({ accountId, city = '' }: Props) {
   const missing = c.config_missing
 
   // Passos da cascata (labels + valores + taxas) — usado pra renderizar bars visualmente
-  const steps = [
+  // Na Recompra nao ha Qualificados/Reunioes: quem entrou na recompra e quem recomprou
+  const steps = isRec ? [
+    { key: 'total', label: 'Entraram',    count: c.total ?? 0, rate: null,                 color: '#5DADE2' },
+    { key: 'won',   label: 'Recompraram', count: c.won ?? 0,   rate: c.overall_conversion, color: '#34C759' },
+  ] : [
     { key: 'total',     label: 'Leads',        count: c.total,     rate: null,             color: '#5DADE2' },
     { key: 'qualified', label: 'Qualificados', count: c.qualified, rate: c.qualified_rate, color: '#FFB300' },
     { key: 'meeting',   label: 'Reunioes',     count: c.meeting,   rate: c.meeting_rate,   color: '#9B59B6' },
@@ -91,7 +98,7 @@ export default function FunilMensalPanel({ accountId, city = '' }: Props) {
       </div>
 
       {/* Aviso de config faltando */}
-      {(missing.qualified || missing.meeting) && (
+      {!isRec && (missing.qualified || missing.meeting) && (
         <div className="card" style={{ padding: 12, background: 'rgba(255,179,0,0.08)', border: '1px solid rgba(255,179,0,0.3)', marginBottom: 12, display: 'flex', gap: 8, alignItems: 'flex-start' }}>
           <AlertTriangle size={14} style={{ color: '#FFB300', flexShrink: 0, marginTop: 2 }} />
           <div style={{ fontSize: 12, color: '#c4a575' }}>
@@ -102,6 +109,7 @@ export default function FunilMensalPanel({ accountId, city = '' }: Props) {
         </div>
       )}
 
+      <FunnelCostNotice funnel={funnel} />
       <CityNotice city={city}>
         Leads, etapas, vendas e faturamento são do local escolhido. Investimento e meta são da conta inteira, então CPL, CAC, ROAS e o progresso da meta não aparecem por cidade ou estado.
       </CityNotice>
@@ -123,7 +131,7 @@ export default function FunilMensalPanel({ accountId, city = '' }: Props) {
           )
         })}
         <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid rgba(255,255,255,0.06)', fontSize: 11, color: '#6B6580' }}>
-          Conversao geral (Lead {'->'} Venda): <strong style={{ color: '#34C759' }}>{fmtPct(c.overall_conversion)}</strong>
+          {isRec ? 'Taxa de recompra:' : <>Conversao geral (Lead {'->'} Venda):</>} <strong style={{ color: '#34C759' }}>{fmtPct(c.overall_conversion)}</strong>
         </div>
       </div>
 
@@ -132,7 +140,9 @@ export default function FunilMensalPanel({ accountId, city = '' }: Props) {
         <div className="metric-card">
           <div className="metric-header"><span className="metric-label">Investimento</span><div className="metric-icon" style={{ background: '#5DADE220', color: '#5DADE2' }}><DollarSign size={16} /></div></div>
           <div className="metric-value" style={{ fontSize: 20 }}>{fmtBRL(cfg.ad_investment)}</div>
-          {city
+          {isRec
+            ? <div className="metric-sub" style={{ fontSize: 11, color: '#6B6580' }}>Da venda nova</div>
+            : city
             ? <div className="metric-sub" style={{ fontSize: 11, color: '#6B6580' }}>Da conta inteira</div>
             : cfg.ad_investment === 0 && canEdit && <div className="metric-sub" style={{ color: '#FFB300', fontSize: 11 }}>Configure pra ver CAC e ROAS</div>}
         </div>
@@ -161,8 +171,10 @@ export default function FunilMensalPanel({ accountId, city = '' }: Props) {
         </div>
         <div className="metric-card">
           <div className="metric-header"><span className="metric-label">Meta de Vendas</span><div className="metric-icon" style={{ background: '#FF6B8A20', color: '#FF6B8A' }}><Target size={16} /></div></div>
-          <div className="metric-value" style={{ fontSize: 20 }}>{city ? c.won : `${c.won} / ${cfg.sales_target || '-'}`}</div>
-          {city && <div className="metric-sub" style={{ fontSize: 11, color: '#6B6580' }}>Vendas no local (meta é da conta)</div>}
+          <div className="metric-value" style={{ fontSize: 20 }}>{city || isRec ? c.won : `${c.won} / ${cfg.sales_target || '-'}`}</div>
+          {isRec
+            ? <div className="metric-sub" style={{ fontSize: 11, color: '#6B6580' }}>Recompras (a meta é de venda nova)</div>
+            : city && <div className="metric-sub" style={{ fontSize: 11, color: '#6B6580' }}>Vendas no local (meta é da conta)</div>}
           {calc.target_progress != null && (
             <div className="metric-sub" style={{ fontSize: 11, color: calc.target_progress >= 100 ? '#34C759' : calc.target_progress >= 70 ? '#FFB300' : '#FF6B6B' }}>
               {calc.target_progress.toFixed(0)}% da meta {calc.target_remaining > 0 ? `(faltam ${calc.target_remaining})` : '(batida!)'}

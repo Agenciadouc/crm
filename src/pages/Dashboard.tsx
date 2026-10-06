@@ -7,6 +7,7 @@ import { ResponsiveContainer, AreaChart, Area, BarChart, Bar, PieChart, Pie, Cel
 import { Users, Target, TrendingUp, TrendingDown, Calendar, UserX, Zap } from 'lucide-react'
 import FunilMensalPanel from '../components/FunilMensal'
 import CityFilter, { useCityFilter } from '../components/CityFilter'
+import FunnelFilter, { useFunnelFilter } from '../components/FunnelFilter'
 import ConversionByBandCard from '../components/score/ConversionByBandCard'
 import RepurchaseDashboardCard from '../components/RepurchaseDashboardCard'
 
@@ -31,15 +32,17 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true)
   const { accountId } = useAccount()
   const [city, setCity] = useCityFilter(accountId)
+  // Vendas novas | Recompra | Todos (vale para todas as telas da conta)
+  const [funnel, setFunnel, funnelAvailable] = useFunnelFilter(accountId)
 
   useEffect(() => {
     if (!accountId) return
     setLoading(true)
     Promise.all([
-      fetchDashboardStats(accountId, days, city).catch(() => null),
-      fetchAgentStats(accountId, days, city).catch(() => []),
+      fetchDashboardStats(accountId, days, city, funnel).catch(() => null),
+      fetchAgentStats(accountId, days, city, funnel).catch(() => []),
     ]).then(([s, a]) => { setStats(s); setAgents(a as AgentStat[]) }).finally(() => setLoading(false))
-  }, [accountId, days, city])
+  }, [accountId, days, city, funnel])
 
   if (!accountId) return <div className="empty-state"><h3>Selecione uma conta</h3></div>
   if (loading) return <div className="loading-container"><div className="spinner" /></div>
@@ -55,6 +58,7 @@ export default function Dashboard() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <h1>Dashboard</h1>
           <AccountSelector />
+          <FunnelFilter value={funnel} onChange={setFunnel} available={funnelAvailable} />
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
           <CityFilter accountId={accountId} value={city} onChange={setCity} />
@@ -81,7 +85,7 @@ export default function Dashboard() {
       </section>
 
       {/* Funil Mensal + ROAS (novo modulo) */}
-      <FunilMensalPanel accountId={accountId} city={city} />
+      <FunilMensalPanel accountId={accountId} city={city} funnel={funnel} />
 
       {/* Funnel by stage */}
       {stats.byStage.length > 0 && (
