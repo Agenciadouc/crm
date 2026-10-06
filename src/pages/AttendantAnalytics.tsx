@@ -16,6 +16,7 @@ import {
 } from 'lucide-react'
 import ConversationDetailModal from '../components/ConversationDetailModal'
 import CityFilter, { useCityFilter, CityNotice } from '../components/CityFilter'
+import FunnelFilter, { useFunnelFilter } from '../components/FunnelFilter'
 
 type TabKey = 'overview' | 'ranking' | 'critical' | 'coaching' | 'market' | 'alerts'
 
@@ -206,6 +207,8 @@ export default function AttendantAnalytics() {
   const [tab, setTab] = useState<TabKey>('overview')
   const [days, setDays] = useState(30)
   const [city, setCity] = useCityFilter(accountId)
+  // Vendas novas | Recompra | Todos (vale para todas as telas da conta)
+  const [funnel, setFunnel, funnelAvailable] = useFunnelFilter(accountId)
   const [analyzing, setAnalyzing] = useState(false)
   const [showConfirmModal, setShowConfirmModal] = useState(false)
   const [estimate, setEstimate] = useState<AnalyzeEstimate | null>(null)
@@ -243,8 +246,8 @@ export default function AttendantAnalytics() {
     if (!accountId) return
     setLoading(true)
     Promise.all([
-      fetchOverviewV2(accountId, days, city).catch(() => null),
-      fetchAttendants(accountId, days, city).catch(() => ({ days, attendants: [] as AttendantMetrics[] })),
+      fetchOverviewV2(accountId, days, city, funnel).catch(() => null),
+      fetchAttendants(accountId, days, city, funnel).catch(() => ({ days, attendants: [] as AttendantMetrics[] })),
     ]).then(([o, v1]) => {
       setOverview(o)
       setAttendantsV1(v1.attendants)
@@ -255,8 +258,8 @@ export default function AttendantAnalytics() {
     if (!accountId) return
     setLoading(true)
     Promise.all([
-      fetchRankingV2(accountId, days, city).catch(() => ({ days, attendants: [] as RankingRowV2[] })),
-      fetchAttendants(accountId, days, city).catch(() => ({ days, attendants: [] as AttendantMetrics[] })),
+      fetchRankingV2(accountId, days, city, funnel).catch(() => ({ days, attendants: [] as RankingRowV2[] })),
+      fetchAttendants(accountId, days, city, funnel).catch(() => ({ days, attendants: [] as AttendantMetrics[] })),
     ]).then(([v2, v1]) => {
       setRankingV2(v2.attendants)
       setAttendantsV1(v1.attendants)
@@ -266,19 +269,19 @@ export default function AttendantAnalytics() {
   const loadCritical = () => {
     if (!accountId) return
     setLoading(true)
-    fetchCriticalConversations(accountId, days, 50, city).then(setCritical).catch(() => setCritical([])).finally(() => setLoading(false))
+    fetchCriticalConversations(accountId, days, 50, city, funnel).then(setCritical).catch(() => setCritical([])).finally(() => setLoading(false))
   }
 
   const loadAlerts = () => {
     if (!accountId) return
     setLoading(true)
-    fetchAlerts(accountId, 'open', city).then(setAlerts).catch(() => setAlerts([])).finally(() => setLoading(false))
+    fetchAlerts(accountId, 'open', city, funnel).then(setAlerts).catch(() => setAlerts([])).finally(() => setLoading(false))
   }
 
   const loadMarket = () => {
     if (!accountId) return
     setLoading(true)
-    fetchMarketIntel(accountId, days, city).then(setMarketIntel).catch(() => setMarketIntel(null)).finally(() => setLoading(false))
+    fetchMarketIntel(accountId, days, city, funnel).then(setMarketIntel).catch(() => setMarketIntel(null)).finally(() => setLoading(false))
   }
 
   const loadCoaching = (userId: number) => {
@@ -297,7 +300,7 @@ export default function AttendantAnalytics() {
     else if (tab === 'market') loadMarket()
     else if (tab === 'coaching' && coachingUserId) loadCoaching(coachingUserId)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [accountId, tab, days, city])
+  }, [accountId, tab, days, city, funnel])
 
   // Quando troca o user do coaching
   useEffect(() => {
@@ -458,7 +461,10 @@ export default function AttendantAnalytics() {
   return (
     <div>
       <div className="page-header">
-        <h1><BarChart3 size={20} style={{ marginRight: 8, verticalAlign: 'middle' }} />Análise de Atendimentos</h1>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+          <h1><BarChart3 size={20} style={{ marginRight: 8, verticalAlign: 'middle' }} />Análise de Atendimentos</h1>
+          <FunnelFilter value={funnel} onChange={setFunnel} available={funnelAvailable} />
+        </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
           <CityFilter accountId={accountId} value={city} onChange={setCity} />
           <div className="date-selector">
@@ -665,6 +671,7 @@ export default function AttendantAnalytics() {
       {/* ── TAB: Coaching ── */}
       {!loading && tab === 'coaching' && (
         <section className="dash-section">
+          {funnel !== 'todos' && <div className="text-muted" style={{ fontSize: 13, marginBottom: 12 }}>O coaching semanal junta vendas novas e recompra.</div>}
           <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 16 }}>
             <label style={{ fontSize: 13, color: 'var(--text-muted)' }}>Atendente:</label>
             <select value={coachingUserId || ''} onChange={e => setCoachingUserId(Number(e.target.value))} style={{ padding: '6px 10px', borderRadius: 4, border: '1px solid var(--border-subtle)', background: 'var(--bg-card)', color: 'var(--text-primary)' }}>
