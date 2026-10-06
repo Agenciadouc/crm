@@ -7,6 +7,8 @@ import { generateCoachingForUser, isoMonday } from '../services/coachingAnalyzer
 import { cityWhere, leadCityExists, hasGeo } from '../services/city.js'
 import { countsInMetrics } from '../services/contacts/scope.js'
 import { computeDashboardStats, computeAgentStats } from '../services/dashboardStats.js'
+import { cascadeFor, monthBounds } from '../services/funnelCascade.js'
+import { parseFunnelFilter } from '../services/funnelFilter.js'
 
 // Filtro de cidade/estado + so contatos que contam nos numeros (lead e cliente; revendedor e
 // interno ficam fora — spec 2026-10-05 crm simples §2).
@@ -796,18 +798,8 @@ router.put('/leads/:leadId/value', requireRole('super_admin', 'gerente', 'atende
 // - /monthly-metrics/:month  -> GET/PUT dados manuais (investimento, meta, ticket)
 // - /projecao?months=N  -> tabela hist+projetada dos ultimos/proximos N meses
 
-// Helper: retorna primeiro dia (inclusive) e primeiro dia do mes seguinte (exclusive)
-// no formato 'YYYY-MM-DD HH:MM:SS' (compat com created_at do DB).
-export function monthBounds(yearMonth) {
-  const m = /^(\d{4})-(\d{2})$/.exec(String(yearMonth || ''))
-  if (!m) return null
-  const y = parseInt(m[1]), mo = parseInt(m[2])
-  const start = `${m[1]}-${m[2]}-01 00:00:00`
-  const nextY = mo === 12 ? y + 1 : y
-  const nextM = mo === 12 ? 1 : mo + 1
-  const end = `${nextY}-${String(nextM).padStart(2, '0')}-01 00:00:00`
-  return { start, end, yearMonth }
-}
+// monthBounds mora em services/funnelCascade.js (re-exportado: o Core/embed importa daqui)
+export { monthBounds }
 
 // Helper: mes atual no formato YYYY-MM
 export function currentYearMonth() {
@@ -830,105 +822,10 @@ export function loadMonthConfig(accountId, yearMonth) {
   }
 }
 
-// Helper: computa cascata do funil pra um mes (leads criados no mes + jornada via stage_history).
-// Um lead conta como "qualificado" se JA passou por algum stage com is_qualified=1 OU is_meeting=1
-// OU is_conversion=1 (progressao acumulativa). "reuniao" idem em is_meeting/is_conversion. "won" so
-// em is_conversion. Isso reflete o fluxo (mesmo se o lead voltou pra um stage anterior, o marco fica).
-// city (opcional): cidade (texto) ou { city, uf } — so leads dessa cidade/estado.
-export function computeFunnelCascade(accountId, yearMonth, city = null) {
-  const b = monthBounds(yearMonth)
-  if (!b) return null
-  const cw = leadsWhere('leads', city)
-  const cwl = leadsWhere('l', city)
-
-  // Leads criados no mes (base)
-  const totalRow = db.prepare(`
-    SELECT COUNT(*) as c FROM leads
-    WHERE account_id = ? AND is_active = 1 AND is_blocked = 0
-      AND created_at >= ? AND created_at < ?${cw.sql}
-  `).get(accountId, b.start, b.end, ...cw.params)
-  const total = totalRow.c
-
-  // IDs de stages classificados na conta (default funnel)
-  const stages = db.prepare(`
-    SELECT fs.id, fs.is_qualified, fs.is_meeting, fs.is_conversion
-    FROM funnel_stages fs
-    JOIN funnels f ON f.id = fs.funnel_id
-    WHERE f.account_id = ? AND f.is_default = 1
-  `).all(accountId)
-  const qualIds  = stages.filter(s => s.is_qualified || s.is_meeting || s.is_conversion).map(s => s.id)
-  const meetIds  = stages.filter(s => s.is_meeting  || s.is_conversion).map(s => s.id)
-  const wonIds   = stages.filter(s => s.is_conversion).map(s => s.id)
-
-  const configMissing = { qualified: qualIds.length === 0, meeting: meetIds.length === 0, won: wonIds.length === 0 }
-
-  // Helper query: quantos leads do mes ja passaram por pelo menos 1 dos stages da lista.
-  // Usa DISTINCT porque um lead pode ter varias entradas em stage_history apontando pros mesmos stages.
-  function countPassed(stageIds) {
-    if (stageIds.length === 0) return 0
-    const placeholders = stageIds.map(() => '?').join(',')
-    const row = db.prepare(`
-      SELECT COUNT(DISTINCT l.id) as c
-      FROM leads l
-      WHERE l.account_id = ? AND l.is_active = 1 AND l.is_blocked = 0
-        AND l.created_at >= ? AND l.created_at < ?${cwl.sql}
-        AND EXISTS (
-          SELECT 1 FROM stage_history sh
-          WHERE sh.lead_id = l.id AND sh.to_stage_id IN (${placeholders})
-        )
-    `).get(accountId, b.start, b.end, ...cwl.params, ...stageIds)
-    return row.c
-  }
-
-  const qualified = countPassed(qualIds)
-  const meeting   = countPassed(meetIds)
-  const won       = countPassed(wonIds)
-
-  // Faturamento real do mes = SOMA das vendas com sale_date DENTRO do mes.
-  // Usa a tabela lead_sales (nova) — respeita retroativas, recompras/upsells
-  // aparecem no mes em que aconteceram, nao no mes de criacao do lead.
-  //
-  // Fallback: leads antigos que ainda nao migraram pro modelo lead_sales
-  // (nao tem entry na tabela lead_sales mas tem value_estimated > 0) contam
-  // via created_at do lead + stage_history WON — comportamento legado.
-  let realRevenue = 0
-  {
-    // 1) Vendas novas (por sale_date)
-    const salesRow = db.prepare(`
-      SELECT COALESCE(SUM(ls.value), 0) as v
-      FROM lead_sales ls
-      JOIN leads l ON l.id = ls.lead_id
-      WHERE l.account_id = ? AND l.is_active = 1 AND l.is_blocked = 0
-        AND ls.sale_date >= ? AND ls.sale_date < ?${cwl.sql}
-    `).get(accountId, b.start, b.end, ...cwl.params)
-    realRevenue += salesRow.v || 0
-
-    // 2) Fallback legado — leads WON no mes que NAO tem entry em lead_sales
-    if (wonIds.length > 0) {
-      const placeholders = wonIds.map(() => '?').join(',')
-      const legacyRow = db.prepare(`
-        SELECT COALESCE(SUM(l.value_estimated), 0) as v
-        FROM leads l
-        WHERE l.account_id = ? AND l.is_active = 1 AND l.is_blocked = 0
-          AND l.created_at >= ? AND l.created_at < ?
-          AND l.value_estimated > 0
-          AND EXISTS (SELECT 1 FROM stage_history sh WHERE sh.lead_id = l.id AND sh.to_stage_id IN (${placeholders}))
-          AND NOT EXISTS (SELECT 1 FROM lead_sales ls2 WHERE ls2.lead_id = l.id)${cwl.sql}
-      `).get(accountId, b.start, b.end, ...wonIds, ...cwl.params)
-      realRevenue += legacyRow.v || 0
-    }
-  }
-
-  return {
-    total, qualified, meeting, won,
-    // Taxas em cascata (cada uma sobre a etapa anterior). null se etapa anterior = 0.
-    qualified_rate: total > 0 ? (qualified / total) * 100 : null,
-    meeting_rate:   qualified > 0 ? (meeting / qualified) * 100 : null,
-    won_rate:       meeting > 0 ? (won / meeting) * 100 : null,
-    overall_conversion: total > 0 ? (won / total) * 100 : null,
-    real_revenue: realRevenue,
-    config_missing: configMissing,
-  }
+// Cascata do funil do mes (services/funnelCascade.js). funnel: 'vendas'|'recompra'|'todos' (padrao todos,
+// para o Core/embed continuar igual). city (opcional): cidade (texto) ou { city, uf }.
+export function computeFunnelCascade(accountId, yearMonth, city = null, funnel = 'todos') {
+  return cascadeFor(db, accountId, yearMonth, city, funnel)
 }
 
 // GET /funil-mensal/:month -> retorna cascata + config + calculos ROAS pra o mes
@@ -936,7 +833,8 @@ router.get('/funil-mensal/:month', requireRole('super_admin', 'gerente', 'atende
   if (!req.accountId) return res.status(400).json({ error: 'account_id required' })
   const month = req.params.month === 'current' ? currentYearMonth() : req.params.month
   const city = { city: req.query.city, uf: req.query.uf } // filtro de cidade/estado
-  const cascade = computeFunnelCascade(req.accountId, month, city)
+  const funnel = parseFunnelFilter(req.query) // vendas | recompra | todos
+  const cascade = computeFunnelCascade(req.accountId, month, city, funnel)
   if (!cascade) return res.status(400).json({ error: 'formato de mes invalido (use YYYY-MM ou current)' })
 
   const cfg = loadMonthConfig(req.accountId, month)
@@ -945,23 +843,26 @@ router.get('/funil-mensal/:month', requireRole('super_admin', 'gerente', 'atende
   const target = cfg.sales_target
 
   // Faturamento estimado: prioriza soma real de value_estimated; se zero, usa won * ticket.
-  const estimatedRevenue = cascade.real_revenue > 0 ? cascade.real_revenue : (cascade.won * ticket)
+  // Na Recompra so vale o faturamento real (ticket medio e de venda nova).
+  const estimatedRevenue = cascade.real_revenue > 0 || funnel === 'recompra' ? cascade.real_revenue : (cascade.won * ticket)
 
   // Investimento e meta sao da conta inteira (nao tem cidade): com cidade escolhida, CPL/CAC/ROAS e
   // progresso da meta ficam nulos e a tela avisa (decisao do dono, 24/09/2026).
   const byCity = hasGeo(city)
-  const cpl  = !byCity && cascade.total > 0 ? investment / cascade.total : null
-  const cac  = !byCity && cascade.won > 0 ? investment / cascade.won : null
-  const roas = !byCity && investment > 0 ? estimatedRevenue / investment : null
-  const targetProgress = !byCity && target > 0 ? (cascade.won / target) * 100 : null
+  // Investimento e meta sao de venda nova: na Recompra tambem ficam nulos (spec filtro de funil §3).
+  const hideCost = byCity || funnel === 'recompra'
+  const cpl  = !hideCost && cascade.total > 0 ? investment / cascade.total : null
+  const cac  = !hideCost && cascade.won > 0 ? investment / cascade.won : null
+  const roas = !hideCost && investment > 0 ? estimatedRevenue / investment : null
+  const targetProgress = !hideCost && target > 0 ? (cascade.won / target) * 100 : null
 
   res.json({
-    month, cascade, config: cfg, by_city: byCity,
+    month, cascade, config: cfg, by_city: byCity, by_funnel: funnel,
     calc: {
       cpl, cac, roas,
       estimated_revenue: estimatedRevenue,
       target_progress: targetProgress,
-      target_remaining: byCity ? null : Math.max(0, target - cascade.won),
+      target_remaining: hideCost ? null : Math.max(0, target - cascade.won),
     },
   })
 })
@@ -1021,6 +922,9 @@ router.get('/projecao', requireRole('super_admin', 'gerente'), (req, res) => {
   // da conta inteira) ficam nulos e a tela avisa (decisao do dono, 24/09/2026).
   const city = { city: req.query.city, uf: req.query.uf } // filtro de cidade/estado
   const byCity = hasGeo(city)
+  const funnel = parseFunnelFilter(req.query) // vendas | recompra | todos
+  // Na Recompra nao ha investimento/projecao (sao de venda nova): mesmos nulos da cidade.
+  const hideCost = byCity || funnel === 'recompra'
 
   // Gera lista de YYYY-MM: [past atras ... atual ... future adiante]
   const list = []
@@ -1037,7 +941,7 @@ router.get('/projecao', requireRole('super_admin', 'gerente'), (req, res) => {
     const isFuture = offset > 0
     const cascade = isFuture
       ? { total: 0, qualified: 0, meeting: 0, won: 0, real_revenue: 0, qualified_rate: null, meeting_rate: null, won_rate: null, overall_conversion: null }
-      : computeFunnelCascade(req.accountId, year_month, city)
+      : computeFunnelCascade(req.accountId, year_month, city, funnel)
     return { year_month, is_future: isFuture, config: cfg, cascade }
   })
 
@@ -1059,7 +963,7 @@ router.get('/projecao', requireRole('super_admin', 'gerente'), (req, res) => {
     const cfg = r.config
     let cascade = r.cascade
     let projected = false
-    if (r.is_future && !byCity) {
+    if (r.is_future && !hideCost) {
       projected = true
       const projTotal = cfg.ad_investment > 0 && avg_cpl > 0 ? Math.round(cfg.ad_investment / avg_cpl) : 0
       const projQual  = Math.round(projTotal * (avg.qualified_rate / 100))
@@ -1074,14 +978,14 @@ router.get('/projecao', requireRole('super_admin', 'gerente'), (req, res) => {
     }
     const investment = cfg.ad_investment
     const ticket = cfg.avg_ticket
-    const revenue = cascade.real_revenue > 0 ? cascade.real_revenue : (cascade.won * ticket)
+    const revenue = cascade.real_revenue > 0 || funnel === 'recompra' ? cascade.real_revenue : (cascade.won * ticket)
     return {
       year_month: r.year_month,
       is_future: r.is_future,
       projected,
       investment,
       total_leads: cascade.total,
-      cpl: !byCity && cascade.total > 0 ? investment / cascade.total : null,
+      cpl: !hideCost && cascade.total > 0 ? investment / cascade.total : null,
       qualified: cascade.qualified,
       qualified_rate: cascade.qualified_rate,
       meeting: cascade.meeting,
@@ -1091,14 +995,15 @@ router.get('/projecao', requireRole('super_admin', 'gerente'), (req, res) => {
       target: cfg.sales_target,
       ticket,
       revenue,
-      cac: !byCity && cascade.won > 0 ? investment / cascade.won : null,
-      roas: !byCity && investment > 0 ? revenue / investment : null,
+      cac: !hideCost && cascade.won > 0 ? investment / cascade.won : null,
+      roas: !hideCost && investment > 0 ? revenue / investment : null,
     }
   })
 
   res.json({
     rows: enriched,
     by_city: byCity,
+    by_funnel: funnel,
     assumptions: {
       avg_qualified_rate: avg.qualified_rate,
       avg_meeting_rate: avg.meeting_rate,
