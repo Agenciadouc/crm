@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { createCadenceTestDb, seedCadenceBase, leadIn, Q_PRAZO, Q_LIVRE, publishedRoteiro } from './helpers/cadenceDb.js'
 import {
   createCadence, getCadence, listCadences, updateCadence, deleteCadence, addStep, updateStep, deleteStep, reorderSteps,
-  replaceAttemptsById, saveDeviations, addQuestionSteps, spinStepQuestions, aiStepQuestions, applySuggestionLive, confirmVariantLive, getStageView, syncStageQuestions,
+  replaceAttemptsById, saveDeviations, addQuestionSteps, spinStepQuestions, aiStepQuestions, aiContactSteps, isContactStageId, applySuggestionLive, confirmVariantLive, getStageView, syncStageQuestions,
 } from '../server/services/cadence/repo.js'
 import { CadenceError } from '../server/services/cadence/errors.js'
 import { getLeadRoteiro, saveAnswer, checkRoteiroGate } from '../server/services/roteiro/leadRoteiro.js'
@@ -333,4 +333,32 @@ test('aplicar perfil novo: cria o perfil; com 6 perfis recusa e a sugestao conti
   const cheio = weeklySuggestion(db, s.accountId, 'new_profile', { name: 'Setimo', description: '' })
   assert.throws(() => applySuggestionLive(db, s.accountId, cheio, {}), /Máximo de 6 tipos de cliente/)
   assert.equal(db.prepare('SELECT status FROM roteiro_suggestions WHERE id = ?').get(cheio).status, 'new')
+})
+
+test('montar com IA na etapa de contato: mensagens e ligacoes, sem pergunta, no fim da lista', async () => {
+  const db = createCadenceTestDb(); const s = seedCadenceBase(db)
+  assert.equal(isContactStageId(db, s.accountId, s.stages.novo), true)
+  assert.equal(isContactStageId(db, s.accountId, s.stages.qualificando), false)
+  let sent
+  const ai = { call: async (args) => { sent = args; return { toolUses: [{ name: 'propose_contact_steps', input: { steps: [
+    { action_type: 'mensagem', delay_days: 0, text: 'Oi {nome}, vi seu cadastro!' },
+    { action_type: 'ligacao', delay_days: 1, title: 'Ligar para {nome}', text: 'Se apresentar e perguntar se recebeu a mensagem.' },
+    { action_type: 'pergunta', delay_days: 99, text: 'Vira mensagem, dia limitado' },
+    { action_type: 'mensagem', delay_days: 2, text: '   ' },
+  ] } }] } } }
+  const c = await aiContactSteps(db, s.accountId, { stageId: s.stages.novo, ai })
+  assert.equal(sent.toolChoice.name, 'propose_contact_steps')
+  assert.match(sent.messages[0].content, /Novo/)
+  assert.deepEqual(c.attempts.map(a => [a.action_type, a.delay_days]), [['mensagem', 0], ['ligacao', 1], ['mensagem', 30]])
+  assert.equal(c.attempts[0].auto_message, 'Oi {nome}, vi seu cadastro!')
+  assert.equal(c.attempts[1].description, 'Ligar para {nome}')
+  assert.equal(c.attempts[1].call_script, 'Se apresentar e perguntar se recebeu a mensagem.')
+  assert.ok(!c.attempts.some(a => a.question_key))
+  const again = await aiContactSteps(db, s.accountId, { stageId: s.stages.novo, ai })
+  assert.equal(again.id, c.id)
+  assert.equal(again.attempts.length, 6) // soma no fim, nao apaga
+  const empty = { call: async () => ({ toolUses: [{ name: 'propose_contact_steps', input: { steps: [] } }] }) }
+  await assert.rejects(aiContactSteps(db, s.accountId, { stageId: s.stages.novo, ai: empty }), e => e.status === 422)
+  const broken = { call: async () => { throw new Error('rede') } }
+  await assert.rejects(aiContactSteps(db, s.accountId, { stageId: s.stages.novo, ai: broken }), e => e.status === 502)
 })

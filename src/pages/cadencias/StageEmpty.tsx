@@ -62,14 +62,18 @@ export function TemplateButtons({ accountId, funnelId, stage, onCadence, compact
         <button type="button" className="btn btn-secondary btn-sm" disabled={busy !== null || aiOff} title={aiOff ? AI_OFF_TEXT : undefined} onClick={() => ask('ia')}>
           <Sparkles size={12} /> {busy === 'ia' ? 'A IA está montando…' : 'Montar com IA'}
         </button>
-        {!compact && <HelpTip title="Montar com IA">A IA monta as perguntas desta etapa a partir do seu negócio e das conversas. Você confere depois. Ex.: numa loja de limpeza, "Você revende para quem hoje?".</HelpTip>}
+        {!compact && (stage.is_contact
+          ? <HelpTip title="Montar com IA">A IA monta as mensagens e ligações para o cliente responder, a partir do seu negócio. Você confere depois. Ex.: 1º Mensagem "Oi {'{nome}'}, vi seu cadastro" · 2º Ligação no dia 1.</HelpTip>
+          : <HelpTip title="Montar com IA">A IA monta as perguntas desta etapa a partir do seu negócio e das conversas. Você confere depois. Ex.: numa loja de limpeza, "Você revende para quem hoje?".</HelpTip>)}
       </span>
       {aiOff && <div style={{ fontSize: 12, color: 'var(--warning)', marginTop: 6, width: '100%' }}>{AI_OFF_TEXT}</div>}
       {error && <div style={{ fontSize: 12, color: 'var(--negative)', marginTop: 6, width: '100%' }}>{error}</div>}
       {confirm && (
-        <ConfirmDialog title="Somar perguntas a esta etapa?" confirmLabel="Montar com IA"
+        <ConfirmDialog title={stage.is_contact ? 'Somar passos a esta etapa?' : 'Somar perguntas a esta etapa?'} confirmLabel="Montar com IA"
           onConfirm={() => run(confirm)} onCancel={() => setConfirm(null)}>
-          {`A etapa ${stage.name} já tem ${stage.summary.steps} ${stage.summary.steps === 1 ? 'passo' : 'passos'}. As perguntas novas entram no fim da lista e nada é apagado. Ex.: se já existe "Para quando é o evento?", confira depois se não ficou repetida.`}
+          {stage.is_contact
+            ? `A etapa ${stage.name} já tem ${stage.summary.steps} ${stage.summary.steps === 1 ? 'passo' : 'passos'}. As mensagens e ligações novas entram no fim da lista e nada é apagado. Ex.: se já existe "Oi, vi seu cadastro", confira depois se não ficou repetida.`
+            : `A etapa ${stage.name} já tem ${stage.summary.steps} ${stage.summary.steps === 1 ? 'passo' : 'passos'}. As perguntas novas entram no fim da lista e nada é apagado. Ex.: se já existe "Para quando é o evento?", confira depois se não ficou repetida.`}
         </ConfirmDialog>
       )}
     </>

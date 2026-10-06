@@ -4,6 +4,7 @@
 import { getRoteiro, saveDraft, publish, newKey, RoteiroError } from '../roteiro/repo.js'
 import { missingSpinQuestions } from '../roteiro/spinTemplate.js'
 import { buildAiDraft } from '../roteiro/aiDraft.js'
+import { buildAiContactSteps } from '../roteiro/aiContactSteps.js'
 import { isContactStage } from '../roteiro/stageKind.js'
 import { listProfiles, saveBusiness } from '../roteiro/profiles.js'
 import { applySuggestion, confirmVariant } from '../roteiro/learning.js'
@@ -449,8 +450,28 @@ export async function aiStepQuestions(db, accountId, { funnelId, stageId, ai }) 
   if (before) saveDraft(db, accountId, funnelId, { questions: before.questions, deviations: before.deviations })
   else resetDraftToPublished(db, accountId, funnelId)
   const qs = draft.questions.filter(q => q.stage_id === Number(stageId))
-  if (!qs.length) throw new CadenceError('ai_empty', 422, 'A IA não sugeriu perguntas para esta etapa. Tente o modelo SPIN.')
+  if (!qs.length) throw new CadenceError('ai_empty', 422, 'A IA não sugeriu perguntas para esta etapa. Monte à mão com + Passo ou tente de novo.')
   return qs.map(toQuestionInput)
+}
+
+// Montar com IA em etapa de tentativa de contato: mensagens e ligacoes no fim da lista, sem pergunta.
+export async function aiContactSteps(db, accountId, { stageId, ai }) {
+  const stage = loadStageForAccount(db, accountId, stageId)
+  const steps = await buildAiContactSteps(db, { accountId, stage, ai })
+  if (!steps.length) throw new CadenceError('ai_empty', 422, 'A IA não sugeriu passos para esta etapa. Monte à mão com + Passo ou tente de novo.')
+  let cadenceId
+  db.transaction(() => {
+    const existing = db.prepare('SELECT id FROM cadences WHERE stage_id = ? AND is_active = 1 AND account_id = ?').get(stage.id, accountId)
+    cadenceId = existing ? existing.id : createCadence(db, accountId, { stageId: stage.id }).id
+    let pos = db.prepare('SELECT COUNT(*) AS n FROM cadence_attempts WHERE cadence_id = ?').get(cadenceId).n
+    for (const s of steps) insertStepRow(db, cadenceId, normalizeStep(s, { isStage: true }), pos++)
+    touch(db, cadenceId)
+  })()
+  return getCadence(db, accountId, cadenceId)
+}
+
+export function isContactStageId(db, accountId, stageId) {
+  return isContactStage(loadStageForAccount(db, accountId, stageId))
 }
 
 function rankOf(order, key) {

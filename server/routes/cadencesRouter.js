@@ -7,7 +7,7 @@ import { CadenceError } from '../services/cadence/errors.js'
 import {
   listCadences, getCadence, createCadence, updateCadence, deleteCadence, replaceAttemptsById,
   addStep, updateStep, deleteStep, reorderSteps, getStageView, saveDeviations,
-  addQuestionSteps, spinStepQuestions, aiStepQuestions, applySuggestionLive, confirmVariantLive,
+  addQuestionSteps, spinStepQuestions, aiStepQuestions, aiContactSteps, isContactStageId, applySuggestionLive, confirmVariantLive,
 } from '../services/cadence/repo.js'
 import {
   attachLeadsInStage, refreshLeadsOfCadence, getLeadStageCadence, markStepDone,
@@ -108,6 +108,11 @@ export function createCadencesRouter(db, { ai = null, broadcast = () => {} } = {
       } else if (mode === 'ia') {
         const account = db.prepare('SELECT * FROM accounts WHERE id = ?').get(req.accountId)
         if (!ai || !pickAnthropicKey(account)) return res.status(503).json({ error: 'A IA não está ligada nesta conta.', code: 'ai_off' })
+        if (isContactStageId(db, req.accountId, req.params.stageId)) {
+          const cadence = await aiContactSteps(db, req.accountId, { stageId: req.params.stageId, ai })
+          afterStageChange(req, cadence, { structural: true })
+          return res.json({ cadence })
+        }
         questions = await aiStepQuestions(db, req.accountId, { funnelId: req.params.funnelId, stageId: req.params.stageId, ai })
       } else {
         throw new CadenceError('invalid', 400, 'Modelo inválido.')
