@@ -1,5 +1,6 @@
 import { normalizeProviders, type WhatsAppProviderId } from './whatsappProviders.js'
 import { geoQuery } from './geoFilter.js'
+import { funnelQuery, type FunnelValue } from './funnelFilter.js'
 import type { ScoreBand, ScoreQuadrant } from './score'
 export type { WhatsAppProviderId }
 
@@ -147,7 +148,7 @@ export const updateFunnelFirstMessage = (funnelId: number, accountId: number, te
   apiFetch(`/api/funnels/${funnelId}?account_id=${accountId}`, { method: 'PUT', body: JSON.stringify({ first_msg_template: template }) })
 
 // Leads
-export interface LeadFilters { stage_id?: number | string; attendant_id?: number | string; instance_id?: number | string; funnel_id?: number; source?: string; city?: string; uf?: string; tag?: number | string; search?: string; date_from?: string; date_to?: string; show_archived?: '1' | 'all'; page?: number; limit?: number; score_bands?: string; score_min?: number; fit?: 'AB'; engagement?: 'high'; sort?: 'score'; curve?: string; tier_id?: number; repurchase_late?: '1'; only_leads?: '1' }
+export interface LeadFilters { stage_id?: number | string; attendant_id?: number | string; instance_id?: number | string; funnel_id?: number; source?: string; city?: string; uf?: string; tag?: number | string; search?: string; date_from?: string; date_to?: string; show_archived?: '1' | 'all'; page?: number; limit?: number; score_bands?: string; score_min?: number; fit?: 'AB'; engagement?: 'high'; sort?: 'score'; curve?: string; tier_id?: number; repurchase_late?: '1'; only_leads?: '1'; funnel?: string }
 export const fetchLeads = (accountId: number, filters: LeadFilters = {}) => {
   const params = new URLSearchParams({ account_id: String(accountId) })
   Object.entries(filters).forEach(([k, v]) => { if (v !== undefined && v !== '') params.set(k, String(v)) })
@@ -342,12 +343,14 @@ export const syncContractHub = (id: number) => apiFetch<{ ok: boolean; client_id
 // Dashboard
 // Filtro de estado/cidade dos relatorios: o valor e o texto "UF|Cidade" (ver lib/geoFilter.js)
 const cityQ = (geo?: string | null) => geoQuery(geo)
+// Filtro de funil (Vendas novas | Recompra | Todos): so vai na URL quando a tela passa
+const fq = (funnel?: FunnelValue | null) => (funnel ? funnelQuery(funnel) : '')
 export interface CityOption { value: string; uf: string | null; count: number }
 export interface StateOption { value: string; name: string; count: number }
 export const fetchLeadCities = (accountId: number, uf?: string | null) => apiFetch<{ cities: CityOption[] }>(`/api/leads/cities?account_id=${accountId}${uf ? `&uf=${encodeURIComponent(uf)}` : ''}`).then(d => d.cities || [])
 export const fetchLeadStates = (accountId: number) => apiFetch<{ states: StateOption[]; sem_estado: number }>(`/api/leads/states?account_id=${accountId}`)
-export const fetchDashboardStats = (accountId: number, days = 7, city?: string | null) => apiFetch<DashboardStats>(`/api/dashboard/stats?account_id=${accountId}&days=${days}${cityQ(city)}`)
-export const fetchAgentStats = (accountId: number, days = 7, city?: string | null) => apiFetch<{ agents: AgentStat[] }>(`/api/dashboard/agents?account_id=${accountId}&days=${days}${cityQ(city)}`).then(d => d.agents)
+export const fetchDashboardStats = (accountId: number, days = 7, city?: string | null, funnel?: FunnelValue | null) => apiFetch<DashboardStats>(`/api/dashboard/stats?account_id=${accountId}&days=${days}${cityQ(city)}${fq(funnel)}`)
+export const fetchAgentStats = (accountId: number, days = 7, city?: string | null, funnel?: FunnelValue | null) => apiFetch<{ agents: AgentStat[] }>(`/api/dashboard/agents?account_id=${accountId}&days=${days}${cityQ(city)}${fq(funnel)}`).then(d => d.agents)
 export const fetchGlobalDashboard = () => apiFetch<{ accounts: any[]; totalLeads: number; leadsToday: number }>('/api/dashboard/global')
 
 // ─── Funil Mensal + ROAS + Projecao ────────────────────────────────────────
@@ -417,16 +420,16 @@ export interface ProjecaoResponse {
   }
 }
 
-export const fetchFunilMensal = (accountId: number, month: string, city?: string | null) =>
-  apiFetch<FunilMensal>(`/api/dashboard/funil-mensal/${month}?account_id=${accountId}${cityQ(city)}`)
+export const fetchFunilMensal = (accountId: number, month: string, city?: string | null, funnel?: FunnelValue | null) =>
+  apiFetch<FunilMensal>(`/api/dashboard/funil-mensal/${month}?account_id=${accountId}${cityQ(city)}${fq(funnel)}`)
 export const fetchMonthlyMetrics = (accountId: number, month: string) =>
   apiFetch<MonthlyConfig>(`/api/dashboard/monthly-metrics/${month}?account_id=${accountId}`)
 export const updateMonthlyMetrics = (accountId: number, month: string, data: { ad_investment?: number; sales_target?: number; avg_ticket?: number | null; notes?: string }) =>
   apiFetch<MonthlyConfig>(`/api/dashboard/monthly-metrics/${month}?account_id=${accountId}`, { method: 'PUT', body: JSON.stringify(data) })
 export const updateAccountAvgTicket = (accountId: number, avgTicket: number | null) =>
   apiFetch<{ ok: boolean; avg_ticket: number | null }>(`/api/dashboard/account/avg-ticket?account_id=${accountId}`, { method: 'PUT', body: JSON.stringify({ avg_ticket: avgTicket }) })
-export const fetchProjecao = (accountId: number, months = 3, futuros = 3, city?: string | null) =>
-  apiFetch<ProjecaoResponse>(`/api/dashboard/projecao?account_id=${accountId}&months=${months}&futuros=${futuros}${cityQ(city)}`)
+export const fetchProjecao = (accountId: number, months = 3, futuros = 3, city?: string | null, funnel?: FunnelValue | null) =>
+  apiFetch<ProjecaoResponse>(`/api/dashboard/projecao?account_id=${accountId}&months=${months}&futuros=${futuros}${cityQ(city)}${fq(funnel)}`)
 
 export interface AiUsageData {
   period: string
@@ -476,16 +479,17 @@ export interface AttendantDetail {
   recent_insights: ConversationInsight[]
   top_errors: Array<{ error: string; count: number }>
 }
-export const fetchAttendants = (accountId: number, days = 30, city?: string | null) =>
-  apiFetch<{ days: number; attendants: AttendantMetrics[]; by_city?: boolean }>(`/api/dashboard/attendants?account_id=${accountId}&days=${days}${cityQ(city)}`)
+export const fetchAttendants = (accountId: number, days = 30, city?: string | null, funnel?: FunnelValue | null) =>
+  apiFetch<{ days: number; attendants: AttendantMetrics[]; by_city?: boolean }>(`/api/dashboard/attendants?account_id=${accountId}&days=${days}${cityQ(city)}${fq(funnel)}`)
 export const fetchAttendantDetail = (userId: number, accountId: number, days = 30) =>
   apiFetch<AttendantDetail>(`/api/dashboard/attendants/${userId}?account_id=${accountId}&days=${days}`)
-export const fetchConversationInsights = (accountId: number, opts: { days?: number; filter?: string; attendant_id?: number; limit?: number } = {}) => {
+export const fetchConversationInsights = (accountId: number, opts: { days?: number; filter?: string; attendant_id?: number; limit?: number; funnel?: FunnelValue | null } = {}) => {
   const q = new URLSearchParams({ account_id: String(accountId) })
   if (opts.days) q.set('days', String(opts.days))
   if (opts.filter) q.set('filter', opts.filter)
   if (opts.attendant_id) q.set('attendant_id', String(opts.attendant_id))
   if (opts.limit) q.set('limit', String(opts.limit))
+  if (opts.funnel) q.set('funnel', opts.funnel)
   return apiFetch<{ insights: ConversationInsight[] }>(`/api/dashboard/conversation-insights?${q.toString()}`)
 }
 export const fetchLeadInsight = (leadId: number, accountId: number) =>
@@ -1233,16 +1237,16 @@ export interface AnalyzeEstimate {
   is_super_admin_bypass: boolean
 }
 
-export const fetchOverviewV2 = (accountId: number, days: number = 30, city?: string | null) =>
-  apiFetch<OverviewV2>(`/api/dashboard/overview-v2?account_id=${accountId}&days=${days}${cityQ(city)}`)
-export const fetchRankingV2 = (accountId: number, days: number = 30, city?: string | null) =>
-  apiFetch<{ days: number; attendants: RankingRowV2[]; by_city?: boolean }>(`/api/dashboard/ranking-v2?account_id=${accountId}&days=${days}${cityQ(city)}`)
-export const fetchCriticalConversations = (accountId: number, days: number = 30, limit: number = 50, city?: string | null) =>
-  apiFetch<{ conversations: CriticalConversation[] }>(`/api/dashboard/critical-conversations?account_id=${accountId}&days=${days}&limit=${limit}${cityQ(city)}`).then(d => d.conversations)
+export const fetchOverviewV2 = (accountId: number, days: number = 30, city?: string | null, funnel?: FunnelValue | null) =>
+  apiFetch<OverviewV2>(`/api/dashboard/overview-v2?account_id=${accountId}&days=${days}${cityQ(city)}${fq(funnel)}`)
+export const fetchRankingV2 = (accountId: number, days: number = 30, city?: string | null, funnel?: FunnelValue | null) =>
+  apiFetch<{ days: number; attendants: RankingRowV2[]; by_city?: boolean }>(`/api/dashboard/ranking-v2?account_id=${accountId}&days=${days}${cityQ(city)}${fq(funnel)}`)
+export const fetchCriticalConversations = (accountId: number, days: number = 30, limit: number = 50, city?: string | null, funnel?: FunnelValue | null) =>
+  apiFetch<{ conversations: CriticalConversation[] }>(`/api/dashboard/critical-conversations?account_id=${accountId}&days=${days}&limit=${limit}${cityQ(city)}${fq(funnel)}`).then(d => d.conversations)
 export const fetchConversationDetailV2 = (leadId: number, accountId: number) =>
   apiFetch<ConversationDetailV2>(`/api/dashboard/conversation-detail/${leadId}?account_id=${accountId}`)
-export const fetchAlerts = (accountId: number, status: 'open' | 'resolved' | 'dismissed' = 'open', city?: string | null) =>
-  apiFetch<{ alerts: AnalystAlert[] }>(`/api/dashboard/alerts?account_id=${accountId}&status=${status}${cityQ(city)}`).then(d => d.alerts)
+export const fetchAlerts = (accountId: number, status: 'open' | 'resolved' | 'dismissed' = 'open', city?: string | null, funnel?: FunnelValue | null) =>
+  apiFetch<{ alerts: AnalystAlert[] }>(`/api/dashboard/alerts?account_id=${accountId}&status=${status}${cityQ(city)}${fq(funnel)}`).then(d => d.alerts)
 export const resolveAlert = (id: number, accountId: number, status: 'resolved' | 'dismissed' = 'resolved') =>
   apiFetch(`/api/dashboard/alerts/${id}/resolve?account_id=${accountId}`, { method: 'POST', body: JSON.stringify({ status }) })
 export const assignAlert = (id: number, accountId: number, userId: number | null) =>
@@ -1251,8 +1255,8 @@ export const fetchCoaching = (userId: number, accountId: number, weeks: number =
   apiFetch<{ weekly: CoachingWeekly[] }>(`/api/dashboard/coaching/${userId}?account_id=${accountId}&weeks=${weeks}`).then(d => d.weekly)
 export const generateCoachingNow = (userId: number, accountId: number) =>
   apiFetch<{ ok: boolean; week_start: string; message: string }>(`/api/dashboard/coaching/${userId}/generate?account_id=${accountId}`, { method: 'POST' })
-export const fetchMarketIntel = (accountId: number, days: number = 30, city?: string | null) =>
-  apiFetch<MarketIntel>(`/api/dashboard/market-intelligence?account_id=${accountId}&days=${days}${cityQ(city)}`)
+export const fetchMarketIntel = (accountId: number, days: number = 30, city?: string | null, funnel?: FunnelValue | null) =>
+  apiFetch<MarketIntel>(`/api/dashboard/market-intelligence?account_id=${accountId}&days=${days}${cityQ(city)}${fq(funnel)}`)
 export const fetchAnalyzeEstimate = (accountId: number, days: number = 7, maxLeads: number = 50) =>
   apiFetch<AnalyzeEstimate>(`/api/dashboard/analyze-estimate?account_id=${accountId}&days=${days}&max=${maxLeads}`)
 export const markProposalSent = (leadId: number, accountId: number) =>
