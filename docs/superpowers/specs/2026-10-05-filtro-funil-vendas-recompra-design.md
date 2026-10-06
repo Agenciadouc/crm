@@ -84,6 +84,19 @@ Rotas que passam a aceitar `?funnel=`:
   funil), Leads (idem + Exportar), Dashboard, Projeção, AttendantAnalytics (todas as abas).
   Cartões de custo em `recompra` mostram "—" com o aviso.
 
+## 5b. Atendimentos: agregado noturno por funil (decisão do dono, opção A)
+
+Os cartões de SLA/1ª resposta/respondidos/ociosos vêm do agregado noturno
+`attendant_metrics_daily` (por vendedor e dia, sem funil). Tabela nova
+`attendant_metrics_daily_funnel` (mesmas colunas + `funnel_kind` 'vendas'|'recompra',
+`UNIQUE(account_id, user_id, date, funnel_kind)`); a tabela antiga fica intocada e continua sendo a
+fonte do modo `todos`. O agregador noturno grava também as duas linhas por funil: cada lead conta
+no funil em que estava **no início do dia** (lead novo: funil em que nasceu). Na primeira subida, um
+preenchimento único (marcado em `app_settings`) recalcula os últimos 90 dias em segundo plano.
+Insights da IA (análise, críticas, alertas, inteligência de mercado, erros/fortes do ranking)
+são filtrados pelo funil do lead na data da análise/criação. O **coaching semanal** (texto gerado
+por vendedor) não é separado por funil.
+
 ## 6. Erros e limites
 
 - Parâmetro inválido → tratado como `todos`.
