@@ -38,6 +38,7 @@ import adminRoutes from './routes/admin.js'
 import appSettingsRoutes from './routes/app-settings.js'
 import globalTemplatesRoutes from './routes/globalTemplates.js'
 import { createCustomersRouter } from './routes/customersRouter.js'
+import { createLeadImportRouter } from './routes/leadImportRouter.js'
 import { repurchaseAiFor } from './services/ltv/aiRuntime.js'
 import { authenticate, scopeToAccount } from './middleware/auth.js'
 import { addSSEClient, removeSSEClient, broadcastSSE } from './sse.js'
@@ -95,6 +96,8 @@ app.get('/crm/proposta/:slug', publicProposalHandler)
 app.use('/api/accounts', authenticate, accountRoutes)
 app.use('/api/users', authenticate, userRoutes)
 app.use('/api/funnels', authenticate, scopeToAccount, funnelRoutes)
+// Importar planilha antes de /api/leads (senao /import cai em /:id)
+app.use('/api/leads/import', authenticate, scopeToAccount, createLeadImportRouter(db, { broadcast: broadcastSSE }))
 app.use('/api/leads', authenticate, scopeToAccount, leadRoutes)
 app.use('/api/tag-mapping', authenticate, scopeToAccount, tagMappingRoutes)
 app.use('/api/messages', authenticate, scopeToAccount, messageRoutes)
