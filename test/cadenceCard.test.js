@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { cadenceCardActions, stepLine, cadenceRenderList, stageStepView, BOX_PLACEHOLDER } from '../src/lib/cadenceCard.js'
+import { cadenceCardActions, stepLine, cadenceRenderList, stageStepView, BOX_PLACEHOLDER, actionWord, unifiedProgress, afterSummary } from '../src/lib/cadenceCard.js'
 import { avulsaStepView } from '../src/lib/avulsaStep.js'
 
 const ids = r => ({ primary: r.primary && r.primary.id, secondary: r.secondary && r.secondary.id, links: r.links.map(l => l.id) })
@@ -13,20 +13,20 @@ test('linha laranja: "Passo 1/4: PERGUNTA" (etapa) e "Etapa 6/7: MENSAGEM" (avul
   assert.equal(stepLine('etapa', null, null, 'visita'), 'VISITA')
 })
 
-test('mensagem (etapa e avulsa): [Revisar e enviar] + [So avancar (sem enviar)] + link Marcar como feito', () => {
+test('mensagem (etapa e avulsa): [Enviar] + [Pular] + link "Já mandei por fora"', () => {
   for (const kind of ['etapa', 'avulsa']) {
     for (const t of ['mensagem', 'whatsapp']) {
       const r = cadenceCardActions(kind, { action_type: t })
-      assert.deepEqual(r.primary, { id: 'enviar', label: 'Revisar e enviar' })
-      assert.deepEqual(r.secondary, { id: 'pular', label: 'Só avançar (sem enviar)' })
-      assert.deepEqual(r.links, [{ id: 'feito', label: 'Marcar como feito' }])
+      assert.deepEqual(r.primary, { id: 'enviar', label: 'Enviar' })
+      assert.deepEqual(r.secondary, { id: 'pular', label: 'Pular' })
+      assert.deepEqual(r.links, [{ id: 'feito', label: 'Já mandei por fora' }])
     }
   }
 })
 
-test('pergunta: etapa = [Revisar e enviar] + [Ja sei a resposta]; avulsa so avanca', () => {
+test('pergunta: etapa = [Enviar] + [Ja sei a resposta]; avulsa so pula', () => {
   const r = cadenceCardActions('etapa', { action_type: 'pergunta', state: 'pendente' })
-  assert.deepEqual(r.primary, { id: 'perguntar', label: 'Revisar e enviar' })
+  assert.deepEqual(r.primary, { id: 'perguntar', label: 'Enviar' })
   assert.deepEqual(r.secondary, { id: 'ja_sei', label: 'Já sei a resposta' })
   assert.deepEqual(r.links, [])
   // ja perguntou: falta anotar a resposta
@@ -34,20 +34,52 @@ test('pergunta: etapa = [Revisar e enviar] + [Ja sei a resposta]; avulsa so avan
   // avulsa: o servidor so aceita pular a pergunta (sem resposta pela avulsa)
   const a = cadenceCardActions('avulsa', { action_type: 'pergunta' })
   assert.equal(a.primary, null)
-  assert.deepEqual(a.secondary, { id: 'pular', label: 'Só avançar (sem enviar)' })
+  assert.deepEqual(a.secondary, { id: 'pular', label: 'Pular' })
 })
 
-test('ligacao: [Ver roteiro e ligar] + [So avancar]; visita/reuniao/e-mail: [Feito] + [So avancar]', () => {
+test('ligacao: [Ver roteiro e ligar] + [Pular]; visita/reuniao/e-mail: [Feito] + [Pular]', () => {
   for (const kind of ['etapa', 'avulsa']) {
     assert.deepEqual(ids(cadenceCardActions(kind, { action_type: 'ligacao' })), { primary: 'ligar', secondary: 'pular', links: [] })
     assert.equal(cadenceCardActions(kind, { action_type: 'ligacao' }).primary.label, 'Ver roteiro e ligar')
     for (const t of ['visita', 'reuniao', 'email']) {
       const r = cadenceCardActions(kind, { action_type: t })
       assert.deepEqual(r.primary, { id: 'feito', label: 'Feito' })
-      assert.deepEqual(r.secondary, { id: 'pular', label: 'Só avançar' })
+      assert.deepEqual(r.secondary, { id: 'pular', label: 'Pular' })
     }
   }
   assert.deepEqual(cadenceCardActions('etapa', null), { primary: null, secondary: null, links: [] })
+})
+
+test('palavra do que fazer: Pergunte / Mande / Ligue (sem "Passo 1/4" nem "Etapa 6/7")', () => {
+  assert.equal(actionWord('pergunta'), 'Pergunte')
+  assert.equal(actionWord('mensagem'), 'Mande')
+  assert.equal(actionWord('whatsapp'), 'Mande')
+  assert.equal(actionWord('ligacao'), 'Ligue')
+  assert.equal(actionWord('email'), 'Mande um e-mail')
+  assert.equal(actionWord('visita'), 'Visite')
+  assert.equal(actionWord('reuniao'), 'Faça a reunião')
+  assert.equal(actionWord('outro'), 'outro')
+})
+
+test('contador unico "N de M": etapa primeiro, depois a cadencia extra', () => {
+  // etapa com 4, 1 feito; extra com 7, 2 feitos: o da vez e o 2o da etapa
+  assert.deepEqual(unifiedProgress({ stageDone: 1, stageTotal: 4, stageHasNext: true, extra: { done: 2, total: 7 } }), { n: 2, m: 11 })
+  // etapa acabou: o da vez e o 3o da extra = 4 + 3
+  assert.deepEqual(unifiedProgress({ stageDone: 4, stageTotal: 4, stageHasNext: false, extra: { done: 2, total: 7 } }), { n: 7, m: 11 })
+  // sem extra
+  assert.deepEqual(unifiedProgress({ stageDone: 0, stageTotal: 3, stageHasNext: true, extra: null }), { n: 1, m: 3 })
+  // tudo feito
+  assert.equal(unifiedProgress({ stageDone: 3, stageTotal: 3, stageHasNext: false, extra: null }), null)
+  assert.equal(unifiedProgress({ stageDone: 0, stageTotal: 0, stageHasNext: false, extra: null }), null)
+})
+
+test('"Depois:" resume em contagem e soma a cadencia extra', () => {
+  const after = [{ action_type: 'pergunta' }, { action_type: 'pergunta' }, { action_type: 'mensagem' }, { action_type: 'whatsapp' }, { action_type: 'ligacao' }]
+  assert.equal(afterSummary(after, 0), 'Depois: 2 perguntas, 2 mensagens, 1 ligação')
+  assert.equal(afterSummary([{ action_type: 'pergunta' }], 4), 'Depois: 1 pergunta e 4 passos da cadência extra')
+  assert.equal(afterSummary([], 1), 'Depois: 1 passo da cadência extra')
+  assert.equal(afterSummary([{ action_type: 'visita' }], 0), 'Depois: 1 visita')
+  assert.equal(afterSummary([], 0), '')
 })
 
 test('caixa vazia: placeholder de passo sem texto pronto', () => {

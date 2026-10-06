@@ -6,3 +6,6 @@ export function cadenceCardActions(kind: 'etapa' | 'avulsa', step: { action_type
 export function stageStepView(step: any, fill?: (text: string) => string): { title: string; text: string }
 export const CADENCE_GROUP: 'cadencia'
 export function cadenceRenderList<T extends string>(ids: T[] | null | undefined): Array<T | 'cadencia'>
+export function actionWord(type: string | null | undefined): string
+export function unifiedProgress(p: { stageDone?: number; stageTotal?: number; stageHasNext?: boolean; extra?: { done: number; total: number } | null }): { n: number; m: number } | null
+export function afterSummary(after: Array<{ action_type: string }> | null | undefined, extraRemaining?: number): string

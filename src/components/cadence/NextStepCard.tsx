@@ -7,14 +7,14 @@ import {
 import { fetchLeadStageCadence, markLeadStepDone, type LeadStageCadence, type LeadStep } from '../../lib/cadenceApi'
 import { saveLeadAnswer, undoAdvance, type QState, type RoteiroOffscript } from '../../lib/roteiroApi'
 import {
-  splitSteps, stepTitle, stepTypeLabel, afterLine, nextActions, doneText, doneOrigin, deviationLine,
+  splitSteps, stepTitle, stepTypeLabel, nextActions, doneText, doneOrigin, deviationLine,
   stepSendText, cadenceEventForAccount, createReloadDebouncer,
 } from '../../lib/nextStep.js'
 import { useSSE } from '../../context/SSEContext'
 import { AUTOMATION_PATH } from '../../lib/automationTabs.js'
 import { STEP_ICONS } from '../../pages/cadencias/StepRow'
 import { reviewPosition, type ReviewPos } from '../../lib/atendimentoPanel.js'
-import { cadenceCardActions, stageStepView, stepLine, BOX_PLACEHOLDER } from '../../lib/cadenceCard.js'
+import { cadenceCardActions, stageStepView, actionWord, unifiedProgress, afterSummary, BOX_PLACEHOLDER } from '../../lib/cadenceCard.js'
 import { CADENCE_INNER, CARD_NAME, STEP_LINE, STEP_DESC, LinkButton, TextPreview, StepButtons } from '../atendimento/PanelParts'
 import HelpTip from '../HelpTip'
 import AnswerEditor from '../roteiro/AnswerEditor'
@@ -36,13 +36,16 @@ interface Props {
   onCall?: (r: { attemptId: number; text: string; pos: ReviewPos | null }) => void
   // Chat: troca das variaveis do lead para a previa da mensagem (ex.: {{primeiro_nome}} -> Ana)
   fill?: (text: string) => string
+  // Chat: cadencia extra (avulsa) do lead no mesmo cartao. Entra depois dos passos da etapa;
+  // render desenha o passo da vez dela (botoes e janelas ficam no Chat).
+  extra?: { name: string; done: number; total: number; render: () => ReactNode } | null
 }
 
 const smallBtn = { fontSize: 10, padding: '2px 8px' }
 // Varios avisos seguidos (salvar automatico do gestor, mensagens, IA) viram uma recarga so
 const SSE_RELOAD_DEBOUNCE_MS = 600
 
-export default function NextStepCard({ leadId, accountId, mode, onAsk, onSendStep, canManage, onReview, reloadSignal, onCall, fill }: Props) {
+export default function NextStepCard({ leadId, accountId, mode, onAsk, onSendStep, canManage, onReview, reloadSignal, onCall, fill, extra }: Props) {
   const [data, setData] = useState<LeadStageCadence | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(false)
@@ -56,6 +59,7 @@ export default function NextStepCard({ leadId, accountId, mode, onAsk, onSendSte
   const [undoing, setUndoing] = useState(false)
   const [offscript, setOffscript] = useState<RoteiroOffscript | null>(null)
   const [showDone, setShowDone] = useState(false)
+  const [showAfter, setShowAfter] = useState(false)
   const [scriptOpen, setScriptOpen] = useState<number | null>(null)
   // Perguntas que a IA acabou de responder (lead:roteiro): aparecem fora do "Feitos" recolhido
   const [aiFresh, setAiFresh] = useState<number[]>([])
@@ -193,21 +197,23 @@ export default function NextStepCard({ leadId, accountId, mode, onAsk, onSendSte
     </div>
   )
 
-  // Chat: cartao da etapa no visual do bloco antigo: nome da etapa em negrito e, a direita, quantos ja foram feitos
+  // Chat: um cartao so "Proximo passo" (etapa + cadencia extra) com o contador "N de M" a direita
+  const extraPending = !!extra && extra.done < extra.total
   const chatBox = (children: ReactNode) => {
-    const allOk = !!data && !!data.total && data.done_count === data.total
+    const prog = data ? unifiedProgress({ stageDone: data.done_count, stageTotal: data.total, stageHasNext: !!splitSteps(data).next, extra: extraPending ? extra : null }) : null
+    const anyStep = !!data?.total || extraPending
     return (
       <div style={CADENCE_INNER}>
-        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6 }}>
-          <div style={CARD_NAME}>{data?.stage?.name || 'Cadência da etapa'}</div>
-          {!!data?.total && (
-            <span
-              title={`${data.done_count} de ${data.total} passos desta etapa já feitos (pergunta com resposta, mensagem enviada ou marcada Feito).`}
-              style={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 10, fontWeight: 600, marginTop: 3, whiteSpace: 'nowrap', color: allOk ? 'var(--positive)' : 'var(--text-muted)' }}
-            >
-              {data.done_count}/{data.total} feitos {allOk && <Check size={10} />}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <div style={{ ...CARD_NAME, fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.4, color: 'var(--text-muted)' }}>Próximo passo</div>
+          {prog ? (
+            <span title={`Passo ${prog.n} de ${prog.m}: primeiro os da etapa${data?.stage ? ` "${data.stage.name}"` : ''}${extraPending ? `, depois os da cadência extra "${extra!.name}"` : ''}.`}
+              style={{ fontSize: 10, fontWeight: 600, whiteSpace: 'nowrap', color: 'var(--text-muted)' }}>
+              {prog.n} de {prog.m}
             </span>
-          )}
+          ) : anyStep ? (
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 10, fontWeight: 600, color: 'var(--positive)' }}>Tudo feito <Check size={10} /></span>
+          ) : null}
         </div>
         {children}
       </div>
@@ -247,6 +253,8 @@ export default function NextStepCard({ leadId, accountId, mode, onAsk, onSendSte
 
   // Etapa sem cadencia (ou sem passos): exemplo e caminho para montar
   if (!data.lead_cadence || data.steps.length === 0) {
+    // Etapa sem passos mas com cadencia extra: o passo da vez e o da extra
+    if (mode === 'chat' && extraPending) return box(<>{notices}{extra!.render()}</>)
     return box(
       <>
         {notices}
@@ -410,10 +418,10 @@ export default function NextStepCard({ leadId, accountId, mode, onAsk, onSendSte
     return (
       <div>
         <div style={STEP_LINE}>
-          {stepLine('etapa', pos?.n, pos?.m, step.action_type)}
+          {actionWord(step.action_type)}:
           {isAsk && step.question?.required && (
-            <span title="Obrigatória: trava a mudança de etapa até ter resposta" style={{ display: 'inline-flex', alignItems: 'center', gap: 2, marginLeft: 4 }}>
-              · <Lock size={9} /> obrigatória
+            <span title="Precisa da resposta para avançar de etapa" style={{ display: 'inline-flex', alignItems: 'center', gap: 3, marginLeft: 6, color: 'var(--negative)', textTransform: 'none', fontWeight: 600 }}>
+              <span aria-hidden="true" style={{ width: 6, height: 6, borderRadius: 3, background: 'var(--negative)', display: 'inline-block' }} /> precisa
             </span>
           )}
         </div>
@@ -435,7 +443,7 @@ export default function NextStepCard({ leadId, accountId, mode, onAsk, onSendSte
             enviar: 'Abre a janela para conferir o texto antes de enviar',
             perguntar: 'Abre a janela para conferir a pergunta antes de enviar',
             pular: 'Passa para o próximo passo sem enviar nada',
-            feito: 'Já fez por outro caminho? Marca o passo sem enviar nada',
+            feito: 'Já mandou pelo celular ou outro caminho? Marca o passo sem enviar nada',
           }}
         />
         {editor(step)}
@@ -521,16 +529,42 @@ export default function NextStepCard({ leadId, accountId, mode, onAsk, onSendSte
     )
   }
 
-  // --- modo Chat: proximo, depois e feitos -------------------------------------------------
-  const after1 = afterLine(after)
+  // --- modo Chat: proximo (etapa, senao a cadencia extra), depois e feitos -------------------
+  // Depois da etapa vem a extra inteira; se a extra ja e o passo da vez, sobram os seguintes dela
+  const extraLeft = extraPending ? extra!.total - extra!.done - (next ? 0 : 1) : 0
+  const after1 = afterSummary(after, extraLeft)
   const fresh = showDone ? [] : done.filter(s => aiFresh.includes(s.attempt_id))
   return box(
     <>
-      {next ? chatStep(next) : allDone}
+      {next ? chatStep(next) : extraPending ? extra!.render() : allDone}
       {/* Avisos (IA, desvio, avanco com Desfazer) ficam compactos embaixo dos botoes (so se houver) */}
       {hasNotices && <div style={{ marginTop: 8 }}>{notices}</div>}
       {fresh.length > 0 && <div style={{ marginBottom: 6 }}>{fresh.map(doneRow)}</div>}
-      {after1 && <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 8, lineHeight: 1.4 }}>{after1}</div>}
+      {after1 && (
+        <div style={{ marginTop: 8 }}>
+          <button type="button" onClick={() => setShowAfter(v => !v)} aria-expanded={showAfter}
+            style={{ display: 'flex', alignItems: 'center', gap: 4, background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontSize: 10, color: 'var(--text-muted)', textAlign: 'left', lineHeight: 1.4 }}>
+            {after1} {showAfter ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
+          </button>
+          {showAfter && (
+            <div style={{ marginTop: 4 }}>
+              {after.map(step => (
+                <div key={step.attempt_id} style={{ fontSize: 11, padding: '4px 0', borderTop: '1px solid var(--border-subtle)', lineHeight: 1.4 }}>
+                  <span style={{ color: 'var(--text-muted)' }}>{actionWord(step.action_type)}: </span>
+                  <span style={{ color: 'var(--text-primary)' }}>{stepTitle(step)}</span>
+                </div>
+              ))}
+              {/* Cadencia extra enquanto a etapa ainda tem passos: da para fazer o passo dela antes da hora */}
+              {next && extraPending && (
+                <div style={{ marginTop: 6, paddingTop: 6, borderTop: '1px dashed var(--border-subtle)' }}>
+                  <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 4 }}>Cadência extra "{extra!.name}" — pode fazer agora se quiser:</div>
+                  {extra!.render()}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
       {done.length > 0 && (
         <div style={{ marginTop: 6 }}>
           <button

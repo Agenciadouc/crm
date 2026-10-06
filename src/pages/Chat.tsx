@@ -44,8 +44,8 @@ import {
   reviewPosition, reviewTitle, reviewFromPendingAsk, reviewSendKeys, boxKeysAfterReviewSend, offerRecognition,
   manualTaskRows, reviewTextToSend, attendantView, sectionTitle, type StepReview, type ReviewPos,
 } from '../lib/atendimentoPanel.js'
-import { cadenceCardActions, cadenceRenderList, stepLine, BOX_PLACEHOLDER } from '../lib/cadenceCard.js'
-import { PANEL_CARD, CADENCE_INNER, CARD_NAME, STEP_LINE, STEP_DESC, PILL_BTN, PRIMARY_BTN, HEAD_BTN, LinkButton, PanelTitle, TextPreview, StepButtons } from '../components/atendimento/PanelParts'
+import { cadenceCardActions, cadenceRenderList, actionWord, BOX_PLACEHOLDER } from '../lib/cadenceCard.js'
+import { PANEL_CARD, CADENCE_INNER, CARD_NAME, STEP_LINE, STEP_DESC, PRIMARY_BTN, HEAD_BTN, LinkButton, PanelTitle, TextPreview, StepButtons } from '../components/atendimento/PanelParts'
 import StageGateModal from '../components/roteiro/StageGateModal'
 import SaleModal from '../components/SaleModal'
 import CustomerCard from '../components/CustomerCard'
@@ -67,6 +67,9 @@ import { applyMessageVars } from '../lib/messageVars'
 import { parseSqlDate, formatTime, formatDayLabel, localDayKey } from '../lib/dates'
 import { automationUrl } from '../lib/automationTabs'
 import { useIsMobile } from '../hooks/useIsMobile'
+
+// Item do menu "..." do bloco Cadencia
+const MENU_ITEM: React.CSSProperties = { background: 'none', border: 'none', textAlign: 'left', padding: '7px 10px', cursor: 'pointer', color: 'var(--text-primary)', fontSize: 12, borderRadius: 4 }
 
 function timeAgo(dateStr: string) {
   const diff = Date.now() - parseSqlDate(dateStr).getTime()
@@ -170,6 +173,7 @@ export default function Chat() {
   const [applyingGlobalId, setApplyingGlobalId] = useState<number | null>(null)
   const [applyingGlobalFuId, setApplyingGlobalFuId] = useState<number | null>(null)
   const [showCadenceMenu, setShowCadenceMenu] = useState(false)
+  const [cadenceMenuOpen, setCadenceMenuOpen] = useState(false) // menu "..." do bloco Cadencia
   const [leadFollowUp, setLeadFollowUp] = useState<LeadFollowUp | null>(null)
   const [followUps, setFollowUps] = useState<FollowUp[]>([])
   const [showFollowUpMenu, setShowFollowUpMenu] = useState(false)
@@ -2129,12 +2133,32 @@ export default function Chat() {
                   <PanelTitle
                     icon={<>{cadenciaCollapsed ? <ChevronDown size={12} style={{ color: '#9B96B0' }} /> : <ChevronUp size={12} style={{ color: '#9B96B0' }} />}<ListOrdered size={10} /></>}
                     label="Cadência"
-                    help={<>O que fazer agora com este cliente. Em cima, a cadência da etapa (muda quando ele muda de etapa); embaixo, a cadência avulsa que você aplicou só para ele. Ex.: "Revisar e enviar" abre a janela para conferir a pergunta "Para quando é o evento?" antes de mandar. "Só avançar (sem enviar)" passa para o próximo passo sem mandar nada.</>}
+                    help={<>O que fazer agora com este cliente, um passo de cada vez: primeiro os passos da etapa (perguntas, mensagens, ligações), depois os da cadência extra, se tiver. Ex.: "Pergunte: Para quando é o evento?" → [Enviar] abre a janela para conferir antes de mandar; [Pular] passa para o próximo sem mandar nada. No ⋯ você escolhe uma cadência extra, como "Pós-venda".</>}
                     onClick={() => setCadenciaCollapsed(p => { const v = !p; try { localStorage.setItem('chat_cadencia_collapsed', v ? '1' : '0') } catch { /* sem storage */ } return v })}
                     style={{ marginBottom: 0 }}
                     right={shownIds.includes('avulsa') ? (
                       <div style={{ position: 'relative' }}>
-                        <button className="btn btn-secondary btn-sm" onClick={() => { setCadenciaCollapsed(false); setShowCadenceMenu(!showCadenceMenu) }} style={HEAD_BTN} title={leadCadence ? 'Escolher outra cadência avulsa para este cliente' : 'Ex.: escolha "Pós-venda" para mandar mensagens extras só para este cliente'}>{leadCadence ? 'Trocar' : 'Atribuir'}</button>
+                        <button className="btn btn-secondary btn-sm" aria-label="Mais opções da cadência" aria-haspopup="menu" aria-expanded={cadenceMenuOpen}
+                          onClick={() => { setCadenciaCollapsed(false); setShowCadenceMenu(false); setCadenceMenuOpen(o => !o) }} style={HEAD_BTN}
+                          title='Cadência extra e edição. Ex.: escolha "Pós-venda" para mandar mensagens extras só para este cliente'>⋯</button>
+                        {cadenceMenuOpen && (
+                          <div role="menu" style={{ position: 'absolute', right: 0, top: '100%', marginTop: 4, background: 'var(--bg-card)', border: '1px solid var(--border-medium)', borderRadius: 8, padding: 4, zIndex: 50, minWidth: 200, display: 'grid' }}>
+                            <button type="button" role="menuitem" style={MENU_ITEM} onClick={() => { setCadenceMenuOpen(false); setShowCadenceMenu(true) }}>
+                              {leadCadence ? 'Usar outra cadência extra' : 'Usar uma cadência extra'}
+                            </button>
+                            {leadCadence && (
+                              <button type="button" role="menuitem" style={{ ...MENU_ITEM, color: 'var(--negative)' }} onClick={async () => {
+                                setCadenceMenuOpen(false)
+                                if (!accountId || !confirm(`Tirar a cadência extra "${leadCadence.cadence_name}" deste cliente?`)) return
+                                await removeLeadCadence(leadCadence.id, accountId)
+                                loadLead()
+                              }}>Tirar a cadência extra</button>
+                            )}
+                            <button type="button" role="menuitem" style={MENU_ITEM} onClick={() => { setCadenceMenuOpen(false); const base = import.meta.env.BASE_URL.replace(/\/$/, ''); window.open(`${base}${automationUrl('manuais')}`, '_blank') }}>
+                              Editar cadências
+                            </button>
+                          </div>
+                        )}
                         {showCadenceMenu && (
                           <div style={{ position: 'absolute', right: 0, top: '100%', marginTop: 4, background: 'var(--bg-card)', border: '1px solid var(--border-medium)', borderRadius: 8, padding: 4, zIndex: 50, minWidth: 220, maxHeight: 320, overflowY: 'auto' }}>
                             {cadences.length === 0 && globalCadences.length === 0 && <div style={{ padding: 8, fontSize: 11, color: 'var(--text-muted)' }}>Nenhuma cadência. Crie em Cadências e Follow-ups (aba Manuais)</div>}
@@ -2167,6 +2191,49 @@ export default function Chat() {
                     ) : undefined}
                   />
                 )
+                // Passo da vez da cadencia extra: mesmas palavras e botoes do passo da etapa (Pergunte/Mande/Ligue)
+                const renderAvulsaStep = () => {
+                  if (!leadCadence || leadCadence.status === 'completed') return null
+                  const v = avulsaStepView(leadCadence, fillLeadVars)
+                  if (!v) return null
+                  const target = { leadId: lead.id, lcId: leadCadence.id, attemptId: leadCadence.current_attempt_id }
+                  const label = avulsaStepLabel(leadCadence)
+                  const acts = cadenceCardActions('avulsa', { action_type: leadCadence.action_type || '' })
+                  const isMsg = v.kind === 'mensagem'
+                  const isAsk = leadCadence.action_type === 'pergunta'
+                  const runAvulsa = (id: string) => {
+                    if (id === 'enviar') handleAvulsaSend()
+                    else if (id === 'ligar') setCallModal({ source: 'avulsa', ...target, label, text: v.text })
+                    else if (id === 'feito') handleAvulsaStep('feito', target)
+                    else if (id === 'pular') handleAvulsaStep('pulado', target)
+                  }
+                  // Descricao em cinza italico: na mensagem e o titulo; na ligacao a descricao (o roteiro fica na janela)
+                  const desc = isMsg ? (v.title || '') : v.kind === 'ligacao' ? (leadCadence.attempt_description || '').trim() : isAsk ? '' : v.text
+                  const instr = (leadCadence.attempt_instructions || '').trim()
+                  return (
+                    <div>
+                      <div style={STEP_LINE} title={`Cadência extra "${leadCadence.cadence_name}"`}>{actionWord(leadCadence.action_type)}:</div>
+                      {desc && <div style={STEP_DESC}>{desc}</div>}
+                      {instr && instr !== desc && instr !== v.text && <div style={STEP_DESC}>{instr}</div>}
+                      {(isMsg || isAsk) && <TextPreview text={v.text} placeholder={BOX_PLACEHOLDER} />}
+                      <StepButtons
+                        primary={acts.primary}
+                        secondary={acts.secondary}
+                        links={acts.links}
+                        run={runAvulsa}
+                        disabled={avulsaBusy}
+                        titles={{
+                          enviar: 'Abre a janela para conferir o texto antes de enviar',
+                          pular: 'Passa para o próximo passo sem enviar nada',
+                          feito: 'Já mandou pelo celular ou outro caminho? Marca o passo sem enviar nada',
+                        }}
+                      />
+                    </div>
+                  )
+                }
+                const avulsaExtra = leadCadence && leadCadence.status !== 'completed' && shownIds.includes('avulsa')
+                  ? { name: leadCadence.cadence_name || 'Cadência extra', done: leadCadence.attempt_position ?? 0, total: leadCadence.total_attempts ?? 0, render: renderAvulsaStep }
+                  : null
                 const blocks: Record<AtendimentoBlockId, () => React.ReactNode> = {
                   score: () => (<>
                   {/* 1. Termometro em uma linha (clique expande) */}
@@ -2269,72 +2336,22 @@ export default function Chat() {
                     onCall={c => setCallModal({ source: 'etapa', leadId: lead.id, lcId: 0, attemptId: c.attemptId, label: c.pos ? `Passo ${c.pos.n} de ${c.pos.m} · Ligação` : 'Ligação', text: c.text })}
                     reloadSignal={nextStepReload}
                     canManage={user?.role === 'gerente' || user?.role === 'super_admin'}
+                    extra={avulsaExtra}
                   />
                   </>),
                   avulsa: () => (<>
-                  {/* 5b. Cadencia avulsa do lead: mesmo cartao da etapa (visual do bloco antigo de cadencia) */}
-                  {(() => {
-                    if (!leadCadence) {
-                      // Sem avulsa: so um exemplo quando o cartao da etapa nao aparece (o [Atribuir] fica no titulo)
-                      return shownIds.includes('proximo_passo') ? null : (
-                        <div style={{ fontSize: 11, color: '#6B6580', marginTop: 8 }}>Nenhuma cadência avulsa. Ex.: clique em Atribuir e escolha "Pós-venda".</div>
-                      )
-                    }
-                    const completed = leadCadence.status === 'completed'
-                    const total = leadCadence.total_attempts ?? 0
-                    const v = completed ? null : avulsaStepView(leadCadence, fillLeadVars)
-                    const target = { leadId: lead.id, lcId: leadCadence.id, attemptId: leadCadence.current_attempt_id }
-                    const label = avulsaStepLabel(leadCadence)
-                    const acts = cadenceCardActions('avulsa', v ? { action_type: leadCadence.action_type || '' } : null)
-                    const isMsg = v?.kind === 'mensagem'
-                    const isAsk = leadCadence.action_type === 'pergunta'
-                    const runAvulsa = (id: string) => {
-                      if (id === 'enviar') handleAvulsaSend()
-                      else if (id === 'ligar' && v) setCallModal({ source: 'avulsa', ...target, label, text: v.text })
-                      else if (id === 'feito') handleAvulsaStep('feito', target)
-                      else if (id === 'pular') handleAvulsaStep('pulado', target)
-                    }
-                    // Descricao em cinza italico: na mensagem e o titulo; na ligacao a descricao (o roteiro fica na janela)
-                    const desc = !v ? '' : isMsg ? (v.title || '') : v.kind === 'ligacao' ? (leadCadence.attempt_description || '').trim() : isAsk ? '' : v.text
-                    const instr = (leadCadence.attempt_instructions || '').trim()
-                    return (
-                      <div style={CADENCE_INNER}>
-                        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6 }}>
-                          <div style={CARD_NAME}>{leadCadence.cadence_name}</div>
-                          <div style={{ display: 'flex', gap: 3, flexShrink: 0 }}>
-                            <button className="btn btn-secondary btn-sm" style={PILL_BTN} onClick={() => { const base = import.meta.env.BASE_URL.replace(/\/$/, ''); window.open(`${base}${automationUrl('manuais')}`, '_blank') }} title="Abre a tela de cadências numa nova aba">Editar</button>
-                            <button className="btn btn-danger btn-sm" style={PILL_BTN} onClick={async () => {
-                              if (!accountId || !confirm('Remover cadencia deste lead?')) return
-                              await removeLeadCadence(leadCadence.id, accountId)
-                              loadLead()
-                            }}>Remover</button>
-                          </div>
-                        </div>
-                        {completed || !v ? (
-                          <div style={{ fontSize: 11, color: '#34C759', display: 'flex', alignItems: 'center', gap: 3, marginTop: 4 }}><Check size={10} /> Concluida</div>
-                        ) : (
-                          <>
-                            <div style={STEP_LINE} title="Passo da vez na cadência avulsa. Ex.: 6/7 = sexto de sete passos.">{stepLine('avulsa', (leadCadence.attempt_position ?? 0) + 1, total, leadCadence.action_type)}</div>
-                            {desc && <div style={STEP_DESC}>{desc}</div>}
-                            {instr && instr !== desc && instr !== v.text && <div style={STEP_DESC}>{instr}</div>}
-                            {(isMsg || isAsk) && <TextPreview text={v.text} placeholder={BOX_PLACEHOLDER} />}
-                            <StepButtons
-                              primary={acts.primary}
-                              secondary={acts.secondary}
-                              links={acts.links}
-                              run={runAvulsa}
-                              disabled={avulsaBusy}
-                              titles={{
-                                enviar: 'Abre a janela para conferir o texto antes de enviar',
-                                pular: 'Passa para o próximo passo sem enviar nada',
-                                feito: 'Já fez por outro caminho? Marca o passo sem enviar nada',
-                              }}
-                            />
-                          </>
-                        )}
-                      </div>
-                    )
-                  })()}
+                  {/* 5b. Cadencia extra (avulsa): entra no cartao "Proximo passo" (ajuste 06/10).
+                      Cartao proprio so quando o "Arrumar" esconde o Proximo passo. */}
+                  {shownIds.includes('proximo_passo') ? null : !leadCadence ? (
+                    <div style={{ fontSize: 11, color: '#6B6580', marginTop: 8 }}>Nenhuma cadência extra. Ex.: no menu ⋯, escolha "Pós-venda".</div>
+                  ) : (
+                    <div style={CADENCE_INNER}>
+                      <div style={CARD_NAME}>{leadCadence.cadence_name}</div>
+                      {leadCadence.status === 'completed'
+                        ? <div style={{ fontSize: 11, color: '#34C759', display: 'flex', alignItems: 'center', gap: 3, marginTop: 4 }}><Check size={10} /> Concluída</div>
+                        : renderAvulsaStep()}
+                    </div>
+                  )}
                   </>),
                   tarefas: () => (<>
                   {/* 6. Tarefas manuais do lead + [+ tarefa]. Passo de cadencia (etapa ou avulsa) fica no bloco Cadencia */}
