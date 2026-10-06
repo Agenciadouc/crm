@@ -6,6 +6,7 @@ import { aggregateAllAccounts } from '../services/attendantMetrics.js'
 import { generateCoachingForUser, isoMonday } from '../services/coachingAnalyzer.js'
 import { cityWhere, leadCityExists, hasGeo } from '../services/city.js'
 import { countsInMetrics } from '../services/contacts/scope.js'
+import { computeDashboardStats, computeAgentStats } from '../services/dashboardStats.js'
 
 // Filtro de cidade/estado + so contatos que contam nos numeros (lead e cliente; revendedor e
 // interno ficam fora — spec 2026-10-05 crm simples §2).
@@ -30,94 +31,16 @@ const AMD_NULL_V2 = {
   sla_5min_pct: null, conversion_pct: null,
 }
 
-// Main dashboard stats
+// Main dashboard stats (numeros por funil: ?funnel=vendas|recompra|todos — services/dashboardStats.js)
 router.get('/stats', (req, res) => {
   if (!req.accountId) return res.status(400).json({ error: 'account_id required' })
-  const { days = '7' } = req.query
-  const d = parseInt(days)
-  const since = new Date()
-  since.setDate(since.getDate() - d)
-  const sinceStr = since.toISOString().slice(0, 19).replace('T', ' ')
-
-  const prevSince = new Date(since)
-  prevSince.setDate(prevSince.getDate() - d)
-  const prevSinceStr = prevSince.toISOString().slice(0, 19).replace('T', ' ')
-
-  // Filtro opcional por cidade do lead (?city=), comparado sem acento
-  const cw = leadsWhere('leads', req.query)
-  const cwl = leadsWhere('l', req.query)
-
-  // Total leads in period
-  const totalLeads = db.prepare(`SELECT COUNT(*) as c FROM leads WHERE account_id = ? AND is_archived = 0 AND is_blocked = 0 AND created_at >= ?${cw.sql}`).get(req.accountId, sinceStr, ...cw.params).c
-  const prevTotalLeads = db.prepare(`SELECT COUNT(*) as c FROM leads WHERE account_id = ? AND is_archived = 0 AND is_blocked = 0 AND created_at >= ? AND created_at < ?${cw.sql}`).get(req.accountId, prevSinceStr, sinceStr, ...cw.params).c
-
-  // Leads today
-  const leadsToday = db.prepare(`SELECT COUNT(*) as c FROM leads WHERE account_id = ? AND is_archived = 0 AND is_blocked = 0 AND date(created_at) = date('now')${cw.sql}`).get(req.accountId, ...cw.params).c
-
-  // Conversion rate (all active leads, not just period — a lead created months ago can convert today)
-  // So conta conversao de funil de vendas (exclui atividade do funil Recompra das metricas antigas)
-  const convData = db.prepare(`
-    SELECT COUNT(*) as total,
-      SUM(CASE WHEN fs.is_conversion = 1 THEN 1 ELSE 0 END) as converted
-    FROM leads l JOIN funnel_stages fs ON l.stage_id = fs.id JOIN funnels fk ON fk.id = fs.funnel_id AND fk.kind = 'vendas'
-    WHERE l.account_id = ? AND l.is_active = 1 AND l.is_archived = 0 AND l.is_blocked = 0${cwl.sql}
-  `).get(req.accountId, ...cwl.params)
-  const conversionRate = convData.total > 0 ? (convData.converted / convData.total) * 100 : 0
-
-  // Unassigned leads
-  const unassigned = db.prepare(`SELECT COUNT(*) as c FROM leads WHERE account_id = ? AND attendant_id IS NULL AND is_active = 1 AND is_archived = 0 AND is_blocked = 0${cw.sql}`).get(req.accountId, ...cw.params).c
-
-  // Leads per stage (for funnel chart)
-  const byStage = db.prepare(`
-    SELECT fs.id, fs.name, fs.color, fs.position, fs.is_conversion, COUNT(l.id) as count
-    FROM funnel_stages fs
-    JOIN funnels f ON fs.funnel_id = f.id
-    LEFT JOIN leads l ON l.stage_id = fs.id AND l.is_active = 1 AND l.is_archived = 0 AND l.is_blocked = 0${cwl.sql}
-    WHERE f.account_id = ? AND f.is_default = 1
-    GROUP BY fs.id ORDER BY fs.position
-  `).all(...cwl.params, req.accountId)
-
-  // Leads per source
-  const bySource = db.prepare(`
-    SELECT COALESCE(source, 'manual') as source, COUNT(*) as count
-    FROM leads WHERE account_id = ? AND is_archived = 0 AND is_blocked = 0 AND created_at >= ?${cw.sql}
-    GROUP BY source ORDER BY count DESC
-  `).all(req.accountId, sinceStr, ...cw.params)
-
-  // Daily leads
-  const daily = db.prepare(`
-    SELECT date(created_at) as date, COUNT(*) as count
-    FROM leads WHERE account_id = ? AND is_archived = 0 AND is_blocked = 0 AND created_at >= ?${cw.sql}
-    GROUP BY date(created_at) ORDER BY date
-  `).all(req.accountId, sinceStr, ...cw.params)
-
-  res.json({
-    totalLeads, prevTotalLeads, leadsToday, conversionRate, unassigned,
-    byStage, bySource, daily,
-  })
+  res.json(computeDashboardStats(db, req.accountId, req.query))
 })
 
 // Agent performance stats
 router.get('/agents', requireRole('super_admin', 'gerente'), (req, res) => {
   if (!req.accountId) return res.status(400).json({ error: 'account_id required' })
-  const { days = '7' } = req.query
-  const d = parseInt(days)
-  const since = new Date()
-  since.setDate(since.getDate() - d)
-  const sinceStr = since.toISOString().slice(0, 19).replace('T', ' ')
-
-  const cw = leadsWhere('leads', req.query)
-  const cwl = leadsWhere('l', req.query)
-  const agents = db.prepare(`
-    SELECT u.id, u.name, u.is_active,
-      (SELECT COUNT(*) FROM leads WHERE attendant_id = u.id AND is_archived = 0 AND is_blocked = 0 AND created_at >= ?${cw.sql}) as leads_period,
-      (SELECT COUNT(*) FROM leads WHERE attendant_id = u.id AND is_active = 1 AND is_archived = 0 AND is_blocked = 0${cw.sql}) as leads_total,
-      (SELECT COUNT(*) FROM leads l JOIN funnel_stages fs ON l.stage_id = fs.id JOIN funnels fk ON fk.id = fs.funnel_id AND fk.kind = 'vendas' WHERE l.attendant_id = u.id AND fs.is_conversion = 1 AND l.is_active = 1 AND l.is_archived = 0 AND l.is_blocked = 0${cwl.sql}) as conversions
-    FROM users u WHERE u.account_id = ? AND u.role IN ('atendente', 'gerente')
-    ORDER BY leads_total DESC
-  `).all(sinceStr, ...cw.params, ...cw.params, ...cwl.params, req.accountId)
-
-  res.json({ agents })
+  res.json(computeAgentStats(db, req.accountId, req.query))
 })
 
 // Daily leads for chart
