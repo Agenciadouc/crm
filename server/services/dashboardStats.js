@@ -2,7 +2,7 @@
 // funil §3). Recebe a conexao (nao importa server/db.js) para rodar em teste com SQLite de memoria.
 import { cityWhere } from './city.js'
 import { countsInMetrics } from './contacts/scope.js'
-import { parseFunnelFilter, periodLeadsSql, currentFunnelWhere, salesWhere } from './funnelFilter.js'
+import { funnelFor, periodLeadsSql, currentFunnelWhere, salesWhere } from './funnelFilter.js'
 
 // Filtro de cidade/estado + so contatos que contam nos numeros (lead e cliente).
 function leadsWhere(alias, geo) {
@@ -19,7 +19,7 @@ function windowOf(query, now) {
 }
 
 export function computeDashboardStats(conn, accountId, query = {}, now = new Date()) {
-  const f = parseFunnelFilter(query)
+  const f = funnelFor(conn, accountId, query)
   const { sinceStr, prevSinceStr, nowStr } = windowOf(query, now)
   const cwl = leadsWhere('l', query)
   // Quem "conta no periodo": criados (vendas/todos) ou que entraram na recompra (recompra)
@@ -43,7 +43,7 @@ export function computeDashboardStats(conn, accountId, query = {}, now = new Dat
     // a 1a compra / recompraram depois de entrar. Assim venda de lead antigo nao passa de 100%.
     const converted = conn.prepare(`
       SELECT COUNT(DISTINCT l.id) c ${P} AND p.period_at >= ?${cwl.sql}
-        AND EXISTS (SELECT 1 FROM lead_sales ls WHERE ls.lead_id = l.id AND ls.sale_date >= p.period_at${salesWhere('ls', f)})
+        AND EXISTS (SELECT 1 FROM lead_sales ls WHERE ls.lead_id = l.id AND date(ls.sale_date) >= date(p.period_at)${salesWhere('ls', f)})
     `).get(accountId, sinceStr, ...cwl.params).c
     conversionRate = totalLeads > 0 ? (converted / totalLeads) * 100 : 0
   }
@@ -77,7 +77,7 @@ export function computeDashboardStats(conn, accountId, query = {}, now = new Dat
 }
 
 export function computeAgentStats(conn, accountId, query = {}, now = new Date()) {
-  const f = parseFunnelFilter(query)
+  const f = funnelFor(conn, accountId, query)
   const { sinceStr } = windowOf(query, now)
   const cw = leadsWhere('l2', query)
   const cwl = leadsWhere('l', query)

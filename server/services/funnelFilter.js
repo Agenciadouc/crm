@@ -85,6 +85,13 @@ export function amdSource(filter) {
   return `(SELECT * FROM attendant_metrics_daily_funnel WHERE funnel_kind = '${filter}')`
 }
 
+// Filtro efetivo da conta: sem funil Recompra ativo, tudo e 'todos' (spec §6 — nenhum numero muda).
+export function funnelFor(conn, accountId, query) {
+  const f = parseFunnelFilter(query)
+  if (f === 'todos') return f
+  return hasRepurchaseFunnel(conn, accountId) ? f : 'todos'
+}
+
 export function hasRepurchaseFunnel(conn, accountId) {
   return !!conn.prepare("SELECT 1 FROM funnels WHERE account_id = ? AND kind = 'recompra' AND is_active = 1 LIMIT 1").get(accountId)
 }

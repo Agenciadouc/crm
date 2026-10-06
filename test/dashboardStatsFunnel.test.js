@@ -47,3 +47,13 @@ test('agents: periodo e conversoes de recompra por atendente', () => {
   assert.equal(ana('recompra').leads_total, 1)
   assert.equal(ana('recompra').conversions, 1)
 })
+
+test('venda no mesmo dia em que o lead chegou conta na conversao (horario da venda antes da chegada)', () => {
+  const { db, s } = setup()
+  const hoje = db.prepare("INSERT INTO leads (account_id, funnel_id, stage_id, name, phone, created_at) VALUES (?, ?, ?, 'Hoje', '5548999990001', '2026-10-20 14:00:00')").run(s.accountId, s.vendasFunnelId, s.stages.novo).lastInsertRowid
+  db.prepare("INSERT INTO stage_history (lead_id, from_stage_id, to_stage_id, created_at) VALUES (?, NULL, ?, '2026-10-20 14:00:00')").run(hoje, s.stages.novo)
+  db.prepare("INSERT INTO lead_sales (account_id, lead_id, value, sale_date) VALUES (?, ?, 300, '2026-10-20 12:00:00')").run(s.accountId, hoje)
+  const st = computeDashboardStats(db, s.accountId, { days: '30', funnel: 'vendas' }, NOW)
+  assert.equal(st.totalLeads, 4)
+  assert.equal(st.conversionRate, (2 / 4) * 100) // Maria e Hoje
+})

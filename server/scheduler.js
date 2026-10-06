@@ -14,7 +14,7 @@ import { listGhostCandidates, listDailyCheckInstances, listWebhookReRegister, cl
 import { createUzapiStatusSync } from './services/whatsapp/uzapiStatusSync.js'
 import { createInstanceManager } from './services/whatsapp/instanceManager.js'
 import { aggregateAllAccounts } from './services/attendantMetrics.js'
-import { backfillFunnelMetrics } from './services/attendantMetricsCompute.js'
+import { backfillFunnelMetricsAsync } from './services/attendantMetricsCompute.js'
 import { analyzeAllAccounts } from './services/conversationAnalyzer.js'
 import { canRoteiroAi } from './services/aiBudget.js'
 import { createRoteiroAi } from './services/roteiro/aiAdapter.js'
@@ -745,8 +745,11 @@ export function startScheduler() {
     runAutoRescue().catch(e => console.error('[AutoRescue boot]', e.message))
   }, 60 * 1000)
   // Atendimentos por funil: preenche 1x os ultimos 90 dias (spec filtro de funil §5b). Marca em app_settings.
+  // Aos poucos (um atendente/dia por vez, cedendo a vez ao resto do servidor) e retoma se reiniciar.
   setTimeout(() => {
-    try { const r = backfillFunnelMetrics(db, 90); if (r.done) console.log('[AMD funnel backfill] 90 dias preenchidos') } catch (e) { console.error('[AMD funnel backfill]', e.message) }
+    backfillFunnelMetricsAsync(db, 90)
+      .then(r => { if (r.done) console.log('[AMD funnel backfill] 90 dias preenchidos') })
+      .catch(e => console.error('[AMD funnel backfill]', e.message))
   }, 3 * 60 * 1000)
   // Daily instance health check (auto-reconecta disconnected)
   scheduleDailyHealthCheck()

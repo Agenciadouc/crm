@@ -292,7 +292,7 @@ export default function AttendantAnalytics() {
 
   // Switch loader on tab/days
   useEffect(() => {
-    if (!accountId) return
+    if (!accountId || funnel === null) return // espera o filtro de funil
     if (tab === 'overview') loadOverview()
     else if (tab === 'ranking') loadRanking()
     else if (tab === 'critical') loadCritical()

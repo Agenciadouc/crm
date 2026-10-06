@@ -11,6 +11,14 @@ export function normalizeFunnel(v) {
   return FUNNEL_OPTIONS.some(o => o.value === v) ? v : 'vendas'
 }
 
+// Filtro efetivo da tela: null enquanto nao se sabe se a conta tem funil Recompra (a tela espera para
+// nao buscar duas vezes); conta sem Recompra = 'todos' (nada muda nos numeros).
+export function effectiveFunnel(value, available, ready) {
+  if (!ready) return null
+  if (!available) return 'todos'
+  return normalizeFunnel(value)
+}
+
 // Pedaco de query string: "&funnel=vendas"
 export function funnelQuery(v) {
   return `&funnel=${normalizeFunnel(v)}`

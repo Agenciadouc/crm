@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createLtvTestDb } from './helpers/ltvDb.js'
 import { seedMaria } from './helpers/funnelFilterDb.js'
-import { computeAttendantDay, ensureFunnelMetricsTable, upsertFunnelDay, backfillFunnelMetrics } from '../server/services/attendantMetricsCompute.js'
+import { computeAttendantDay, ensureFunnelMetricsTable, upsertFunnelDay, backfillFunnelMetrics, backfillFunnelMetricsAsync } from '../server/services/attendantMetricsCompute.js'
 
 function tryExec(db, sql) { try { db.exec(sql) } catch {} }
 
@@ -56,4 +56,20 @@ test('upsert por funil e preenchimento unico', () => {
 test('data invalida e recusada', () => {
   const { db, s } = setup()
   assert.throws(() => computeAttendantDay(db, s.accountId, s.atendenteId, "2026-10-26'; --", 'vendas'))
+})
+
+test('preenchimento aos poucos: cede a vez entre os dias e retoma sem refazer o que ja existe', async () => {
+  const { db, s } = setup()
+  db.exec('UPDATE accounts SET attendant_analytics_enabled = 1')
+  // dia 26 ja calculado antes (ex.: servidor reiniciou no meio): fica como esta
+  const m = computeAttendantDay(db, s.accountId, s.atendenteId, '2026-10-26', 'recompra')
+  upsertFunnelDay(db, s.accountId, s.atendenteId, '2026-10-26', 'vendas', { ...m, leads_responded: 99 })
+  upsertFunnelDay(db, s.accountId, s.atendenteId, '2026-10-26', 'recompra', { ...m, leads_responded: 99 })
+  let pauses = 0
+  const r = await backfillFunnelMetricsAsync(db, 3, new Date('2026-10-27T12:00:00Z'), { pause: async () => { pauses++ } })
+  assert.equal(r.done, true)
+  assert.ok(pauses >= 2)
+  assert.equal(db.prepare("SELECT leads_responded v FROM attendant_metrics_daily_funnel WHERE date = '2026-10-26' AND funnel_kind = 'recompra'").get().v, 99)
+  assert.ok(db.prepare("SELECT COUNT(*) c FROM attendant_metrics_daily_funnel WHERE date = '2026-10-25'").get().c >= 2)
+  assert.equal((await backfillFunnelMetricsAsync(db, 3, new Date('2026-10-27T12:00:00Z'), { pause: async () => {} })).done, false)
 })

@@ -27,3 +27,10 @@ test('leadMatchesFunnel e stagesForFunnel', () => {
   assert.deepEqual(stagesForFunnel(funnels, 'vendas').map(s => s.id), [10, 30])
   assert.deepEqual(stagesForFunnel(funnels, 'todos').map(s => s.id), [10, 20, 30])
 })
+
+test('effectiveFunnel: espera saber se a conta tem Recompra antes de buscar', async () => {
+  const { effectiveFunnel } = await import('../src/lib/funnelFilter.js')
+  assert.equal(effectiveFunnel('vendas', false, false), null)   // ainda carregando: nao busca
+  assert.equal(effectiveFunnel('vendas', false, true), 'todos') // conta sem Recompra
+  assert.equal(effectiveFunnel('recompra', true, true), 'recompra')
+})

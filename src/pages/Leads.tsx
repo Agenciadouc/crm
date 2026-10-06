@@ -82,7 +82,7 @@ export default function Leads() {
   }, [accountId])
 
   const loadLeads = () => {
-    if (!accountId) return
+    if (!accountId || funnelFilter === null) return // espera o filtro de funil
     setLoading(true)
     fetchLeads(accountId, {
       search: search || undefined, stage_id: stageFilter ? +stageFilter : undefined,

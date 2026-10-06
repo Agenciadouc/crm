@@ -36,7 +36,7 @@ export default function Dashboard() {
   const [funnel, setFunnel, funnelAvailable] = useFunnelFilter(accountId)
 
   useEffect(() => {
-    if (!accountId) return
+    if (!accountId || funnel === null) return // espera o filtro de funil
     setLoading(true)
     Promise.all([
       fetchDashboardStats(accountId, days, city, funnel).catch(() => null),

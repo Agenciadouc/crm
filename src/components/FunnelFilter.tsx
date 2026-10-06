@@ -1,22 +1,26 @@
 import { useEffect, useState } from 'react'
 import { fetchFunnels } from '../lib/api'
-import { FUNNEL_OPTIONS, normalizeFunnel, type FunnelValue } from '../lib/funnelFilter.js'
+import { FUNNEL_OPTIONS, normalizeFunnel, effectiveFunnel, type FunnelValue } from '../lib/funnelFilter.js'
 
 // Filtro de funil das telas (Vendas novas | Recompra | Todos) — spec 2026-10-05 filtro de funil.
 // A escolha vale para todas as telas da conta (guardada no navegador, igual ao filtro de cidade).
 // Conta sem funil Recompra: available = false, o seletor some e o valor efetivo e 'todos'.
 const storageKey = (accountId: number) => `dros_funnel_filter_${accountId}`
 
-export function useFunnelFilter(accountId: number | null | undefined): [FunnelValue, (v: FunnelValue) => void, boolean] {
+// Valor = null enquanto carrega (a tela nao busca ainda, para nao pedir 'todos' e depois 'vendas').
+export function useFunnelFilter(accountId: number | null | undefined): [FunnelValue | null, (v: FunnelValue) => void, boolean] {
   const [value, setValueState] = useState<FunnelValue>('vendas')
   const [available, setAvailable] = useState(false)
+  const [ready, setReady] = useState(false)
   useEffect(() => {
-    if (!accountId) { setAvailable(false); return }
+    setReady(false)
+    setAvailable(false)
+    if (!accountId) return
     let alive = true
     try { setValueState(normalizeFunnel(localStorage.getItem(storageKey(accountId)))) } catch { setValueState('vendas') }
     fetchFunnels(accountId)
-      .then(fs => { if (alive) setAvailable(fs.some(f => f.kind === 'recompra')) })
-      .catch(() => { if (alive) setAvailable(false) })
+      .then(fs => { if (alive) { setAvailable(fs.some(f => f.kind === 'recompra')); setReady(true) } })
+      .catch(() => { if (alive) { setAvailable(false); setReady(true) } })
     return () => { alive = false }
   }, [accountId])
   const setValue = (v: FunnelValue) => {
@@ -24,11 +28,11 @@ export function useFunnelFilter(accountId: number | null | undefined): [FunnelVa
     if (!accountId) return
     try { localStorage.setItem(storageKey(accountId), v) } catch {}
   }
-  return [available ? value : 'todos', setValue, available]
+  return [effectiveFunnel(value, available, ready), setValue, available]
 }
 
-export default function FunnelFilter({ value, onChange, available }: { value: FunnelValue; onChange: (v: FunnelValue) => void; available: boolean }) {
-  if (!available) return null
+export default function FunnelFilter({ value, onChange, available }: { value: FunnelValue | null; onChange: (v: FunnelValue) => void; available: boolean }) {
+  if (!available || !value) return null
   return (
     <div role="radiogroup" aria-label="Funil" style={{ display: 'inline-flex', gap: 4 }}>
       {FUNNEL_OPTIONS.map(o => (
@@ -49,7 +53,7 @@ export default function FunnelFilter({ value, onChange, available }: { value: Fu
 }
 
 // Aviso nas telas de custo: investimento/meta sao de venda nova, entao na Recompra aparecem como "—".
-export function FunnelCostNotice({ funnel }: { funnel: FunnelValue }) {
+export function FunnelCostNotice({ funnel }: { funnel: FunnelValue | null }) {
   if (funnel !== 'recompra') return null
   return (
     <div className="text-muted" style={{ fontSize: 13, margin: '4px 0 12px' }}>

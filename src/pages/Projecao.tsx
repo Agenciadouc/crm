@@ -49,7 +49,7 @@ export default function Projecao() {
   const [funnel, setFunnel, funnelAvailable] = useFunnelFilter(accountId)
 
   const load = () => {
-    if (!accountId) return
+    if (!accountId || funnel === null) return // espera o filtro de funil
     setLoading(true)
     fetchProjecao(accountId, past, future, city, funnel)
       .then(setData)

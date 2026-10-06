@@ -43,7 +43,7 @@ function fmtInt(v: number | null | undefined) {
 }
 
 // city: cidade escolhida no Dashboard ('' = todas); funnel: Vendas novas | Recompra | Todos
-interface Props { accountId: number; city?: string; funnel?: FunnelValue }
+interface Props { accountId: number; city?: string; funnel?: FunnelValue | null }
 
 export default function FunilMensalPanel({ accountId, city = '', funnel = 'todos' }: Props) {
   const isRec = funnel === 'recompra'
@@ -55,6 +55,7 @@ export default function FunilMensalPanel({ accountId, city = '', funnel = 'todos
   const [editing, setEditing] = useState(false)
 
   const load = () => {
+    if (funnel === null) return // filtro de funil ainda carregando
     setLoading(true)
     fetchFunilMensal(accountId, month, city, funnel)
       .then(setData)

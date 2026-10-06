@@ -376,7 +376,7 @@ export default function Chat() {
   // Load leads list — limit reduzido de 500 pra 100 (suficiente pra lista lateral ativa).
   // Quem busca leads especificos usa o campo "Buscar contato" (server-side com debounce).
   const loadLeadsList = useCallback(() => {
-    if (!accountId) return
+    if (!accountId || funnelFilter === null) return // espera o filtro de funil
     const filters: any = { limit: 100 }
     if (showArchived) filters.show_archived = '1'
     if (debouncedSearch.length >= 2) filters.search = debouncedSearch

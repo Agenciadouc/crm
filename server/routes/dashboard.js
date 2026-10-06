@@ -8,7 +8,7 @@ import { cityWhere, leadCityExists, hasGeo } from '../services/city.js'
 import { countsInMetrics } from '../services/contacts/scope.js'
 import { computeDashboardStats, computeAgentStats } from '../services/dashboardStats.js'
 import { cascadeFor, monthBounds } from '../services/funnelCascade.js'
-import { parseFunnelFilter, amdSource, insightFunnelWhere, currentFunnelWhere } from '../services/funnelFilter.js'
+import { funnelFor, amdSource, insightFunnelWhere, currentFunnelWhere } from '../services/funnelFilter.js'
 
 // Filtro de cidade/estado + so contatos que contam nos numeros (lead e cliente; revendedor e
 // interno ficam fora — spec 2026-10-05 crm simples §2).
@@ -159,7 +159,7 @@ router.get('/attendants', requireRole('super_admin', 'gerente'), requireAnalytic
   const sinceDate = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10)
   const byCity = hasGeo(req.query)
   const lce = leadCityExists('ci.lead_id', req.query)
-  const funnel = parseFunnelFilter(req.query) // vendas | recompra | todos (spec filtro de funil §5b)
+  const funnel = funnelFor(db, req.accountId, req.query) // vendas | recompra | todos (spec filtro de funil §5b)
   const ifw = insightFunnelWhere('ci.lead_id', 'ci.analyzed_at', funnel)
 
   // Agrega métricas dos últimos N dias por user
@@ -268,7 +268,7 @@ router.get('/conversation-insights', requireRole('super_admin', 'gerente'), requ
   const attendantId = req.query.attendant_id ? parseInt(req.query.attendant_id) : null
   const limit = Math.max(1, Math.min(200, parseInt(req.query.limit) || 50))
 
-  const funnel = parseFunnelFilter(req.query) // vendas | recompra | todos (spec filtro de funil §5b)
+  const funnel = funnelFor(db, req.accountId, req.query) // vendas | recompra | todos (spec filtro de funil §5b)
   let where = 'ci.account_id = ? AND ci.analyzed_at >= ?' + insightFunnelWhere('ci.lead_id', 'ci.analyzed_at', funnel)
   const params = [req.accountId, sinceDate]
   if (attendantId) { where += ' AND ci.attendant_user_id = ?'; params.push(attendantId) }
@@ -407,7 +407,7 @@ router.get('/overview-v2', requireRole('super_admin', 'gerente'), requireAnalyti
   const byCity = hasGeo(req.query)
   const lci = leadCityExists('conversation_insights.lead_id', req.query)
   const cwl = cityWhere('l', req.query) // analise de conversas: mesma base dos cartoes (leadCityExists)
-  const funnel = parseFunnelFilter(req.query) // vendas | recompra | todos (spec filtro de funil §5b)
+  const funnel = funnelFor(db, req.accountId, req.query) // vendas | recompra | todos (spec filtro de funil §5b)
   const ifw = insightFunnelWhere('conversation_insights.lead_id', 'conversation_insights.analyzed_at', funnel)
   const ifwCi = insightFunnelWhere('ci.lead_id', 'ci.analyzed_at', funnel)
   const cfw = currentFunnelWhere('l', funnel)
@@ -520,7 +520,7 @@ router.get('/ranking-v2', requireRole('super_admin', 'gerente'), requireAnalytic
   const sinceDate = since.slice(0, 10)
   const byCity = hasGeo(req.query)
   const lce = leadCityExists('ci.lead_id', req.query)
-  const funnel = parseFunnelFilter(req.query) // vendas | recompra | todos (spec filtro de funil §5b)
+  const funnel = funnelFor(db, req.accountId, req.query) // vendas | recompra | todos (spec filtro de funil §5b)
 
   const rows = db.prepare(`
     SELECT
@@ -578,7 +578,7 @@ router.get('/critical-conversations', requireRole('super_admin', 'gerente'), req
   const limit = Math.min(100, Math.max(1, parseInt(req.query.limit || '50')))
   const since = new Date(Date.now() - days * 86400 * 1000).toISOString().slice(0, 19).replace('T', ' ')
   const cwl = cityWhere('l', req.query) // idem: lista igual ao cartao
-  const funnel = parseFunnelFilter(req.query) // vendas | recompra | todos (spec filtro de funil §5b)
+  const funnel = funnelFor(db, req.accountId, req.query) // vendas | recompra | todos (spec filtro de funil §5b)
 
   const rows = db.prepare(`
     SELECT ci.lead_id, l.name as lead_name, l.phone as lead_phone,
@@ -659,7 +659,7 @@ router.get('/alerts', requireRole('super_admin', 'gerente'), requireAnalyticsEna
   const status = req.query.status || 'open'
   // Com cidade: so alertas de leads dessa cidade (alerta sem lead fica de fora)
   const cwl = cityWhere('l', req.query) // idem: lista igual ao cartao
-  const funnel = parseFunnelFilter(req.query) // vendas | recompra | todos (spec filtro de funil §5b)
+  const funnel = funnelFor(db, req.accountId, req.query) // vendas | recompra | todos (spec filtro de funil §5b)
   const rows = db.prepare(`
     SELECT a.*, l.name as lead_name, l.phone as lead_phone, u.name as assigned_to_name
     FROM analyst_alerts a
@@ -747,7 +747,7 @@ router.get('/market-intelligence', requireRole('super_admin', 'gerente'), requir
   if (!req.accountId) return res.status(400).json({ error: 'account_id required' })
   const days = Math.min(365, Math.max(1, parseInt(req.query.days || '30')))
   const since = new Date(Date.now() - days * 86400 * 1000).toISOString().slice(0, 19).replace('T', ' ')
-  const funnel = parseFunnelFilter(req.query) // vendas | recompra | todos (spec filtro de funil §5b)
+  const funnel = funnelFor(db, req.accountId, req.query) // vendas | recompra | todos (spec filtro de funil §5b)
 
   const rows = db.prepare(`
     SELECT objecoes_detectadas, motivos_perda, riscos_detectados
@@ -846,7 +846,7 @@ router.get('/funil-mensal/:month', requireRole('super_admin', 'gerente', 'atende
   if (!req.accountId) return res.status(400).json({ error: 'account_id required' })
   const month = req.params.month === 'current' ? currentYearMonth() : req.params.month
   const city = { city: req.query.city, uf: req.query.uf } // filtro de cidade/estado
-  const funnel = parseFunnelFilter(req.query) // vendas | recompra | todos
+  const funnel = funnelFor(db, req.accountId, req.query) // vendas | recompra | todos
   const cascade = computeFunnelCascade(req.accountId, month, city, funnel)
   if (!cascade) return res.status(400).json({ error: 'formato de mes invalido (use YYYY-MM ou current)' })
 
@@ -935,7 +935,7 @@ router.get('/projecao', requireRole('super_admin', 'gerente'), (req, res) => {
   // da conta inteira) ficam nulos e a tela avisa (decisao do dono, 24/09/2026).
   const city = { city: req.query.city, uf: req.query.uf } // filtro de cidade/estado
   const byCity = hasGeo(city)
-  const funnel = parseFunnelFilter(req.query) // vendas | recompra | todos
+  const funnel = funnelFor(db, req.accountId, req.query) // vendas | recompra | todos
   // Na Recompra nao ha investimento/projecao (sao de venda nova): mesmos nulos da cidade.
   const hideCost = byCity || funnel === 'recompra'
 

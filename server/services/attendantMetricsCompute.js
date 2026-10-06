@@ -203,6 +203,31 @@ export function aggregateFunnelDay(conn, accountId, userId, dateStr) {
 
 const BACKFILL_KEY = 'amd_funnel_backfill_v1'
 
+const nextTick = () => new Promise(r => setTimeout(r, 0))
+
+// Versao usada no servidor: um atendente/dia por vez (numa transacao), cedendo a vez ao resto do
+// processo entre os dias (webhooks, SSE, API nao ficam travados). Dia que ja tem as duas linhas e
+// pulado, entao se o servidor reiniciar no meio, retoma de onde parou. Marca app_settings no fim.
+export async function backfillFunnelMetricsAsync(conn, days = 90, today = new Date(), { pause = nextTick } = {}) {
+  if (conn.prepare('SELECT 1 FROM app_settings WHERE key = ?').get(BACKFILL_KEY)) return { done: false }
+  const accounts = conn.prepare('SELECT id FROM accounts WHERE is_active = 1 AND attendant_analytics_enabled = 1').all()
+  const dates = []
+  for (let i = days; i >= 1; i--) dates.push(new Date(today.getTime() - i * 86400000).toISOString().slice(0, 10))
+  const already = conn.prepare('SELECT COUNT(*) c FROM attendant_metrics_daily_funnel WHERE account_id = ? AND user_id = ? AND date = ?')
+  for (const acc of accounts) {
+    const users = conn.prepare(`
+      SELECT id FROM users WHERE account_id = ? AND role IN ('atendente', 'gerente') AND is_active = 1 AND COALESCE(is_bot, 0) = 0
+    `).all(acc.id)
+    for (const u of users) for (const d of dates) {
+      if (already.get(acc.id, u.id, d).c >= 2) continue
+      try { conn.transaction(() => aggregateFunnelDay(conn, acc.id, u.id, d))() } catch (e) { console.error(`[AMD funnel backfill] account=${acc.id} user=${u.id} date=${d}:`, e.message) }
+      await pause()
+    }
+  }
+  conn.prepare("INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, datetime('now'))").run(BACKFILL_KEY)
+  return { done: true }
+}
+
 // Preenchimento unico dos ultimos `days` dias (ate ontem). Marca app_settings para nao repetir.
 export function backfillFunnelMetrics(conn, days = 90, today = new Date()) {
   if (conn.prepare('SELECT 1 FROM app_settings WHERE key = ?').get(BACKFILL_KEY)) return { done: false }

@@ -4,7 +4,7 @@ import { createLtvTestDb } from './helpers/ltvDb.js'
 import { seedMaria } from './helpers/funnelFilterDb.js'
 import {
   parseFunnelFilter, kindAtSql, firstKindSql, kindAtWhere, currentFunnelWhere,
-  leadListFunnelWhere, periodLeadsSql, salesWhere, amdSource, hasRepurchaseFunnel,
+  leadListFunnelWhere, periodLeadsSql, salesWhere, amdSource, hasRepurchaseFunnel, funnelFor,
 } from '../server/services/funnelFilter.js'
 
 function setup() { const db = createLtvTestDb(); return { db, s: seedMaria(db) } }
@@ -79,4 +79,11 @@ test('hasRepurchaseFunnel por conta', () => {
   const { db, s } = setup()
   assert.equal(hasRepurchaseFunnel(db, s.accountId), true)
   assert.equal(hasRepurchaseFunnel(db, s.otherAccountId), false)
+})
+
+test('funnelFor: conta sem funil Recompra vira todos', () => {
+  const { db, s } = setup()
+  assert.equal(funnelFor(db, s.accountId, { funnel: 'vendas' }), 'vendas')
+  assert.equal(funnelFor(db, s.otherAccountId, { funnel: 'vendas' }), 'todos')
+  assert.equal(funnelFor(db, s.otherAccountId, { funnel: 'recompra' }), 'todos')
 })

@@ -42,10 +42,10 @@ export function cascadeFor(conn, accountId, yearMonth, city = null, funnel = 'to
   `).get(accountId, b.start, b.end, ...cwl.params).v || 0
 
   if (f === 'recompra') {
+    // Turma do mes (igual ao Dashboard): dos que entraram na recompra no mes, quantos recompraram depois
     const won = conn.prepare(`
-      SELECT COUNT(DISTINCT ls.lead_id) as c FROM lead_sales ls JOIN leads l ON l.id = ls.lead_id
-      WHERE l.account_id = ? AND l.is_active = 1 AND l.is_blocked = 0
-        AND ls.sale_date >= ? AND ls.sale_date < ?${salesWhere('ls', 'recompra')}${cwl.sql}
+      SELECT COUNT(DISTINCT l.id) as c ${base}
+        AND EXISTS (SELECT 1 FROM lead_sales ls WHERE ls.lead_id = l.id AND date(ls.sale_date) >= date(p.period_at)${salesWhere('ls', 'recompra')})
     `).get(accountId, b.start, b.end, ...cwl.params).c
     return {
       total, qualified: null, meeting: null, won,
