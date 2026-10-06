@@ -16,6 +16,7 @@ import { applyPanelLayoutSchema } from './services/panelLayouts.js'
 import { applyLtvSchema } from './services/ltv/schema.js'
 import { backfillAllCustomers } from './services/ltv/customer.js'
 import { ensureAllRepurchaseFunnels } from './services/ltv/funnel.js'
+import { ensureFunnelMetricsTable } from './services/attendantMetricsCompute.js'
 import { applyKeywordSignalsSchema, seedDefaultKeywordsForUntouchedStages } from './services/signals/schema.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -630,6 +631,8 @@ db.exec(`
   )
 `)
 try { db.exec('CREATE INDEX IF NOT EXISTS idx_metrics_daily_lookup ON attendant_metrics_daily(account_id, date, user_id)') } catch (e) {}
+// Mesmo agregado separado por funil (vendas/recompra) — spec 2026-10-05 filtro de funil §5b
+ensureFunnelMetricsTable(db)
 
 // Rate limit do "Analisar agora" + limite mensal de tokens p/ análise + timestamp do último cron noturno
 addColumnIfNotExists('accounts', 'last_analysis_at', 'TEXT')
