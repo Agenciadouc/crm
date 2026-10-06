@@ -24,6 +24,7 @@ import {
 import EditTaskModal from '../components/EditTaskModal'
 import FilterDropdown, { type FilterValue } from '../components/FilterDropdown'
 import { useCityFilter } from '../components/CityFilter'
+import FunnelFilter, { useFunnelFilter } from '../components/FunnelFilter'
 import MoreFilters, { useScoreFilter } from '../components/MoreFilters'
 import ScoreBadge from '../components/score/ScoreBadge'
 import ScoreLine from '../components/score/ScoreLine'
@@ -51,6 +52,7 @@ import CustomerCard from '../components/CustomerCard'
 import RecognizedQuestionBar from '../components/roteiro/RecognizedQuestionBar'
 import { confirmAsk } from '../lib/roteiroApi'
 import { geoParams, leadMatchesGeo } from '../lib/geoFilter.js'
+import { funnelParams, leadMatchesFunnel, stagesForFunnel } from '../lib/funnelFilter.js'
 import { scoreParams, leadMatchesScore } from '../lib/scoreFilter.js'
 import {
   MessageCircle, Search, Send, Phone, User, Edit3, Save, X, Plus,
@@ -176,6 +178,12 @@ export default function Chat() {
   const [attendantFilter, setAttendantFilter] = useState<FilterValue[]>([])
   const [stageFilter, setStageFilter] = useState<FilterValue[]>([])
   const [geoFilter, setGeoFilter] = useCityFilter(accountId)
+  // Vendas novas | Recompra | Todos (vale para todas as telas da conta)
+  const [funnelFilter, setFunnelFilter, funnelAvailable] = useFunnelFilter(accountId)
+  useEffect(() => {
+    const ok = new Set(stagesForFunnel(funnels, funnelFilter).map(st => st.id))
+    setStageFilter(prev => (prev.some(v => typeof v === 'number' && !ok.has(v)) ? prev.filter(v => typeof v !== 'number' || ok.has(v)) : prev))
+  }, [funnelFilter, funnels])
   const [scoreFilter, setScoreFilter] = useScoreFilter(accountId)
   // Ordenar: Mais recentes (padrao, nao lidas primeiro) | Termometro (nota mais alta primeiro)
   const [listSort, setListSort] = useState<'recent' | 'score'>('recent')
@@ -382,11 +390,11 @@ export default function Chat() {
     if (attCsv) filters.attendant_id = attCsv
     const instCsv = toCsv(instanceFilter)
     if (instCsv) filters.instance_id = instCsv
-    Object.assign(filters, geoParams(geoFilter), scoreParams(scoreFilter))
+    Object.assign(filters, geoParams(geoFilter), scoreParams(scoreFilter), funnelParams(funnelFilter))
     if (listSort === 'score') filters.sort = 'score'
 
     fetchLeads(accountId, filters).then(data => setLeads(data.leads))
-  }, [accountId, instanceFilter, tagFilter, stageFilter, attendantFilter, showArchived, debouncedSearch, geoFilter, scoreFilter, listSort])
+  }, [accountId, instanceFilter, tagFilter, stageFilter, attendantFilter, showArchived, debouncedSearch, geoFilter, scoreFilter, listSort, funnelFilter])
   useEffect(() => { loadLeadsList() }, [loadLeadsList])
 
   // Race token: cada chamada de loadLead recebe um id incremental.
@@ -931,6 +939,8 @@ export default function Chat() {
     }
     // Estado/cidade: a lista ja vem filtrada do servidor; aqui cobre lead que chega em tempo real
     if (geoFilter) result = result.filter(l => leadMatchesGeo(l, geoFilter))
+    // Funil: idem (lista vem filtrada; cobre lead que chega ou muda de funil em tempo real)
+    result = result.filter(l => leadMatchesFunnel(l, funnelFilter, funnels))
     result = result.filter(l => leadMatchesScore(l, scoreFilter))
     if (search.trim()) {
       const s = search.toLowerCase()
@@ -960,7 +970,7 @@ export default function Chat() {
       const bTs = b.last_inbound_at || b.updated_at || ''
       return bTs.localeCompare(aTs)
     })
-  }, [leads, search, tagFilter, attendantFilter, stageFilter, recentlyReadIds, geoFilter, scoreFilter, listSort])
+  }, [leads, search, tagFilter, attendantFilter, stageFilter, recentlyReadIds, geoFilter, scoreFilter, listSort, funnelFilter, funnels])
 
   // Title da aba: soma total de unread → mostra "(N) Dros CRM"
   useEffect(() => {
@@ -1603,6 +1613,7 @@ export default function Chat() {
       <div className="chat-header">
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <h1 style={{ fontSize: 20, margin: 0, whiteSpace: 'nowrap' }}><MessageCircle size={20} style={{ verticalAlign: -4, marginRight: 6 }} />Chat</h1>
+          <FunnelFilter value={funnelFilter} onChange={setFunnelFilter} available={funnelAvailable} />
           <FilterDropdown
             label="instancias"
             width={200}
@@ -1623,7 +1634,7 @@ export default function Chat() {
           <FilterDropdown
             label="etapas"
             width={180}
-            options={allStages.map(s => ({ value: s.id, label: s.name }))}
+            options={stagesForFunnel(funnels, funnelFilter).map(s => ({ value: s.id, label: s.name }))}
             selected={stageFilter}
             onChange={setStageFilter}
           />

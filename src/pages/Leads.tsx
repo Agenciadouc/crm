@@ -5,10 +5,12 @@ import { useAccount } from '../context/AccountContext'
 import { useSSE } from '../context/SSEContext'
 import AccountSelector from '../components/AccountSelector'
 import { useCityFilter } from '../components/CityFilter'
+import FunnelFilter, { useFunnelFilter } from '../components/FunnelFilter'
 import MoreFilters, { useScoreFilter } from '../components/MoreFilters'
 import HelpTip from '../components/HelpTip'
 import ScoreBadge from '../components/score/ScoreBadge'
 import { geoParams } from '../lib/geoFilter.js'
+import { funnelParams, stagesForFunnel } from '../lib/funnelFilter.js'
 import { scoreParams, isScoreFilterActive, EMPTY_SCORE_FILTER } from '../lib/scoreFilter.js'
 import { useCustomerFilter, customerParams, isCustomerFilterActive, EMPTY_CUSTOMER_FILTER } from '../lib/customerFilter.js'
 import { SCORE_HELP_TEXT } from '../lib/score'
@@ -50,6 +52,8 @@ export default function Leads() {
   const [dateTo, setDateTo] = useState('')
   const [tagFilter, setTagFilter] = useState('')
   const [cityFilter, setCityFilter] = useCityFilter(accountId)
+  // Vendas novas | Recompra | Todos (vale para todas as telas da conta)
+  const [funnelFilter, setFunnelFilter, funnelAvailable] = useFunnelFilter(accountId)
   const [scoreFilter, setScoreFilter] = useScoreFilter(accountId)
   const [customerFilter, setCustomerFilter] = useCustomerFilter(accountId)
   // Clique no cabecalho "Termometro": mais quente primeiro (sort=score)
@@ -86,6 +90,7 @@ export default function Leads() {
       date_from: dateFrom || undefined, date_to: dateTo || undefined,
       tag: tagFilter ? +tagFilter : undefined,
       ...geoParams(cityFilter),
+      ...funnelParams(funnelFilter),
       ...scoreParams(scoreFilter),
       ...customerParams(customerFilter),
       sort: sortScore ? 'score' : undefined,
@@ -97,7 +102,7 @@ export default function Leads() {
       .finally(() => setLoading(false))
   }
 
-  useEffect(loadLeads, [accountId, search, stageFilter, sourceFilter, attendantFilter, dateFrom, dateTo, tagFilter, cityFilter, scoreFilter, customerFilter, sortScore, showArchived, page])
+  useEffect(loadLeads, [accountId, search, stageFilter, sourceFilter, attendantFilter, dateFrom, dateTo, tagFilter, cityFilter, scoreFilter, customerFilter, sortScore, showArchived, page, funnelFilter])
 
   const loadArchivedCount = useCallback(() => {
     if (!accountId) return
@@ -162,7 +167,7 @@ export default function Leads() {
   return (
     <div>
       <div className="page-header">
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}><h1>Leads <span style={{ fontSize: 14, color: '#9B96B0', fontWeight: 400 }}>({formatNumber(total)})</span></h1><AccountSelector /></div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}><h1>Leads <span style={{ fontSize: 14, color: '#9B96B0', fontWeight: 400 }}>({formatNumber(total)})</span></h1><AccountSelector /><FunnelFilter value={funnelFilter} onChange={v => { setFunnelFilter(v); setStageFilter(''); setPage(1) }} available={funnelAvailable} /></div>
         <div className="page-header-actions">
           <button
             className={`btn btn-sm ${showArchived ? 'btn-primary' : 'btn-secondary'}`}
@@ -178,7 +183,7 @@ export default function Leads() {
             const token = localStorage.getItem('dros_crm_token')
             // CSV sai com o mesmo local, termometro e ordem da lista
             const q = new URLSearchParams({ account_id: String(accountId) })
-            Object.entries({ ...geoParams(cityFilter), ...scoreParams(scoreFilter), ...customerParams(customerFilter), ...(sortScore ? { sort: 'score' } : {}) })
+            Object.entries({ ...geoParams(cityFilter), ...funnelParams(funnelFilter), ...scoreParams(scoreFilter), ...customerParams(customerFilter), ...(sortScore ? { sort: 'score' } : {}) })
               .forEach(([k, v]) => { if (v !== undefined && v !== '') q.set(k, String(v)) })
             const res = await fetch(`${import.meta.env.BASE_URL.replace(/\/$/, '')}/api/leads/export?${q}`, { headers: { Authorization: `Bearer ${token}` } })
             const blob = await res.blob()
@@ -200,7 +205,7 @@ export default function Leads() {
         <input className="input search-input" placeholder="Buscar nome, telefone, email..." value={search} onChange={e => { setSearch(e.target.value); setPage(1) }} />
         <select className="select" value={stageFilter} onChange={e => { setStageFilter(e.target.value); setPage(1) }}>
           <option value="">Todas etapas</option>
-          {allStages.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+          {stagesForFunnel(funnels, funnelFilter).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
         </select>
         <select className="select" value={sourceFilter} onChange={e => { setSourceFilter(e.target.value); setPage(1) }}>
           <option value="">Todas fontes ({sourceOptions.reduce((s, o) => s + o.count, 0)})</option>
