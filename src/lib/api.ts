@@ -60,6 +60,7 @@ export interface Lead {
   wa_remote_jid: string | null; instance_id: number | null; last_instance_id?: number | null; profile_pic_url: string | null; is_active: number; created_at: string; updated_at: string
   is_archived?: number; archived_at?: string | null; has_new_after_archive?: number
   contact_type?: 'lead' | 'cliente' | 'revendedor' | 'interno' | null // quem nao e cliente em potencial sai do funil e dos numeros
+  custom_fields?: string | null // informacoes extras (JSON chave: valor), ex.: vindas de uma planilha importada
   contact_type_origin?: string | null
   unread_count?: number  // qtd de msgs inbound nao lidas — zerado ao abrir o chat
   last_inbound_at?: string | null  // timestamp da ultima msg do cliente (nao do atendente) — sort do chat
@@ -1470,3 +1471,22 @@ export const createReason = (accountId: number, input: { grp: 'nao_agora' | 'nao
   apiFetch<{ reason: RepurchaseReason }>(`/api/customers/reasons?account_id=${accountId}`, { method: 'POST', body: JSON.stringify(input) }).then(d => d.reason)
 export const updateReason = (accountId: number, id: number, patch: Partial<{ label: string; is_active: boolean; position: number }>) =>
   apiFetch<{ reason: RepurchaseReason }>(`/api/customers/reasons/${id}?account_id=${accountId}`, { method: 'PUT', body: JSON.stringify(patch) }).then(d => d.reason)
+
+// Importar leads por planilha (spec 2026-10-06 importar leads)
+export interface LeadImportRowBody { row: number; fields: Record<string, string | number | string[]>; extra: Record<string, string> }
+export interface LeadImportBody {
+  rows: LeadImportRowBody[]
+  fileName: string
+  destination: { funnel_id: number; stage_id: number; attendant: { mode: 'none' | 'one' | 'split'; user_id?: number }; contact_type: string; auto_tag: boolean }
+}
+export interface LeadImportPreview {
+  new_count: number; existing_count: number; filled_fields: number
+  skipped: { row: number; reason: string }[]
+  samples: { novos: { name: string; phone: string }[]; existentes: { name: string; phone: string }[] }
+}
+export interface LeadImportResult { created: number; updated: number; skipped: { row: number; reason: string }[]; tag_id: number | null }
+const importReq = (body: LeadImportBody): RequestInit => ({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+export const previewLeadImport = (accountId: number, body: LeadImportBody) =>
+  apiFetch<LeadImportPreview>(`/api/leads/import/preview?account_id=${accountId}`, importReq(body))
+export const importLeads = (accountId: number, body: LeadImportBody) =>
+  apiFetch<LeadImportResult>(`/api/leads/import?account_id=${accountId}`, importReq(body))

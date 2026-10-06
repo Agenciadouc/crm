@@ -8,6 +8,7 @@ import { useCityFilter } from '../components/CityFilter'
 import FunnelFilter, { useFunnelFilter } from '../components/FunnelFilter'
 import MoreFilters, { useScoreFilter } from '../components/MoreFilters'
 import HelpTip from '../components/HelpTip'
+import ImportLeadsModal from '../components/leads/ImportLeadsModal'
 import ScoreBadge from '../components/score/ScoreBadge'
 import { geoParams } from '../lib/geoFilter.js'
 import { funnelParams, stagesForFunnel } from '../lib/funnelFilter.js'
@@ -21,7 +22,7 @@ import {
   archiveLead, unarchiveLead, fetchArchivedCount, fetchWhatsAppInstances,
   formatNumber, type BulkMoveResult, type Lead, type Funnel, type User as UserType, type Tag, type WhatsAppInstance,
 } from '../lib/api'
-import { Plus, Download, Phone, MessageCircle, Clock, CheckSquare, Square, Users, ArrowRight, Archive, ArchiveRestore, ArrowDown, ArrowUpDown, Lock, CheckCircle2, X } from 'lucide-react'
+import { Plus, Upload, Download, Phone, MessageCircle, Clock, CheckSquare, Square, Users, ArrowRight, Archive, ArchiveRestore, ArrowDown, ArrowUpDown, Lock, CheckCircle2, X } from 'lucide-react'
 import { parseSqlDate } from '../lib/dates'
 
 function timeAgo(d: string) { const m = Math.max(0, Math.floor((Date.now() - parseSqlDate(d).getTime()) / 60000)); if (m < 60) return `${m}m`; const h = Math.floor(m / 60); if (h < 24) return `${h}h`; return `${Math.floor(h / 24)}d` }
@@ -60,6 +61,7 @@ export default function Leads() {
   const [sortScore, setSortScore] = useState(false)
   const [sourceOptions, setSourceOptions] = useState<{ value: string; count: number }[]>([])
   const [showNew, setShowNew] = useState(false)
+  const [showImport, setShowImport] = useState(false) // janela Importar leads (so gestor)
   const [newLead, setNewLead] = useState<Record<string, any>>({ name: '', phone: '', email: '', city: '', source: 'manual', empresa: '', cpf_cnpj: '', instagram: '' })
   const [showArchived, setShowArchived] = useState(false)
   const [archivedCount, setArchivedCount] = useState<{ count: number; withActivity: number }>({ count: 0, withActivity: 0 })
@@ -191,6 +193,11 @@ export default function Leads() {
             const a = document.createElement('a'); a.href = url; a.download = `leads-${new Date().toISOString().slice(0,10)}.csv`; a.click()
             URL.revokeObjectURL(url)
           }}><Download size={14} /> Exportar</button>
+          {(user?.role === 'gerente' || user?.role === 'super_admin') && (
+            <button className="btn btn-secondary btn-sm" onClick={() => setShowImport(true)} title="Subir uma lista de leads (.xlsx ou .csv). Ex.: lista de contatos de uma feira.">
+              <Upload size={14} /> Importar
+            </button>
+          )}
           <button
             className="btn btn-primary btn-sm"
             onClick={() => setShowNew(true)}
@@ -392,6 +399,19 @@ export default function Leads() {
       )}
 
       {/* New lead modal */}
+      {showImport && accountId && (
+        <ImportLeadsModal
+          accountId={accountId}
+          funnels={funnels}
+          users={users}
+          onClose={() => setShowImport(false)}
+          onDone={tagId => {
+            setShowImport(false)
+            fetchTags(accountId).then(setTags).catch(() => {})
+            if (tagId) { setTagFilter(String(tagId)); setPage(1) } else loadLeads()
+          }}
+        />
+      )}
       {showNew && (
         <div className="modal-overlay" onClick={() => setShowNew(false)}>
           <div className="modal" onClick={e => e.stopPropagation()}>

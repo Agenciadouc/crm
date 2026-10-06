@@ -20,12 +20,15 @@
     "jsonwebtoken": "^9.0.2",
     "lucide-react": "^0.511.0",
     "node-fetch": "^3.3.2",
+    "papaparse": "^5.7.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "react-router-dom": "^7.6.1",
+    "read-excel-file": "^5.8.8",
     "recharts": "^2.15.3"
   },
   "devDependencies": {
+    "@types/papaparse": "^5.5.2",
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",
     "@vitejs/plugin-react": "^4.2.1",
