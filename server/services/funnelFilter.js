@@ -34,6 +34,12 @@ export function kindAtWhere(leadIdExpr, timeExpr, filter) {
   return ` AND ${kindAtSql(leadIdExpr, timeExpr)} = '${filter}'`
 }
 
+// Insights/erros/alertas da IA: contam no funil em que o lead estava na data (sem lead: so em 'todos').
+export function insightFunnelWhere(leadIdExpr, timeExpr, filter) {
+  const k = kindAtWhere(leadIdExpr, timeExpr, filter)
+  return k ? ` AND ${leadIdExpr} IS NOT NULL${k}` : ''
+}
+
 export function currentFunnelWhere(alias, filter) {
   if (filter !== 'vendas' && filter !== 'recompra') return ''
   return ` AND ${alias}.funnel_id IN (SELECT id FROM funnels WHERE kind = '${filter}')`

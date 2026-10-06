@@ -21,6 +21,15 @@ test('stats nos tres modos (30 dias ate 31/10)', () => {
   assert.deepEqual(st('recompra').bySource.map(x => x.count).reduce((a, b) => a + b, 0), 2)
 })
 
+test('conversao e da turma do periodo: venda de lead antigo nao passa de 100%', () => {
+  const { db, s } = setup()
+  // Volta nasceu em setembro (fora da turma de vendas de outubro) e faz a 1a compra em outubro
+  db.prepare("INSERT INTO lead_sales (account_id, lead_id, value, sale_date) VALUES (?, ?, 50, '2026-10-15 10:00:00')").run(s.accountId, s.volta)
+  const st = computeDashboardStats(db, s.accountId, { days: '30', funnel: 'vendas' }, NOW)
+  assert.equal(st.conversionRate, (1 / 3) * 100) // so a Maria, da turma de outubro, comprou
+  assert.ok(st.conversionRate <= 100)
+})
+
 test('stats: outra conta nao vaza e sem ?funnel = todos', () => {
   const { db, s } = setup()
   const a = computeDashboardStats(db, s.accountId, { days: '30' }, NOW)

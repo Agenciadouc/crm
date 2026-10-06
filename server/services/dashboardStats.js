@@ -39,12 +39,13 @@ export function computeDashboardStats(conn, accountId, query = {}, now = new Dat
     `).get(accountId, ...cwl.params)
     conversionRate = conv.total > 0 ? (conv.converted / conv.total) * 100 : 0
   } else {
-    // 1as vendas / leads novos (vendas) ou recompras / entradas na recompra (recompra)
-    const sales = conn.prepare(`
-      SELECT COUNT(DISTINCT ls.id) c FROM lead_sales ls JOIN leads l ON l.id = ls.lead_id
-      WHERE l.account_id = ? AND l.is_blocked = 0 AND ls.sale_date >= ?${salesWhere('ls', f)}${cwl.sql}
+    // Turma do periodo: dos leads que chegaram (vendas) / entraram na recompra (recompra), quantos ja fizeram
+    // a 1a compra / recompraram depois de entrar. Assim venda de lead antigo nao passa de 100%.
+    const converted = conn.prepare(`
+      SELECT COUNT(DISTINCT l.id) c ${P} AND p.period_at >= ?${cwl.sql}
+        AND EXISTS (SELECT 1 FROM lead_sales ls WHERE ls.lead_id = l.id AND ls.sale_date >= p.period_at${salesWhere('ls', f)})
     `).get(accountId, sinceStr, ...cwl.params).c
-    conversionRate = totalLeads > 0 ? (sales / totalLeads) * 100 : 0
+    conversionRate = totalLeads > 0 ? (converted / totalLeads) * 100 : 0
   }
 
   const unassigned = conn.prepare(`SELECT COUNT(*) c FROM leads l WHERE l.account_id = ? AND l.attendant_id IS NULL AND l.is_active = 1 AND l.is_archived = 0 AND l.is_blocked = 0${currentFunnelWhere('l', f)}${cwl.sql}`).get(accountId, ...cwl.params).c

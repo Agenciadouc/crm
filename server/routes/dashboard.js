@@ -8,7 +8,7 @@ import { cityWhere, leadCityExists, hasGeo } from '../services/city.js'
 import { countsInMetrics } from '../services/contacts/scope.js'
 import { computeDashboardStats, computeAgentStats } from '../services/dashboardStats.js'
 import { cascadeFor, monthBounds } from '../services/funnelCascade.js'
-import { parseFunnelFilter } from '../services/funnelFilter.js'
+import { parseFunnelFilter, amdSource, insightFunnelWhere, currentFunnelWhere } from '../services/funnelFilter.js'
 
 // Filtro de cidade/estado + so contatos que contam nos numeros (lead e cliente; revendedor e
 // interno ficam fora — spec 2026-10-05 crm simples §2).
@@ -159,6 +159,8 @@ router.get('/attendants', requireRole('super_admin', 'gerente'), requireAnalytic
   const sinceDate = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10)
   const byCity = hasGeo(req.query)
   const lce = leadCityExists('ci.lead_id', req.query)
+  const funnel = parseFunnelFilter(req.query) // vendas | recompra | todos (spec filtro de funil §5b)
+  const ifw = insightFunnelWhere('ci.lead_id', 'ci.analyzed_at', funnel)
 
   // Agrega métricas dos últimos N dias por user
   const rows = db.prepare(`
@@ -178,21 +180,21 @@ router.get('/attendants', requireRole('super_admin', 'gerente'), requireAnalytic
         SELECT AVG(ci.attendant_score)
         FROM conversation_insights ci
         WHERE ci.attendant_user_id = u.id AND ci.account_id = u.account_id
-          AND ci.analyzed_at >= ?${lce.sql}
+          AND ci.analyzed_at >= ?${lce.sql}${ifw}
       ) as ai_score_avg,
       (
         SELECT COUNT(*) FROM conversation_insights ci
         WHERE ci.attendant_user_id = u.id AND ci.account_id = u.account_id
-          AND ci.analyzed_at >= ? AND ci.lost_sale_signals IS NOT NULL${lce.sql}
+          AND ci.analyzed_at >= ? AND ci.lost_sale_signals IS NOT NULL${lce.sql}${ifw}
       ) as lost_sales_detected,
       (
         SELECT SUM(json_array_length(COALESCE(ci.attendant_errors, '[]')))
         FROM conversation_insights ci
         WHERE ci.attendant_user_id = u.id AND ci.account_id = u.account_id
-          AND ci.analyzed_at >= ?${lce.sql}
+          AND ci.analyzed_at >= ?${lce.sql}${ifw}
       ) as ai_errors_total
     FROM users u
-    LEFT JOIN attendant_metrics_daily amd ON amd.user_id = u.id AND amd.date >= ?
+    LEFT JOIN ${amdSource(funnel)} amd ON amd.user_id = u.id AND amd.date >= ?
     WHERE u.account_id = ? AND u.role IN ('atendente', 'gerente') AND u.is_active = 1
       AND COALESCE(u.is_bot, 0) = 0
     GROUP BY u.id
@@ -201,7 +203,7 @@ router.get('/attendants', requireRole('super_admin', 'gerente'), requireAnalytic
 
   // Com cidade: contagens/tempos vem do agregado diario por atendente (sem cidade) -> nulos; a tela avisa.
   const out = byCity ? rows.map(r => ({ ...r, ...AMD_NULL_V1 })) : rows
-  res.json({ days, attendants: out, by_city: byCity })
+  res.json({ days, attendants: out, by_city: byCity, by_funnel: funnel })
 })
 
 // Detalhe de um atendente específico
@@ -266,7 +268,8 @@ router.get('/conversation-insights', requireRole('super_admin', 'gerente'), requ
   const attendantId = req.query.attendant_id ? parseInt(req.query.attendant_id) : null
   const limit = Math.max(1, Math.min(200, parseInt(req.query.limit) || 50))
 
-  let where = 'ci.account_id = ? AND ci.analyzed_at >= ?'
+  const funnel = parseFunnelFilter(req.query) // vendas | recompra | todos (spec filtro de funil §5b)
+  let where = 'ci.account_id = ? AND ci.analyzed_at >= ?' + insightFunnelWhere('ci.lead_id', 'ci.analyzed_at', funnel)
   const params = [req.accountId, sinceDate]
   if (attendantId) { where += ' AND ci.attendant_user_id = ?'; params.push(attendantId) }
   if (filter === 'lost_sales') where += " AND ci.lost_sale_signals IS NOT NULL AND ci.lost_sale_signals != ''"
@@ -404,23 +407,27 @@ router.get('/overview-v2', requireRole('super_admin', 'gerente'), requireAnalyti
   const byCity = hasGeo(req.query)
   const lci = leadCityExists('conversation_insights.lead_id', req.query)
   const cwl = cityWhere('l', req.query) // analise de conversas: mesma base dos cartoes (leadCityExists)
+  const funnel = parseFunnelFilter(req.query) // vendas | recompra | todos (spec filtro de funil §5b)
+  const ifw = insightFunnelWhere('conversation_insights.lead_id', 'conversation_insights.analyzed_at', funnel)
+  const ifwCi = insightFunnelWhere('ci.lead_id', 'ci.analyzed_at', funnel)
+  const cfw = currentFunnelWhere('l', funnel)
 
   const conversasAnalisadas = db.prepare(`
     SELECT COUNT(*) as n FROM conversation_insights
-    WHERE account_id = ? AND analyzed_at >= ? AND insights_version >= 2${lci.sql}
+    WHERE account_id = ? AND analyzed_at >= ? AND insights_version >= 2${lci.sql}${ifw}
   `).get(req.accountId, since, ...lci.params)?.n || 0
 
   const scoreMedioRow = db.prepare(`
     SELECT AVG(conversation_score) as avg FROM conversation_insights
-    WHERE account_id = ? AND analyzed_at >= ? AND insights_version >= 2 AND conversation_score IS NOT NULL${lci.sql}
+    WHERE account_id = ? AND analyzed_at >= ? AND insights_version >= 2 AND conversation_score IS NOT NULL${lci.sql}${ifw}
   `).get(req.accountId, since, ...lci.params)
   const scoreMedio = scoreMedioRow?.avg ? Math.round(scoreMedioRow.avg) : null
 
   // SLA <5min (humano) — usa attendant_metrics_daily agregado
   const slaRow = db.prepare(`
     SELECT SUM(leads_under_5min) as under5, SUM(leads_assigned) as total
-    FROM attendant_metrics_daily
-    WHERE account_id = ? AND date >= date(?)
+    FROM ${amdSource(funnel)} amd
+    WHERE amd.account_id = ? AND amd.date >= date(?)
   `).get(req.accountId, since.slice(0, 10))
   const slaPct = !byCity && slaRow?.total ? Math.round(100 * (slaRow.under5 || 0) / slaRow.total) : null
 
@@ -429,7 +436,7 @@ router.get('/overview-v2', requireRole('super_admin', 'gerente'), requireAnalyti
     JOIN leads l ON l.id = ci.lead_id
     WHERE ci.account_id = ? AND ci.analyzed_at >= ?
       AND ci.temperatura_lead = 'quente'
-      AND l.is_active = 1 AND COALESCE(l.is_archived, 0) = 0${cwl.sql}
+      AND l.is_active = 1 AND COALESCE(l.is_archived, 0) = 0${cwl.sql}${ifwCi}
       AND NOT EXISTS (
         SELECT 1 FROM messages WHERE lead_id = l.id AND direction = 'outbound' AND ai_agent_id IS NULL
           AND created_at >= datetime('now', '-1 day')
@@ -438,7 +445,7 @@ router.get('/overview-v2', requireRole('super_admin', 'gerente'), requireAnalyti
 
   const vendasPerdidas = db.prepare(`
     SELECT COUNT(*) as n FROM conversation_insights
-    WHERE account_id = ? AND analyzed_at >= ? AND lost_sale_signals IS NOT NULL AND lost_sale_signals != ''${lci.sql}
+    WHERE account_id = ? AND analyzed_at >= ? AND lost_sale_signals IS NOT NULL AND lost_sale_signals != ''${lci.sql}${ifw}
   `).get(req.accountId, since, ...lci.params)?.n || 0
 
   // Receita estimada em risco
@@ -447,7 +454,7 @@ router.get('/overview-v2', requireRole('super_admin', 'gerente'), requireAnalyti
     JOIN leads l ON l.id = ci.lead_id
     WHERE ci.account_id = ? AND ci.analyzed_at >= ?
       AND ci.temperatura_lead = 'quente'
-      AND l.value_estimated IS NOT NULL${cwl.sql}
+      AND l.value_estimated IS NOT NULL${cwl.sql}${ifwCi}
       AND NOT EXISTS (
         SELECT 1 FROM messages WHERE lead_id = l.id AND direction = 'outbound' AND ai_agent_id IS NULL
           AND created_at >= datetime('now', '-1 day')
@@ -457,17 +464,17 @@ router.get('/overview-v2', requireRole('super_admin', 'gerente'), requireAnalyti
 
   const errosCriticos = db.prepare(`
     SELECT COUNT(*) as n FROM conversation_errors
-    WHERE account_id = ? AND created_at >= ? AND gravity = 'critica'${leadCityExists('conversation_errors.lead_id', req.query).sql}
+    WHERE account_id = ? AND created_at >= ? AND gravity = 'critica'${leadCityExists('conversation_errors.lead_id', req.query).sql}${insightFunnelWhere('conversation_errors.lead_id', 'conversation_errors.created_at', funnel)}
   `).get(req.accountId, since, ...leadCityExists('conversation_errors.lead_id', req.query).params)?.n || 0
 
   const alertasOpen = db.prepare(`
-    SELECT COUNT(*) as n FROM analyst_alerts WHERE account_id = ? AND status = 'open'${leadCityExists('analyst_alerts.lead_id', req.query).sql}
+    SELECT COUNT(*) as n FROM analyst_alerts WHERE account_id = ? AND status = 'open'${leadCityExists('analyst_alerts.lead_id', req.query).sql}${insightFunnelWhere('analyst_alerts.lead_id', 'analyst_alerts.created_at', funnel)}
   `).get(req.accountId, ...leadCityExists('analyst_alerts.lead_id', req.query).params)?.n || 0
 
   // Bot taxa de resolução: % de bot_analysis.respondeu_corretamente
   const botRow = db.prepare(`
     SELECT bot_analysis_json FROM conversation_insights
-    WHERE account_id = ? AND analyzed_at >= ? AND bot_analysis_json IS NOT NULL${lci.sql}
+    WHERE account_id = ? AND analyzed_at >= ? AND bot_analysis_json IS NOT NULL${lci.sql}${ifw}
   `).all(req.accountId, since, ...lci.params)
   let botTotal = 0, botOk = 0
   for (const r of botRow) {
@@ -483,7 +490,7 @@ router.get('/overview-v2', requireRole('super_admin', 'gerente'), requireAnalyti
     SELECT COUNT(*) as n FROM lead_follow_ups lfu
     JOIN follow_ups fu ON fu.id = lfu.follow_up_id
     JOIN leads l ON l.id = lfu.lead_id
-    WHERE l.account_id = ? AND lfu.status = 'active' AND lfu.next_run_at < datetime('now')${cwl.sql}
+    WHERE l.account_id = ? AND lfu.status = 'active' AND lfu.next_run_at < datetime('now')${cwl.sql}${cfw}
   `).get(req.accountId, ...cwl.params)?.n || 0
 
   res.json({
@@ -501,6 +508,7 @@ router.get('/overview-v2', requireRole('super_admin', 'gerente'), requireAnalyti
     },
     days,
     by_city: byCity,
+    by_funnel: funnel,
   })
 })
 
@@ -512,6 +520,7 @@ router.get('/ranking-v2', requireRole('super_admin', 'gerente'), requireAnalytic
   const sinceDate = since.slice(0, 10)
   const byCity = hasGeo(req.query)
   const lce = leadCityExists('ci.lead_id', req.query)
+  const funnel = parseFunnelFilter(req.query) // vendas | recompra | todos (spec filtro de funil §5b)
 
   const rows = db.prepare(`
     SELECT
@@ -527,8 +536,8 @@ router.get('/ranking-v2', requireRole('super_admin', 'gerente'), requireAnalytic
       COUNT(DISTINCT CASE WHEN ci.lost_sale_signals IS NOT NULL AND ci.lost_sale_signals != '' THEN ci.lead_id END) as lost_sales,
       COUNT(DISTINCT CASE WHEN ci.temperatura_lead = 'quente' THEN ci.lead_id END) as quentes
     FROM users u
-    LEFT JOIN attendant_metrics_daily amd ON amd.user_id = u.id AND amd.account_id = u.account_id AND amd.date >= ?
-    LEFT JOIN conversation_insights ci ON ci.attendant_user_id = u.id AND ci.account_id = u.account_id AND ci.analyzed_at >= ? AND ci.insights_version >= 2${lce.sql}
+    LEFT JOIN ${amdSource(funnel)} amd ON amd.user_id = u.id AND amd.account_id = u.account_id AND amd.date >= ?
+    LEFT JOIN conversation_insights ci ON ci.attendant_user_id = u.id AND ci.account_id = u.account_id AND ci.analyzed_at >= ? AND ci.insights_version >= 2${lce.sql}${insightFunnelWhere('ci.lead_id', 'ci.analyzed_at', funnel)}
     WHERE u.account_id = ? AND u.role IN ('atendente', 'gerente') AND u.is_active = 1 AND COALESCE(u.is_bot, 0) = 0
     GROUP BY u.id, u.name, u.role
     ORDER BY score_v2 DESC NULLS LAST, leads_responded DESC
@@ -537,12 +546,12 @@ router.get('/ranking-v2', requireRole('super_admin', 'gerente'), requireAnalytic
   // Pra cada user: principal_erro e principal_forte
   const principalErrorStmt = db.prepare(`
     SELECT code, COUNT(*) as n FROM conversation_errors
-    WHERE account_id = ? AND attendant_user_id = ? AND created_at >= ?${leadCityExists('conversation_errors.lead_id', req.query).sql}
+    WHERE account_id = ? AND attendant_user_id = ? AND created_at >= ?${leadCityExists('conversation_errors.lead_id', req.query).sql}${insightFunnelWhere('conversation_errors.lead_id', 'conversation_errors.created_at', funnel)}
     GROUP BY code ORDER BY n DESC LIMIT 1
   `)
   const principalStrengthStmt = db.prepare(`
     SELECT code, COUNT(*) as n FROM conversation_strengths
-    WHERE account_id = ? AND attendant_user_id = ? AND created_at >= ?${leadCityExists('conversation_strengths.lead_id', req.query).sql}
+    WHERE account_id = ? AND attendant_user_id = ? AND created_at >= ?${leadCityExists('conversation_strengths.lead_id', req.query).sql}${insightFunnelWhere('conversation_strengths.lead_id', 'conversation_strengths.created_at', funnel)}
     GROUP BY code ORDER BY n DESC LIMIT 1
   `)
   const cityParams = leadCityExists('x', req.query).params
@@ -559,7 +568,7 @@ router.get('/ranking-v2', requireRole('super_admin', 'gerente'), requireAnalytic
     ...(byCity ? AMD_NULL_V2 : {}),
   }))
 
-  res.json({ days, attendants: enriched, by_city: byCity })
+  res.json({ days, attendants: enriched, by_city: byCity, by_funnel: funnel })
 })
 
 // Conversas críticas
@@ -569,6 +578,7 @@ router.get('/critical-conversations', requireRole('super_admin', 'gerente'), req
   const limit = Math.min(100, Math.max(1, parseInt(req.query.limit || '50')))
   const since = new Date(Date.now() - days * 86400 * 1000).toISOString().slice(0, 19).replace('T', ' ')
   const cwl = cityWhere('l', req.query) // idem: lista igual ao cartao
+  const funnel = parseFunnelFilter(req.query) // vendas | recompra | todos (spec filtro de funil §5b)
 
   const rows = db.prepare(`
     SELECT ci.lead_id, l.name as lead_name, l.phone as lead_phone,
@@ -580,7 +590,7 @@ router.get('/critical-conversations', requireRole('super_admin', 'gerente'), req
     FROM conversation_insights ci
     JOIN leads l ON l.id = ci.lead_id
     LEFT JOIN users u ON u.id = ci.attendant_user_id
-    WHERE ci.account_id = ? AND ci.analyzed_at >= ? AND ci.insights_version >= 2${cwl.sql}
+    WHERE ci.account_id = ? AND ci.analyzed_at >= ? AND ci.insights_version >= 2${cwl.sql}${insightFunnelWhere('ci.lead_id', 'ci.analyzed_at', funnel)}
       AND (
         ci.prioridade_revisao IN ('alta', 'critica')
         OR ci.lost_sale_signals IS NOT NULL
@@ -649,12 +659,13 @@ router.get('/alerts', requireRole('super_admin', 'gerente'), requireAnalyticsEna
   const status = req.query.status || 'open'
   // Com cidade: so alertas de leads dessa cidade (alerta sem lead fica de fora)
   const cwl = cityWhere('l', req.query) // idem: lista igual ao cartao
+  const funnel = parseFunnelFilter(req.query) // vendas | recompra | todos (spec filtro de funil §5b)
   const rows = db.prepare(`
     SELECT a.*, l.name as lead_name, l.phone as lead_phone, u.name as assigned_to_name
     FROM analyst_alerts a
     LEFT JOIN leads l ON l.id = a.lead_id
     LEFT JOIN users u ON u.id = a.assigned_to_user_id
-    WHERE a.account_id = ? AND a.status = ?${cwl.sql}
+    WHERE a.account_id = ? AND a.status = ?${cwl.sql}${insightFunnelWhere('a.lead_id', 'a.created_at', funnel)}
     ORDER BY
       CASE a.severity WHEN 'critica' THEN 0 WHEN 'alta' THEN 1 WHEN 'media' THEN 2 ELSE 3 END,
       a.created_at DESC
@@ -736,11 +747,12 @@ router.get('/market-intelligence', requireRole('super_admin', 'gerente'), requir
   if (!req.accountId) return res.status(400).json({ error: 'account_id required' })
   const days = Math.min(365, Math.max(1, parseInt(req.query.days || '30')))
   const since = new Date(Date.now() - days * 86400 * 1000).toISOString().slice(0, 19).replace('T', ' ')
+  const funnel = parseFunnelFilter(req.query) // vendas | recompra | todos (spec filtro de funil §5b)
 
   const rows = db.prepare(`
     SELECT objecoes_detectadas, motivos_perda, riscos_detectados
     FROM conversation_insights
-    WHERE account_id = ? AND analyzed_at >= ? AND insights_version >= 2${leadCityExists('conversation_insights.lead_id', req.query).sql}
+    WHERE account_id = ? AND analyzed_at >= ? AND insights_version >= 2${leadCityExists('conversation_insights.lead_id', req.query).sql}${insightFunnelWhere('conversation_insights.lead_id', 'conversation_insights.analyzed_at', funnel)}
   `).all(req.accountId, since, ...leadCityExists('conversation_insights.lead_id', req.query).params)
 
   function countArr(field) {
@@ -764,6 +776,7 @@ router.get('/market-intelligence', requireRole('super_admin', 'gerente'), requir
     riscos_top: countArr('riscos_detectados'),
     days,
     sample_size: rows.length,
+    by_funnel: funnel,
   })
 })
 
