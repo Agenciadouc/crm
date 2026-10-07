@@ -108,17 +108,13 @@ export default function Sidebar() {
           <div style={{ padding: '8px 16px', borderBottom: '1px solid var(--border-subtle)' }}>
             <label style={{ fontSize: 10, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 0.5, display: 'block', marginBottom: 4 }}>Visualizando conta</label>
             <select className="select" value={accountId || ''} onChange={e => setAccountId(Number(e.target.value))} style={{ width: '100%', fontSize: 12, padding: '6px 8px' }}>
-              {/* Ativas primeiro (ordenadas por nome), inativas depois */}
+              {/* Só ativas; mostra inativa só se for a selecionada no momento (fallback) */}
               {[...accounts]
-                .sort((a, b) => {
-                  const aa = a.is_active !== 0 ? 0 : 1
-                  const bb = b.is_active !== 0 ? 0 : 1
-                  if (aa !== bb) return aa - bb
-                  return (a.name || '').localeCompare(b.name || '', 'pt-BR')
-                })
+                .filter(a => a.is_active !== 0 || a.id === accountId)
+                .sort((a, b) => (a.name || '').localeCompare(b.name || '', 'pt-BR'))
                 .map(a => (
                   <option key={a.id} value={a.id}>
-                    {a.is_active === 0 ? '🔴' : '🟢'} {a.name}
+                    {a.is_active === 0 ? '🔴 ' : ''}{a.name}
                   </option>
                 ))}
             </select>
