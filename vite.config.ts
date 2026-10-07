@@ -7,6 +7,11 @@ export default defineConfig({
   server: {
     port: 5175,
     proxy: {
+      '/crm/api': {
+        target: 'http://localhost:3002',
+        changeOrigin: true,
+        rewrite: (p) => p.replace(/^\/crm/, ''),
+      },
       '/api': {
         target: 'http://localhost:3002',
         changeOrigin: true,
