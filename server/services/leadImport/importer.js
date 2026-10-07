@@ -1,7 +1,7 @@
 // Importar leads (spec 2026-10-06 importar leads §6-§7): previa e gravacao. Nada automatico:
 // nao usa leadIntake/getOrCreateLead (distribuem e avisam). Nao importa server/db.js: recebe db.
 import { normalizePhone, phoneCompareKey } from '../whatsapp/normalize.js'
-import { resolveCity } from '../city.js'
+import { resolveCity, cityKey } from '../city.js'
 import { ensureStageCadence } from '../cadence/leadCadence.js'
 import { CONTACT_TYPES } from '../contacts/scope.js'
 
@@ -83,6 +83,8 @@ function analyze(db, { accountId, rows, destination }) {
     const digits = String(r.phoneRaw).replace(/\D/g, '')
     if (digits.length < 10) { skipped.push({ row: r.row, reason: 'telefone inválido' }); continue }
     const phone = normalizePhone(digits)
+    // So celular/fixo do Brasil (55 + DDD + numero); dois numeros na mesma celula viram invalido
+    if (!/^55\d{10,11}$/.test(phone)) { skipped.push({ row: r.row, reason: 'telefone inválido' }); continue }
     const key = phoneCompareKey(phone)
     const g = groups.get(key)
     if (!g) { groups.set(key, { ...r, phone }); continue }
@@ -151,6 +153,13 @@ export function applyImport(db, { accountId, rows, destination, fileName, userId
     const linkTag = db.prepare('INSERT OR IGNORE INTO lead_tags (lead_id, tag_id) VALUES (?, ?)')
     const tagsOf = g => [...g.tags.map(t => tagId(db, accountId, t)), ...(autoTag ? [autoTag] : [])]
     const defInstance = db.prepare("SELECT id FROM whatsapp_instances WHERE account_id = ? AND status = 'connected' ORDER BY id DESC LIMIT 1").get(accountId)?.id || null
+    // Cidade: uma busca por cidade diferente (resolveCity varre os leads da conta)
+    const cityCache = new Map()
+    const city = v => {
+      const k = cityKey(v)
+      if (!cityCache.has(k)) cityCache.set(k, resolveCity(db, accountId, v))
+      return cityCache.get(k)
+    }
     const ids = []
     novos.forEach((g, i) => {
       const attendantId = dest.attendants.length ? dest.attendants[i % dest.attendants.length] : null
@@ -161,7 +170,7 @@ export function applyImport(db, { accountId, rows, destination, fileName, userId
           notes, value_estimated, source, source_detail, custom_fields, contact_type, contact_type_origin)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'importacao', ?, ?, ?, ?)
       `).run(accountId, dest.funnel.id, dest.stage.id, attendantId, instanceId, f.name || null, g.phone, f.email || null,
-        f.city ? resolveCity(db, accountId, f.city) : null, f.state || null, f.empresa || null, f.instagram || null, f.cpf_cnpj || null,
+        f.city ? city(f.city) : null, f.state || null, f.empresa || null, f.instagram || null, f.cpf_cnpj || null,
         f.notes || null, f.value_estimated ?? null, f.source_detail || String(fileName || '').slice(0, 200) || null,
         Object.keys(g.extra).length ? JSON.stringify(g.extra) : null, dest.contactType, dest.contactType === 'lead' ? null : 'lista').lastInsertRowid)
       db.prepare("INSERT INTO stage_history (lead_id, to_stage_id, trigger_type, triggered_by) VALUES (?, ?, 'import', ?)").run(id, dest.stage.id, userId)
@@ -170,12 +179,13 @@ export function applyImport(db, { accountId, rows, destination, fileName, userId
         db.prepare('INSERT OR IGNORE INTO lead_instance_assignments (lead_id, instance_id, attendant_id) VALUES (?, ?, ?)').run(id, instanceId, attendantId)
       }
       for (const t of tagsOf(g)) linkTag.run(id, t)
-      try { ensureStageCadence(db, { leadId: id }) } catch (e) { console.error('[Importar] cadencia:', e.message) }
+      // Savepoint proprio: se a cadencia falhar no meio, so ela volta (o lead fica)
+      try { db.transaction(() => ensureStageCadence(db, { leadId: id }))() } catch (e) { console.error('[Importar] cadencia:', e.message) }
       ids.push(id)
     })
     for (const { g, lead } of existentes) {
       const sets = fillsFor(lead, g)
-      if (sets.city) sets.city = resolveCity(db, accountId, sets.city)
+      if (sets.city) sets.city = city(sets.city)
       const ex = mergedExtra(lead, g.extra)
       if (ex) sets.custom_fields = JSON.stringify(ex)
       const cols = Object.keys(sets)

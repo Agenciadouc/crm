@@ -53,3 +53,11 @@ test('telefone mascarado, texto Latin-1 e CSV dos que nao entraram', () => {
   assert.equal(csv, '﻿Nome;Fone;Motivo\r\nAna;;sem telefone\r\nBia;1;telefone inválido\r\n')
   assert.equal(MAX_ROWS, 5000)
 })
+
+test('revisao: "R$ 1.500" e 1500 (ponto de milhar sem virgula); CSV nao vira formula no Excel', () => {
+  assert.equal(parseMoney('R$ 1.500'), 1500)
+  assert.equal(parseMoney('1.500.000'), 1500000)
+  assert.equal(parseMoney('1.5'), 1.5)
+  const csv = skippedCsv(['Fone', 'Obs'], [['+55 48 98888-1111', '=HYPERLINK("x")']], [{ row: 2, reason: 'telefone inválido' }])
+  assert.equal(csv, "﻿Fone;Obs;Motivo\r\n'+55 48 98888-1111;\"'=HYPERLINK(\"\"x\"\")\";telefone inválido\r\n")
+})

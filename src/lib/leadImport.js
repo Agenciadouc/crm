@@ -74,6 +74,7 @@ export function parseMoney(v) {
   let s = str(v).replace(/[^\d.,-]/g, '')
   if (!s) return null
   if (s.includes(',')) s = s.replace(/\./g, '').replace(',', '.')
+  else if (/^-?\d{1,3}(\.\d{3})+$/.test(s)) s = s.replace(/\./g, '') // "1.500" = mil e quinhentos
   const n = Number(s)
   return Number.isFinite(n) ? n : null
 }
@@ -129,8 +130,10 @@ export function decodeText(bytes) {
   return new TextDecoder('windows-1252').decode(bytes)
 }
 
+// Celula que comeca com = + - @ viraria formula no Excel: vai com ' na frente
 const csvCell = v => {
-  const s = String(v == null ? '' : v)
+  let s = String(v == null ? '' : v)
+  if (/^[=+\-@\t\r]/.test(s)) s = "'" + s
   return /[;"\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
 }
 export function skippedCsv(headers, data, skipped) {

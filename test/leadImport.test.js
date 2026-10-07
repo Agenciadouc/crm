@@ -84,3 +84,31 @@ test('nome da tag automatica', () => {
   assert.equal(autoTagName('lista-feira.xlsx', new Date(2026, 9, 6)), 'Importado 06/10 – lista-feira')
   assert.ok(autoTagName('x'.repeat(200) + '.csv', new Date(2026, 9, 6)).length <= 60)
 })
+
+test('revisao: celula com dois telefones = telefone invalido (nao cria lead com numero quebrado)', () => {
+  const db = createImportTestDb(); const s = seedImport(db)
+  const p = planImport(db, { accountId: s.accountId, rows: [R(2, { phone: '48 99999-0000 / 48 98888-1111' })], destination: s.dest, fileName: 'a.csv' })
+  assert.deepEqual([p.new_count, p.skipped], [0, [{ row: 2, reason: 'telefone inválido' }]])
+})
+
+test('revisao: cidade e buscada uma vez por cidade (nao trava o servidor com planilha grande)', () => {
+  const db = createImportTestDb(); const s = seedImport(db)
+  for (let i = 0; i < 300; i++) addLead(db, { account_id: s.accountId, funnel_id: s.funnelId, stage_id: s.stages.novo, phone: `55489${String(i).padStart(8, '0')}`, city: i % 2 ? 'Florianópolis' : 'São José' })
+  let calls = 0
+  const { cityKey } = { cityKey: v => String(v || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim() }
+  db.function('city_key', { deterministic: true }, v => { calls++; return cityKey(v) })
+  const rows = Array.from({ length: 60 }, (_, i) => R(i + 2, { phone: `48977${String(i).padStart(6, '0')}`, city: i % 2 ? 'florianopolis' : 'sao jose' }))
+  applyImport(db, { accountId: s.accountId, rows, destination: s.dest, fileName: 'a.csv', userId: s.gerenteId })
+  assert.ok(calls < 2000, `city_key chamado ${calls} vezes`)
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM leads WHERE source = 'importacao' AND city = 'Florianópolis'").get().n, 30)
+})
+
+test('revisao: falha no meio da cadencia nao deixa cadencia pela metade', () => {
+  const db = createImportTestDb(); const s = seedImport(db)
+  const cad = Number(db.prepare("INSERT INTO cadences (account_id, name, funnel_id, stage_id) VALUES (?, 'Novo', ?, ?)").run(s.accountId, s.funnelId, s.stages.novo).lastInsertRowid)
+  db.prepare("INSERT INTO cadence_attempts (cadence_id, position, action_type, description) VALUES (?, 0, 'ligacao', 'Ligar')").run(cad)
+  db.exec("CREATE TEMP TRIGGER cad_boom BEFORE UPDATE ON lead_cadences BEGIN SELECT RAISE(ABORT, 'boom'); END;")
+  const r = applyImport(db, { accountId: s.accountId, rows: [R(2, { phone: '48911110001' })], destination: s.dest, fileName: 'a.csv', userId: s.gerenteId })
+  assert.equal(r.created, 1)
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM lead_cadences').get().n, 0)
+})
