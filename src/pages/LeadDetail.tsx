@@ -23,6 +23,7 @@ import LeadProfileSelect from '../components/roteiro/LeadProfileSelect'
 import ContactTypeSelect from '../components/roteiro/ContactTypeSelect'
 import RoteiroCard from '../components/roteiro/RoteiroCard'
 import NextStepCard from '../components/cadence/NextStepCard'
+import ExtraInfoCard from '../components/leads/ExtraInfoCard'
 import { applyMessageVars } from '../lib/messageVars'
 import StageGateModal from '../components/roteiro/StageGateModal'
 import SaleModal from '../components/SaleModal'
@@ -381,6 +382,8 @@ export default function LeadDetail() {
                   {lead.instance_name && <div className="lead-info-row"><span className="lead-info-label" style={{ color: '#34C759' }}>WhatsApp</span><span className="lead-info-value" style={{ color: '#34C759' }}>{lead.instance_name}</span></div>}
                 </>
               )}
+              <ExtraInfoCard key={`extra-${lead.id}`} lead={lead} canEdit style={{ marginTop: 12, boxShadow: 'none', background: 'var(--bg-hover)' }}
+                onSaved={f => setLead(p => (p ? { ...p, custom_fields: JSON.stringify(f) } : p))} />
             </div>
           </div>
 

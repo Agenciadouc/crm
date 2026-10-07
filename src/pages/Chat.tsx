@@ -33,6 +33,7 @@ import LeadProfileSelect from '../components/roteiro/LeadProfileSelect'
 import ContactTypeSelect from '../components/roteiro/ContactTypeSelect'
 import { isScoreBand } from '../lib/score'
 import NextStepCard from '../components/cadence/NextStepCard'
+import ExtraInfoCard from '../components/leads/ExtraInfoCard'
 import StepReviewModal from '../components/cadence/StepReviewModal'
 import HelpTip from '../components/HelpTip'
 import PanelLayoutEditor from '../components/PanelLayoutEditor'
@@ -2569,6 +2570,9 @@ export default function Chat() {
                 <>
                   {/* Informacoes: o mesmo cartao e o bloco "Dados do contato" da aba Atendimento */}
                   {renderContatoCard(lead)}
+                  {/* Informacoes extras (planilha importada / formulario): some quando nao ha nenhuma */}
+                  <ExtraInfoCard key={`extra-${lead.id}`} lead={lead} canEdit style={PANEL_CARD}
+                    onSaved={f => setLead(p => (p && p.id === lead.id ? { ...p, custom_fields: JSON.stringify(f) } : p))} />
 
                   {/* Classificacao do lead: tipo de cliente e tipo de contato (fora da aba Atendimento para nao poluir) */}
                   <div className="card" style={PANEL_CARD}>
