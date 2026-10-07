@@ -986,7 +986,7 @@ export default function Chat() {
   }, [leads])
 
   const handleSendMsg = async () => {
-    if (!msgText.trim() || !lead || !accountId) return
+    if (sending || !msgText.trim() || !lead || !accountId) return
     // Bloqueia envio se nao ha instancia escolhida (lead novo sem aba ativa)
     const override = sendInstanceOverride || activeConvInstance || undefined
     if (!override) {
@@ -1014,6 +1014,8 @@ export default function Chat() {
       if (sameLead) setMsgText('')
     } catch (e: any) { setNotice({ kind: 'error', title: 'Erro ao enviar', message: e?.message || 'Erro desconhecido' }) }
     setSending(false)
+    // Cursor volta pra caixa (tambem quando enviou pelo botao) pra ja digitar a proxima mensagem
+    if (selectedLeadIdRef.current === sentLeadId) setTimeout(() => msgInputRef.current?.focus(), 0)
   }
 
   // Caminho unico de envio de texto do Chat (caixa de mensagem e janela "Conferir mensagem").
@@ -2002,7 +2004,8 @@ export default function Chat() {
                         handleSendMsg()
                       }
                     }}
-                    disabled={sending}
+                    // readOnly (e nao disabled) durante o envio: disabled tira o foco e o cursor some da caixa
+                    readOnly={sending}
                   />
 
                   {showReadyMsgs && (
